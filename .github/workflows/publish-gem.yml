@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - "v*"
+  # Run by hand to finish a release whose gem push stopped halfway.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -30,6 +32,7 @@ jobs:
           working-directory: sdk/ruby
 
       - name: Check versions match the tag
+        if: github.event_name == 'push'
         run: |
           test "v$(ruby -Isdk/ruby/lib -rndb/version -e 'puts Ndb::VERSION')" = "$GITHUB_REF_NAME"
           test "v$(ruby -Isdk/rails/lib -rndb/rails/version -e 'puts Ndb::Rails::VERSION')" = "$GITHUB_REF_NAME"
@@ -59,18 +62,12 @@ jobs:
         with:
           trusted-publisher: true
 
+      # A version that is already on rubygems.org is skipped, so a re-run
+      # finishes a release that stopped halfway.
       - name: "Push ndb (first, ndb-rails depends on it)"
         working-directory: sdk/ruby
-        run: gem push ndb-*.gem
-
-      - name: Wait for ndb on the index
-        run: |
-          for i in $(seq 1 30); do
-            gem search -r '^ndb$' --exact | grep -q "$(ruby -Isdk/ruby/lib -rndb/version -e 'puts Ndb::VERSION')" && exit 0
-            sleep 10
-          done
-          exit 1
+        run: gem push ndb-*.gem 2>&1 | tee push.log || grep -q "Repushing of gem versions is not allowed" push.log
 
       - name: Push ndb-rails
         working-directory: sdk/rails
-        run: gem push ndb-rails-*.gem
+        run: gem push ndb-rails-*.gem 2>&1 | tee push.log || grep -q "Repushing of gem versions is not allowed" push.log

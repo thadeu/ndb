@@ -7,6 +7,8 @@ on:
       - 'docs/**'
       - 'docs-site/**'
       - 'brand/**'
+      - 'install.sh'
+      - 'uninstall.sh'
       - '.github/workflows/docs.yml'
   # Build again after a release, so the version pill shows the new tag.
   workflow_run:
@@ -58,12 +60,23 @@ jobs:
         working-directory: docs-site
         env:
           DOCS_VERSION: ${{ steps.version.outputs.tag }}
+          DOCS_URL: https://ndb.clowk.in
         run: pnpm docs:build
+
+      # wrangler pages deploy does not create a missing project; create it once.
+      - name: Ensure the Cloudflare Pages project
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages project create ndb-docs --production-branch=main
+          workingDirectory: '.'
+        continue-on-error: true
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy docs-site/.vitepress/dist --project-name=ndb-docs --branch=main
+          command: pages deploy docs-site/.vitepress/dist --project-name=ndb-docs --branch=main --commit-dirty=true
           workingDirectory: '.'
