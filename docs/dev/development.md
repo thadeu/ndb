@@ -1,0 +1,46 @@
+# Development
+
+## Commands
+
+```bash
+make test        # go test ./...
+make race        # with the race detector
+make lint        # golangci-lint (wsl enforces blank lines)
+make build       # static binary: bin/ndb
+make dist        # tar.gz + checksums.txt in dist/ (linux/amd64, linux/arm64, darwin/arm64)
+test/smoke.sh    # builds ndb and runs every endpoint with curl
+```
+
+Keep local test runs light:
+
+```bash
+nice -n 10 go test -p 2 -race -parallel=2 -timeout 300s ./...
+```
+
+`make fuzz-smoke` runs each fuzz target for 10 s with two workers. Long fuzz runs belong in CI.
+
+SDK tests:
+
+```bash
+(cd sdk/go && go test -race ./...)          # starts the daemon it needs
+(cd sdk/ruby && bundle install && bundle exec rake test)
+(cd sdk/ts && pnpm install && pnpm test && pnpm lint && pnpm typecheck && pnpm build)
+```
+
+## Rules
+
+- Test first. Each change starts with a failing test.
+- `gofmt` and `GOOS=linux go vet ./...` must be clean.
+- Code style: a blank line before `if`, `for`, `switch`, `return`, `defer`, `go`, after a closing `}`, and between groups that do different things.
+- Docs in `docs/dev/` change with the behavior.
+
+## Release
+
+Push a tag `vX.Y.Z`.
+
+- `release.yml` runs the tests, builds the static binaries with the version in `-ldflags "-X main.version=..."`, makes tar.gz files and `checksums.txt`, and creates the GitHub release with generated notes.
+- `image.yml` builds the multi-arch image and pushes `ghcr.io/<owner>/ndb`.
+
+`ndb -version` prints the version. Locally: `make dist VERSION=0.1.0`.
+
+GoReleaser is not used: it would do the same job as `release.yml` (build matrix, archives, checksums, release), and the workflow is the same shape as the one in the sibling project `anway`.

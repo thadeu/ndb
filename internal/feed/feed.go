@@ -63,6 +63,10 @@ func (e *Error) Code() string {
 var (
 	ErrLagged = &Error{code: "watch_lagged", msg: "the consumer is too slow; reconnect, the stream resumes from the last ack"}
 	ErrBadPos = &Error{code: "invalid_position", msg: "the position token is not valid for this collection"}
+
+	// ErrHistoryTruncated: the WAL files that hold the requested history
+	// were deleted (wal_retention). The consumer cannot resume from there.
+	ErrHistoryTruncated = &Error{code: "history_truncated", msg: "the history before this position was deleted by wal_retention; start from now or rebuild from find"}
 )
 
 // Hub fans values out to subscribers. A subscriber has a bounded buffer:

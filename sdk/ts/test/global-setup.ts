@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -9,12 +9,17 @@ declare module 'vitest' {
   export interface ProvidedContext {
     unixAddr: string
     tcpAddr: string
+    tokenTcpAddr: string
+    token: string
   }
 }
 
 const repoRoot = resolve(import.meta.dirname, '../../..')
 
+const token = 'ts-sdk-secret'
+
 let daemon: ChildProcess | undefined
+let tokenDaemon: ChildProcess | undefined
 let dir = ''
 
 function freePort(): Promise<number> {
@@ -72,24 +77,48 @@ export default async function setup(project: TestProject): Promise<() => Promise
     { stdio: 'inherit' },
   )
 
+  const tokenSock = join(dir, 'tok.sock')
+  const tokenPort = await freePort()
+  const tokenFile = join(dir, 'token')
+
+  writeFileSync(tokenFile, `${token}\n`)
+
+  tokenDaemon = spawn(
+    bin,
+    [
+      '-config', join(dir, 'absent.yml'),
+      '-data-dir', join(dir, 'tokdata'),
+      '-unix', tokenSock,
+      '-tcp', `127.0.0.1:${tokenPort}`,
+      '-token-file', tokenFile,
+    ],
+    { stdio: 'inherit' },
+  )
+
   try {
-    await waitReady(sock)
+    await Promise.all([waitReady(sock), waitReady(tokenSock)])
   } catch (err) {
     daemon.kill('SIGTERM')
+    tokenDaemon.kill('SIGTERM')
 
     throw err
   }
 
   project.provide('unixAddr', `unix://${sock}`)
   project.provide('tcpAddr', `tcp://127.0.0.1:${port}`)
+  project.provide('tokenTcpAddr', `tcp://127.0.0.1:${tokenPort}`)
+  project.provide('token', token)
 
   return async () => {
-    const proc = daemon
-    const exited = new Promise((r) => proc?.once('exit', r))
-
-    proc?.kill('SIGTERM')
-    await exited
+    await Promise.all([daemon, tokenDaemon].map(stopDaemon))
 
     rmSync(dir, { recursive: true, force: true })
   }
+}
+
+async function stopDaemon(proc: ChildProcess | undefined): Promise<void> {
+  const exited = new Promise((r) => proc?.once('exit', r))
+
+  proc?.kill('SIGTERM')
+  await exited
 }

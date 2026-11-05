@@ -124,7 +124,7 @@ Three ways fill the catalog. All three use the same internal call
 | `write` | error `catalog_conflict` |
 | `path` | error `catalog_conflict` |
 | `time` | error `catalog_conflict` |
-| `durability`, `retention` | `ndb.yml` wins (they are operator decisions); a warning is logged |
+| `durability`, `retention`, `wal_retention` | `ndb.yml` wins (they are operator decisions); a warning is logged |
 
 - A new index on a collection that has data is built in the background.
   Queries keep working with a scan until the index is ready. `stats`
@@ -138,7 +138,7 @@ Use `ndb.yml` for:
 
 - direct-mode collections over files that no code declares (another
   app's files, Nginx logs);
-- operator settings: memory limit, listen address, durability, retention.
+- operator settings: memory limit, listen address, durability, retention, wal_retention.
 
 ```yaml
 data_dir: /var/lib/ndb
@@ -179,6 +179,7 @@ collections:
 | `indexes` | fields with a secondary index (dot paths are allowed: `address.city`) |
 | `durability` | `strict` (fsync before ack) or `relaxed` (flush every 200 ms). Engine mode only. |
 | `retention` | drop derived data older than this. The source NDJSON is never deleted by ndb. |
+| `wal_retention` | engine mode: delete WAL files older than this once they are sealed and no watch consumer needs them (§7.6). Default: keep forever. |
 | `max_line_size` | largest accepted line. Default 1 MiB, hard maximum 16 MiB (§7.5). |
 | `blob_threshold` | engine mode: string fields larger than this move to the blob store. Default off; suggested 64 KiB (§7.5). |
 | `ttl` | each document expires this long after its `time` field (§11.5) |
@@ -339,6 +340,39 @@ document keeps a reference:
   to; unreferenced blobs older than a grace period (default 24 h) are deleted.
 - Backup: blobs never change, so they are copied like sealed segments.
 
+### 7.6 WAL truncation
+
+By default WAL files are never deleted (history for `watch`, rebuild from the
+WAL). With `wal_retention` on an engine-mode collection, a WAL file is deleted
+when **all** of these hold:
+
+1. **Sealed:** the checkpoint in `meta.bolt` (already durable) is past the
+   file (`checkpoint.pos.seq` is greater than the file number). Recovery never
+   reads it: it starts at the checkpoint position, and the tx-gap check starts
+   from the tx stored there, so a first remaining file that starts at a later
+   tx is valid.
+2. **No consumer needs it:** every stored cursor of the collection in
+   `cursors.bolt` is at a tx after the last tx of the file, and no open
+   `watch` stream is still reading it (streams pin their start tx). The engine
+   gives the collection the stored cursors with a func hook, so the packages
+   do not import each other.
+3. **Old enough:** the first record of the next file (the moment this file
+   was closed) is older than `wal_retention` (`catalog.ParseDuration`).
+
+Files are deleted from the oldest, and the walk stops at the first file that
+stays, so the kept files are contiguous. The active file is never deleted.
+After the deletes the directory is fsync'd. The sealer runs this on every tick.
+
+A consumer that was never acked (stored position `""`) holds the whole
+history back until it acks or the history is already gone.
+
+**Blob GC:** with `wal_retention` set, the blob GC also treats the blobs that
+the kept WAL files refer to as live, so a watch replay never points to a
+deleted blob. (Without it the GC scans only live documents.)
+
+Trade-off: with truncation on, the WAL alone no longer rebuilds the whole
+collection; keep the segments and `meta.bolt` (they are in the backup).
+
 ## 8. Durability and recovery
 
 Model: the same as PostgreSQL WAL, but simpler, because data is never
@@ -492,6 +526,26 @@ Expressions: field paths, `$dateTrunc` (needed for charts).
   watcher ever saw it). Reads still see relaxed writes at once.
 - Direct mode: a file rotated or deleted before a consumer reaches it loses
   that history for the consumer (ndb never controls the apps' files).
+- Engine mode with `wal_retention`: a `watch` that must read WAL files that
+  were deleted (no stored position, `from: "beginning"`, or a position before
+  the oldest kept file) fails with `history_truncated` (HTTP 410). It never
+  skips the gap in silence. A stored position is safe: ndb keeps the file that
+  holds it (§7.6).
+- `where` uses the query language of `find` (same operators). Rules:
+  - a `put` is delivered when its document matches;
+  - a `del` has no document, so it matches by the **last known document**:
+    the last `put` of that id that this stream saw. It is delivered only if
+    that `put` matched. A `del` of an id the stream never saw (it happened
+    before the stream started, or the stream forgot it: it keeps the last
+    65 536 ids) is **not** delivered when `where` is present. Without `where`
+    every `del` is delivered, as before;
+  - positions advance over the events that are left out: the daemon stores the
+    position of the last filtered-out event itself (every 256 events, when the
+    stream is idle, and when it closes), so a filtered consumer does not
+    replay them after a restart and does not hold back WAL truncation;
+  - a document that stops matching (an update moves it out of the filter) is
+    not delivered: `where` selects documents, it does not report "left the
+    filter". A consumer that needs this watches without `where`.
 
 ### 10.5 Catalog calls
 
@@ -907,9 +961,13 @@ Each phase ends with a usable result.
 1. Keep `_raw` (the full JSON) in each segment, or rebuild the document from columns?
    `_raw` makes `find` exact and simple, but uses more disk.
 2. Direct mode with `id`: keep only the last version in segments (compaction), or keep history?
-3. Is `watch` with a filter (`where`) needed in v1, or only the full feed?
+3. ~~Is `watch` with a filter (`where`) needed in v1?~~ Yes, decided: §10.4.
 4. One daemon for all apps on the server, or one daemon per app?
-5. Auth on the TCP port (token), or unix socket only in v1?
+5. ~~Auth on the TCP port (token), or unix socket only in v1?~~ Resolved: optional
+   bearer token. `ndb -token-file <path>` makes the TCP listener require
+   `Authorization: Bearer <token>` (constant-time compare, 401 `unauthorized`); the unix
+   socket stays token-free and `/v1/backup` stays unix-only. SDKs take `token` or env
+   `NDB_TOKEN`, and read `NDB_URL` when no address is given.
 6. Final name of the project.
 7. Should the Rails model layer support associations (`has_many`, `belongs_to`)
    as two queries, or stay out of v1 (no joins)?

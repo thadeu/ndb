@@ -29,6 +29,10 @@ import (
 // DefaultMaxLine is the line limit of a collection without max_line_size.
 const DefaultMaxLine = 1 << 20
 
+// walSegmentSize is the WAL file size of every engine collection (0 = the
+// collection default, 64 MiB). Tests lower it to force rotation.
+var walSegmentSize int64
+
 // DB is one open data dir. It is safe for concurrent use.
 type DB struct {
 	dir  string
@@ -282,6 +286,9 @@ func (db *DB) open(def catalog.Def) (*Collection, error) {
 		Blobs:      db.blobs,
 		Observer:   wm,
 		OnCompact:  db.compacted,
+
+		Cursors:        func() ([]string, error) { return db.cursors.List(def.Name) },
+		WALSegmentSize: walSegmentSize,
 	})
 	if err != nil {
 		return nil, err

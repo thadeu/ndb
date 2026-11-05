@@ -31,12 +31,15 @@ type Server struct {
 
 	// blobLimit is the largest blob in bytes (0 = DefaultBlobLimit).
 	blobLimit int64
+
+	// token, when set, is the bearer token every non-unix request must carry.
+	token []byte
 }
 
 func New() *Server {
 	stopCtx, stop := context.WithCancel(context.Background())
 	s := &Server{heartbeat: defaultHeartbeat, stopCtx: stopCtx}
-	s.handler = s.routes()
+	s.handler = s.authenticate(s.routes())
 	s.http = &http.Server{
 		Handler:           s.handler,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -46,6 +49,12 @@ func New() *Server {
 	s.http.RegisterOnShutdown(stop)
 
 	return s
+}
+
+// SetToken makes every request that does not come in on the unix socket carry
+// "Authorization: Bearer <token>". Call it before Serve. Empty = no token.
+func (s *Server) SetToken(token string) {
+	s.token = []byte(token)
 }
 
 // Attach gives the server the open engine. Until then it is not ready.

@@ -1,0 +1,65 @@
+# One VM, one ndb, many apps in different languages.
+#
+#   docker compose up --build
+#   docker compose logs -f go ruby node
+#
+# Build context for the apps is the repo root, so the SDKs in sdk/ are used.
+name: ndb-single-vm
+
+services:
+  ndb:
+    # Local build of the repo Dockerfile. Use ghcr.io/thadeu/ndb:<version> to pull.
+    build:
+      context: ../../..
+      dockerfile: Dockerfile
+    image: ndb:example
+    # 0660 + group 65532: the apps below run with this gid to open the socket.
+    command: ["-data-dir", "/var/lib/ndb", "-unix", "/run/ndb/ndb.sock", "-unix-mode", "0660"]
+    stop_grace_period: 35s
+    restart: unless-stopped
+    volumes:
+      # data_dir: a local named volume that only ndb mounts. Never NFS/EFS.
+      - ndb-data:/var/lib/ndb
+      # socket dir: shared with every app. On Linux you can use a host path
+      # instead (- /run/ndb:/run/ndb); the dir must be writable by uid 65532.
+      - ndb-run:/run/ndb
+
+  go:
+    build:
+      context: ../../..
+      dockerfile: deploy/examples/single-vm/apps/go/Dockerfile
+    user: "65532:65532"
+    depends_on: [ndb]
+    restart: unless-stopped
+    environment:
+      NDB_URL: unix:///run/ndb/ndb.sock
+    volumes:
+      - ndb-run:/run/ndb
+
+  ruby:
+    build:
+      context: ../../..
+      dockerfile: deploy/examples/single-vm/apps/ruby/Dockerfile
+    user: "1000:65532"
+    depends_on: [ndb]
+    restart: unless-stopped
+    environment:
+      NDB_URL: unix:///run/ndb/ndb.sock
+    volumes:
+      - ndb-run:/run/ndb
+
+  node:
+    build:
+      context: ../../..
+      dockerfile: deploy/examples/single-vm/apps/node/Dockerfile
+    user: "1000:65532"
+    depends_on: [ndb]
+    restart: unless-stopped
+    environment:
+      NDB_URL: unix:///run/ndb/ndb.sock
+    volumes:
+      - ndb-run:/run/ndb
+
+volumes:
+  ndb-data:
+  ndb-run:

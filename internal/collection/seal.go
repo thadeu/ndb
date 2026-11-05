@@ -539,6 +539,10 @@ func (c *Collection) runSealer() {
 			if err := c.compactDue(); err != nil {
 				log.Printf("ndb: compaction failed, retrying on the next tick: %v", err)
 			}
+
+			if _, err := c.TruncateWAL(); err != nil {
+				log.Printf("ndb: wal truncation failed, retrying on the next tick: %v", err)
+			}
 		}
 	}
 }

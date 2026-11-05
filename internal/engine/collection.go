@@ -115,6 +115,17 @@ func (c *Collection) Seal() error {
 	return c.eng.Seal()
 }
 
+// TruncateWAL deletes the WAL files that wal_retention, the checkpoint and
+// the stored watch cursors allow, and returns how many. The background
+// sealer does this every tick; direct mode has no WAL.
+func (c *Collection) TruncateWAL() (int, error) {
+	if c.eng == nil {
+		return 0, nil
+	}
+
+	return c.eng.TruncateWAL()
+}
+
 func (c *Collection) Stats() Stats {
 	s := Stats{Name: c.name, Write: c.write, Rows: c.rd.Len(), Indexes: c.rd.Indexes()}
 

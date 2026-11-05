@@ -1,0 +1,30 @@
+# TEMPLATE. This manifest was not run. The block and field names are a plain,
+# generic style; adjust them to the voodu version and to your other manifests
+# (for example infra/voodu/apps/*.voodu in your own repo).
+#
+# Apply:  vd apply -f ndb.voodu -y
+
+app "ndb" {
+  image    = "ghcr.io/thadeu/ndb:latest"
+  replicas = 1                      # one replica owns the data dir (flock)
+  user     = "65532:65532"
+
+  args = [
+    "-data-dir", "/var/lib/ndb",
+    "-unix", "/run/ndb/ndb.sock",
+    "-unix-mode", "0660",
+  ]
+
+  stop_timeout = "35s"              # the daemon waits up to 30 s on SIGTERM
+
+  volume "data" {
+    type = "local"                  # local persistent disk, never NFS/EFS
+    path = "/var/lib/ndb"
+  }
+
+  volume "socket" {
+    type      = "hostPath"          # shared with the app pods
+    host_path = "/run/ndb"
+    path      = "/run/ndb"
+  }
+}

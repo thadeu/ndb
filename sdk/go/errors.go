@@ -44,8 +44,10 @@ var (
 	ErrCursorExpired     = &Error{Code: "cursor_expired"}
 	ErrRequestTooLarge   = &Error{Code: "request_too_large"}
 	ErrLineTooLarge      = &Error{Code: "line_too_large"}
+	ErrUnauthorized      = &Error{Code: "unauthorized"}
 	ErrNotReady          = &Error{Code: "not_ready"}
 	ErrClosed            = &Error{Code: "closed"}
 	ErrWatchLagged       = &Error{Code: "watch_lagged"}
 	ErrInvalidPosition   = &Error{Code: "invalid_position"}
+	ErrHistoryTruncated  = &Error{Code: "history_truncated"}
 )

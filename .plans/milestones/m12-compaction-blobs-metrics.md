@@ -1,6 +1,6 @@
 # M12 — Compaction, retention, TTL, blobs, metrics
 
-Status: done (light verification; WAL truncation and expires_field index skip open) · Depends on: M05 (blobs API needs M07) · Plan: §7.5, §8.5, §11.5, phase 9
+Status: done (light verification; expires_field index skip is open) · Depends on: M05 (blobs API needs M07) · Plan: §7.5, §8.5, §11.5, phase 9
 
 ## Goal
 
@@ -29,6 +29,14 @@ operator can see what happens.
 - [x] Engine-mode sweeper: tombstones for expired docs in small batches; `watch` shows `"_expired": true`; crash during a sweep is safe (tombstones are idempotent)
 - [x] Direct mode: hide only, never touch the apps' files; compaction drops expired rows from derived data
 - [x] Model layers: Ruby `ttl` / `expires: true`, Go tag `expires` (TS: M11)
+
+### E12.7 WAL truncation (plan §7.6)
+
+- [x] Tests first: nothing is deleted without `wal_retention`; only sealed, old files go; a stored cursor or an open stream keeps its files; recovery works after truncation; `watch` from a truncated position is `history_truncated` (HTTP 410)
+- [x] `wal_retention` in the catalog/`ndb.yml` (`catalog.ParseDuration`; default keep forever)
+- [x] Engine passes the stored cursors to the collection with a func hook (`cursors.List`)
+- [x] Delete after the checkpoint is durable; fsync the directory
+- [x] Blob GC treats blobs of kept WAL records as live
 
 ### E12.3 Blob store
 

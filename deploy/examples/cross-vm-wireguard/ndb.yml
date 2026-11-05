@@ -1,0 +1,7 @@
+# db VM. The daemon listens on the WireGuard address only, never on 0.0.0.0
+# and never on a public IP. Apps on this VM keep using the unix socket.
+data_dir: /var/lib/ndb
+
+listen:
+  unix: /run/ndb/ndb.sock
+  tcp: 10.10.0.1:7070

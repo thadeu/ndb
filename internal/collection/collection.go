@@ -75,6 +75,12 @@ type Config struct {
 	WatchBuffer    int
 	WALSegmentSize int64
 
+	// Cursors gives the stored watch positions of the consumers of this
+	// collection. WAL truncation never deletes a file a consumer still
+	// needs. Nil means no stored consumers. It is a func, not a store, so
+	// this package does not import the cursor store.
+	Cursors func() ([]string, error)
+
 	// Blobs receives the string values over Def.BlobThreshold. Without it
 	// nothing is externalized.
 	Blobs *blob.Store
@@ -125,6 +131,11 @@ type Collection struct {
 	feed *engineFeed
 
 	blobs *blob.Store
+
+	// walKeep is Def.WALRetention (0 = keep every WAL file). walDir, walFS,
+	// maxLine and cursors are what TruncateWAL needs.
+	walKeep time.Duration
+	cursors func() ([]string, error)
 }
 
 // Doc is a document and its version.
@@ -159,6 +170,16 @@ func Open(cfg Config) (*Collection, error) {
 	}
 
 	c.feed = &engineFeed{fs: cfg.FS, dir: cfg.Dir, buf: cfg.WatchBuffer}
+	c.cursors = cfg.Cursors
+
+	if cfg.Def.WALRetention != "" {
+		keep, err := catalog.ParseDuration(cfg.Def.WALRetention)
+		if err != nil {
+			return nil, err
+		}
+
+		c.walKeep = keep
+	}
 
 	if c.feed.buf <= 0 {
 		c.feed.buf = defaultWatchBuffer

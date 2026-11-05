@@ -57,6 +57,7 @@ type Def struct {
 	Unique        []string   `json:"unique,omitempty" yaml:"unique"`
 	Durability    Durability `json:"durability,omitempty" yaml:"durability"`
 	Retention     string     `json:"retention,omitempty" yaml:"retention"`
+	WALRetention  string     `json:"wal_retention,omitempty" yaml:"wal_retention"`
 	TTL           string     `json:"ttl,omitempty" yaml:"ttl"`
 	ExpiresField  string     `json:"expires_field,omitempty" yaml:"expires_field"`
 	MaxLineSize   int64      `json:"max_line_size,omitempty" yaml:"-"`
@@ -251,7 +252,7 @@ func withDefaults(d Def, src Source) Def {
 
 	d.Indexes = normIndexes(d.Indexes)
 	d.Unique = normIndexes(d.Unique)
-	d.OpsFromYAML = src == FromYAML && (d.Durability != Strict || d.Retention != "")
+	d.OpsFromYAML = src == FromYAML && (d.Durability != Strict || d.Retention != "" || d.WALRetention != "")
 
 	return d
 }
@@ -300,7 +301,7 @@ func merge(cur, decl Def, src Source) (Def, error) {
 	return next, nil
 }
 
-// mergeOps applies durability/retention. ndb.yml wins: they are operator
+// mergeOps applies durability, retention and wal_retention. ndb.yml wins: they are operator
 // decisions.
 func mergeOps(next *Def, decl Def, src Source) {
 	if src != FromYAML && next.OpsFromYAML {
@@ -315,7 +316,11 @@ func mergeOps(next *Def, decl Def, src Source) {
 		next.Retention = decl.Retention
 	}
 
-	if src == FromYAML && (decl.Durability != "" || decl.Retention != "") {
+	if decl.WALRetention != "" {
+		next.WALRetention = decl.WALRetention
+	}
+
+	if src == FromYAML && (decl.Durability != "" || decl.Retention != "" || decl.WALRetention != "") {
 		next.OpsFromYAML = true
 	}
 }
@@ -355,7 +360,7 @@ func validateDurations(d Def) error {
 		return fmt.Errorf("%w: set ttl or expires_field, not both", ErrInvalid)
 	}
 
-	for name, v := range map[string]string{"ttl": d.TTL, "retention": d.Retention} {
+	for name, v := range map[string]string{"ttl": d.TTL, "retention": d.Retention, "wal_retention": d.WALRetention} {
 		if v == "" {
 			continue
 		}
@@ -373,6 +378,8 @@ func validateFinal(d Def) error {
 	switch {
 	case d.Write == Direct && d.Path == "":
 		return fmt.Errorf("%w: direct mode needs a path", ErrInvalid)
+	case d.Write == Direct && d.WALRetention != "":
+		return fmt.Errorf("%w: wal_retention is for engine mode (direct mode has no WAL)", ErrInvalid)
 	case d.Write == Engine && d.Path != "":
 		return fmt.Errorf("%w: engine mode has no path (ndb owns the files)", ErrInvalid)
 	case d.TTL != "" && d.ExpiresField != "":

@@ -13,6 +13,8 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,6 +24,9 @@ import (
 )
 
 const shutdownTimeout = 30 * time.Second
+
+// version is set at release build time: -ldflags "-X main.version=1.2.3".
+var version = "dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -42,9 +47,19 @@ func run(args []string) error {
 	dataDir := fl.String("data-dir", "", "data dir (overrides ndb.yml)")
 	unix := fl.String("unix", "", "unix socket path (overrides ndb.yml)")
 	tcp := fl.String("tcp", "", "TCP listen address, e.g. 127.0.0.1:7070 (overrides ndb.yml)")
+	unixMode := fl.String("unix-mode", "", "permission of the unix socket, octal, e.g. 0660 (default: process umask)")
+	showVersion := fl.Bool("version", false, "print the version and exit")
+
+	tokenFile := fl.String("token-file", "", "file with the bearer token the TCP listener requires (unix socket stays open)")
 
 	if err := fl.Parse(args); err != nil {
 		return err
+	}
+
+	if *showVersion {
+		fmt.Println("ndb", version)
+
+		return nil
 	}
 
 	cfg, err := config.Load(*cfgPath)
@@ -70,6 +85,12 @@ func run(args []string) error {
 		cfg.Listen.TCP = *tcp
 	}
 
+	if set["unix-mode"] {
+		if cfg.Listen.UnixMode, err = parseUnixMode(*unixMode); err != nil {
+			return err
+		}
+	}
+
 	// memory_limit is the Go heap soft limit (plan §11.4). Segment reads
 	// still decode into the heap; mmap is not used yet.
 	if cfg.MemoryLimit > 0 {
@@ -80,12 +101,36 @@ func run(args []string) error {
 
 	defer stop()
 
-	return serve(ctx, cfg)
+	token := ""
+
+	if *tokenFile != "" {
+		if token, err = readTokenFile(*tokenFile); err != nil {
+			return err
+		}
+	}
+
+	return serve(ctx, cfg, token)
+}
+
+// readTokenFile returns the trimmed token. An empty file is an error: it
+// would turn the protection off without a word.
+func readTokenFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("token file: %w", err)
+	}
+
+	token := strings.TrimSpace(string(data))
+	if token == "" {
+		return "", fmt.Errorf("token file %s is empty", path)
+	}
+
+	return token, nil
 }
 
 // serve listens, recovers the data dir, and stops in order when ctx ends:
 // no new requests, in-flight requests finish, then the collections close.
-func serve(ctx context.Context, cfg config.Config) error {
+func serve(ctx context.Context, cfg config.Config, token string) error {
 	log := slog.Default()
 
 	listeners, err := listen(cfg.Listen)
@@ -96,6 +141,7 @@ func serve(ctx context.Context, cfg config.Config) error {
 	srv := server.New()
 
 	srv.SetBlobLimit(cfg.BlobMaxSize)
+	srv.SetToken(token)
 
 	errc := make(chan error, len(listeners))
 
@@ -155,6 +201,14 @@ func listen(l config.Listen) ([]net.Listener, error) {
 			return nil, err
 		}
 
+		if l.UnixMode != 0 {
+			if err := os.Chmod(l.Unix, l.UnixMode); err != nil {
+				ul.Close()
+
+				return nil, err
+			}
+		}
+
 		out = append(out, ul)
 	}
 
@@ -170,6 +224,16 @@ func listen(l config.Listen) ([]net.Listener, error) {
 	}
 
 	return out, nil
+}
+
+// parseUnixMode reads an octal permission such as "0660".
+func parseUnixMode(s string) (os.FileMode, error) {
+	n, err := strconv.ParseUint(s, 8, 32)
+	if err != nil || n > 0o777 {
+		return 0, fmt.Errorf("-unix-mode %q: want an octal permission such as 0660", s)
+	}
+
+	return os.FileMode(n), nil
 }
 
 func removeStaleSocket(path string) error {

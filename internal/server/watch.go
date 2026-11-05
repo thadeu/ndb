@@ -25,6 +25,9 @@ type watchReq struct {
 	Consumer string `json:"consumer"`
 	From     string `json:"from"`
 	Limit    int    `json:"limit"`
+
+	// Where is the optional filter, the where of find.
+	Where json.RawMessage `json:"where"`
 }
 
 type ackReq struct {
@@ -41,7 +44,9 @@ func (s *Server) SetWatchHeartbeat(d time.Duration) {
 // watch streams the changes of a collection to a consumer, from the position
 // of its last ack: first the history, then the live changes. The stream ends
 // when the client leaves, after limit events, when the server shuts down, or
-// with an error line (watch_lagged: the consumer must reconnect).
+// with an error line (watch_lagged: the consumer must reconnect). A where
+// filter keeps only the matching events (plan §10.4); a start from a position
+// whose WAL files were deleted is history_truncated (410).
 func (s *Server) watch(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
 
@@ -66,7 +71,11 @@ func (s *Server) watch(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
-	stream, err := db.Watch(name, req.Consumer, req.From)
+	if string(req.Where) == "null" {
+		req.Where = nil
+	}
+
+	stream, err := db.WatchWhere(name, req.Consumer, req.From, req.Where)
 	if err != nil {
 		writeError(w, err)
 
@@ -94,6 +103,8 @@ func validateWatch(req watchReq) error {
 		return badRequest("from must be beginning or now")
 	case req.Limit < 0:
 		return badRequest("limit must be zero or more")
+	case len(req.Where) > 0 && req.Where[0] != '{' && string(req.Where) != "null":
+		return badRequest("where must be an object")
 	}
 
 	return nil

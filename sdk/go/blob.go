@@ -32,6 +32,8 @@ func (db *DB) PutBlob(ctx context.Context, r io.Reader, contentType string) (Blo
 		req.Header.Set("Content-Type", contentType)
 	}
 
+	db.authorize(req)
+
 	resp, err := db.client.Do(req)
 	if err != nil {
 		return Blob{}, err

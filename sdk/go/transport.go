@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 )
@@ -19,20 +20,40 @@ import (
 type DB struct {
 	base   string
 	client *http.Client
+	token  string
 
 	mu      sync.Mutex
 	ensured map[string]bool
 }
 
+// OpenOption tunes Open.
+type OpenOption func(*DB)
+
+// WithToken sets the bearer token for the TCP listener. Without it Open
+// reads NDB_TOKEN. The token goes only in the Authorization header.
+func WithToken(token string) OpenOption {
+	return func(db *DB) { db.token = token }
+}
+
 // Open returns a handle for addr: unix:///path/to/ndb.sock or
-// tcp://host:port. It does not connect; the first call does.
-func Open(addr string) (*DB, error) {
+// tcp://host:port. An empty addr reads NDB_URL. It does not connect; the
+// first call does.
+func Open(addr string, opts ...OpenOption) (*DB, error) {
+	if addr == "" {
+		addr = os.Getenv("NDB_URL")
+	}
+
 	u, err := url.Parse(addr)
 	if err != nil {
 		return nil, fmt.Errorf("ndb: bad address %q: %w", addr, err)
 	}
 
-	db := &DB{ensured: map[string]bool{}}
+	db := &DB{ensured: map[string]bool{}, token: os.Getenv("NDB_TOKEN")}
+
+	for _, opt := range opts {
+		opt(db)
+	}
+
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 
 	tr.MaxIdleConnsPerHost = 16
@@ -74,6 +95,8 @@ func (db *DB) do(ctx context.Context, method, path string, body []byte) (*http.R
 
 	req.Header.Set("Content-Type", "application/json")
 
+	db.authorize(req)
+
 	resp, err := db.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -84,6 +107,13 @@ func (db *DB) do(ctx context.Context, method, path string, body []byte) (*http.R
 	}
 
 	return nil, apiError(resp)
+}
+
+// authorize adds the bearer token, when the handle has one.
+func (db *DB) authorize(req *http.Request) {
+	if db.token != "" {
+		req.Header.Set("Authorization", "Bearer "+db.token)
+	}
 }
 
 func (db *DB) find(ctx context.Context, coll string, body []byte) (*http.Response, error) {

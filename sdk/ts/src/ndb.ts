@@ -1,12 +1,12 @@
 import { Model } from './model.js'
-import { Transport } from './transport.js'
+import { Transport, type ConnectOptions } from './transport.js'
 import type { Fields, Schema } from './types.js'
 
 export class Ndb {
   readonly transport: Transport
 
-  constructor(addr: string) {
-    this.transport = new Transport(addr)
+  constructor(addr?: string, opts?: ConnectOptions) {
+    this.transport = new Transport(addr, opts)
   }
 
   model<const F extends Fields>(name: string, schema: Schema<F>): Model<F> {
@@ -30,6 +30,6 @@ export class Ndb {
   }
 }
 
-export function connect(addr: string): Ndb {
-  return new Ndb(addr)
+export function connect(addr?: string, opts?: ConnectOptions): Ndb {
+  return new Ndb(addr, opts)
 }

@@ -75,11 +75,21 @@ func runWriterChild() {
 }
 
 func childArgs() []string {
-	return []string{
+	args := []string{
 		"-config", filepath.Join(os.Getenv("NDB_DATA"), "absent.yml"),
 		"-data-dir", os.Getenv("NDB_DATA"),
 		"-unix", os.Getenv("NDB_SOCK"),
 	}
+
+	if tcp := os.Getenv("NDB_TCP"); tcp != "" {
+		args = append(args, "-tcp", tcp)
+	}
+
+	if file := os.Getenv("NDB_TOKEN_FILE"); file != "" {
+		args = append(args, "-token-file", file)
+	}
+
+	return args
 }
 
 // sockPath is a short unix socket path: macOS caps the length at 104 bytes.
@@ -318,5 +328,89 @@ func TestBackupOnlineAndOffline(t *testing.T) {
 
 	if err := run([]string{"backup", "-config", absent, "-data-dir", dir}); err == nil {
 		t.Error("backup without a dest must fail")
+	}
+}
+
+func TestReadTokenFile(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "good")
+	empty := filepath.Join(dir, "empty")
+	blank := filepath.Join(dir, "blank")
+
+	os.WriteFile(good, []byte("  abc123\n"), 0o600)
+	os.WriteFile(empty, nil, 0o600)
+	os.WriteFile(blank, []byte(" \n"), 0o600)
+
+	tok, err := readTokenFile(good)
+	if err != nil || tok != "abc123" {
+		t.Fatalf("good: %q %v", tok, err)
+	}
+
+	for _, p := range []string{empty, blank, filepath.Join(dir, "absent")} {
+		if _, err := readTokenFile(p); err == nil {
+			t.Fatalf("%s: want an error", p)
+		}
+	}
+}
+
+// The daemon with -token-file asks for the token on TCP only.
+func TestDaemonTokenFileOnTCP(t *testing.T) {
+	dir := t.TempDir()
+	sock := sockPath(t)
+	tokenFile := filepath.Join(dir, "token")
+
+	os.WriteFile(tokenFile, []byte("s3cret\n"), 0o600)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	addr := ln.Addr().String()
+
+	ln.Close()
+
+	cmd := exec.Command(os.Args[0], "-test.run=^$")
+	cmd.Env = append(os.Environ(), childEnv+"=daemon", "NDB_DATA="+dir, "NDB_SOCK="+sock, "NDB_TCP="+addr, "NDB_TOKEN_FILE="+tokenFile)
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		cmd.Process.Signal(syscall.SIGTERM)
+		cmd.Wait()
+	})
+
+	waitHealthy(unixClient(sock))
+
+	status := func(auth string) int {
+		req, _ := http.NewRequest("GET", "http://"+addr+"/v1/c", nil)
+
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		resp.Body.Close()
+
+		return resp.StatusCode
+	}
+
+	if got := status(""); got != 401 {
+		t.Fatalf("no token: %d", got)
+	}
+
+	if got := status("Bearer s3cret"); got != 200 {
+		t.Fatalf("token: %d", got)
+	}
+
+	if got := post(unixClient(sock), "/v1/c/x/find", `{}`); got == 401 {
+		t.Fatal("unix socket asked for a token")
 	}
 }

@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: vet
+        run: go vet ./...
+
+      - name: Test daemon
+        run: go test -race -p 2 -parallel=2 -timeout 300s ./...
+
+      - name: Test Go SDK
+        working-directory: sdk/go
+        run: |
+          go vet ./...
+          go test -race -p 2 -parallel=2 -timeout 300s ./...
+
+  ruby:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+          working-directory: sdk/ruby
+
+      - name: Test Ruby SDK
+        working-directory: sdk/ruby
+        run: bundle exec rake test
+
+  ts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: sdk/ts/package.json
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: sdk/ts/pnpm-lock.yaml
+
+      - name: Install
+        working-directory: sdk/ts
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        working-directory: sdk/ts
+        run: pnpm lint
+
+      - name: Typecheck
+        working-directory: sdk/ts
+        run: pnpm typecheck
+
+      - name: Test
+        working-directory: sdk/ts
+        run: pnpm test
+
+      - name: Build
+        working-directory: sdk/ts
+        run: pnpm build

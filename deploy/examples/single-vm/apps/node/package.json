@@ -1,0 +1,8 @@
+{
+  "name": "visits",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "ndb": "*"
+  }
+}

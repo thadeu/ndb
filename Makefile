@@ -1,4 +1,4 @@
-.PHONY: test race lint fuzz-smoke bench
+.PHONY: test race lint fuzz-smoke bench build dist
 
 test:
 	go test ./...
@@ -22,3 +22,23 @@ fuzz-smoke:
 
 bench:
 	go test -run=^$$ -bench=. -benchmem ./...
+
+# Static, CGO-free release build. VERSION defaults to the git description.
+# Binaries are staged in bin/ (git-ignored); tarballs and checksums go to dist/.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
+TARGETS ?= linux/amd64 linux/arm64 darwin/arm64
+LDFLAGS = -s -w -X main.version=$(VERSION)
+
+build:
+	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/ndb ./cmd/ndb
+
+dist:
+	mkdir -p dist
+	@for t in $(TARGETS); do \
+		os=$${t%/*}; arch=$${t#*/}; name=ndb-$(VERSION)-$$os-$$arch; \
+		mkdir -p bin/stage/$$name; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o bin/stage/$$name/ndb ./cmd/ndb || exit 1; \
+		cp LICENSE README.md bin/stage/$$name/; \
+		tar -C bin/stage -czf dist/$$name.tar.gz $$name; \
+	done
+	cd dist && (sha256sum ndb-$(VERSION)-*.tar.gz 2>/dev/null || shasum -a 256 ndb-$(VERSION)-*.tar.gz) > checksums.txt

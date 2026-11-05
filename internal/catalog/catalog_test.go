@@ -302,6 +302,8 @@ func TestDurationsAreValidated(t *testing.T) {
 		{Name: "a", Time: "t", TTL: "soon"},
 		{Name: "b", Time: "t", TTL: "-1h"},
 		{Name: "c", Retention: "forever"},
+		{Name: "d", WALRetention: "-1h"},
+		{Name: "e", Path: "/x/*.ndjson", WALRetention: "7d"},
 	} {
 		if _, err := c.Ensure(d, catalog.FromCode); !errors.Is(err, catalog.ErrInvalid) {
 			t.Fatalf("%+v: %v", d, err)
@@ -329,5 +331,26 @@ func TestParseDuration(t *testing.T) {
 		if _, err := catalog.ParseDuration(bad); err == nil {
 			t.Errorf("%q: want an error", bad)
 		}
+	}
+}
+
+func TestWALRetentionIsAnOperatorSetting(t *testing.T) {
+	c, _ := open(t, catalog.Options{})
+
+	c.Ensure(catalog.Def{Name: "outbox", WALRetention: "7d"}, catalog.FromYAML)
+
+	def, err := c.Ensure(catalog.Def{Name: "outbox", WALRetention: "1d"}, catalog.FromCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if def.WALRetention != "7d" {
+		t.Fatalf("code overrode YAML wal_retention: %+v", def)
+	}
+
+	def, _ = c.Ensure(catalog.Def{Name: "plain"}, catalog.FromCode)
+
+	if def.WALRetention != "" {
+		t.Fatalf("default must keep the WAL forever: %+v", def)
 	}
 }

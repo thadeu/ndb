@@ -79,6 +79,13 @@ func (db *DB) liveBlobs(ctx context.Context) (iter.Seq[string], error) {
 		if err != nil {
 			return nil, err
 		}
+
+		walRefs, err := col.walBlobRefs()
+		if err != nil {
+			return nil, err
+		}
+
+		hashes = append(hashes, walRefs...)
 	}
 
 	return func(yield func(string) bool) {
@@ -88,6 +95,19 @@ func (db *DB) liveBlobs(ctx context.Context) (iter.Seq[string], error) {
 			}
 		}
 	}, nil
+}
+
+// walBlobRefs lists the blobs that the kept WAL files refer to, when WAL
+// truncation is on: a watch replay reads those records, so their blobs are
+// live even if no current document uses them. Without wal_retention the WAL
+// is not a source of truth for the GC (the live documents are), so it is not
+// scanned.
+func (c *Collection) walBlobRefs() ([]string, error) {
+	if c.eng == nil || !c.eng.KeepsWAL() {
+		return nil, nil
+	}
+
+	return c.eng.WALBlobRefs()
 }
 
 // eachDoc calls fn for every live document, page by page.

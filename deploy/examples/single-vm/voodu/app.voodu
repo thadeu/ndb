@@ -1,0 +1,22 @@
+# TEMPLATE. This manifest was not run. See the note in ndb.voodu.
+#
+# One app that uses ndb through the shared socket. Add one block like this
+# for each app (Go, Ruby, Node, Bun). Apply it after ndb.voodu.
+
+app "visits-go" {
+  image    = "registry.example.com/visits-go:latest"
+  replicas = 1
+  user     = "1000:65532"           # gid 65532 = the group of the socket (-unix-mode 0660)
+
+  env = {
+    NDB_URL = "unix:///run/ndb/ndb.sock"
+  }
+
+  volume "socket" {
+    type      = "hostPath"
+    host_path = "/run/ndb"
+    path      = "/run/ndb"
+  }
+
+  depends_on = ["ndb"]
+}

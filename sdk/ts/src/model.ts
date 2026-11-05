@@ -152,10 +152,10 @@ export class Model<F extends Fields> {
     return { rows, next: res.header('x-ndb-next') ?? '', total: Number(res.header('x-ndb-total') ?? 0) }
   }
 
-  async *watch(consumer: string, opts: WatchOptions = {}): AsyncGenerator<WatchEvent<Row<F>>> {
+  async *watch(consumer: string, opts: WatchOptions<F> = {}): AsyncGenerator<WatchEvent<Row<F>>> {
     await this.ready()
 
-    const body = { consumer, from: opts.from, limit: opts.limit }
+    const body = { consumer, from: opts.from, limit: opts.limit, where: opts.where }
     const res = await this.db.transport.stream('POST', this.path('watch'), body, opts.signal)
 
     for await (const ev of watchEvents(res.rows(), consumer)) {

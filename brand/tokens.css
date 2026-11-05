@@ -1,0 +1,49 @@
+/* ndb design tokens. Light by default, dark with prefers-color-scheme or data-theme. */
+
+:root {
+  /* color: text and surfaces */
+  --ndb-ink: #0b0b0f;
+  --ndb-paper: #ffffff;
+  --ndb-line: #e5e5e5;
+  --ndb-muted: #6b6b76;
+
+  /* color: accent */
+  --ndb-accent: #f0047f;
+  --ndb-accent-soft: #fde6f1;
+  --ndb-on-accent: #ffffff;
+
+  /* color: primary button, always black on light and white on dark */
+  --ndb-button: #0b0b0f;
+  --ndb-on-button: #ffffff;
+
+  /* type */
+  --ndb-font-sans: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --ndb-font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* shape */
+  --ndb-radius: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --ndb-ink: #f4f4f6;
+    --ndb-paper: #0e0e11;
+    --ndb-line: #26262c;
+    --ndb-muted: #9a9aa5;
+    --ndb-accent: #f0047f;
+    --ndb-accent-soft: #2a0a1b;
+    --ndb-button: #f4f4f6;
+    --ndb-on-button: #0b0b0f;
+  }
+}
+
+:root[data-theme='dark'] {
+  --ndb-ink: #f4f4f6;
+  --ndb-paper: #0e0e11;
+  --ndb-line: #26262c;
+  --ndb-muted: #9a9aa5;
+  --ndb-accent: #f0047f;
+  --ndb-accent-soft: #2a0a1b;
+  --ndb-button: #f4f4f6;
+  --ndb-on-button: #0b0b0f;
+}

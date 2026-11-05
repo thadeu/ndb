@@ -1,0 +1,39 @@
+# Direct-mode variant. Use it on top of the main file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.direct.yml up --build
+#
+# The apps append to /data/logs/<app>-<pod>.ndjson (one file per process) and
+# ndb tails the files. Reads still go through the socket.
+#
+# The apps run as root here, so they can create files in the new volume.
+# In production, give the volume the right owner instead.
+services:
+  ndb:
+    command: ["-config", "/etc/ndb/ndb.yml", "-unix-mode", "0660"]
+    volumes:
+      - ./ndb.direct.yml:/etc/ndb/ndb.yml:ro
+      - logs:/data/logs:ro
+
+  go:
+    user: "0:0"
+    environment:
+      NDB_DIRECT_DIR: /data/logs
+    volumes:
+      - logs:/data/logs
+
+  ruby:
+    user: "0:0"
+    environment:
+      NDB_DIRECT_DIR: /data/logs
+    volumes:
+      - logs:/data/logs
+
+  node:
+    user: "0:0"
+    environment:
+      NDB_DIRECT_DIR: /data/logs
+    volumes:
+      - logs:/data/logs
+
+volumes:
+  logs:

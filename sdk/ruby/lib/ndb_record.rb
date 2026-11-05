@@ -28,7 +28,9 @@ module NdbRecord
 
     def client
       @client ||= Client.new(
+        url: configuration.url,
         socket: configuration.socket,
+        token: configuration.token,
         timeout: configuration.timeout,
         pool_size: configuration.pool_size
       )

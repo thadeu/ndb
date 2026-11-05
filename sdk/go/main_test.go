@@ -19,6 +19,14 @@ import (
 var daemon struct {
 	unix string
 	tcp  string
+	bin  string
+	dir  string
+}
+
+// lastLaunch holds the addresses of the daemon that launchDaemon started last.
+var lastLaunch struct {
+	unix string
+	tcp  string
 }
 
 var collSeq atomic.Int64
@@ -46,7 +54,13 @@ func runWithDaemon(m *testing.M) int {
 
 	defer stop()
 
-	return m.Run()
+	code := m.Run()
+
+	for _, extra := range extraStops {
+		extra()
+	}
+
+	return code
 }
 
 // startDaemon builds cmd/ndb from the repo root and starts it on a unix
@@ -62,8 +76,26 @@ func startDaemon(dir string) (func(), error) {
 		return nil, fmt.Errorf("build: %w", err)
 	}
 
+	daemon.bin = bin
+	daemon.dir = dir
+
+	return launchDaemon(dir, "", true)
+}
+
+// launchDaemon starts the built daemon with its own data dir under dir. With
+// a tokenFile the TCP listener asks for the token. It sets daemon.unix and
+// daemon.tcp only when primary is true; otherwise see lastLaunch.
+func launchDaemon(dir, tokenFile string, primary bool) (func(), error) {
+	bin := daemon.bin
+
 	tcpAddr, err := freeAddr()
 	if err != nil {
+		return nil, err
+	}
+
+	dir = filepath.Join(dir, fmt.Sprintf("d%d", collSeq.Add(1)))
+
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
 
@@ -75,12 +107,18 @@ func startDaemon(dir string) (func(), error) {
 	}
 
 	sock := filepath.Join(dir, "ndb.sock")
-	cmd := exec.Command(bin,
+	args := []string{
 		"-config", filepath.Join(dir, "absent.yml"),
 		"-data-dir", filepath.Join(dir, "data"),
 		"-unix", sock,
 		"-tcp", tcpAddr,
-	)
+	}
+
+	if tokenFile != "" {
+		args = append(args, "-token-file", tokenFile)
+	}
+
+	cmd := exec.Command(bin, args...)
 
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
@@ -95,10 +133,15 @@ func startDaemon(dir string) (func(), error) {
 		_ = logFile.Close()
 	}
 
-	daemon.unix = "unix://" + sock
-	daemon.tcp = "tcp://" + tcpAddr
+	lastLaunch.unix = "unix://" + sock
+	lastLaunch.tcp = "tcp://" + tcpAddr
 
-	if err := waitReady(daemon.unix); err != nil {
+	if primary {
+		daemon.unix = lastLaunch.unix
+		daemon.tcp = lastLaunch.tcp
+	}
+
+	if err := waitReady(lastLaunch.unix); err != nil {
 		stop()
 
 		logs, _ := os.ReadFile(logPath)
@@ -148,10 +191,10 @@ func waitReady(addr string) error {
 	return last
 }
 
-func openTest(t *testing.T, addr string) *DB {
+func openTest(t *testing.T, addr string, opts ...OpenOption) *DB {
 	t.Helper()
 
-	db, err := Open(addr)
+	db, err := Open(addr, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}

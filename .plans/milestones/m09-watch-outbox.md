@@ -1,6 +1,6 @@
 # M09 — Watch + first real use (fsw-esl outbox)
 
-Status: done (light verification; E9.4 fsw-esl outbox-sweeper and the watch where filter are open) · Depends on: M08 · Plan: §10.4, phase 8
+Status: done (light verification; E9.4 fsw-esl outbox-sweeper is open) · Depends on: M08 · Plan: §10.4, phase 8
 
 ## Goal
 
@@ -20,7 +20,7 @@ First real use: the fsw-esl `outbox-sweeper`.
 - [ ] Tests first: consumer killed at random points resumes with no gap; slow consumer does not block writers
 - [ ] `POST /v1/c/{coll}/watch`: chunked NDJSON stream from the consumer position
 - [ ] Works for engine mode and direct mode
-- [ ] Optional `where` filter (decision: open question 3)
+- [x] Optional `where` filter (decision: plan §10.4; HTTP, Go `WatchWhere`, Ruby `watch(where:)`, TS `watch(..., {where})`)
 
 ### E9.3 Go client
 

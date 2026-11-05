@@ -1,4 +1,5 @@
 export type ErrorCode =
+  | 'unauthorized'
   | 'not_found'
   | 'version_conflict'
   | 'duplicate_id'
@@ -20,6 +21,7 @@ export type ErrorCode =
   | 'closed'
   | 'watch_lagged'
   | 'invalid_position'
+  | 'history_truncated'
   | 'http_status'
   | (string & {})
 
@@ -35,6 +37,7 @@ export class NdbError extends Error {
   }
 }
 
+export class UnauthorizedError extends NdbError {}
 export class NotFoundError extends NdbError {}
 export class VersionConflictError extends NdbError {}
 export class DuplicateIdError extends NdbError {}
@@ -42,8 +45,10 @@ export class UniqueViolationError extends NdbError {}
 export class InvalidQueryError extends NdbError {}
 export class CursorError extends NdbError {}
 export class WatchLaggedError extends NdbError {}
+export class HistoryTruncatedError extends NdbError {}
 
 const subclasses: Record<string, typeof NdbError> = {
+  unauthorized: UnauthorizedError,
   not_found: NotFoundError,
   unknown_collection: NotFoundError,
   version_conflict: VersionConflictError,
@@ -55,6 +60,7 @@ const subclasses: Record<string, typeof NdbError> = {
   cursor_mismatch: CursorError,
   cursor_expired: CursorError,
   watch_lagged: WatchLaggedError,
+  history_truncated: HistoryTruncatedError,
 }
 
 export function makeError(code: ErrorCode, message: string, status = 0): NdbError {

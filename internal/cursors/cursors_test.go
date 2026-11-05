@@ -67,3 +67,30 @@ func TestConsumersAndCollectionsAreIndependent(t *testing.T) {
 		}
 	}
 }
+
+func TestListReturnsOnlyTheCollectionsPositions(t *testing.T) {
+	s, err := cursors.Open(filepath.Join(t.TempDir(), "cursors.bolt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer s.Close()
+
+	set := func(pos string) func(string, bool) (string, error) {
+		return func(string, bool) (string, error) { return pos, nil }
+	}
+
+	s.Update("posts", "a", set("e1.1"))
+	s.Update("posts", "b", set("e5.2"))
+	s.Update("posts2", "a", set("e9.9"))
+	s.Update("other", "a", set("e7.7"))
+
+	got, err := s.List("posts")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(got) != 2 || got[0] != "e1.1" || got[1] != "e5.2" {
+		t.Fatalf("list = %v", got)
+	}
+}

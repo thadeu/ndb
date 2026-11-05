@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest'
+import { HistoryTruncatedError, makeError } from '../src/errors.js'
 import { callsModel } from './fixtures.js'
 import { unixDb } from './helpers.js'
 
@@ -50,5 +51,40 @@ describe('watch', () => {
     expect(ev.value?.doc?.status).toBe('s')
 
     await it.return(undefined)
+  })
+
+  it('delivers only the events that match where', async () => {
+    const calls = callsModel(db)
+
+    await calls.insert([
+      { call_id: 'a', status: 'pending', ts: new Date() },
+      { call_id: 'b', status: 'done', ts: new Date() },
+      { call_id: 'c', status: 'pending', ts: new Date() },
+    ])
+
+    const seen: string[] = []
+
+    for await (const ev of calls.watch('w3', { where: { status: 'pending' }, limit: 2 })) {
+      seen.push(ev.id)
+    }
+
+    expect(seen).toEqual(['a', 'c'])
+  })
+
+  it('fails with a typed error on a bad where', async () => {
+    const calls = callsModel(db)
+
+    await calls.insert({ call_id: 'a', status: 'pending', ts: new Date() })
+
+    const stream = calls.watch('w4', { where: { status: { $bogus: 1 } } as never })
+
+    await expect(stream.next()).rejects.toMatchObject({ code: 'invalid_query' })
+  })
+
+  it('maps history_truncated to its own error class', () => {
+    const err = makeError('history_truncated', 'gone', 410)
+
+    expect(err).toBeInstanceOf(HistoryTruncatedError)
+    expect(err.status).toBe(410)
   })
 })

@@ -2,6 +2,7 @@ package ndb
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -156,5 +157,54 @@ func TestWatchErrorsAreTyped(t *testing.T) {
 
 	if !errors.Is(err, ErrInvalidPosition) {
 		t.Fatalf("err = %v, want ErrInvalidPosition", err)
+	}
+}
+
+func TestWatchWhereDeliversOnlyMatchingEvents(t *testing.T) {
+	c, ctx := watchColl(t)
+
+	addJobs(t, ctx, c, 1, 2)
+
+	if _, err := c.Insert(ctx, Job{JobID: "j3", Status: "done"}, Job{JobID: "j4", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var ids []string
+
+	for ev, err := range c.Watch(ctx, "only-done", WatchWhere(Eq("status", "done")), Limit(1)) {
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		ids = append(ids, ev.ID)
+	}
+
+	if len(ids) != 1 || ids[0] != "j3" {
+		t.Fatalf("ids = %v, want [j3]", ids)
+	}
+}
+
+func TestWatchWhereBadFilterIsInvalidQuery(t *testing.T) {
+	c, ctx := watchColl(t)
+
+	for _, err := range c.Watch(ctx, "bad", WatchWhere(Filter{doc: map[string]any{"status": map[string]any{"$bogus": 1}}})) {
+		if !errors.Is(err, ErrInvalidQuery) {
+			t.Fatalf("err = %v, want ErrInvalidQuery", err)
+		}
+	}
+}
+
+func TestWatchBodyCarriesWhere(t *testing.T) {
+	var b watchBody
+
+	WatchWhere(Eq("status", "done"), Gt("n", 2))(&b)
+
+	raw, err := json.Marshal(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(raw) != `{"consumer":"","where":{"n":{"$gt":2},"status":"done"}}` {
+		t.Fatalf("body = %s", raw)
 	}
 }

@@ -4,6 +4,7 @@
 package cursors
 
 import (
+	"bytes"
 	"io"
 
 	bolt "go.etcd.io/bbolt"
@@ -88,4 +89,23 @@ func (s *Store) Update(coll, consumer string, fn func(old string, ok bool) (stri
 
 		return b.Put(k, []byte(next))
 	})
+}
+
+// List returns the stored position of every consumer of the collection.
+func (s *Store) List(coll string) ([]string, error) {
+	var out []string
+
+	prefix := []byte(coll + "\x00")
+
+	err := s.db.View(func(tx *bolt.Tx) error {
+		c := tx.Bucket(bucket).Cursor()
+
+		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
+			out = append(out, string(v))
+		}
+
+		return nil
+	})
+
+	return out, err
 }

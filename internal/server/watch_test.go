@@ -424,3 +424,52 @@ func TestWatchDirectModeOverHTTP(t *testing.T) {
 		t.Fatalf("third = %v (live line from the tailer)", third)
 	}
 }
+
+func TestWatchWhereFiltersEventsAndMovesTheCursor(t *testing.T) {
+	env := newWatchEnv(t, t.TempDir(), 30*time.Millisecond)
+
+	env.insert("posts", 1, 5)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	r, resp := env.watch(ctx, "posts", `{"consumer":"relay","where":{"n":{"$gte":4}}}`)
+
+	for _, id := range []string{"p4", "p5"} {
+		if ev := r.next(); ev["id"] != id {
+			t.Fatalf("got %v, want %s", ev, id)
+		}
+	}
+
+	cancel()
+	resp.Body.Close()
+
+	r, resp = env.watch(context.Background(), "posts", `{"consumer":"other","where":{"n":{"$gt":100}},"limit":1}`)
+
+	defer resp.Body.Close()
+
+	if hb := r.next(); hb["heartbeat"] != true {
+		t.Fatalf("got %v, want a heartbeat", hb)
+	}
+}
+
+func TestWatchWhereRejectsABadFilter(t *testing.T) {
+	env := newWatchEnv(t, t.TempDir(), time.Hour)
+
+	env.insert("posts", 1, 1)
+
+	for _, body := range []string{
+		`{"consumer":"c","where":{"n":{"$bogus":1}}}`,
+		`{"consumer":"c","where":"n=1"}`,
+	} {
+		resp := env.post(context.Background(), "/v1/c/posts/watch", body)
+
+		var out map[string]map[string]string
+
+		json.NewDecoder(resp.Body).Decode(&out)
+		resp.Body.Close()
+
+		if resp.StatusCode != 400 {
+			t.Fatalf("%s: status %d, %v", body, resp.StatusCode, out)
+		}
+	}
+}

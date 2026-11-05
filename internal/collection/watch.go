@@ -8,6 +8,7 @@ import (
 	"io"
 	"path/filepath"
 	"strconv"
+	"sync"
 
 	"github.com/thadeu/ndb/internal/feed"
 	"github.com/thadeu/ndb/internal/fs"
@@ -21,7 +22,8 @@ const nowOps = 1 << 30
 
 // engineFeed is the change feed of an engine-mode collection. A position is
 // "e<tx>.<n>": the first n ops of tx are delivered. The WAL holds the history
-// (it is never deleted), the writer's Applied hook feeds the live part.
+// (files are deleted only by TruncateWAL, see waltrunc.go), the writer's
+// Applied hook feeds the live part.
 type engineFeed struct {
 	fs      fs.FS
 	dir     string
@@ -29,6 +31,12 @@ type engineFeed struct {
 	buf     int
 
 	hub feed.Hub[wal.Record]
+
+	// mu guards pins and serializes WAL deletion with the start of a
+	// stream. pins holds the first tx that each open WAL read still needs.
+	mu      sync.Mutex
+	pins    map[int]uint64
+	nextPin int
 
 	// last is the last tx that Applied published; guarded by the hub lock.
 	last uint64
@@ -116,14 +124,23 @@ func (f *engineFeed) Open(start string) (feed.Stream, error) {
 		return nil, err
 	}
 
+	unpin, err := f.pinHistory(from)
+	if err != nil {
+		return nil, err
+	}
+
 	var upTo uint64
 
 	sub := f.hub.Subscribe(f.buf, func() { upTo = f.last })
 
-	s := &engineStream{f: f, sub: sub, from: from, upTo: upTo}
+	s := &engineStream{f: f, sub: sub, from: from, upTo: upTo, unpin: unpin}
 
 	if upTo > 0 && (from.tx < upTo || (from.tx == upTo && from.n < nowOps)) {
 		s.wal = &walReader{fs: f.fs, dir: f.dir, maxLine: f.maxLine, fromTx: from.tx}
+	}
+
+	if s.wal == nil {
+		s.release()
 	}
 
 	return s, nil
@@ -137,6 +154,18 @@ type engineStream struct {
 
 	wal   *walReader
 	queue []feed.Event
+
+	// unpin releases the history pin; nil once released.
+	unpin func()
+}
+
+// release drops the pin: the stream no longer reads the WAL files.
+func (s *engineStream) release() {
+	if s.unpin != nil {
+		s.unpin()
+
+		s.unpin = nil
+	}
 }
 
 func (s *engineStream) Close() {
@@ -145,6 +174,8 @@ func (s *engineStream) Close() {
 	if s.wal != nil {
 		s.wal.close()
 	}
+
+	s.release()
 }
 
 func (s *engineStream) Next(ctx context.Context) (feed.Event, error) {
@@ -173,6 +204,8 @@ func (s *engineStream) fill(ctx context.Context) error {
 			s.wal.close()
 
 			s.wal = nil
+
+			s.release()
 		}
 
 		s.queue = s.eventsOf(rec)

@@ -45,10 +45,21 @@ func Limit(n int) WatchOption {
 	}
 }
 
+// WatchWhere delivers only the events whose document matches the filters
+// (ANDed, as in Where). A delete event has no document: it is delivered only
+// when the same stream saw an earlier put of that id that matched. The stored
+// position of the consumer still moves over the events that are left out.
+func WatchWhere(filters ...Filter) WatchOption {
+	return func(b *watchBody) {
+		b.Where = whereOf(filters)
+	}
+}
+
 type watchBody struct {
-	Consumer string `json:"consumer"`
-	From     string `json:"from,omitempty"`
-	Limit    int    `json:"limit,omitempty"`
+	Consumer string         `json:"consumer"`
+	From     string         `json:"from,omitempty"`
+	Limit    int            `json:"limit,omitempty"`
+	Where    map[string]any `json:"where,omitempty"`
 }
 
 type ackBody struct {
@@ -76,7 +87,9 @@ type watchLine struct {
 //
 // The loop ends with an error when the connection fails or when the daemon
 // ends the stream with ErrWatchLagged (the consumer was too slow). In both
-// cases, call Watch again: it continues after the last Ack.
+// cases, call Watch again: it continues after the last Ack. A consumer whose
+// position is older than the WAL the daemon kept (wal_retention) gets
+// ErrHistoryTruncated and has to start over.
 func (c *Coll[T]) Watch(ctx context.Context, consumer string, opts ...WatchOption) iter.Seq2[Event[T], error] {
 	return func(yield func(Event[T], error) bool) {
 		var zero Event[T]

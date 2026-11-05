@@ -1,6 +1,6 @@
 # M13 — Packaging + adoption
 
-Status: not started · Depends on: all · Plan: phase 10
+Status: in progress (E13.1, E13.3, E13.5 done; E13.2, E13.4, E13.6 open) · Depends on: all · Plan: phase 10
 
 ## Goal
 
@@ -11,10 +11,10 @@ fsw-esl, anway and voodu-webui.
 
 ### E13.1 Release
 
-- [ ] Static binary (no CGO) for linux/amd64, linux/arm64, darwin/arm64
-- [ ] Release pipeline (for example GoReleaser) with checksums
-- [ ] Docker image on `distroless/static`; volume for `data_dir`; socket shared through a volume
-- [ ] systemd unit example
+- [x] Static binary (no CGO) for linux/amd64, linux/arm64, darwin/arm64
+- [x] Release pipeline with checksums: `.github/workflows/release.yml` + `make dist` (GoReleaser not used: it would duplicate the workflow)
+- [x] Docker image on `distroless/static`; volume for `data_dir`; socket shared through a volume
+- [x] systemd unit example
 
 ### E13.2 Clients release
 
@@ -24,10 +24,10 @@ fsw-esl, anway and voodu-webui.
 
 ### E13.3 Docs
 
-- [ ] README: what it is, quick start in 5 minutes
-- [ ] Query reference (operators, stages, pagination, errors)
-- [ ] Client guides: Rails, Go, TS
-- [ ] Operations runbook: config, durability, backup/restore, metrics, quarantine, recovery
+- [x] README: what it is, quick start in 5 minutes
+- [x] Query reference (operators, stages, pagination, errors)
+- [x] Client guides: Rails, Go, TS
+- [x] Operations runbook: config, durability, backup/restore, metrics, quarantine, recovery
 
 ### E13.5 Deployment examples (`deploy/examples/`, also linked from the docs)
 
@@ -47,11 +47,11 @@ fsw-esl, anway and voodu-webui.
  └──────────────────────────────────────────────────┘
 ```
 
-- [ ] `docker-compose.yml` with: `ndb` service (one replica, `data_dir` on a named local volume that only ndb mounts, socket dir `/run/ndb` on a bind/hostPath shared by every app service), and sample app services in Go, Ruby and Node that mount `/run/ndb` read-write and use `unix:///run/ndb/ndb.sock`
-- [ ] The same as a voodu manifest set (`ndb.voodu` + one app), following `infra/voodu/apps/*.voodu` in fsw-esl
-- [ ] Optional direct-mode variant: apps append to `/data/logs/<app>-<pod>.ndjson` on a shared volume (one file per process), ndb tails it
-- [ ] Socket permissions: daemon flag `-unix-mode 0660` and a shared gid; the example sets both
-- [ ] README notes: the `data_dir` is never on NFS/EFS or any network volume (flock and fsync are not reliable there); one ndb replica owns the data dir (`flock`); clients reconnect after a daemon restart
+- [x] `docker-compose.yml` with: `ndb` service (one replica, `data_dir` on a named local volume that only ndb mounts, socket dir `/run/ndb` on a bind/hostPath shared by every app service), and sample app services in Go, Ruby and Node that mount `/run/ndb` read-write and use `unix:///run/ndb/ndb.sock`
+- [x] The same as a voodu manifest set (`ndb.voodu` + one app). Written as a template, not run: check the syntax against the real `infra/voodu/apps/*.voodu` in fsw-esl
+- [x] Optional direct-mode variant: apps append to `/data/logs/<app>-<pod>.ndjson` on a shared volume (one file per process), ndb tails it
+- [x] Socket permissions: daemon flag `-unix-mode 0660` and a shared gid; the example sets both (flag added in this milestone)
+- [x] README notes: the `data_dir` is never on NFS/EFS or any network volume (flock and fsync are not reliable there); one ndb replica owns the data dir (`flock`); clients reconnect after a daemon restart
 
 **B. Cross-VM over WireGuard** (`deploy/examples/cross-vm-wireguard/`):
 
@@ -65,16 +65,16 @@ fsw-esl, anway and voodu-webui.
  └──────────────────────────────┘          └──────────────────────────────┘
 ```
 
-- [ ] Daemon listens on the WireGuard address only (`-tcp 10.10.0.1:7070`), never on `0.0.0.0` or a public IP; firewall allows 7070 on `wg0` only
-- [ ] Apps on the db VM keep the unix socket; apps on other VMs use `tcp://<private dns>:7070`
-- [ ] Optional bearer token on the TCP listener (`-token-file`, header `Authorization: Bearer ...`) as defense in depth on top of WireGuard (closes plan open question 5); the unix socket stays token-free
-- [ ] Direct mode stays local to the db VM: apps on other VMs write through the API (engine mode), never NDJSON files over a network file system
+- [x] Daemon listens on the WireGuard address only (`-tcp 10.10.0.1:7070`), never on `0.0.0.0` or a public IP; firewall allows 7070 on `wg0` only
+- [x] Apps on the db VM keep the unix socket; apps on other VMs use `tcp://<private dns>:7070`
+- [x] Optional bearer token on the TCP listener (`-token-file`, header `Authorization: Bearer ...`) as defense in depth on top of WireGuard (closes plan open question 5); the unix socket stays token-free
+- [x] Direct mode stays local to the db VM: apps on other VMs write through the API (engine mode), never NDJSON files over a network file system
 
 ### E13.6 SDK transport gaps found while planning E13.5
 
-- [ ] Ruby SDK: TCP transport (`tcp://host:port` in `config/ndb.yml`), same pool and keep-alive as the unix socket, DNS resolved on connect
-- [ ] Token support in the Go, Ruby and TS SDKs (`token:` option / `NDB_TOKEN`)
-- [ ] All SDKs read `NDB_URL` when no address is given
+- [x] Ruby SDK: TCP transport (`tcp://host:port` in `config/ndb.yml`), same pool and keep-alive as the unix socket, DNS resolved on connect
+- [x] Token support in the Go, Ruby and TS SDKs (`token:` option / `NDB_TOKEN`)
+- [x] All SDKs read `NDB_URL` when no address is given
 
 ### E13.4 Adoption
 

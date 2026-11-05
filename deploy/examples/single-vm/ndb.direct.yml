@@ -1,0 +1,13 @@
+# Direct mode: the apps append NDJSON; ndb follows the files.
+data_dir: /var/lib/ndb
+
+listen:
+  unix: /run/ndb/ndb.sock
+
+collections:
+  visits:
+    write: direct
+    path: /data/logs/*.ndjson
+    id: id
+    time: ts
+    indexes: [app]

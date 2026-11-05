@@ -1,0 +1,32 @@
+[Unit]
+Description=ndb, NDJSON query daemon
+After=network.target
+
+[Service]
+Type=simple
+User=ndb
+Group=ndb
+ExecStart=/usr/local/bin/ndb -config /etc/ndb/ndb.yml -unix-mode 0660
+Restart=on-failure
+RestartSec=2
+
+# The daemon waits for in-flight requests up to 30 s on SIGTERM.
+TimeoutStopSec=40
+
+# /var/lib/ndb and /run/ndb are created and owned by the ndb user.
+# data_dir must be /var/lib/ndb and listen.unix must be /run/ndb/ndb.sock
+# in /etc/ndb/ndb.yml (see deploy/systemd/ndb.yml).
+StateDirectory=ndb
+StateDirectoryMode=0750
+RuntimeDirectory=ndb
+RuntimeDirectoryMode=0750
+
+# Hardening.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/ndb /run/ndb
+
+[Install]
+WantedBy=multi-user.target

@@ -88,10 +88,15 @@ export interface AggregateResult<R = Record<string, unknown>> {
   total: number
 }
 
-export interface WatchOptions {
+export interface WatchOptions<F extends Fields = Fields> {
   from?: string
   limit?: number
   signal?: AbortSignal
+
+  // Only the events whose document matches are delivered. A delete has no
+  // document: it comes only if this stream saw an earlier matching put of
+  // that id. The stored position still moves over the events left out.
+  where?: Where<F>
 }
 
 export interface WatchEvent<R> {

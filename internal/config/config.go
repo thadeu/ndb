@@ -19,6 +19,10 @@ var ErrInvalid = errors.New("config: invalid ndb.yml")
 type Listen struct {
 	Unix string `yaml:"unix"`
 	TCP  string `yaml:"tcp"`
+
+	// UnixMode is the permission of the unix socket file. 0 keeps the
+	// default (the process umask). Set by the -unix-mode flag.
+	UnixMode os.FileMode `yaml:"-"`
 }
 
 type Config struct {

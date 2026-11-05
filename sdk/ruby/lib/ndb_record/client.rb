@@ -9,12 +9,20 @@ module NdbRecord
   # The HTTP API of the daemon (plan §12.1). It builds JSON and reads
   # NDJSON; it has no query semantics.
   class Client
-    attr_reader :pool, :socket
+    DEFAULT_SOCKET = "/var/run/ndb/ndb.sock"
 
-    def initialize(socket:, timeout: 30, pool_size: 16)
-      @socket = socket
-      @pool = Pool.new(socket, timeout: timeout, size: pool_size)
+    attr_reader :pool, :endpoint
+
+    # The address is, in order: url:, socket:, env NDB_URL, the default
+    # socket. The token is token:, or env NDB_TOKEN. It goes only in the
+    # Authorization header, and the unix socket does not need it.
+    def initialize(url: nil, socket: nil, token: nil, timeout: 30, pool_size: 16)
+      @endpoint = Endpoint.parse(url || socket || ENV["NDB_URL"].presence || DEFAULT_SOCKET)
+      @token = token.presence || ENV["NDB_TOKEN"].presence
+      @pool = Pool.new(@endpoint, timeout: timeout, size: pool_size)
     end
+
+    def socket = @endpoint.path
 
     def find(coll, body)
       page(post(coll, "find", body))
@@ -40,6 +48,31 @@ module NdbRecord
       change[:if_version] = if_version if if_version
 
       json(post(coll, "delete", delete: change))
+    end
+
+    # Streams the changes of a collection for a named consumer: first the ones
+    # after its last ack, then the new ones. Yields one Hash per event (pos,
+    # op, id, v, doc). where is the same Hash/Range conditions as find, and
+    # only the matching events come; limit ends the stream after that many
+    # events. Without a block it returns an Enumerator. Delivery is at least
+    # once: ack the pos of an event when its work is done.
+    #
+    # The stream raises WatchLagged when the consumer is too slow, and
+    # HistoryTruncated when its position is older than the kept WAL; call
+    # watch again for the first, start over for the second.
+    def watch(coll, consumer, where: nil, from: nil, limit: nil, &block)
+      return enum_for(:watch, coll, consumer, where: where, from: from, limit: limit) unless block
+
+      body = { consumer: consumer, from: from, limit: limit }.compact
+      body[:where] = Conditions.equality(where) if where
+
+      stream_events("#{path(coll)}/watch", body, &block)
+    end
+
+    # Stores the position of an event for its consumer: the next watch with
+    # that consumer name starts after it.
+    def ack(coll, consumer, pos)
+      json(post(coll, "ack", consumer: consumer, pos: pos))
     end
 
     def ensure_collection(coll, definition)
@@ -74,11 +107,16 @@ module NdbRecord
 
     def request(method, target, body, headers: {})
       payload = encode(body)
+      headers = authorize(headers)
       response = @pool.with { |conn| conn.request(method, target, payload, headers: headers) }
 
       raise_api_error(response) if response.status >= 300
 
       response
+    end
+
+    def authorize(headers)
+      @token ? headers.merge("Authorization" => "Bearer #{@token}") : headers
     end
 
     # JSON for a Hash, "" for nothing, an IO as it is (blob upload).
@@ -111,6 +149,39 @@ module NdbRecord
 
         JSON.parse(line) unless line.empty?
       end
+    end
+
+    def stream_events(target, body, &block)
+      pending = +""
+
+      response = @pool.with do |conn|
+        conn.stream("POST", target, JSON.generate(body)) do |chunk|
+          pending << chunk
+
+          while (newline = pending.index("\n"))
+            emit_event(pending.slice!(0, newline + 1), &block)
+          end
+        end
+      end
+
+      raise_api_error(response) if response.status >= 300
+    end
+
+    # A heartbeat is skipped; an error line raises.
+    def emit_event(line)
+      line = line.strip
+
+      return if line.empty?
+
+      event = JSON.parse(line)
+
+      return if event["heartbeat"]
+
+      if (error = event["error"])
+        raise NdbRecord.error_for(error["code"], error["message"], 200)
+      end
+
+      yield event
     end
 
     def raise_api_error(response)

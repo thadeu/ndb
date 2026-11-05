@@ -99,3 +99,37 @@ func TestStatsCarryMetricsFields(t *testing.T) {
 		t.Fatalf("mem bytes = %d", st.MemBytes)
 	}
 }
+
+func TestGCBlobsKeepsBlobsOfKeptWALRecords(t *testing.T) {
+	dir := t.TempDir()
+	db := open(t, cfg(dir, nil))
+	col := ensure(t, db, catalog.Def{Name: "calls", ID: "call_id", BlobThreshold: 64, WALRetention: "7d"})
+
+	if _, err := col.Insert(ctx, []byte(`{"call_id":"gone","audio":"`+strings.Repeat("g", 200)+`"}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := col.Delete(ctx, "gone", 0); err != nil {
+		t.Fatal(err)
+	}
+
+	orphan, err := db.Blobs().Put(strings.NewReader("never referenced"), "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ageAll(t, dir)
+
+	res, err := db.GCBlobs(ctx, blob.DefaultGrace)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if res.Deleted != 1 || db.Blobs().Has(orphan.Hash()) {
+		t.Fatalf("only the unreferenced blob goes: %+v", res)
+	}
+
+	if count, _ := db.Blobs().Stats(); count != 1 {
+		t.Fatalf("the blob of the kept WAL record must stay, blobs = %d", count)
+	}
+}
