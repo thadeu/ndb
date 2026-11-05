@@ -12,6 +12,7 @@ const brand = resolve(here, '../../brand')
 const repoRoot = resolve(here, '../..').split(sep).join('/')
 const require = createRequire(import.meta.url)
 const repoUrl = 'https://github.com/thadeu/ndb'
+const installScripts = ['install.sh', 'uninstall.sh']
 const brandFiles = ['svg/favicon.svg', 'favicon.ico', 'png/apple-touch-icon.png']
 
 // The docs version: DOCS_VERSION (set by CI from the latest release tag),
@@ -226,6 +227,10 @@ export default defineConfig({
 
       mkdirSync(dirname(target), { recursive: true })
       copyFileSync(resolve(brand, name), target)
+    }
+
+    for (const name of installScripts) {
+      copyFileSync(resolve(here, '../..', name), resolve(config.outDir, name))
     }
 
     writeLlms(config.outDir, docsVersion())

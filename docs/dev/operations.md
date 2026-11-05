@@ -9,6 +9,41 @@
 - Stop with SIGTERM and wait at least 30 s.
 - Configuration and durability: [configuration.md](configuration.md).
 
+## CLI
+
+The `ndb` binary is the daemon and the CLI. `ndb` with only flags still runs the daemon; `ndb serve` is the same, written out. The data dir always lives on the host, even when the daemon runs in Docker (see [docker.md](docker.md#cli)). Common flags: `-config FILE` and `-data-dir DIR`.
+
+| Command | What it does |
+| --- | --- |
+| `ndb serve [flags]` | Run the daemon. |
+| `ndb backup <dest>` | Copy the data dir (see above). |
+| `ndb restore <backup-dir>` | Put a backup in a data dir. |
+| `ndb stats` | Per collection: rows, size, segments, WAL files, indexes, quarantined lines. |
+| `ndb size` | Disk usage per collection and per part. |
+| `ndb version` | Print the version. `ndb -version` still works. |
+| `ndb help` | List the commands. |
+
+### restore
+
+`ndb restore <backup-dir> [-data-dir DIR] [-force]`
+
+1. It takes the data dir lock. A running daemon holds it, so the command refuses.
+2. It refuses a data dir that is not empty, unless `-force`.
+3. It copies the backup to `<data-dir>/.restore-stage` and opens it as a daemon would: the WAL is replayed and segments and indexes are rebuilt. A backup that does not recover stops here and the data dir stays as it was.
+4. Only then it removes the old contents (`-force`) and moves the checked copy into place.
+
+### stats
+
+`ndb stats [-data-dir DIR | -url URL] [-json]`
+
+- `-url unix:///run/ndb/ndb.sock` or `tcp://host:7070` (default `NDB_URL`; `NDB_TOKEN` is the bearer token) asks the daemon: `GET /v1/c` and `GET /v1/c/{coll}/stats` give rows, write mode, indexes and quarantined lines. Size, segment and WAL file counts are added from the data dir when it is readable.
+- With no flag, the `listen.unix` socket of `ndb.yml` is tried; when nothing answers, it falls back to the data dir.
+- `-data-dir` reads the data dir only. It takes no lock, so it works with the daemon running. Rows, indexes and quarantine show `-` (they need the daemon).
+
+### size
+
+`ndb size [-data-dir DIR] [-json]` prints bytes per collection split in `wal`, `segments` and `meta` (`meta.bolt`), plus the shared `blobs`, `cursors.bolt` and catalog (`meta` of the `(shared)` row). Units are KiB, MiB, GiB. It only stats files, so it takes no lock.
+
 ## Health
 
 `GET /health` is `200 {"status":"ok"}` after recovery and `503` before. Use it for readiness. Clients should retry `not_ready` and reconnect after a daemon restart.
@@ -16,6 +51,15 @@
 ```bash
 curl --unix-socket /run/ndb/ndb.sock http://ndb/health
 ```
+
+## Install
+
+```bash
+curl -fsSL https://ndb.clowk.in/install.sh | bash                    # binary only
+curl -fsSL https://ndb.clowk.in/install.sh | sudo bash -s -- --systemd  # + user, /var/lib/ndb, /etc/ndb/ndb.yml, ndb.service
+```
+
+The script checks the sha256 of the release. `NDB_VERSION=0.1.0` pins a version; `NDB_INSTALL_DIR` sets the binary dir (default `/usr/local/bin`, else `~/.local/bin`). It never overwrites an existing `/etc/ndb/ndb.yml`. Remove with `uninstall.sh` (`--systemd` stops and removes the unit and keeps the data; add `--purge` to delete `/var/lib/ndb`, `/etc/ndb` and the user).
 
 ## Backup and restore
 
@@ -30,11 +74,11 @@ ndb backup -config /etc/ndb/ndb.yml /backups/ndb-2026-11-05
 - Direct-mode collections: only their definition is saved. The data is in the apps' own files; back those up yourself.
 - Online backup needs `listen.unix`. It is refused over TCP.
 
-Restore: stop the daemon, put the copy where `data_dir` is, start the daemon. It rebuilds segments and indexes from the WAL. Check with `GET /v1/c/{coll}/stats`.
+Restore with `ndb restore` (see [CLI](#cli)). Stop the daemon first; the command refuses when the data dir is locked.
 
 ```bash
 systemctl stop ndb
-cp -a /backups/ndb-2026-11-05/. /var/lib/ndb/
+sudo -u ndb ndb restore /backups/ndb-2026-11-05 -data-dir /var/lib/ndb
 systemctl start ndb
 ```
 

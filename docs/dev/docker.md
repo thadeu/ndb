@@ -16,8 +16,30 @@ docker run -d --name ndb \
 - The process runs as UID 65532. A bind mount must allow this user to write. Named volumes work as they are.
 - For TCP, add `-tcp 0.0.0.0:7070` and publish the port on a private network only, and add `-token-file` (mount the token file as a secret).
 - Run one replica. Two daemons cannot share one data dir.
-- No shell in the image: use `GET /health` over the socket or TCP for health checks, and `docker exec`-free tools. For backups run `ndb backup` in a second container that mounts the same two volumes, or use the host binary.
+- No shell in the image, but `ndb` is the entrypoint binary: see [CLI](#cli). For health checks use `GET /health` over the socket or TCP.
 - Stop timeout above 30 s, so that running requests finish.
+
+## CLI
+
+The data dir is a volume on the host, so the CLI can reach it in three ways.
+
+```bash
+# 1. Inside the running container: the binary is in the image.
+docker exec ndb /usr/local/bin/ndb stats
+docker exec ndb /usr/local/bin/ndb size
+
+# 2. The host binary, on the shared socket (a bind mount or the volume path).
+ndb stats -url unix:///var/lib/docker/volumes/ndb-run/_data/ndb.sock
+
+# 3. The host binary, on the data dir. Works with the daemon running or stopped.
+ndb size -data-dir /var/lib/docker/volumes/ndb-data/_data
+ndb stats -data-dir /var/lib/docker/volumes/ndb-data/_data
+```
+
+- The CLI exists from the first release after 0.1.0. The image entrypoint is `/usr/local/bin/ndb`, so `docker run ... ghcr.io/thadeu/ndb <command>` also works.
+- `-data-dir` stats show sizes only. Use the socket (or `-url tcp://...` with `NDB_TOKEN`) for rows, indexes and quarantine.
+- `ndb restore` needs the daemon stopped: `docker stop ndb`, then `ndb restore <backup> -data-dir <volume path>` (or `docker run --rm -v ndb-data:/var/lib/ndb -v /backups:/backups:ro ghcr.io/thadeu/ndb restore /backups/x -data-dir /var/lib/ndb`), then `docker start ndb`. The files must stay owned by UID 65532.
+- `ndb backup` runs the same way, in a second container with both volumes, or with the host binary.
 
 Build it yourself:
 

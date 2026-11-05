@@ -37,8 +37,14 @@ func main() {
 
 // run reads the flags and ndb.yml, then serves until SIGTERM or SIGINT.
 func run(args []string) error {
-	if len(args) > 0 && args[0] == "backup" {
-		return runBackup(args[1:])
+	if len(args) > 0 {
+		if cmd, ok := subcommands[args[0]]; ok {
+			return cmd(args[1:])
+		}
+
+		if args[0] == "serve" {
+			args = args[1:]
+		}
 	}
 
 	fl := flag.NewFlagSet("ndb", flag.ContinueOnError)
