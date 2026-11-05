@@ -1,0 +1,53 @@
+package spec_test
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+
+	"github.com/thadeu/ndb/internal/spec"
+)
+
+// listEngine stores inserts and returns all of them on find. It only proves
+// that the runner works until the real engine exists (M01/M03).
+type listEngine struct {
+	docs []json.RawMessage
+}
+
+func (e *listEngine) EnsureCollection(context.Context, string, json.RawMessage) error {
+	return nil
+}
+
+func (e *listEngine) Do(_ context.Context, _ string, step spec.Step) ([]json.RawMessage, error) {
+	switch step.Op {
+	case "insert":
+		var body struct {
+			Insert []json.RawMessage `json:"insert"`
+		}
+
+		if err := json.Unmarshal(step.Body, &body); err != nil {
+			return nil, err
+		}
+
+		e.docs = append(e.docs, body.Insert...)
+
+		return nil, nil
+	case "find":
+		return e.docs, nil
+	}
+
+	return nil, &spec.CodeError{Code: "unknown_op"}
+}
+
+func TestSampleCasesRun(t *testing.T) {
+	cases, err := spec.Load("../../spec/cases/find")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(cases) == 0 {
+		t.Fatal("no cases loaded")
+	}
+
+	spec.Run(t, cases, func(*testing.T) spec.Engine { return &listEngine{} })
+}
