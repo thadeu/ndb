@@ -66,8 +66,10 @@ jobs:
       # finishes a release that stopped halfway.
       - name: "Push ndb (first, ndb-rails depends on it)"
         working-directory: sdk/ruby
+        shell: bash
         run: gem push ndb-*.gem 2>&1 | tee push.log || grep -q "Repushing of gem versions is not allowed" push.log
 
       - name: Push ndb-rails
         working-directory: sdk/rails
+        shell: bash
         run: gem push ndb-rails-*.gem 2>&1 | tee push.log || grep -q "Repushing of gem versions is not allowed" push.log
