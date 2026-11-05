@@ -333,3 +333,42 @@ func TestDirectCollectionHidesExpiredRowsAndKeepsTheFiles(t *testing.T) {
 		t.Fatalf("the source file changed: %q err %v", after, err)
 	}
 }
+
+func TestRelativeGlobFromConfigFindsTheFiles(t *testing.T) {
+	root := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(root, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	line := `{"_id":"1","status":"answered"}` + "\n"
+
+	if err := os.WriteFile(filepath.Join(root, "logs", "a.ndjson"), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	yml := "data_dir: ./data\ncollections:\n  events:\n    write: direct\n    path: ./logs/*.ndjson\n"
+
+	if err := os.WriteFile(filepath.Join(root, "ndb.yml"), []byte(yml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := config.Load(filepath.Join(root, "ndb.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	col, err := open(t, c).Get("events")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := col.Find(ctx, []byte(`{"where":{"status":"answered"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(page.Rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(page.Rows))
+	}
+}

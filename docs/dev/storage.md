@@ -10,7 +10,7 @@
   blobs/                        large values, content-addressed (sha256)
   collections/
     <name>/
-      000001.ndjson ...         WAL (engine mode); sealed files never change
+      000001.ndjson ...         WAL (engine mode), see wal.md
       segments/                 Parquet segments (derived)
       meta.bolt                 checkpoint, segment list, file cursors (derived)
       quarantine/<name>.ndjson  lines that could not be applied (direct mode)
@@ -20,7 +20,7 @@ Look at it with `ls`; do not edit it by hand while the daemon runs.
 
 ## Write modes
 
-**Engine mode.** Only ndb writes. One request is one WAL line (a transaction) with a CRC. The line is complete, or it is not there: a cut line is dropped at recovery. One writer per collection gives serializable writes; `if_version` gives optimistic concurrency. The WAL is NDJSON, so `jq` can read it.
+**Engine mode.** Only ndb writes, through the [WAL](wal.md). One writer per collection gives serializable writes; `if_version` gives optimistic concurrency.
 
 **Direct mode.** The apps append to their own files, ndb only reads them. Rules for the apps:
 
@@ -37,7 +37,7 @@ The recent rows live in memory. They are sealed to an immutable Parquet segment 
 
 ## Rebuild and recovery
 
-At start the daemon takes the lock, reads the checkpoint, replays the WAL after it (it stops at the first line with no `\n` or a bad CRC and truncates there), continues each source file from its cursor, and removes temporary files and segments the checkpoint does not list. Segments, indexes and checkpoints can be deleted: ndb builds them again from the NDJSON.
+At start the daemon takes the lock, reads the checkpoint, replays the [WAL](wal.md#recovery) after it, continues each source file from its cursor, and removes temporary files and segments the checkpoint does not list. Segments, indexes and checkpoints can be deleted: ndb builds them again from the NDJSON.
 
 Derived files are written as `tmp`, fsync, `rename`, fsync of the directory. All file access goes through an `fs` interface so tests can inject faults.
 

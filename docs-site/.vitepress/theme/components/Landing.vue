@@ -3,8 +3,8 @@ import { withBase } from 'vitepress'
 
 import wordDark from '../../../../brand/svg/wordmark-on-dark.svg'
 import wordLight from '../../../../brand/svg/wordmark-on-light.svg'
-import markDark from '../../../../brand/svg/mark-on-dark.svg'
-import markLight from '../../../../brand/svg/mark-on-light.svg'
+import markDark from '../../../../brand/svg/mark-animated-on-dark.svg'
+import markLight from '../../../../brand/svg/mark-animated-on-light.svg'
 import Icon from './Icon.vue'
 
 interface Card {
@@ -27,7 +27,7 @@ const sections: Section[] = [
       {
         icon: 'search',
         title: 'Query',
-        text: 'Mongo-style find with operators, sort, and cursor pagination.',
+        text: 'NoSQL find with operators, sort, and cursor pagination.',
         command: 'POST /v1/c/calls/find',
         link: '/query',
       },
@@ -88,6 +88,49 @@ const sections: Section[] = [
     ],
   },
 ]
+
+interface Step {
+  title: string
+  text: string
+  code: string
+}
+
+const steps: Step[] = [
+  {
+    title: 'Point ndb at your files',
+    text: 'Declare a collection in ndb.yml. ndb only reads the files.',
+    code: `collections:
+  events:
+    write: direct
+    path: /data/logs/*.ndjson
+    time: ts`,
+  },
+  {
+    title: 'Keep appending lines',
+    text: 'Your app writes one JSON line per event. Any language works.',
+    code: `echo '{"_id":"4","status":"answered","duration":10,...}' \\
+  >> /data/logs/app.ndjson`,
+  },
+  {
+    title: 'Query and aggregate',
+    text: 'The new line is visible right away, with filters, sort and groups.',
+    code: `# find where status answered, sort ts -1
+{"_id":"4",...,"status":"answered","duration":10}
+
+# aggregate: $group by status, $sum and $avg
+{"_id":"answered","avg":49,"calls":3}
+{"_id":"missed","avg":0,"calls":1}`,
+  },
+]
+
+const capabilities = [
+  'Filters and regex',
+  'Sort and cursor pagination',
+  'Aggregations',
+  'Watch new lines',
+  'Indexes',
+  'Go, Ruby and TypeScript SDKs',
+]
 </script>
 
 <template>
@@ -103,8 +146,7 @@ const sections: Section[] = [
         </h1>
 
         <p class="hero-lead">
-          A query engine for NDJSON. One Go daemon with a MongoDB-style JSON API over a unix socket or TCP.
-          Go, Ruby, and TypeScript SDKs give the same answer as <code>curl</code>.
+          Drop NDJSON. Query it. NoSQL, from one Go daemon, with Go, Ruby, and TypeScript SDKs that answer like <code>curl</code>.
         </p>
 
         <div class="hero-actions">
@@ -117,6 +159,28 @@ const sections: Section[] = [
         <img class="only-light" :src="markLight" alt="The ndb ramen bowl mascot" />
         <img class="only-dark" :src="markDark" alt="The ndb ramen bowl mascot" />
       </div>
+    </section>
+
+    <section class="quick">
+      <h2 class="quick-title">Drop an NDJSON file. Query it.</h2>
+
+      <p class="quick-lead">No schema, no import, no migration.</p>
+
+      <ol class="steps">
+        <li v-for="(step, index) in steps" :key="step.title" class="step">
+          <span class="step-number">{{ index + 1 }}</span>
+
+          <h3 class="step-title">{{ step.title }}</h3>
+
+          <p class="step-text">{{ step.text }}</p>
+
+          <pre class="step-code"><code>{{ step.code }}</code></pre>
+        </li>
+      </ol>
+
+      <ul class="chips">
+        <li v-for="item in capabilities" :key="item" class="chip">{{ item }}</li>
+      </ul>
     </section>
 
     <section v-for="section in sections" :key="section.title" class="card-section">

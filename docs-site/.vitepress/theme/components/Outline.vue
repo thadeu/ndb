@@ -2,7 +2,10 @@
 import { computed } from 'vue'
 import { useData } from 'vitepress'
 
+import { useActiveAnchor } from '../composables/useActiveAnchor'
+
 const { page } = useData()
+const active = useActiveAnchor()
 
 const headers = computed(() =>
   (page.value.headers ?? []).flatMap((h) => [h, ...(h.children ?? [])]).filter((h) => h.level <= 3),
@@ -17,7 +20,7 @@ const headers = computed(() =>
       v-for="header in headers"
       :key="header.link"
       class="outline-item"
-      :class="{ nested: header.level === 3 }"
+      :class="{ nested: header.level === 3, active: header.link === `#${active}` }"
       :href="header.link"
     >
       {{ header.title }}

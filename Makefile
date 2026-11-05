@@ -1,4 +1,4 @@
-.PHONY: test race lint fuzz-smoke bench build dist
+.PHONY: test race lint fuzz-smoke bench build dist up docs docs-build
 
 test:
 	go test ./...
@@ -42,3 +42,19 @@ dist:
 		tar -C bin/stage -czf dist/$$name.tar.gz $$name; \
 	done
 	cd dist && (sha256sum ndb-$(VERSION)-*.tar.gz 2>/dev/null || shasum -a 256 ndb-$(VERSION)-*.tar.gz) > checksums.txt
+
+# Local daemon for development: data and socket live in .dev/ (git-ignored).
+# Apps connect with NDB_URL=unix://$(CURDIR)/.dev/ndb.sock or tcp://127.0.0.1:7070.
+DEV_DIR ?= .dev
+DEV_TCP ?= 127.0.0.1:7070
+
+up: build
+	mkdir -p $(DEV_DIR)/data
+	./bin/ndb -data-dir $(DEV_DIR)/data -unix $(DEV_DIR)/ndb.sock -tcp $(DEV_TCP)
+
+# Docs site with hot reload at http://localhost:5173.
+docs:
+	cd docs-site && pnpm install --frozen-lockfile && pnpm docs:dev
+
+docs-build:
+	cd docs-site && pnpm install --frozen-lockfile && pnpm docs:build

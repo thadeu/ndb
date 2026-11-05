@@ -9,6 +9,7 @@ committed line, is the accent color. The wordmark `ndb` and the supporting cast
 font. Only the tagline of the social preview is an outlined font text.
 """
 
+import re
 import json
 import math
 import pathlib
@@ -384,6 +385,63 @@ def social():
     return svg('0 0 1280 640', frame + mark + word + tagline + rule)
 
 
+ANIMATION_CSS = """<style>
+  /* part: the whole bowl bobs a little */
+  .bob { animation: ndb-bob 3.2s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+
+  /* part: steam rises and fades, one wisp after the other */
+  .steam { animation: ndb-steam 2.8s ease-in-out infinite; opacity: 0; }
+  .steam-2 { animation-delay: 0.9s; }
+  .steam-3 { animation-delay: 1.8s; }
+
+  /* part: noodles sway, the magenta one last */
+  .noodle { animation: ndb-sway 2.4s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+  .noodle-2 { animation-delay: 0.3s; }
+  .noodle-3 { animation-delay: 0.6s; }
+
+  /* part: eyes blink, cheeks glow */
+  .eyes { animation: ndb-blink 4.6s infinite; transform-box: fill-box; transform-origin: center; }
+  .cheek { animation: ndb-glow 3.2s ease-in-out infinite; }
+
+  @keyframes ndb-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+  @keyframes ndb-steam { 0% { opacity: 0; transform: translateY(8px); } 35% { opacity: 1; } 100% { opacity: 0; transform: translateY(-10px); } }
+  @keyframes ndb-sway { 0%, 100% { transform: translateX(-2px); } 50% { transform: translateX(2px); } }
+  @keyframes ndb-blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(0.1); } }
+  @keyframes ndb-glow { 0%, 100% { opacity: 0.45; } 50% { opacity: 0.8; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .bob, .steam, .noodle, .eyes, .cheek { animation: none; }
+    .steam { opacity: 1; }
+  }
+</style>"""
+
+
+def animated(mark):
+    """The primary mark with CSS motion: steam, noodles, blink, bob.
+    Used by the docs hero; static files stay static."""
+    steam = re.search(r'<path d="(M78 12[^"]+)"([^>]*)/>', mark)
+    wisps = re.findall(r'M\d+ \d+q[^M]+', steam.group(1))
+    attrs = steam.group(2)
+    steam_svg = ''.join(f'<path class="steam steam-{i + 1}" d="{w.strip()}"{attrs}/>' for i, w in enumerate(wisps))
+
+    body = mark.replace(steam.group(0), '')
+    head, rest = body.split('</title>', 1)
+    rest = rest.rsplit('</svg>', 1)[0]
+
+    for i in range(3):
+        rest = re.sub(r'<path d="(M\d+\.00 \d+\.00L)', lambda m, n=i: f'<path class="noodle noodle-{n + 1}" d="{m.group(1)}', rest, count=1)
+
+    rest = re.sub(
+        r'(<circle cx="-18"[^>]*/><circle cx="18"[^>]*/><circle cx="-16"[^>]*/><circle cx="20"[^>]*/>)',
+        r'<g class="eyes">\1</g>',
+        rest,
+    )
+
+    rest = rest.replace('<ellipse ', '<ellipse class="cheek" ')
+
+    return f'{head}</title>{ANIMATION_CSS}{steam_svg}<g class="bob">{rest}</g></svg>'
+
+
 def main():
     SVG.mkdir(exist_ok=True)
 
@@ -411,6 +469,9 @@ def main():
         files[f'app-icon-{name}.svg'] = app_icon(tile, 'squircle')
 
     files['app-icon-square.svg'] = app_icon(TILES['ink'], 'square')
+
+    files['mark-animated-on-light.svg'] = animated(files['mark-on-light.svg'])
+    files['mark-animated-on-dark.svg'] = animated(files['mark-on-dark.svg'])
 
     for name, content in files.items():
         (SVG / name).write_text(content)

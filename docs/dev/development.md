@@ -28,6 +28,27 @@ SDK tests:
 (cd sdk/ts && pnpm install && pnpm test && pnpm lint && pnpm typecheck && pnpm build)
 ```
 
+## Code layout
+
+Where the code lives, for contributors.
+
+| Package | Job |
+|---|---|
+| `cmd/ndb` | flags, listeners, graceful stop, `ndb backup` |
+| `internal/server` | HTTP routes, error mapping, metrics, `watch` stream |
+| `internal/engine` | opens the data dir, owns the collections, blobs and backup |
+| `internal/catalog` | collection definitions in `catalog.bolt`; merge of code, YAML and implicit declarations |
+| `internal/config` | loads the optional `ndb.yml` |
+| `internal/collection` | one collection: writes, reads, indexes, sealing, compaction, TTL |
+| `internal/writer`, `internal/wal` | engine-mode WAL with CRC and group commit |
+| `internal/tailer` | direct mode: follows the source files, keeps a cursor per file, quarantines bad lines |
+| `internal/query`, `internal/agg` | parse and run `where`, `sort` and aggregate pipelines |
+| `internal/segment` | Parquet segments |
+| `internal/index` | `_id` and secondary indexes |
+| `internal/feed`, `internal/cursors` | `watch` change feed and consumer positions |
+| `internal/blob` | content-addressed blob store |
+| `internal/recovery`, `internal/lock` | start-up recovery, one daemon per data dir (`flock`) |
+
 ## Docs site
 
 The site in `docs-site/` is built from `docs/dev/*.md` (the only source; no copies). It uses VitePress with a custom theme and the tokens of `brand/`.

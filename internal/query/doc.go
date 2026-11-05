@@ -5,7 +5,7 @@
 // # Type order
 //
 // One total order is used by sort, cursors and index keys. It follows the
-// idea of the MongoDB BSON order:
+// idea of a BSON-like order:
 //
 //	missing < null < number < string < time < object < array < bool
 //

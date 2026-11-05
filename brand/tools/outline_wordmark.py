@@ -22,7 +22,7 @@ from fontTools.ttLib import TTFont
 from fontTools.varLib.instancer import instantiateVariableFont
 
 TEXTS = {
-    'tagline': ('SQLite with NDJSON and a MongoDB face', 450, -0.01),
+    'tagline': ('Drop NDJSON. Query it. NoSQL.', 450, -0.01),
 }
 
 

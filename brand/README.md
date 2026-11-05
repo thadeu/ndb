@@ -37,6 +37,10 @@ At 16 px and in favicons (`favicon.svg`, `favicon.ico`, `favicon-*.png`), use th
 
 The mascot keeps its white bowl and its ink outline on dark surfaces. The on-dark variants (`mark-on-dark`, `mark-small-on-dark`, `lockup-*-on-dark`, the ink app icon, the dark favicon tile) add a thin white halo around the bowl and the noodle dome, so the edge does not vanish into the dark. The steam gets a lighter gray. Do not turn the fills dark. 
 
+## Animated mark
+
+`svg/mark-animated-on-light.svg` and `svg/mark-animated-on-dark.svg` are the primary mark with CSS motion: the steam rises and fades, the noodles sway, the eyes blink, the cheeks glow and the bowl bobs. `tools/build.py` makes them from the static marks. Use them where the mascot is large and alone, such as the docs hero. Keep the static files for favicons, icons, lockups and print. The motion stops under `prefers-reduced-motion`.
+
 ## Extras: the cast
 
 ndb uses only the ramen bowl. The onigiri, the caterpillar and the scroll live in `extras/cast/` (SVG and 512 px PNG). They share the bowl's drawing language and are kept for other projects. Do not use them in ndb.

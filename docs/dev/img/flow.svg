@@ -1,0 +1,164 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 470" width="960" height="470" role="img" aria-labelledby="flow-title flow-desc" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <title id="flow-title">How data moves through ndb</title>
+  <desc id="flow-desc">Direct mode: your app appends lines to its own NDJSON file and the ndb tailer reads them. Engine mode: an SDK sends insert, update or delete over a unix socket or TCP, and the ndb writer commits them to the WAL with fsync. Both feed the in-memory table and indexes, which ndb seals into Parquet segments. find, aggregate and watch read memory and segments over HTTP.</desc>
+
+  <style>
+    /* part: shapes, light */
+    .bg { fill: #ffffff; }
+    .box { fill: #ffffff; stroke: #e5e5e5; stroke-width: 1.5; }
+    .box-hot { fill: #ffffff; stroke: #f0047f; stroke-width: 1.5; }
+    .wire { fill: none; stroke: #c9c9d1; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .wire-read { fill: none; stroke: #c9c9d1; stroke-width: 2; stroke-dasharray: 5 6; stroke-linecap: round; }
+    .head { fill: #c9c9d1; }
+    .file-line { stroke: #6b6b76; stroke-width: 2.5; stroke-linecap: round; }
+
+    /* part: text */
+    .lane { fill: #6b6b76; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; }
+    .title { fill: #0b0b0f; font-size: 15px; font-weight: 700; }
+    .sub { fill: #6b6b76; font-size: 12px; }
+    .mono { font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; }
+    .tag { fill: #6b6b76; font-size: 11px; font-style: italic; }
+
+    /* part: moving data */
+    .dot-direct { fill: #f6d58e; stroke: #0b0b0f; stroke-width: 1.5; }
+    .dot-engine { fill: #f0047f; }
+    .dot-read { fill: #2f6fed; }
+    .new-line { stroke: #f0047f; stroke-width: 3; stroke-linecap: round; animation: append 2.6s ease-in-out infinite; }
+
+    @keyframes append {
+      0%, 30% { opacity: 0; }
+      45%, 85% { opacity: 1; }
+      100% { opacity: 0; }
+    }
+
+    /* part: dark theme */
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0e0e11; }
+      .box, .box-hot { fill: #16161b; }
+      .box { stroke: #2a2a31; }
+      .wire, .wire-read { stroke: #3a3a44; }
+      .head { fill: #3a3a44; }
+      .file-line { stroke: #9a9aa5; }
+      .lane, .sub, .tag { fill: #9a9aa5; }
+      .title { fill: #f4f4f6; }
+      .dot-direct { stroke: #f4f4f6; }
+      .dot-read { fill: #6b9bff; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .moving { display: none; }
+      .new-line { animation: none; opacity: 1; }
+    }
+  </style>
+
+  <defs>
+    <path id="lane-direct" d="M212 92 H726 Q740 92 740 106 V150 Q740 162 752 162 H764"/>
+    <path id="lane-engine" d="M212 236 H726 Q740 236 740 222 V190 Q740 178 752 178 H764"/>
+    <path id="lane-seal" d="M848 200 V306"/>
+    <path id="lane-read" d="M848 362 V410 Q848 424 834 424 H212"/>
+
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="head" d="M0 0 L10 5 L0 10 Z"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="960" height="470" rx="14"/>
+
+  <text class="lane" x="40" y="44">DIRECT MODE · YOUR APP WRITES FILES</text>
+  <text class="lane" x="40" y="188">ENGINE MODE · NDB WRITES THE WAL</text>
+  <text class="lane" x="40" y="380">READS</text>
+
+  <use class="wire" href="#lane-direct" marker-end="url(#arrow)"/>
+  <use class="wire" href="#lane-engine" marker-end="url(#arrow)"/>
+  <use class="wire" href="#lane-seal" marker-end="url(#arrow)"/>
+  <use class="wire-read" href="#lane-read" marker-end="url(#arrow)"/>
+
+  <g class="moving">
+    <circle class="dot-direct" r="6">
+      <animateMotion dur="4.2s" repeatCount="indefinite" begin="0s"><mpath href="#lane-direct"/></animateMotion>
+    </circle>
+    <circle class="dot-direct" r="6">
+      <animateMotion dur="4.2s" repeatCount="indefinite" begin="-2.1s"><mpath href="#lane-direct"/></animateMotion>
+    </circle>
+
+    <circle class="dot-engine" r="6">
+      <animateMotion dur="3.4s" repeatCount="indefinite" begin="-0.6s"><mpath href="#lane-engine"/></animateMotion>
+    </circle>
+    <circle class="dot-engine" r="6">
+      <animateMotion dur="3.4s" repeatCount="indefinite" begin="-2.3s"><mpath href="#lane-engine"/></animateMotion>
+    </circle>
+
+    <circle class="dot-engine" r="5" opacity="0.8">
+      <animateMotion dur="2.4s" repeatCount="indefinite" begin="-1.2s"><mpath href="#lane-seal"/></animateMotion>
+    </circle>
+
+    <circle class="dot-read" r="6">
+      <animateMotion dur="3.6s" repeatCount="indefinite" begin="-0.4s"><mpath href="#lane-read"/></animateMotion>
+    </circle>
+    <circle class="dot-read" r="6">
+      <animateMotion dur="3.6s" repeatCount="indefinite" begin="-2.2s"><mpath href="#lane-read"/></animateMotion>
+    </circle>
+  </g>
+
+  <g>
+    <rect class="box" x="40" y="62" width="172" height="60" rx="10"/>
+    <text class="title" x="58" y="88">Your app</text>
+    <text class="sub" x="58" y="108">appends one line</text>
+  </g>
+
+  <g>
+    <rect class="box" x="272" y="62" width="196" height="60" rx="10"/>
+    <path class="box" d="M288 74 h22 l8 8 v28 h-30 z"/>
+    <path class="file-line" d="M294 88 h16 M294 95 h12"/>
+    <path class="new-line" d="M294 102 h18"/>
+    <text class="title mono" x="330" y="88" font-size="13">app-1.ndjson</text>
+    <text class="sub" x="330" y="108">one file per process</text>
+  </g>
+
+  <g>
+    <rect class="box" x="528" y="62" width="172" height="60" rx="10"/>
+    <text class="title" x="546" y="88">tailer</text>
+    <text class="sub" x="546" y="108">fsnotify + 5 s poll</text>
+  </g>
+
+  <g>
+    <rect class="box" x="40" y="206" width="172" height="60" rx="10"/>
+    <text class="title" x="58" y="232">SDK</text>
+    <text class="sub" x="58" y="252">Go · Ruby · TS</text>
+  </g>
+
+  <g>
+    <rect class="box" x="272" y="206" width="196" height="60" rx="10"/>
+    <text class="title" x="290" y="232">unix socket / TCP</text>
+    <text class="sub" x="290" y="252">insert · update · delete</text>
+  </g>
+
+  <g>
+    <rect class="box-hot" x="528" y="206" width="172" height="60" rx="10"/>
+    <text class="title" x="546" y="232">writer</text>
+    <text class="sub" x="546" y="252">group commit · fsync</text>
+    <text class="tag mono" x="546" y="290">→ wal/*.ndjson (the WAL)</text>
+  </g>
+
+  <g>
+    <rect class="box-hot" x="764" y="140" width="172" height="60" rx="10"/>
+    <text class="title" x="782" y="166">memory + indexes</text>
+    <text class="sub" x="782" y="186">newest version per id</text>
+  </g>
+
+  <text class="tag" x="836" y="258" text-anchor="end">seal by size / age</text>
+
+  <g>
+    <rect class="box" x="764" y="306" width="172" height="60" rx="10"/>
+    <text class="title" x="782" y="332">Parquet segments</text>
+    <text class="sub" x="782" y="352">zone maps · bloom</text>
+  </g>
+
+  <g>
+    <rect class="box" x="40" y="394" width="172" height="60" rx="10"/>
+    <text class="title" x="58" y="420">find · aggregate</text>
+    <text class="sub" x="58" y="440">watch · over HTTP</text>
+  </g>
+
+  <text class="tag" x="440" y="414">reads memory + segments, newest wins</text>
+</svg>

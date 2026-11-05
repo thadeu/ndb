@@ -28,6 +28,7 @@ export const tabs: Tab[] = [
         items: [
           { text: 'Architecture', link: '/architecture' },
           { text: 'Storage', link: '/storage' },
+          { text: 'WAL', link: '/wal' },
         ],
       },
       {
@@ -143,6 +144,7 @@ export const tabs: Tab[] = [
 export const pageTab: Record<string, string> = {
   '/architecture': 'daemon',
   '/storage': 'daemon',
+  '/wal': 'daemon',
   '/configuration': 'daemon',
   '/http-api': 'daemon',
   '/query': 'query',

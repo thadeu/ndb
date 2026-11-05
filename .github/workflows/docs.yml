@@ -8,6 +8,11 @@ on:
       - 'docs-site/**'
       - 'brand/**'
       - '.github/workflows/docs.yml'
+  # Build again after a release, so the version pill shows the new tag.
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+
   workflow_dispatch:
 
 permissions:
@@ -40,8 +45,19 @@ jobs:
         working-directory: docs-site
         run: pnpm install --frozen-lockfile
 
+      - name: Resolve latest release tag
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="$(gh release list --repo ${{ github.repository }} --limit 1 --json tagName --jq '.[0].tagName // empty')"
+          echo "Latest release tag: ${TAG:-<none>}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
       - name: Build
         working-directory: docs-site
+        env:
+          DOCS_VERSION: ${{ steps.version.outputs.tag }}
         run: pnpm docs:build
 
       - name: Deploy to Cloudflare Pages

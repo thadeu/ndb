@@ -7,7 +7,7 @@
 
 # ndb
 
-A query engine for NDJSON. It is one Go daemon with a MongoDB-style JSON query API over HTTP, on a unix socket (and optional TCP with a bearer token). Go, Ruby and TypeScript SDKs call the same API, so the same query gives the same result in every language and from `curl`.
+Drop NDJSON. Query it. NoSQL. ndb is a query engine for NDJSON: one Go daemon with a JSON query language (operators like `$eq`, `$in`, `$regex`) over HTTP, on a unix socket (and optional TCP with a bearer token). Go, Ruby and TypeScript SDKs call the same API, so the same query gives the same result in every language and from `curl`.
 
 Your apps keep NDJSON as the source of truth: either they append to files (direct mode) or ndb keeps a write-ahead log for them (engine mode). ndb builds indexes and columnar segments from that data. If you delete the derived data, ndb rebuilds it.
 
@@ -79,7 +79,7 @@ Each `v*` tag publishes static binaries (no CGO) for Linux amd64/arm64 and macOS
 
 ## Features
 
-- Mongo-style `find` with `$eq $ne $gt $gte $lt $lte $in $nin $exists $and $or $not`, sort, offset and cursor pagination.
+- NoSQL `find` with `$eq $ne $gt $gte $lt $lte $in $nin $exists $and $or $not`, sort, offset and cursor pagination.
 - `aggregate` with `$match $group $sort $limit $skip $project`, `$dateTrunc` for time buckets.
 - Two write modes: direct (apps append NDJSON files, ndb follows them) and engine (`insert`, `update`, `delete` with a WAL, optimistic `if_version`).
 - `watch` and `ack` for outbox-style consumers, with an optional `where` filter and `wal_retention` to trim the WAL.
@@ -96,6 +96,7 @@ Each `v*` tag publishes static binaries (no CGO) for Linux amd64/arm64 and macOS
 - [docs/dev/http-api.md](docs/dev/http-api.md): HTTP endpoints.
 - [docs/dev/configuration.md](docs/dev/configuration.md): `ndb.yml`, flags, durability.
 - [docs/dev/storage.md](docs/dev/storage.md): On-disk layout.
+- [docs/dev/wal.md](docs/dev/wal.md): The NDJSON write-ahead log, fsync, recovery, truncation.
 - [docs/dev/clients.md](docs/dev/clients.md): Go, Rails and TypeScript guides.
 - [docs/dev/operations.md](docs/dev/operations.md): Backup, metrics, quarantine, recovery, compaction.
 - [docs/dev/docker.md](docs/dev/docker.md): Docker image.

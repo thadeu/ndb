@@ -35,7 +35,7 @@ pre {
 :root {
   --topbar-h: 60px;
   --tabs-h: 46px;
-  --sidebar-w: 272px;
+  --sidebar-w: 248px;
   --outline-w: 216px;
   --content-w: 760px;
 }
@@ -48,7 +48,7 @@ pre {
 
 .logo img {
   display: block;
-  height: 50px;
+  height: 44px;
   width: auto;
 }
 
@@ -137,4 +137,34 @@ pre {
   overflow: hidden;
   clip: rect(0 0 0 0);
   white-space: nowrap;
+}
+
+/* part: scrollbars, thin and transparent (still scrollable) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+*:hover {
+  scrollbar-color: color-mix(in srgb, var(--ndb-muted) 35%, transparent) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+  background: transparent;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: transparent;
+}
+
+:hover::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--ndb-muted) 35%, transparent);
 }

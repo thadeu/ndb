@@ -12,6 +12,27 @@
   border-bottom: 1px solid var(--ndb-line);
 }
 
+/* part: version pill next to the GitHub icon */
+.main-links .version-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  margin-left: 4px;
+  padding: 0 9px;
+  border: 1px solid var(--ndb-line);
+  border-radius: 999px;
+  color: var(--ndb-muted);
+  font-family: var(--ndb-font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.main-links .version-pill:hover {
+  border-color: var(--ndb-accent);
+  color: var(--ndb-accent);
+}
+
 .topbar-spacer {
   flex: 1;
 }
@@ -135,11 +156,6 @@
   height: 100%;
   padding: 0 24px;
   overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.tabs-scroll::-webkit-scrollbar {
-  display: none;
 }
 
 .tab {
@@ -166,14 +182,12 @@
 /* part: three column shell */
 .shell {
   display: grid;
-  grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--outline-w);
-  max-width: 1440px;
-  margin: 0 auto;
+  grid-template-columns: var(--sidebar-w) minmax(0, calc(var(--content-w) + 48px)) var(--outline-w);
 }
 
 .main {
   min-width: 0;
-  padding: 40px 48px 96px;
+  padding: 40px 32px 96px 16px;
 }
 
 .scrim {
@@ -186,7 +200,7 @@
   top: calc(var(--topbar-h) + var(--tabs-h));
   align-self: start;
   height: calc(100vh - var(--topbar-h) - var(--tabs-h));
-  padding: 28px 16px 40px 24px;
+  padding: 28px 16px 40px 38px;
   overflow-y: auto;
 }
 
@@ -226,7 +240,7 @@
   top: calc(var(--topbar-h) + var(--tabs-h));
   align-self: start;
   max-height: calc(100vh - var(--topbar-h) - var(--tabs-h));
-  padding: 40px 24px 40px 0;
+  padding: 40px 24px 40px 8px;
   overflow-y: auto;
 }
 
@@ -249,6 +263,11 @@
 
 .outline-item:hover {
   color: var(--ndb-accent);
+}
+
+.outline-item.active {
+  color: var(--ndb-accent);
+  font-weight: 600;
 }
 
 /* part: tablet, no outline */

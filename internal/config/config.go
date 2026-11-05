@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -113,7 +114,33 @@ func Load(path string) (Config, error) {
 		cfg.Collections[name] = def
 	}
 
+	cfg.resolve(filepath.Dir(path))
+
 	return cfg, nil
+}
+
+// resolve anchors the relative paths of the file to dir, the directory of
+// ndb.yml, so they do not depend on where the daemon was started.
+func (c *Config) resolve(dir string) {
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+
+	c.DataDir = anchor(dir, c.DataDir)
+	c.Listen.Unix = anchor(dir, c.Listen.Unix)
+
+	for name, def := range c.Collections {
+		def.Path = anchor(dir, def.Path)
+		c.Collections[name] = def
+	}
+}
+
+func anchor(dir, p string) string {
+	if p == "" || filepath.IsAbs(p) {
+		return p
+	}
+
+	return filepath.Join(dir, p)
 }
 
 // Apply declares every collection of the file in the catalog.

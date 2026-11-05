@@ -157,3 +157,37 @@ func TestBlobMaxSizeIsASize(t *testing.T) {
 		t.Fatalf("BlobMaxSize = %d", cfg.BlobMaxSize)
 	}
 }
+
+func TestRelativePathsResolveAgainstTheConfigDir(t *testing.T) {
+	path := write(t, `
+data_dir: ./data
+listen:
+  unix: ./ndb.sock
+collections:
+  events:
+    write: direct
+    path: ./logs/*.ndjson
+  other:
+    write: direct
+    path: /abs/*.ndjson
+`)
+
+	dir := filepath.Dir(path)
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.DataDir != filepath.Join(dir, "data") || cfg.Listen.Unix != filepath.Join(dir, "ndb.sock") {
+		t.Fatalf("got data_dir %q unix %q", cfg.DataDir, cfg.Listen.Unix)
+	}
+
+	if got := cfg.Collections["events"].Path; got != filepath.Join(dir, "logs", "*.ndjson") {
+		t.Fatalf("events path = %q", got)
+	}
+
+	if got := cfg.Collections["other"].Path; got != "/abs/*.ndjson" {
+		t.Fatalf("absolute path changed: %q", got)
+	}
+}

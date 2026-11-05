@@ -1,8 +1,7 @@
 /* part: landing frame */
 .landing {
-  max-width: 1120px;
-  margin: 0 auto;
-  padding: 72px 24px 96px;
+  max-width: calc(1120px + 38px + 24px);
+  padding: 72px 24px 96px 38px;
 }
 
 /* part: hero */
@@ -68,6 +67,130 @@
   display: block;
   height: 72px;
   width: auto;
+}
+
+/* part: quick start */
+.quick {
+  margin-top: 72px;
+}
+
+.quick-title {
+  margin: 0 0 8px;
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+.quick-lead {
+  margin: 0 0 28px;
+  color: var(--ndb-muted);
+  font-size: 17px;
+}
+
+/* part: quick start steps */
+.steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--ndb-line);
+  border-radius: 12px;
+}
+
+.step-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-bottom: 14px;
+  border-radius: 999px;
+  background: var(--ndb-accent-soft);
+  color: var(--ndb-accent);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.step-title {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.step-text {
+  margin: 0 0 16px;
+  color: var(--ndb-muted);
+  font-size: 14.5px;
+  line-height: 1.55;
+}
+
+/* part: quick start code block */
+.step-code {
+  flex: 1;
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--ndb-line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ndb-line) 25%, var(--ndb-paper));
+  font-family: var(--ndb-font-mono);
+  font-size: 12.5px;
+  line-height: 1.65;
+  overflow-x: auto;
+}
+
+.step-code code {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+}
+
+/* part: capability chips */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 24px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  padding: 4px 12px;
+  border: 1px solid var(--ndb-line);
+  border-radius: 999px;
+  color: var(--ndb-muted);
+  font-size: 13.5px;
+}
+
+.chip:hover {
+  border-color: var(--ndb-accent);
+  color: var(--ndb-accent);
+}
+
+/* part: quick start stacks on mobile */
+@media (max-width: 860px) {
+  .quick {
+    margin-top: 48px;
+  }
+
+  .quick-title {
+    font-size: 26px;
+  }
+
+  .steps {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* part: card sections */

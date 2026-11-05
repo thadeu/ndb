@@ -3,12 +3,14 @@ import { computed } from 'vue'
 import { useRoute, withBase } from 'vitepress'
 
 import type { Tab } from '../../nav'
+import { useActiveAnchor } from '../composables/useActiveAnchor'
 
 const props = defineProps<{ tab: Tab; open: boolean }>()
 
 defineEmits<{ (e: 'close'): void }>()
 
 const route = useRoute()
+const anchor = useActiveAnchor()
 
 const current = computed(() => {
   const path = route.path.replace(/\.html$/, '').replace(/\/$/, '')
@@ -18,16 +20,50 @@ const current = computed(() => {
 
 const activeLink = computed(() => {
   const items = props.tab.groups.flatMap((group) => group.items)
-  const exact = items.find((item) => item.link === current.value)
+  const path = current.value.split('#')[0]
+  const onPage = items.filter((item) => item.link.split('#')[0] === path)
 
-  if (exact) {
-    return exact.link
+  if (onPage.length === 0) {
+    return ''
   }
 
-  const path = current.value.split('#')[0]
+  const byAnchor = onPage.find((item) => item.link.split('#')[1] === anchor.value)
 
-  return items.find((item) => item.link.split('#')[0] === path)?.link ?? ''
+  if (byAnchor) {
+    return byAnchor.link
+  }
+
+  return activeByOrder(onPage.map((item) => item.link)) ?? onPage[0].link
 })
+
+// When the visible heading has no sidebar item, keep the last item whose
+// anchor sits above it on the page.
+function activeByOrder(links: string[]): string | undefined {
+  if (typeof document === 'undefined' || !anchor.value) {
+    return undefined
+  }
+
+  const target = document.getElementById(anchor.value)
+
+  if (!target) {
+    return undefined
+  }
+
+  let found: string | undefined
+
+  for (const link of links) {
+    const id = link.split('#')[1]
+    const node = id ? document.getElementById(id) : null
+
+    const above = !id || (node && node.compareDocumentPosition(target) & Node.DOCUMENT_POSITION_FOLLOWING) || node === target
+
+    if (above) {
+      found = link
+    }
+  }
+
+  return found
+}
 </script>
 
 <template>

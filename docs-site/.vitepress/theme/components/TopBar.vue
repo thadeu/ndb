@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { withBase } from 'vitepress'
+import { useData, withBase } from 'vitepress'
 
 import Icon from './Icon.vue'
 import Logo from './Logo.vue'
@@ -10,6 +10,7 @@ defineProps<{ drawerOpen: boolean }>()
 defineEmits<{ (e: 'toggle-drawer'): void }>()
 
 const repo = 'https://github.com/thadeu/ndb'
+const { theme } = useData()
 const dark = ref(false)
 
 function readDark(): boolean {
@@ -54,6 +55,17 @@ onMounted(() => {
       <a :href="withBase('/http-api')">Reference</a>
       <a class="icon-link" :href="repo" target="_blank" rel="noopener" aria-label="GitHub">
         <Icon name="github" :size="20" />
+      </a>
+
+      <a
+        v-if="theme.version"
+        class="version-pill"
+        :href="`${repo}/blob/main/CHANGELOG.md`"
+        target="_blank"
+        rel="noopener"
+        :title="`Docs for ndb ${theme.version}`"
+      >
+        v{{ theme.version }}
       </a>
     </nav>
 

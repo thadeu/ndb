@@ -61,8 +61,8 @@ An unknown key is an error at start (the file is read in strict mode). Sizes are
 
 | Key | Meaning |
 |---|---|
-| `data_dir` | where all data lives. Never put it on NFS, EFS or another network volume. |
-| `listen.unix` | unix socket path. |
+| `data_dir` | where all data lives. Never put it on NFS, EFS or another network volume. A relative path starts at the folder of `ndb.yml`. |
+| `listen.unix` | unix socket path. A relative path starts at the folder of `ndb.yml`. |
 | `listen.tcp` | TCP address. Bind to a private address only, and set `-token-file`. |
 | `memory_limit` | Go heap soft limit (`GOMEMLIMIT`). |
 | `group_limit` | memory limit of one aggregate group table. Over it: `group_limit_exceeded`. |
@@ -74,7 +74,7 @@ An unknown key is an error at start (the file is read in strict mode). Sizes are
 | Key | Meaning |
 |---|---|
 | `write` | `engine` (default): only ndb writes, through its WAL. `direct`: apps append to the files in `path`; ndb only reads. |
-| `path` | glob of source files. Direct mode only. `**` is allowed. |
+| `path` | glob of source files. Direct mode only. `**` is allowed. A relative glob such as `./logs/*.ndjson` starts at the folder of `ndb.yml`, not at the folder where you start the daemon. |
 | `id` | field that identifies a document. Default `_id`. Direct mode without `id`: `file:offset`. |
 | `time` | time field. Used for zone maps, `$dateTrunc`, TTL and retention. |
 | `indexes` | fields with a secondary index (dot paths allowed). |

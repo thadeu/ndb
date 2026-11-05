@@ -76,7 +76,7 @@ Rules:
 ```
 
 - `$regex` is a string pattern, at most 1 KiB. `$options` is optional and needs `$regex`. Flags: `i` (ignore case), `m` (`^` and `$` match at each line), `s` (`.` matches a newline), `x` (extended, see below). Any other flag is `invalid_query`.
-- Syntax is Go **RE2**, not PCRE as in MongoDB: there are no backreferences (`\1`) and no look-around (`(?=...)`, `(?<!...)`). Matching is linear in the text, so a pattern cannot cause catastrophic backtracking. An invalid pattern or flag is `invalid_query` with the RE2 message.
+- Syntax is Go **RE2**, not PCRE: there are no backreferences (`\1`) and no look-around (`(?=...)`, `(?<!...)`). Matching is linear in the text, so a pattern cannot cause catastrophic backtracking. An invalid pattern or flag is `invalid_query` with the RE2 message.
 - `x` is done by ndb, not by RE2: white space and `# ...` comments outside a character class are removed before compiling. Escape them (`\ `, `\#`) or put them in a class (`[ ]`) to keep them.
 - Only strings match. A number, `null`, a boolean, an object or a missing field never matches. On an array field the row matches when any string element matches. `$regex` works in dot paths, in `$not` (field and top level), `$and` and `$or`, and next to other operators of the same field. `{"a": {"$not": {"$regex": "x"}}}` also matches a missing field, like the other negations.
 - A time field is matched as its RFC 3339 text.
