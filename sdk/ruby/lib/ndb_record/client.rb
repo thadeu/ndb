@@ -50,6 +50,18 @@ module NdbRecord
       json(request("GET", "/v1/c", nil)).fetch("collections")
     end
 
+    # Uploads an IO (streamed) and returns the reference hash.
+    def put_blob(io, content_type = nil)
+      json(request("PUT", "/v1/blobs", io, headers: { "Content-Type" => content_type || "application/octet-stream" }))
+    end
+
+    # The bytes of a blob, or of its range from..to (inclusive).
+    def get_blob(ref, from: nil, to: nil)
+      headers = from ? { "Range" => "bytes=#{from}-#{to}" } : {}
+
+      request("GET", "/v1/blobs/#{ref}", nil, headers: headers).body
+    end
+
     private
 
     def post(coll, verb, body)
@@ -60,13 +72,21 @@ module NdbRecord
       "/v1/c/#{URI.encode_www_form_component(coll).gsub('+', '%20')}"
     end
 
-    def request(method, target, body)
-      payload = body.nil? ? "" : JSON.generate(body)
-      response = @pool.with { |conn| conn.request(method, target, payload) }
+    def request(method, target, body, headers: {})
+      payload = encode(body)
+      response = @pool.with { |conn| conn.request(method, target, payload, headers: headers) }
 
       raise_api_error(response) if response.status >= 300
 
       response
+    end
+
+    # JSON for a Hash, "" for nothing, an IO as it is (blob upload).
+    def encode(body)
+      return "" if body.nil?
+      return body if body.respond_to?(:read)
+
+      JSON.generate(body)
     end
 
     def json(response)

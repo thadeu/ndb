@@ -10,6 +10,10 @@ import (
 type Options struct {
 	// TimeField is the collection time field: RFC 3339 strings compare as time.
 	TimeField string
+
+	// ExpiresField is the TTL field of the collection. Like the time field,
+	// its RFC 3339 strings compare as time.
+	ExpiresField string
 }
 
 type SortKey struct {
@@ -273,7 +277,7 @@ func (q *Query) compileField(path string, v any) (Node, error) {
 		return nil, err
 	}
 
-	f := &fieldNode{path: path, parts: splitPath(path), isTime: path == q.opts.TimeField, slot: q.slot(path)}
+	f := &fieldNode{path: path, parts: splitPath(path), isTime: q.IsTime(path), slot: q.slot(path)}
 
 	m, isObj := v.(map[string]any)
 
@@ -416,9 +420,9 @@ func (q *Query) MatchCols(cands [][]Value) bool {
 	return q.where.matchCols(cands)
 }
 
-// IsTime tells if path is the collection time field.
+// IsTime tells if path is the collection time field, or its TTL field.
 func (q *Query) IsTime(path string) bool {
-	return path == q.opts.TimeField
+	return path == q.opts.TimeField || (q.opts.ExpiresField != "" && path == q.opts.ExpiresField)
 }
 
 // Indexable lists the conditions an index can answer. The caller still

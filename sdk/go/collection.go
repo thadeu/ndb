@@ -174,7 +174,7 @@ func (db *DB) ensure(ctx context.Context, name string, s *schema) error {
 		return nil
 	}
 
-	body, err := json.Marshal(ensureBody{ID: s.id, Time: s.time, Indexes: s.indexes, Unique: s.unique})
+	body, err := json.Marshal(ensureBody{ID: s.id, Time: s.time, ExpiresField: s.expires, Indexes: s.indexes, Unique: s.unique})
 	if err != nil {
 		return err
 	}
@@ -201,10 +201,11 @@ func (db *DB) putCollection(ctx context.Context, name string, catalog []byte) er
 }
 
 type ensureBody struct {
-	ID      string   `json:"id,omitempty"`
-	Time    string   `json:"time,omitempty"`
-	Indexes []string `json:"indexes,omitempty"`
-	Unique  []string `json:"unique,omitempty"`
+	ID           string   `json:"id,omitempty"`
+	Time         string   `json:"time,omitempty"`
+	ExpiresField string   `json:"expires_field,omitempty"`
+	Indexes      []string `json:"indexes,omitempty"`
+	Unique       []string `json:"unique,omitempty"`
 }
 
 type insertBody struct {

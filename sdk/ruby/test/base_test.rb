@@ -41,6 +41,24 @@ class BaseTest < Minitest::Test
     assert_includes Post.attribute_names, "call_id"
   end
 
+  def test_expires_option_sets_the_expires_field
+    klass = Class.new(Post) { attribute :expires_at, :datetime, expires: true }
+
+    assert_equal "expires_at", klass.collection_definition["expires_field"]
+    assert_nil Post.collection_definition["expires_field"]
+  end
+
+  def test_ttl_is_sent_as_seconds_and_inherited
+    klass = Class.new(Post) do
+      attribute :ts, :datetime, time: true
+      ttl 24.hours
+    end
+
+    assert_equal "86400s", klass.collection_definition["ttl"]
+    assert_equal "86400s", Class.new(klass).collection_definition["ttl"]
+    assert_nil Post.collection_definition["ttl"]
+  end
+
   def test_collection_definition
     assert_equal({ "id" => "call_id", "indexes" => ["status"], "unique" => ["dnis"] }, Post.collection_definition)
   end

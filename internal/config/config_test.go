@@ -135,3 +135,25 @@ func TestGroupLimitIsASize(t *testing.T) {
 		t.Fatalf("GroupLimit = %d", cfg.GroupLimit)
 	}
 }
+
+func TestLoadTTLAndExpiresField(t *testing.T) {
+	cfg, err := config.Load(write(t, "collections:\n  a:\n    time: at\n    ttl: 24h\n  b:\n    expires_field: expires_at\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Collections["a"].TTL != "24h" || cfg.Collections["b"].ExpiresField != "expires_at" {
+		t.Fatalf("collections: %+v", cfg.Collections)
+	}
+}
+
+func TestBlobMaxSizeIsASize(t *testing.T) {
+	cfg, err := config.Load(write(t, "blob_max_size: 256MiB\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.BlobMaxSize != 256<<20 {
+		t.Fatalf("BlobMaxSize = %d", cfg.BlobMaxSize)
+	}
+}

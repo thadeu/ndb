@@ -1,0 +1,67 @@
+{
+  "name": "aggregate does not group expired documents",
+  "collection": "sessions",
+  "setup": {
+    "catalog": {
+      "id": "id",
+      "write": "engine",
+      "expires_field": "exp"
+    },
+    "writes": [
+      {
+        "op": "insert",
+        "body": {
+          "insert": [
+            {
+              "id": "past",
+              "exp": "2020-01-01T00:00:00Z"
+            },
+            {
+              "id": "past_unix",
+              "exp": 1577836800
+            },
+            {
+              "id": "future",
+              "exp": "2999-01-01T00:00:00Z"
+            },
+            {
+              "id": "future_unix",
+              "exp": 32503680000
+            },
+            {
+              "id": "never"
+            },
+            {
+              "id": "null_exp",
+              "exp": null
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "request": {
+    "op": "aggregate",
+    "body": {
+      "pipeline": [
+        {
+          "$group": {
+            "_id": null,
+            "n": {
+              "$count": {}
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "ordered": true,
+    "rows": [
+      {
+        "_id": null,
+        "n": 4
+      }
+    ]
+  }
+}

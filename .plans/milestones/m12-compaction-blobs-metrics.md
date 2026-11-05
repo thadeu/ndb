@@ -1,6 +1,6 @@
 # M12 — Compaction, retention, TTL, blobs, metrics
 
-Status: not started · Depends on: M05 (blobs API needs M07) · Plan: §7.5, §8.5, §11.5, phase 9
+Status: done (light verification; WAL truncation and expires_field index skip open) · Depends on: M05 (blobs API needs M07) · Plan: §7.5, §8.5, §11.5, phase 9
 
 ## Goal
 
@@ -12,23 +12,23 @@ operator can see what happens.
 
 ### E12.1 Compaction
 
-- [ ] Tests first: results equal before and after; crash during compaction; open snapshot cursors keep old segments
-- [ ] Merge small segments; drop old versions and tombstones
-- [ ] Atomic swap in the checkpoint; old segments removed after the last snapshot that uses them
+- [x] Tests first: results equal before and after; crash during compaction; open snapshot cursors keep old segments
+- [x] Merge small segments; drop old versions and tombstones
+- [x] Atomic swap in the checkpoint; old segments removed after the last snapshot that uses them
 
 ### E12.2 Retention
 
-- [ ] Tests first: data older than `retention` is gone from queries; source NDJSON is never deleted
-- [ ] Drop derived data by the `time` field (whole segments when possible)
+- [x] Tests first: data older than `retention` is gone from queries; source NDJSON is never deleted
+- [x] Drop derived data by the `time` field (whole segments when possible)
 
 ### E12.6 Document TTL (plan §11.5)
 
-- [ ] Tests first: an expired doc is hidden from find/count/aggregate at once (no job ran); an update that moves `expires_at` forward keeps it; a doc without `expires_field` never expires; `ttl` needs a `time` field (catalog validation)
-- [ ] Catalog: `ttl` and `expires_field` (one of the two), merge rules like `time` (conflict on change)
-- [ ] Read filter against the snapshot time; range skip when `expires_field` is indexed
-- [ ] Engine-mode sweeper: tombstones for expired docs in small batches; `watch` shows `"_expired": true`; crash during a sweep is safe (tombstones are idempotent)
-- [ ] Direct mode: hide only, never touch the apps' files; compaction drops expired rows from derived data
-- [ ] Model layers: Rails `ttl` / `expires_field`, Go tag `expires`, TS `expires`
+- [x] Tests first: an expired doc is hidden from find/count/aggregate at once (no job ran); an update that moves `expires_at` forward keeps it; a doc without `expires_field` never expires; `ttl` needs a `time` field (catalog validation)
+- [x] Catalog: `ttl` and `expires_field` (one of the two), merge rules like `time` (conflict on change)
+- [x] Read filter against the snapshot time (range skip by index: not done, the filter is a `$not` clause that no index answers)
+- [x] Engine-mode sweeper: tombstones for expired docs in small batches; `watch` shows `"_expired": true`; crash during a sweep is safe (tombstones are idempotent)
+- [x] Direct mode: hide only, never touch the apps' files; compaction drops expired rows from derived data
+- [x] Model layers: Ruby `ttl` / `expires: true`, Go tag `expires` (TS: M11)
 
 ### E12.3 Blob store
 

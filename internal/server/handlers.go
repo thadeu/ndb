@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/collection"
@@ -71,7 +72,12 @@ func (s *Server) find(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
+	began := time.Now()
+
 	page, err := col.Find(r.Context(), body)
+
+	s.metrics.find.Observe(time.Since(began))
+
 	if err != nil {
 		writeError(w, err)
 
@@ -102,7 +108,12 @@ func (s *Server) aggregate(w http.ResponseWriter, r *http.Request, db *engine.DB
 		return
 	}
 
+	began := time.Now()
+
 	page, err := col.Aggregate(r.Context(), body)
+
+	s.metrics.aggregate.Observe(time.Since(began))
+
 	if err != nil {
 		writeError(w, err)
 

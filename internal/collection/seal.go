@@ -3,6 +3,7 @@ package collection
 import (
 	"encoding/json"
 	"fmt"
+	"iter"
 	"log"
 	"path/filepath"
 	"slices"
@@ -56,10 +57,15 @@ type sealer struct {
 	age   time.Duration
 	tick  time.Duration
 
+	compactMin int
+	onCompact  func(liveDocs iter.Seq[[]byte])
+	hook       func(step string)
+	maxTimes   map[*segRef]segMax
+
 	// names, readers, next and last are guarded by Collection.mu for writes.
 	// Seal runs one at a time under mu, so it reads them without c.mu.
 	names   []string
-	readers []segment.Reader
+	readers []*segRef
 	next    int
 	last    time.Time
 
@@ -104,6 +110,10 @@ func (c *Collection) openSegments(cfg Config) (recovery.Position, error) {
 		tick:  cfg.SealTick,
 		last:  time.Now(),
 		stop:  make(chan struct{}),
+
+		compactMin: cfg.CompactMin,
+		onCompact:  cfg.OnCompact,
+		maxTimes:   map[*segRef]segMax{},
 	}
 
 	s.setDefaults()
@@ -127,10 +137,12 @@ func (c *Collection) openSegments(cfg Config) (recovery.Position, error) {
 	}
 
 	for _, name := range cp.Segments {
-		r, err := segment.Open(cfg.FS, s.path(name))
+		raw, err := segment.Open(cfg.FS, s.path(name))
 		if err != nil {
 			return recovery.Position{}, err
 		}
+
+		r := newSegRef(raw, cfg.FS, s.path(name))
 
 		s.readers = append(s.readers, r)
 		s.names = append(s.names, name)
@@ -160,6 +172,10 @@ func (s *sealer) setDefaults() {
 
 	if s.tick == 0 {
 		s.tick = defaultSealTick
+	}
+
+	if s.compactMin == 0 {
+		s.compactMin = defaultCompactMin
 	}
 }
 
@@ -314,10 +330,12 @@ func (c *Collection) Seal() error {
 		return err
 	}
 
-	reader, err := segment.Open(s.fs, s.path(name))
+	raw, err := segment.Open(s.fs, s.path(name))
 	if err != nil {
 		return err
 	}
+
+	reader := newSegRef(raw, s.fs, s.path(name))
 
 	cp := checkpoint{Pos: snap.pos, Segments: append(slices.Clone(s.names), name), Next: s.next + 1}
 
@@ -419,7 +437,7 @@ func (c *Collection) uniqueOf(items []sealItem) []map[string]string {
 // adopt runs on the writer goroutine. It makes the segment live and turns
 // the captured entries into stubs. An entry that changed after the capture
 // keeps its memtable version; a tombstone that was captured is cleared.
-func (c *Collection) adopt(snap sealSnap, r segment.Reader, name string) error {
+func (c *Collection) adopt(snap sealSnap, r *segRef, name string) error {
 	err := c.w.Run(func(writer.Pos) {
 		c.mu.Lock()
 
@@ -512,12 +530,14 @@ func (c *Collection) runSealer() {
 		case <-c.seal.stop:
 			return
 		case <-t.C:
-			if !c.sealDue(time.Now()) {
-				continue
+			if c.sealDue(time.Now()) {
+				if err := c.Seal(); err != nil {
+					log.Printf("ndb: seal failed, retrying on the next tick: %v", err)
+				}
 			}
 
-			if err := c.Seal(); err != nil {
-				log.Printf("ndb: seal failed, retrying on the next tick: %v", err)
+			if err := c.compactDue(); err != nil {
+				log.Printf("ndb: compaction failed, retrying on the next tick: %v", err)
 			}
 		}
 	}
@@ -542,7 +562,7 @@ func (c *Collection) closeSegments() {
 	}
 
 	for _, r := range s.readers {
-		r.Close()
+		r.Reader.Close()
 	}
 
 	s.readers = nil

@@ -4,6 +4,8 @@
 package cursors
 
 import (
+	"io"
+
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -31,6 +33,16 @@ func Open(path string) (*Store, error) {
 	}
 
 	return &Store{db: db}, nil
+}
+
+// Snapshot writes a consistent copy of the cursor file (one read
+// transaction), while the store is in use.
+func (s *Store) Snapshot(w io.Writer) error {
+	return s.db.View(func(tx *bolt.Tx) error {
+		_, err := tx.WriteTo(w)
+
+		return err
+	})
 }
 
 func (s *Store) Close() error {

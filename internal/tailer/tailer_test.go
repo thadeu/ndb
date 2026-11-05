@@ -578,3 +578,28 @@ func TestCursorsRecorded(t *testing.T) {
 		}
 	}
 }
+
+func TestLagIsTheUnreadTail(t *testing.T) {
+	e := newEnv(t, "*.ndjson", "call_id")
+	tl := e.open(nil)
+
+	e.write("a.ndjson", `{"call_id":"1"}`+"\n"+`{"call_id":"2"`)
+
+	if err := tl.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := tl.Lag(), int64(len(`{"call_id":"2"`)); got != want {
+		t.Fatalf("lag = %d, want %d (the partial line)", got, want)
+	}
+
+	e.write("a.ndjson", "}\n")
+
+	if err := tl.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	if tl.Lag() != 0 {
+		t.Fatalf("lag = %d after the line completed", tl.Lag())
+	}
+}

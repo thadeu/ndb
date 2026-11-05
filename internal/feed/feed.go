@@ -18,6 +18,9 @@ type Event struct {
 	ID  string          `json:"id"`
 	V   uint64          `json:"v,omitempty"`
 	Doc json.RawMessage `json:"doc,omitempty"`
+
+	// Expired is set on the del of a document that expired (TTL sweeper).
+	Expired bool `json:"_expired,omitempty"`
 }
 
 // Source is the feed of one collection. Engine mode positions are WAL
@@ -121,6 +124,14 @@ func (h *Hub[T]) Publish(v T, before func()) {
 			close(s.C)
 		}
 	}
+}
+
+// Len is the number of subscribers.
+func (h *Hub[T]) Len() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	return len(h.subs)
 }
 
 // Lagged reports that the hub dropped the subscriber because its buffer

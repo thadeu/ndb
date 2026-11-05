@@ -32,6 +32,10 @@ func main() {
 
 // run reads the flags and ndb.yml, then serves until SIGTERM or SIGINT.
 func run(args []string) error {
+	if len(args) > 0 && args[0] == "backup" {
+		return runBackup(args[1:])
+	}
+
 	fl := flag.NewFlagSet("ndb", flag.ContinueOnError)
 
 	cfgPath := fl.String("config", "ndb.yml", "optional config file (absent = defaults)")
@@ -90,6 +94,9 @@ func serve(ctx context.Context, cfg config.Config) error {
 	}
 
 	srv := server.New()
+
+	srv.SetBlobLimit(cfg.BlobMaxSize)
+
 	errc := make(chan error, len(listeners))
 
 	for _, l := range listeners {

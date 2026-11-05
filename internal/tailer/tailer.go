@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -62,6 +63,10 @@ type Config struct {
 }
 
 type file struct {
+	// lagged is the part of the file not read yet, as last added to
+	// Tailer.lag. Guarded by Tailer.mu.
+	lagged int64
+
 	f     ndbfs.File
 	path  string
 	ino   uint64
@@ -85,6 +90,9 @@ type Tailer struct {
 
 	watcher *fsnotify.Watcher
 	wake    chan struct{}
+
+	// lag is the bytes that sit in the files after the cursors.
+	lag atomic.Int64
 }
 
 func Open(cfg Config) (*Tailer, error) {
@@ -127,6 +135,20 @@ func Open(cfg Config) (*Tailer, error) {
 	t.base, t.depth = globBase(cfg.Def.Path)
 
 	return t, nil
+}
+
+// Lag is how many bytes the tailer has not read yet, over all files. It is
+// updated while a file drains, so a long catch-up shows.
+func (t *Tailer) Lag() int64 {
+	return t.lag.Load()
+}
+
+func (t *Tailer) setLag(fl *file, size int64) {
+	left := size - fl.off
+
+	t.lag.Add(left - fl.lagged)
+
+	fl.lagged = left
 }
 
 // Quarantined is how many lines went to quarantine since Open.
@@ -241,6 +263,7 @@ func (t *Tailer) Sync(ctx context.Context) error {
 			continue
 		}
 
+		t.lag.Add(-t.files[ino].lagged)
 		t.files[ino].f.Close()
 		delete(t.files, ino)
 		delete(t.saved, ino)
@@ -400,6 +423,8 @@ func (t *Tailer) drain(ctx context.Context, fl *file) error {
 		fl.off, fl.fplen, fl.fp = 0, 0, 0
 	}
 
+	t.setLag(fl, size)
+
 	if size == fl.off {
 		return nil
 	}
@@ -428,11 +453,15 @@ func (t *Tailer) drain(ctx context.Context, fl *file) error {
 		batch++
 
 		if batch%t.cfg.BatchLines == 0 {
+			t.setLag(fl, size)
+
 			if err := t.save(fl, size); err != nil {
 				return err
 			}
 		}
 	}
+
+	t.setLag(fl, size)
 
 	return t.save(fl, size)
 }

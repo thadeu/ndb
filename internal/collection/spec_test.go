@@ -22,6 +22,10 @@ type specEngine struct {
 	// read from segments and memtable. The indexes are dropped, so the finds
 	// run the column scan.
 	seal bool
+
+	// compact puts every insert in its own segment, and merges them all
+	// before each read, so the cases prove that compaction keeps the results.
+	compact bool
 }
 
 func (e *specEngine) EnsureCollection(_ context.Context, name string, raw json.RawMessage) error {
@@ -37,8 +41,9 @@ func (e *specEngine) EnsureCollection(_ context.Context, name string, raw json.R
 
 	cfg := collection.Config{Dir: filepath.Join(root, "wal"), FS: fs.OS{}, Def: def}
 
-	if e.seal {
+	if e.seal || e.compact {
 		cfg.Data = root
+		cfg.CompactMin = 1 << 20
 	}
 
 	c, err := collection.Open(cfg)
@@ -48,7 +53,7 @@ func (e *specEngine) EnsureCollection(_ context.Context, name string, raw json.R
 
 	e.t.Cleanup(func() { c.Close() })
 
-	if e.seal {
+	if e.seal || e.compact {
 		for _, f := range def.Indexes {
 			c.DropIndex(f)
 		}
@@ -79,10 +84,13 @@ func (e *specEngine) Do(ctx context.Context, name string, step spec.Step) ([]jso
 		}
 
 		_, err := c.Insert(ctx, docs...)
+		if err == nil && e.compact {
+			err = c.Seal()
+		}
 
 		return nil, specErr(err)
 	case "aggregate":
-		if err := c.Seal(); err != nil {
+		if err := e.settle(c); err != nil {
 			return nil, err
 		}
 
@@ -95,7 +103,7 @@ func (e *specEngine) Do(ctx context.Context, name string, step spec.Step) ([]jso
 
 		return page.Rows, specErr(err)
 	case "find":
-		if err := c.Seal(); err != nil {
+		if err := e.settle(c); err != nil {
 			return nil, err
 		}
 
@@ -110,6 +118,19 @@ func (e *specEngine) Do(ctx context.Context, name string, step spec.Step) ([]jso
 	}
 
 	return nil, &spec.CodeError{Code: "unknown_op"}
+}
+
+// settle seals the memtable, and compacts in compact mode.
+func (e *specEngine) settle(c *collection.Collection) error {
+	if err := c.Seal(); err != nil {
+		return err
+	}
+
+	if e.compact {
+		return c.Compact()
+	}
+
+	return nil
 }
 
 func specErr(err error) error {
@@ -141,5 +162,16 @@ func TestSharedCasesAfterSealing(t *testing.T) {
 
 	spec.Run(t, cases, func(t *testing.T) spec.Engine {
 		return &specEngine{t: t, cols: map[string]*collection.Collection{}, seal: true}
+	})
+}
+
+func TestSharedCasesAfterCompaction(t *testing.T) {
+	cases, err := spec.Load("../../spec/cases")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	spec.Run(t, cases, func(t *testing.T) spec.Engine {
+		return &specEngine{t: t, cols: map[string]*collection.Collection{}, compact: true}
 	})
 }

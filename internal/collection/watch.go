@@ -217,6 +217,8 @@ func (s *engineStream) eventsOf(rec wal.Record) []feed.Event {
 			ID:  op.ID,
 			V:   op.V,
 			Doc: op.Doc,
+
+			Expired: op.Exp,
 		})
 	}
 

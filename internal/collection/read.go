@@ -150,9 +150,15 @@ func (c *Collection) SetSnapshotTTL(d time.Duration) {
 	c.rd.mu.Unlock()
 }
 
-// ParseQuery parses a find body with the collection time field.
+// ParseQuery parses a find body with the collection time field. The query
+// does not see expired documents or rows past the retention (ttl.go).
 func (c *Collection) ParseQuery(body []byte) (*query.Query, error) {
-	return query.Parse(body, query.Options{TimeField: c.def.Time})
+	q, err := query.Parse(body, c.queryOptions())
+	if err != nil {
+		return nil, err
+	}
+
+	return q, c.hide(q)
 }
 
 // applyDurable applies op, written by WAL tx, to the durable state. It keeps
@@ -268,9 +274,15 @@ func (c *Collection) EnsureIndex(field string) error {
 	s.total = len(items)
 	c.rd.idx[field] = s
 
+	held := c.holdSegments()
+
 	c.rd.wg.Add(1)
 
-	go c.build(s, items)
+	go func() {
+		defer releaseAll(held)
+
+		c.build(s, items)
+	}()
 
 	return nil
 }
@@ -400,6 +412,8 @@ func (c *Collection) Query(ctx context.Context, q *query.Query) (Page, error) {
 	}
 
 	src := c.source(q)
+
+	defer src.release()
 
 	parts, err := c.execute(ctx, q, src, cur, hasCur)
 	if err != nil {
@@ -540,7 +554,7 @@ func (c *Collection) source(q *query.Query) source {
 	conds := q.Indexable()
 
 	if out, ok := c.byID(conds); ok {
-		return source{plan: "id", cands: out}
+		return source{plan: "id", cands: out, held: c.holdSegments()}
 	}
 
 	for _, pass := range []func(string) bool{isPoint, isRange} {
@@ -551,11 +565,14 @@ func (c *Collection) source(q *query.Query) source {
 				continue
 			}
 
-			return source{plan: "index:" + cd.Path, cands: c.byIndex(s, cd, conds)}
+			return source{plan: "index:" + cd.Path, cands: c.byIndex(s, cd, conds), held: c.holdSegments()}
 		}
 	}
 
-	return c.scanSource()
+	src := c.scanSource()
+	src.held = c.holdSegments()
+
+	return src
 }
 
 func isPoint(op string) bool {

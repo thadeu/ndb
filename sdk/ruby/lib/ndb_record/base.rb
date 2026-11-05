@@ -62,10 +62,11 @@ module NdbRecord
         @source
       end
 
-      def attribute(name, *args, index: false, unique: false, time: false, **options)
+      def attribute(name, *args, index: false, unique: false, time: false, expires: false, **options)
         own_indexed << name.to_s if index
         own_unique << name.to_s if unique
         @time_field = name.to_s if time
+        @expires_field = name.to_s if expires
 
         super(name, *args, **options)
       end
@@ -73,6 +74,19 @@ module NdbRecord
       # The collection time field (plan §5): zone maps, $dateTrunc, TTL.
       def time_field
         @time_field || (superclass.respond_to?(:time_field) ? superclass.time_field : nil)
+      end
+
+      # The field that holds the expiry time of each document (plan §11.5).
+      def expires_field
+        @expires_field || (superclass.respond_to?(:expires_field) ? superclass.expires_field : nil)
+      end
+
+      # Documents expire this long after the time field: `ttl 24.hours`.
+      # Returns the Go-style duration the daemon reads, such as "86400s".
+      def ttl(duration = nil)
+        @ttl = "#{duration.to_i}s" if duration
+
+        @ttl || (superclass.respond_to?(:ttl) ? superclass.ttl : nil)
       end
 
       def indexed_fields
@@ -90,6 +104,8 @@ module NdbRecord
         definition["indexes"] = indexed_fields if indexed_fields.any?
         definition["unique"] = unique_fields if unique_fields.any?
         definition["time"] = time_field if time_field
+        definition["expires_field"] = expires_field if expires_field
+        definition["ttl"] = ttl if ttl
         definition.merge!("write" => "direct", "path" => source) if source
 
         definition

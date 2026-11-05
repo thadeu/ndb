@@ -29,7 +29,12 @@ func (c *Collection) SetGroupLimit(n int64) {
 
 // ParseAggregate parses an aggregate body with the collection time field.
 func (c *Collection) ParseAggregate(body []byte) (*agg.Pipeline, error) {
-	return agg.Parse(body, agg.Options{TimeField: c.def.Time})
+	p, err := agg.Parse(body, agg.Options{TimeField: c.def.Time, ExpiresField: c.def.ExpiresField})
+	if err != nil {
+		return nil, err
+	}
+
+	return p, c.hide(p.Query)
 }
 
 // aggPart is the result of one unit.
@@ -54,6 +59,8 @@ func (c *Collection) Aggregate(ctx context.Context, p *agg.Pipeline) (Page, erro
 
 	budget := agg.NewBudget(limit)
 	src := c.source(p.Query)
+
+	defer src.release()
 
 	parts, err := runPool(ctx, c.scanWorkers, 1+len(src.segs), func(i int) (aggPart, error) {
 		if i == 0 {

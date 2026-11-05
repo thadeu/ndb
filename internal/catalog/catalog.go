@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"slices"
 	"strings"
@@ -56,6 +57,8 @@ type Def struct {
 	Unique        []string   `json:"unique,omitempty" yaml:"unique"`
 	Durability    Durability `json:"durability,omitempty" yaml:"durability"`
 	Retention     string     `json:"retention,omitempty" yaml:"retention"`
+	TTL           string     `json:"ttl,omitempty" yaml:"ttl"`
+	ExpiresField  string     `json:"expires_field,omitempty" yaml:"expires_field"`
 	MaxLineSize   int64      `json:"max_line_size,omitempty" yaml:"-"`
 	BlobThreshold int64      `json:"blob_threshold,omitempty" yaml:"-"`
 
@@ -113,6 +116,16 @@ func (c *Catalog) load() error {
 
 			return nil
 		})
+	})
+}
+
+// Snapshot writes a consistent copy of the catalog file (one read
+// transaction), while the catalog is in use.
+func (c *Catalog) Snapshot(w io.Writer) error {
+	return c.db.View(func(tx *bolt.Tx) error {
+		_, err := tx.WriteTo(w)
+
+		return err
 	})
 }
 
@@ -253,6 +266,8 @@ func merge(cur, decl Def, src Source) (Def, error) {
 	}{
 		{"id", cur.ID, decl.ID, func(v string) { next.ID = v }},
 		{"time", cur.Time, decl.Time, func(v string) { next.Time = v }},
+		{"ttl", cur.TTL, decl.TTL, func(v string) { next.TTL = v }},
+		{"expires_field", cur.ExpiresField, decl.ExpiresField, func(v string) { next.ExpiresField = v }},
 		{"write", string(cur.Write), string(decl.Write), func(v string) { next.Write = WriteMode(v) }},
 		{"path", cur.Path, decl.Path, func(v string) { next.Path = v }},
 	}
@@ -330,6 +345,26 @@ func validateDecl(d Def) error {
 		return fmt.Errorf("%w: empty index field", ErrInvalid)
 	}
 
+	return validateDurations(d)
+}
+
+// validateDurations checks ttl and retention, and that a declaration does
+// not set both ttl and expires_field.
+func validateDurations(d Def) error {
+	if d.TTL != "" && d.ExpiresField != "" {
+		return fmt.Errorf("%w: set ttl or expires_field, not both", ErrInvalid)
+	}
+
+	for name, v := range map[string]string{"ttl": d.TTL, "retention": d.Retention} {
+		if v == "" {
+			continue
+		}
+
+		if _, err := ParseDuration(v); err != nil {
+			return fmt.Errorf("%w: %s: %v", ErrInvalid, name, err)
+		}
+	}
+
 	return nil
 }
 
@@ -340,6 +375,10 @@ func validateFinal(d Def) error {
 		return fmt.Errorf("%w: direct mode needs a path", ErrInvalid)
 	case d.Write == Engine && d.Path != "":
 		return fmt.Errorf("%w: engine mode has no path (ndb owns the files)", ErrInvalid)
+	case d.TTL != "" && d.ExpiresField != "":
+		return fmt.Errorf("%w: set ttl or expires_field, not both", ErrInvalid)
+	case d.TTL != "" && d.Time == "":
+		return fmt.Errorf("%w: ttl needs a time field", ErrInvalid)
 	}
 
 	return nil

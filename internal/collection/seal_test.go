@@ -27,6 +27,10 @@ func openSealed(t *testing.T, root string, cfg collection.Config) *collection.Co
 	cfg.FS = fsOf(cfg.FS)
 	cfg.Def = sealDef
 
+	if cfg.CompactMin == 0 {
+		cfg.CompactMin = 1 << 20
+	}
+
 	c, err := collection.Open(cfg)
 	if err != nil {
 		t.Fatal(err)

@@ -7,6 +7,7 @@ import (
 	"github.com/thadeu/ndb/internal/agg"
 	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/collection"
+	"github.com/thadeu/ndb/internal/metrics"
 	"github.com/thadeu/ndb/internal/query"
 	"github.com/thadeu/ndb/internal/tailer"
 )
@@ -39,6 +40,9 @@ type Collection struct {
 	tail *tailer.Tailer
 	stop context.CancelFunc
 	done chan struct{}
+
+	// wm holds the WAL writer metrics (engine mode only).
+	wm *metrics.Writer
 }
 
 // Stats is the state of one collection.
@@ -48,6 +52,14 @@ type Stats struct {
 	Rows        int
 	Indexes     []collection.IndexInfo
 	Quarantined int64
+
+	// Metrics fields. Writer is nil in direct mode; TailerLag is 0 in
+	// engine mode.
+	MemBytes    int64
+	Segments    int
+	Subscribers int
+	TailerLag   int64
+	Writer      *metrics.Writer
 }
 
 func (c *Collection) Find(ctx context.Context, body []byte) (collection.Page, error) {
@@ -108,6 +120,15 @@ func (c *Collection) Stats() Stats {
 
 	if c.tail != nil {
 		s.Quarantined = c.tail.Quarantined()
+		s.TailerLag = c.tail.Lag()
+		s.Subscribers = c.mem.Subscribers()
+	}
+
+	if c.eng != nil {
+		s.MemBytes = c.eng.MemBytes()
+		s.Segments = c.eng.Segments()
+		s.Subscribers = c.eng.Subscribers()
+		s.Writer = c.wm
 	}
 
 	return s

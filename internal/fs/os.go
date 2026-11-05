@@ -1,6 +1,9 @@
 package fs
 
-import "os"
+import (
+	"os"
+	"time"
+)
 
 // OS is the real file system.
 type OS struct{}
@@ -62,4 +65,12 @@ func (OS) SyncDir(path string) error {
 	defer d.Close()
 
 	return d.Sync()
+}
+
+func (OS) ReadDir(path string) ([]os.DirEntry, error) {
+	return os.ReadDir(path)
+}
+
+func (OS) Chtimes(path string, t time.Time) error {
+	return os.Chtimes(path, t, t)
 }

@@ -314,3 +314,8 @@ func (s *directStream) openNext() error {
 
 	return nil
 }
+
+// Subscribers is the number of open watch streams.
+func (d *Direct) Subscribers() int {
+	return d.feed.hub.Len()
+}

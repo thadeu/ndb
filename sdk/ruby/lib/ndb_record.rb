@@ -10,6 +10,7 @@ require "ndb_record/connection"
 require "ndb_record/client"
 require "ndb_record/conditions"
 require "ndb_record/relation"
+require "ndb_record/blob"
 require "ndb_record/persistence"
 require "ndb_record/base"
 

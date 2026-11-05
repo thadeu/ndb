@@ -26,6 +26,7 @@ type Config struct {
 	Listen        Listen `yaml:"listen"`
 	MemoryLimit   int64  `yaml:"-"`
 	GroupLimit    int64  `yaml:"-"`
+	BlobMaxSize   int64  `yaml:"-"`
 	AllowImplicit bool   `yaml:"allow_implicit"`
 
 	Collections map[string]catalog.Def `yaml:"-"`
@@ -37,6 +38,7 @@ type file struct {
 
 	MemoryLimit string                `yaml:"memory_limit"`
 	GroupLimit  string                `yaml:"group_limit"`
+	BlobMaxSize string                `yaml:"blob_max_size"`
 	Collections map[string]collection `yaml:"collections"`
 }
 
@@ -86,6 +88,10 @@ func Load(path string) (Config, error) {
 
 	if cfg.GroupLimit, err = parseSize(f.GroupLimit); err != nil {
 		return Config{}, fmt.Errorf("%w: group_limit: %v", ErrInvalid, err)
+	}
+
+	if cfg.BlobMaxSize, err = parseSize(f.BlobMaxSize); err != nil {
+		return Config{}, fmt.Errorf("%w: blob_max_size: %v", ErrInvalid, err)
 	}
 
 	for name, c := range f.Collections {

@@ -1,0 +1,50 @@
+{
+  "name": "rows older than the retention window by the time field are not returned",
+  "collection": "sessions",
+  "setup": {
+    "catalog": {
+      "id": "id",
+      "write": "engine",
+      "time": "at",
+      "retention": "30d"
+    },
+    "writes": [
+      {
+        "op": "insert",
+        "body": {
+          "insert": [
+            {
+              "id": "old",
+              "at": "2020-01-01T00:00:00Z"
+            },
+            {
+              "id": "new",
+              "at": "2999-01-01T00:00:00Z"
+            },
+            {
+              "id": "no_time"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "request": {
+    "op": "find",
+    "body": {
+      "where": {}
+    }
+  },
+  "expect": {
+    "ordered": false,
+    "rows": [
+      {
+        "id": "new",
+        "at": "2999-01-01T00:00:00Z"
+      },
+      {
+        "id": "no_time"
+      }
+    ]
+  }
+}

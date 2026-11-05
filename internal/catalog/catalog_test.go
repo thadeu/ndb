@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/thadeu/ndb/internal/catalog"
 )
@@ -235,5 +236,98 @@ func TestPersistsAcrossReopen(t *testing.T) {
 
 	if len(again.List()) != 1 {
 		t.Fatalf("list = %v", again.List())
+	}
+}
+
+func TestTTLNeedsTime(t *testing.T) {
+	c, _ := open(t, catalog.Options{})
+
+	_, err := c.Ensure(catalog.Def{Name: "sessions", TTL: "24h"}, catalog.FromCode)
+	if !errors.Is(err, catalog.ErrInvalid) {
+		t.Fatalf("ttl without time: %v", err)
+	}
+
+	def, err := c.Ensure(catalog.Def{Name: "sessions", Time: "created_at", TTL: "1d"}, catalog.FromCode)
+	if err != nil || def.TTL != "1d" {
+		t.Fatalf("def=%+v err=%v", def, err)
+	}
+}
+
+func TestTTLAndExpiresFieldExcludeEachOther(t *testing.T) {
+	c, _ := open(t, catalog.Options{})
+
+	_, err := c.Ensure(catalog.Def{Name: "a", Time: "t", TTL: "1h", ExpiresField: "e"}, catalog.FromCode)
+	if !errors.Is(err, catalog.ErrInvalid) {
+		t.Fatalf("both set in one declaration: %v", err)
+	}
+
+	if _, err := c.Ensure(catalog.Def{Name: "b", Time: "t", TTL: "1h"}, catalog.FromCode); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = c.Ensure(catalog.Def{Name: "b", ExpiresField: "e"}, catalog.FromCode)
+	if !errors.Is(err, catalog.ErrInvalid) {
+		t.Fatalf("both set after a merge: %v", err)
+	}
+}
+
+func TestTTLChangeConflicts(t *testing.T) {
+	c, _ := open(t, catalog.Options{})
+
+	if _, err := c.Ensure(catalog.Def{Name: "a", ExpiresField: "expires_at"}, catalog.FromCode); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := c.Ensure(catalog.Def{Name: "a", ExpiresField: "expires_at"}, catalog.FromCode); err != nil {
+		t.Fatalf("same value: %v", err)
+	}
+
+	if _, err := c.Ensure(catalog.Def{Name: "a", ExpiresField: "other"}, catalog.FromCode); !errors.Is(err, catalog.ErrConflict) {
+		t.Fatalf("changed expires_field: %v", err)
+	}
+
+	if _, err := c.Ensure(catalog.Def{Name: "d", Time: "t", TTL: "1h"}, catalog.FromCode); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := c.Ensure(catalog.Def{Name: "d", TTL: "2h"}, catalog.FromCode); !errors.Is(err, catalog.ErrConflict) {
+		t.Fatalf("changed ttl: %v", err)
+	}
+}
+
+func TestDurationsAreValidated(t *testing.T) {
+	c, _ := open(t, catalog.Options{})
+
+	for _, d := range []catalog.Def{
+		{Name: "a", Time: "t", TTL: "soon"},
+		{Name: "b", Time: "t", TTL: "-1h"},
+		{Name: "c", Retention: "forever"},
+	} {
+		if _, err := c.Ensure(d, catalog.FromCode); !errors.Is(err, catalog.ErrInvalid) {
+			t.Fatalf("%+v: %v", d, err)
+		}
+	}
+}
+
+func TestParseDuration(t *testing.T) {
+	cases := map[string]time.Duration{
+		"30d":    30 * 24 * time.Hour,
+		"2w":     14 * 24 * time.Hour,
+		"90m":    90 * time.Minute,
+		"1h30m":  90 * time.Minute,
+		"1500ms": 1500 * time.Millisecond,
+	}
+
+	for in, want := range cases {
+		got, err := catalog.ParseDuration(in)
+		if err != nil || got != want {
+			t.Errorf("%q: got %v err %v, want %v", in, got, err, want)
+		}
+	}
+
+	for _, bad := range []string{"", "d", "0", "0s", "-5d", "x30d"} {
+		if _, err := catalog.ParseDuration(bad); err == nil {
+			t.Errorf("%q: want an error", bad)
+		}
 	}
 }

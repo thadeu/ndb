@@ -23,6 +23,14 @@ import (
 func unixServer(tb testing.TB) *http.Client {
 	tb.Helper()
 
+	return unixServerWith(tb, nil)
+}
+
+// unixServerWith is unixServer; tune, if set, configures the server before it
+// listens.
+func unixServerWith(tb testing.TB, tune func(*server.Server)) *http.Client {
+	tb.Helper()
+
 	db, err := engine.Open(config.Config{DataDir: tb.TempDir(), AllowImplicit: true}, slog.Default())
 	if err != nil {
 		tb.Fatal(err)
@@ -42,6 +50,10 @@ func unixServer(tb testing.TB) *http.Client {
 
 	srv := server.New()
 	srv.Attach(db)
+
+	if tune != nil {
+		tune(srv)
+	}
 
 	go srv.Serve(l)
 

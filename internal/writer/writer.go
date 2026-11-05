@@ -61,10 +61,24 @@ type Config struct {
 	// must only see durable records (watch) waits for Synced.
 	Synced func()
 
+	// Observer, if set, sees every commit batch and every WAL fsync. It is
+	// called on the writer goroutine, so it must be cheap (atomics).
+	Observer Observer
+
 	// OnFatal runs when a write or fsync fails. The default exits the
 	// process: after a failed fsync, Linux may drop dirty pages, so the only
 	// safe path is to crash and recover from the WAL.
 	OnFatal func(err error)
+}
+
+// Observer is the metrics hook of the writer. The server never reaches into
+// the writer: whoever opens it passes an Observer.
+type Observer interface {
+	// Committed: records were written and acked, d after the batch began.
+	Committed(records int, d time.Duration)
+
+	// Fsynced: one WAL fsync took d.
+	Fsynced(d time.Duration)
 }
 
 // Prepared is the output of Config.Prepare. Stage runs only when the record
@@ -242,7 +256,7 @@ func (w *Writer) Run(fn func(end Pos)) error {
 }
 
 func (w *Writer) runJob(j job) bool {
-	if err := w.file.Sync(); err != nil {
+	if err := w.sync(); err != nil {
 		j.done <- err
 		w.closeOnFatal(err)
 
@@ -341,6 +355,8 @@ type pending struct {
 func (w *Writer) commitBatch(batch []*request) bool {
 	var ok []pending
 
+	began := time.Now()
+
 	w.buf = w.buf[:0]
 
 	for _, req := range batch {
@@ -378,7 +394,7 @@ func (w *Writer) commitBatch(batch []*request) bool {
 	}
 
 	if w.cfg.Durability == Strict {
-		if err := w.file.Sync(); err != nil {
+		if err := w.sync(); err != nil {
 			return w.fatal(err, ok)
 		}
 	} else {
@@ -397,7 +413,25 @@ func (w *Writer) commitBatch(batch []*request) bool {
 		w.synced()
 	}
 
+	if w.cfg.Observer != nil {
+		w.cfg.Observer.Committed(len(ok), time.Since(began))
+	}
+
 	return true
+}
+
+// sync fsyncs the current segment and tells the observer how long it took.
+func (w *Writer) sync() error {
+	if w.cfg.Observer == nil {
+		return w.file.Sync()
+	}
+
+	began := time.Now()
+	err := w.file.Sync()
+
+	w.cfg.Observer.Fsynced(time.Since(began))
+
+	return err
 }
 
 func (w *Writer) prepare(req *request) (Prepared, error) {
@@ -478,7 +512,7 @@ func (w *Writer) rotateBefore(cut int) error {
 		return err
 	}
 
-	if err := w.file.Sync(); err != nil {
+	if err := w.sync(); err != nil {
 		return err
 	}
 
@@ -519,7 +553,7 @@ func (w *Writer) flushDirty() bool {
 		return true
 	}
 
-	if err := w.file.Sync(); err != nil {
+	if err := w.sync(); err != nil {
 		w.closeOnFatal(err)
 
 		return false

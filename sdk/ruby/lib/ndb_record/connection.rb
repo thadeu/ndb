@@ -8,6 +8,8 @@ module NdbRecord
   # One HTTP/1.1 keep-alive connection on a unix socket. Not thread-safe:
   # the Pool hands one connection to one thread at a time.
   class Connection
+    STREAM_CHUNK = 256 * 1024
+
     attr_reader :socket
 
     def initialize(path, timeout)
@@ -16,16 +18,17 @@ module NdbRecord
       @socket = nil
     end
 
-    def request(method, target, body)
+    # body is a String, or an IO that is sent chunked and never retried.
+    def request(method, target, body, headers: {})
       reused = !@socket.nil?
 
       begin
-        send_request(method, target, body)
+        send_request(method, target, body, headers)
         read_response
       rescue EOFError, Errno::EPIPE, Errno::ECONNRESET, IOError
         close
 
-        raise unless reused
+        raise unless reused && !body.respond_to?(:read)
 
         reused = false
 
@@ -56,13 +59,28 @@ module NdbRecord
       @socket.timeout = @timeout
     end
 
-    def send_request(method, target, body)
+    def send_request(method, target, body, headers)
       open_socket unless @socket
 
       head = +"#{method} #{target} HTTP/1.1\r\nHost: ndb\r\nAccept: application/json\r\n"
-      head << "Content-Type: application/json\r\nContent-Length: #{body.bytesize}\r\n\r\n"
+
+      { "Content-Type" => "application/json" }.merge(headers).each { |name, value| head << "#{name}: #{value}\r\n" }
+
+      return send_streamed(head, body) if body.respond_to?(:read)
+
+      head << "Content-Length: #{body.bytesize}\r\n\r\n"
 
       @socket.write(head, body)
+    end
+
+    def send_streamed(head, io)
+      @socket.write(head, "Transfer-Encoding: chunked\r\n\r\n")
+
+      while (chunk = io.read(STREAM_CHUNK))
+        @socket.write(chunk.bytesize.to_s(16), "\r\n", chunk, "\r\n")
+      end
+
+      @socket.write("0\r\n\r\n")
     end
 
     def read_response

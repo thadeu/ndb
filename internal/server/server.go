@@ -28,6 +28,9 @@ type Server struct {
 	// stopCtx ends when Shutdown starts, so open watch streams do not hold it.
 	heartbeat time.Duration
 	stopCtx   context.Context
+
+	// blobLimit is the largest blob in bytes (0 = DefaultBlobLimit).
+	blobLimit int64
 }
 
 func New() *Server {
@@ -85,6 +88,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/c", s.ready(s.list))
 	mux.HandleFunc("DELETE /v1/c/{coll}/indexes/{field}", s.ready(s.dropIndex))
 	mux.HandleFunc("GET /v1/c/{coll}/stats", s.ready(s.stats))
+	mux.HandleFunc("PUT /v1/blobs", s.ready(s.putBlob))
+	mux.HandleFunc("GET /v1/blobs/{ref}", s.ready(s.getBlob))
+	mux.HandleFunc("POST /v1/backup", s.ready(s.backup))
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("GET /metrics", s.metricsPage)
 

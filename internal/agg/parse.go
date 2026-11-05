@@ -15,6 +15,9 @@ import (
 type Options struct {
 	// TimeField is the collection time field: RFC 3339 strings compare as time.
 	TimeField string
+
+	// ExpiresField is the TTL field of the collection (plan §11.5).
+	ExpiresField string
 }
 
 // Pipeline is a validated aggregate request.
@@ -237,7 +240,7 @@ func (p *Pipeline) parseQuery(body map[string]any) (*query.Query, error) {
 		return nil, invalid("%v", err)
 	}
 
-	q, err := query.Parse(raw, query.Options{TimeField: p.opts.TimeField})
+	q, err := query.Parse(raw, query.Options{TimeField: p.opts.TimeField, ExpiresField: p.opts.ExpiresField})
 	if err != nil {
 		return nil, invalid("%s", strings.TrimPrefix(err.Error(), "invalid_query: "))
 	}

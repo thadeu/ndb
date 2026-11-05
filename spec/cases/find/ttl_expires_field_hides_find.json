@@ -1,0 +1,69 @@
+{
+  "name": "find hides a document whose expires_field is in the past (RFC 3339 or unix seconds); no field or null never expires",
+  "collection": "sessions",
+  "setup": {
+    "catalog": {
+      "id": "id",
+      "write": "engine",
+      "expires_field": "exp"
+    },
+    "writes": [
+      {
+        "op": "insert",
+        "body": {
+          "insert": [
+            {
+              "id": "past",
+              "exp": "2020-01-01T00:00:00Z"
+            },
+            {
+              "id": "past_unix",
+              "exp": 1577836800
+            },
+            {
+              "id": "future",
+              "exp": "2999-01-01T00:00:00Z"
+            },
+            {
+              "id": "future_unix",
+              "exp": 32503680000
+            },
+            {
+              "id": "never"
+            },
+            {
+              "id": "null_exp",
+              "exp": null
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "request": {
+    "op": "find",
+    "body": {
+      "where": {}
+    }
+  },
+  "expect": {
+    "ordered": false,
+    "rows": [
+      {
+        "id": "future",
+        "exp": "2999-01-01T00:00:00Z"
+      },
+      {
+        "id": "future_unix",
+        "exp": 32503680000
+      },
+      {
+        "id": "never"
+      },
+      {
+        "id": "null_exp",
+        "exp": null
+      }
+    ]
+  }
+}

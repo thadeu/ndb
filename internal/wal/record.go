@@ -28,6 +28,9 @@ type Op struct {
 	ID   string
 	V    uint64
 	Doc  json.RawMessage
+
+	// Exp marks a Del written because the document expired (plan §11.5).
+	Exp bool
 }
 
 // Record is one transaction = one WAL line.
@@ -124,6 +127,10 @@ func appendOpFields(dst []byte, op Op) ([]byte, error) {
 	dst = strconv.AppendUint(dst, op.V, 10)
 
 	if op.Kind == Del {
+		if op.Exp {
+			dst = append(dst, `,"_exp":true`...)
+		}
+
 		return dst, nil
 	}
 
@@ -159,6 +166,7 @@ type wireOp struct {
 	Op  OpKind          `json:"_op"`
 	ID  *string         `json:"_id"`
 	V   uint64          `json:"_v"`
+	Exp bool            `json:"_exp"`
 	Doc json.RawMessage `json:"doc"`
 }
 
@@ -205,7 +213,7 @@ func Decode(line []byte) (Record, error) {
 			return Record{}, ErrCorrupt
 		}
 
-		rec.Ops = append(rec.Ops, Op{Kind: o.Op, ID: *o.ID, V: o.V, Doc: o.Doc})
+		rec.Ops = append(rec.Ops, Op{Kind: o.Op, ID: *o.ID, V: o.V, Doc: o.Doc, Exp: o.Exp})
 	}
 
 	return rec, nil

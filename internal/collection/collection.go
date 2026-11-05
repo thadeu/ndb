@@ -9,11 +9,14 @@ package collection
 
 import (
 	"context"
+	"iter"
 	"log"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/thadeu/ndb/internal/blob"
 	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/fs"
 	"github.com/thadeu/ndb/internal/recovery"
@@ -47,6 +50,12 @@ type Config struct {
 	SealAge   time.Duration
 	SealTick  time.Duration
 
+	// CompactMin is how many adjacent small segments make the sealer merge
+	// them (default 4). OnCompact is called after each compaction with an
+	// iterator over every live document (see compact.go).
+	CompactMin int
+	OnCompact  func(liveDocs iter.Seq[[]byte])
+
 	// ScanWorkers bounds the units of one scan that run at once: the
 	// memtable and one per segment (default 2).
 	ScanWorkers int
@@ -66,9 +75,21 @@ type Config struct {
 	WatchBuffer    int
 	WALSegmentSize int64
 
+	// Blobs receives the string values over Def.BlobThreshold. Without it
+	// nothing is externalized.
+	Blobs *blob.Store
+
+	// Observer receives the commit and fsync timings of the WAL writer.
+	Observer writer.Observer
+
 	// FlushEvery is the background fsync interval in relaxed mode (default
 	// 200 ms). Watch events of a relaxed collection wait for that fsync.
 	FlushEvery time.Duration
+
+	// SweepEvery is how often the TTL sweeper runs (default 10 s). Now is the
+	// clock of TTL and retention reads (default time.Now); tests set it.
+	SweepEvery time.Duration
+	Now        func() time.Time
 }
 
 type Collection struct {
@@ -93,13 +114,17 @@ type Collection struct {
 	tombs    map[string]uint64
 
 	seal    *sealer
+	sweep   *sweeper
 	onFatal func(error)
+	now     func() time.Time
 
 	scanWorkers int
 	groupLimit  atomic.Int64
 	docs        *docCache
 
 	feed *engineFeed
+
+	blobs *blob.Store
 }
 
 // Doc is a document and its version.
@@ -127,8 +152,10 @@ func Open(cfg Config) (*Collection, error) {
 		durable:     newState(cfg.Def.Unique),
 		rd:          newReader(),
 		onFatal:     cfg.OnFatal,
+		now:         cfg.Now,
 		scanWorkers: cfg.ScanWorkers,
 		docs:        newDocCache(cfg.DocCache),
+		blobs:       cfg.Blobs,
 	}
 
 	c.feed = &engineFeed{fs: cfg.FS, dir: cfg.Dir, buf: cfg.WatchBuffer}
@@ -194,6 +221,7 @@ func Open(cfg Config) (*Collection, error) {
 		Applied:     c.applied,
 		Synced:      c.synced,
 		FlushEvery:  cfg.FlushEvery,
+		Observer:    cfg.Observer,
 		OnFatal:     cfg.OnFatal,
 	})
 	if err != nil {
@@ -216,10 +244,15 @@ func Open(cfg Config) (*Collection, error) {
 		c.startSealer()
 	}
 
+	if c.expires() {
+		c.startSweeper(cfg.SweepEvery)
+	}
+
 	return c, nil
 }
 
 func (c *Collection) Close() error {
+	c.stopSweeper()
 	c.rd.close()
 	c.stopSealer()
 
@@ -262,6 +295,10 @@ func (c *Collection) Find(id string) (Doc, bool) {
 	if err != nil {
 		c.fail(err)
 
+		return Doc{}, false
+	}
+
+	if !c.visible(raw) {
 		return Doc{}, false
 	}
 
@@ -332,6 +369,8 @@ func (c *Collection) prepare(req any) (writer.Prepared, error) {
 		ops, err = c.prepareUpdate(v, r)
 	case deleteReq:
 		ops, err = c.prepareDelete(v, r)
+	case expireReq:
+		ops, err = c.prepareExpire(v, r)
 	default:
 		err = errf("internal", "unknown request %T", req)
 	}
@@ -362,6 +401,11 @@ func (c *Collection) prepareInsert(v *view, r insertReq) ([]wal.Op, error) {
 			return nil, errf("duplicate_id", "%s already exists", id)
 		}
 
+		doc, err = c.externalize(doc)
+		if err != nil {
+			return nil, err
+		}
+
 		if err := v.checkUnique(id, doc); err != nil {
 			return nil, err
 		}
@@ -387,6 +431,11 @@ func (c *Collection) prepareUpdate(v *view, r updateReq) ([]wal.Op, error) {
 	}
 
 	doc, err := applyChange(raw, r.change, c.def.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	doc, err = c.externalize(doc)
 	if err != nil {
 		return nil, err
 	}
@@ -444,4 +493,52 @@ func (c *Collection) synced() {
 	}
 
 	c.unsynced = c.unsynced[:0]
+}
+
+// externalize moves the large string values of doc to the blob store. Each
+// blob is durable when Put returns, which is before the WAL line that holds
+// the reference is written: a crash leaves an unused blob, never a dangling
+// reference.
+func (c *Collection) externalize(doc []byte) ([]byte, error) {
+	if c.blobs == nil || c.def.BlobThreshold <= 0 {
+		return doc, nil
+	}
+
+	return blob.Externalize(doc, c.def.BlobThreshold, func(v string) (blob.Ref, error) {
+		return c.blobs.Put(strings.NewReader(v), "text/plain; charset=utf-8", 0)
+	})
+}
+
+// MemBytes is the size of the documents in the memtable.
+func (c *Collection) MemBytes() int64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.memBytes
+}
+
+// Subscribers is the number of open watch streams.
+func (c *Collection) Subscribers() int {
+	return c.feed.hub.Len()
+}
+
+// WALMark is a consistent end of the WAL: the segment, the byte offset in it
+// and the last tx. Everything up to it is durable. Backup copies exactly
+// that prefix while commits go on.
+type WALMark struct {
+	Seq    int
+	Offset int64
+	Tx     uint64
+}
+
+// WALMark runs in the writer goroutine between two commit batches, so the
+// mark is on a record boundary.
+func (c *Collection) WALMark() (WALMark, error) {
+	var m WALMark
+
+	err := c.w.Run(func(end writer.Pos) {
+		m = WALMark{Seq: end.Seq, Offset: end.Offset, Tx: end.Tx}
+	})
+
+	return m, err
 }

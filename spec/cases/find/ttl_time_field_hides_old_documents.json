@@ -1,0 +1,50 @@
+{
+  "name": "with ttl, a document expires ttl after its time field; one without the time field never expires",
+  "collection": "sessions",
+  "setup": {
+    "catalog": {
+      "id": "id",
+      "write": "engine",
+      "time": "at",
+      "ttl": "1d"
+    },
+    "writes": [
+      {
+        "op": "insert",
+        "body": {
+          "insert": [
+            {
+              "id": "old",
+              "at": "2020-01-01T00:00:00Z"
+            },
+            {
+              "id": "fresh",
+              "at": "2999-01-01T00:00:00Z"
+            },
+            {
+              "id": "no_time"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "request": {
+    "op": "find",
+    "body": {
+      "where": {}
+    }
+  },
+  "expect": {
+    "ordered": false,
+    "rows": [
+      {
+        "id": "fresh",
+        "at": "2999-01-01T00:00:00Z"
+      },
+      {
+        "id": "no_time"
+      }
+    ]
+  }
+}

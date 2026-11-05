@@ -273,3 +273,29 @@ func catalogDef(t *testing.T, db *DB, name string) catalogEntry {
 
 	return catalogEntry{}
 }
+
+func TestSchemaExpiresOption(t *testing.T) {
+	type session struct {
+		ID        string    `ndb:"id,id"`
+		ExpiresAt time.Time `ndb:"expires_at,expires"`
+	}
+
+	type twoExpires struct {
+		A time.Time `ndb:"a,expires"`
+		B time.Time `ndb:"b,expires"`
+	}
+
+	s, err := schemaOf(reflect.TypeFor[session]())
+	if err != nil || s.expires != "expires_at" {
+		t.Fatalf("expires %q err %v, want expires_at", s.expires, err)
+	}
+
+	if _, err := schemaOf(reflect.TypeFor[twoExpires]()); err == nil {
+		t.Fatal("two expires fields must fail")
+	}
+
+	body, err := json.Marshal(ensureBody{ID: s.id, ExpiresField: s.expires})
+	if err != nil || string(body) != `{"id":"id","expires_field":"expires_at"}` {
+		t.Fatalf("ensure body %s err %v", body, err)
+	}
+}

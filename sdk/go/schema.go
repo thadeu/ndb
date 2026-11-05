@@ -8,13 +8,15 @@ import (
 )
 
 // schema is the mapping from a Go struct to a document, read from the
-// `ndb:"name[,option...]"` tags. Options: id, time, index, unique, and
-// version (the field holds "_v"). A field without an ndb tag uses its json
+// `ndb:"name[,option...]"` tags. Options: id, time, expires (the field
+// holds the expiry time of the document), index, unique, and version (the
+// field holds "_v"). A field without an ndb tag uses its json
 // name or its Go name; `ndb:"-"` or `json:"-"` skips it.
 type schema struct {
 	fields  []schemaField
 	id      string
 	time    string
+	expires string
 	indexes []string
 	unique  []string
 
@@ -119,6 +121,12 @@ func (s *schema) option(name, opt string) error {
 		}
 
 		s.time = name
+	case "expires":
+		if s.expires != "" {
+			return fmt.Errorf("ndb: more than one expires field (%s and %s)", s.expires, name)
+		}
+
+		s.expires = name
 	case "index":
 		s.indexes = append(s.indexes, name)
 	case "unique":

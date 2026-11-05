@@ -294,3 +294,42 @@ func TestDaemonCollectionsSealAndRecoverFromSegments(t *testing.T) {
 		t.Fatalf("after restart from a segment: err=%v", err)
 	}
 }
+
+func TestDirectCollectionHidesExpiredRowsAndKeepsTheFiles(t *testing.T) {
+	root := t.TempDir()
+	files := filepath.Join(root, "sessions")
+
+	if err := os.MkdirAll(files, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	lines := `{"sid":"gone","at":"2020-01-01T00:00:00Z","exp":"2020-01-02T00:00:00Z"}` + "\n" +
+		`{"sid":"kept","at":"2999-01-01T00:00:00Z","exp":"2999-01-02T00:00:00Z"}` + "\n"
+	file := filepath.Join(files, "a.ndjson")
+
+	if err := os.WriteFile(file, []byte(lines), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	def := catalog.Def{
+		Name: "sessions", Write: catalog.Direct, Path: filepath.Join(files, "*.ndjson"),
+		ID: "sid", Time: "at", Retention: "30d", ExpiresField: "exp",
+	}
+
+	db := open(t, cfg(filepath.Join(root, "data"), map[string]catalog.Def{"sessions": def}))
+
+	col, err := db.Get("sessions")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := col.Find(ctx, []byte(`{}`))
+	if err != nil || len(page.Rows) != 1 {
+		t.Fatalf("rows = %d err %v, want only the live one", len(page.Rows), err)
+	}
+
+	after, err := os.ReadFile(file)
+	if err != nil || string(after) != lines {
+		t.Fatalf("the source file changed: %q err %v", after, err)
+	}
+}

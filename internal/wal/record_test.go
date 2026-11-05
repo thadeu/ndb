@@ -167,3 +167,30 @@ func FuzzRoundTrip(f *testing.F) {
 		}
 	})
 }
+
+func TestExpiredDeleteRoundTrips(t *testing.T) {
+	rec := wal.Record{Tx: 7, TS: ts, Ops: []wal.Op{
+		{Kind: wal.Del, ID: "a", V: 2, Exp: true},
+		{Kind: wal.Del, ID: "b", V: 3},
+	}}
+
+	line, err := wal.Encode(nil, rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := wal.Decode(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !got.Ops[0].Exp || got.Ops[1].Exp {
+		t.Fatalf("exp flags: %+v", got.Ops)
+	}
+
+	plain, _ := wal.Encode(nil, wal.Record{Tx: 8, TS: ts, Ops: []wal.Op{{Kind: wal.Del, ID: "a", V: 2}}})
+
+	if bytes.Contains(plain, []byte("_exp")) {
+		t.Fatalf("a plain delete must not carry _exp: %s", plain)
+	}
+}

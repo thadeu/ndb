@@ -2,7 +2,10 @@
 // inject write, sync and rename failures.
 package fs
 
-import "os"
+import (
+	"os"
+	"time"
+)
 
 type File interface {
 	Write(p []byte) (int, error)
@@ -23,4 +26,9 @@ type FS interface {
 	Stat(path string) (os.FileInfo, error)
 	MkdirAll(path string) error
 	SyncDir(path string) error
+
+	// ReadDir lists a dir sorted by name. Chtimes sets the access and
+	// modification time of a file.
+	ReadDir(path string) ([]os.DirEntry, error)
+	Chtimes(path string, t time.Time) error
 }

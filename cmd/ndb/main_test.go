@@ -260,3 +260,63 @@ func rowsOn(t *testing.T, dir, name string) int {
 
 	return col.Stats().Rows
 }
+
+// TestBackupOnlineAndOffline backs up a running daemon through its socket,
+// stops it, backs up again from the files, and opens both copies.
+func TestBackupOnlineAndOffline(t *testing.T) {
+	dir := t.TempDir()
+	sock := sockPath(t)
+	absent := filepath.Join(dir, "absent.yml")
+
+	cmd := exec.Command(os.Args[0], "-test.run=^$")
+	cmd.Env = append(os.Environ(), childEnv+"=daemon", "NDB_DATA="+dir, "NDB_SOCK="+sock)
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	client := unixClient(sock)
+
+	waitHealthy(client)
+
+	put(client, "/v1/c/log", `{"id":"k"}`)
+
+	const n = 50
+
+	for i := range n {
+		if status := post(client, "/v1/c/log/insert", fmt.Sprintf(`{"insert":[{"k":"d%d"}]}`, i)); status != http.StatusOK {
+			t.Fatalf("insert %d: status %d", i, status)
+		}
+	}
+
+	online := filepath.Join(t.TempDir(), "online")
+
+	if err := run([]string{"backup", "-config", absent, "-data-dir", dir, "-unix", sock, online}); err != nil {
+		t.Fatalf("online backup: %v", err)
+	}
+
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cmd.Wait(); err != nil {
+		t.Fatal(err)
+	}
+
+	offline := filepath.Join(t.TempDir(), "offline")
+
+	if err := run([]string{"backup", "-config", absent, "-data-dir", dir, offline}); err != nil {
+		t.Fatalf("offline backup: %v", err)
+	}
+
+	for name, copyDir := range map[string]string{"online": online, "offline": offline} {
+		if got := rowsOn(t, copyDir, "log"); got != n {
+			t.Errorf("%s copy has %d rows, want %d", name, got, n)
+		}
+	}
+
+	if err := run([]string{"backup", "-config", absent, "-data-dir", dir}); err == nil {
+		t.Error("backup without a dest must fail")
+	}
+}

@@ -26,6 +26,13 @@ type source struct {
 	plan  string
 	cands []cand
 	segs  []segSnap
+
+	// held are the segments this query keeps open; release drops them.
+	held []*segRef
+}
+
+func (s source) release() {
+	releaseAll(s.held)
 }
 
 type segSnap struct {

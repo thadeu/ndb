@@ -10,14 +10,19 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
+	"sync/atomic"
 
+	"github.com/thadeu/ndb/internal/blob"
 	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/collection"
 	"github.com/thadeu/ndb/internal/config"
 	"github.com/thadeu/ndb/internal/cursors"
 	"github.com/thadeu/ndb/internal/fs"
 	"github.com/thadeu/ndb/internal/lock"
+	"github.com/thadeu/ndb/internal/metrics"
 	"github.com/thadeu/ndb/internal/tailer"
 )
 
@@ -30,6 +35,13 @@ type DB struct {
 	log  *slog.Logger
 	lock *lock.Lock
 	cat  *catalog.Catalog
+
+	// blobs is the content-addressed store under <data_dir>/blobs.
+	blobs *blob.Store
+
+	// gcRunning is 1 while a blob GC started by a compaction runs.
+	gcRunning atomic.Bool
+	gcWait    sync.WaitGroup
 
 	// cursors holds the position of each watch consumer.
 	cursors *cursors.Store
@@ -72,6 +84,15 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		return nil, err
 	}
 
+	blobs, err := blob.Open(fs.OS{}, filepath.Join(cfg.DataDir, "blobs"))
+	if err != nil {
+		cur.Close()
+		cat.Close()
+		lk.Release()
+
+		return nil, err
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	db := &DB{
@@ -79,6 +100,7 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		log:        log,
 		lock:       lk,
 		cat:        cat,
+		blobs:      blobs,
 		cursors:    cur,
 		ctx:        ctx,
 		cancel:     cancel,
@@ -107,6 +129,7 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 // releases the lock. Writes that were acked are durable before it returns.
 func (db *DB) Close() error {
 	db.cancel()
+	db.gcWait.Wait()
 
 	db.mu.Lock()
 	defer db.mu.Unlock()
@@ -248,12 +271,23 @@ func (db *DB) open(def catalog.Def) (*Collection, error) {
 		return db.openDirect(def, dir)
 	}
 
-	eng, err := collection.Open(collection.Config{Dir: dir, Data: dir, FS: fs.OS{}, Def: def, GroupLimit: db.groupLimit})
+	wm := &metrics.Writer{}
+
+	eng, err := collection.Open(collection.Config{
+		Dir:        dir,
+		Data:       dir,
+		FS:         fs.OS{},
+		Def:        def,
+		GroupLimit: db.groupLimit,
+		Blobs:      db.blobs,
+		Observer:   wm,
+		OnCompact:  db.compacted,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	return &Collection{name: def.Name, write: catalog.Engine, eng: eng, rd: eng}, nil
+	return &Collection{name: def.Name, write: catalog.Engine, eng: eng, rd: eng, wm: wm}, nil
 }
 
 // openDirect loads the files once before it returns, so a ready daemon
@@ -290,4 +324,20 @@ func (db *DB) openDirect(def catalog.Def, dir string) (*Collection, error) {
 	}()
 
 	return col, nil
+}
+
+// AllStats is the Stats of every open collection, sorted by name.
+func (db *DB) AllStats() []Stats {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+
+	out := make([]Stats, 0, len(db.cols))
+
+	for _, col := range db.cols {
+		out = append(out, col.Stats())
+	}
+
+	slices.SortFunc(out, func(a, b Stats) int { return strings.Compare(a.Name, b.Name) })
+
+	return out
 }

@@ -1,6 +1,6 @@
 # M11 — TS client (package `ndb`)
 
-Status: not started · Depends on: M07 (blob support waits for M12) · Plan: §12.2
+Status: done (light verification) · Depends on: M07 (blob support waits for M12) · Plan: §12.2
 
 ## Goal
 
