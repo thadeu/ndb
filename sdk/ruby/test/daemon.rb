@@ -8,6 +8,7 @@ require "minitest"
 # (macOS limits the path to 104 bytes). Stopped at process exit.
 module TestDaemon
   REPO_ROOT = File.expand_path("../../..", __dir__)
+  READY_DEADLINE = 15
 
   class << self
     attr_reader :socket, :data_dir, :binary
@@ -39,6 +40,20 @@ module TestDaemon
       @pid = nil
     end
 
+    # The daemon listens before recovery and answers /health with 503
+    # until recovery ends, so a connect alone does not mean it is ready.
+    def health_ok?(klass, *args)
+      io = klass.new(*args)
+
+      io.write("GET /health HTTP/1.0\r\n\r\n")
+
+      io.gets.to_s.split(" ")[1] == "200"
+    rescue SystemCallError, IOError
+      false
+    ensure
+      io&.close
+    end
+
     private
 
     def build(binary)
@@ -54,22 +69,17 @@ module TestDaemon
     end
 
     def wait_ready
-      200.times do
-        return if healthy?
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + READY_DEADLINE
+
+      until healthy?
+        raise "ndb daemon exited early:\n#{File.read(File.join(@tmp, 'ndb.log'))}" if Process.wait(@pid, Process::WNOHANG)
+        raise "ndb daemon did not become ready" if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
 
         sleep 0.05
       end
-
-      raise "ndb daemon did not become ready"
     end
 
-    def healthy?
-      UNIXSocket.new(socket).close
-
-      true
-    rescue SystemCallError
-      false
-    end
+    def healthy? = TestDaemon.health_ok?(UNIXSocket, socket)
   end
 end
 
@@ -132,17 +142,26 @@ class TcpDaemon
     server&.close
   end
 
+  # The daemon binds the unix socket before the TCP listener and answers
+  # /health with 503 until recovery ends: wait for 200, then for the TCP port.
   def wait_ready
-    200.times do
-      begin
-        UNIXSocket.new(socket).close
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + TestDaemon::READY_DEADLINE
 
-        return
-      rescue SystemCallError
-        sleep 0.05
-      end
+    until listening?
+      raise "tcp daemon exited early:\n#{File.read(File.join(@tmp, 'ndb.log'))}" if Process.wait(@pid, Process::WNOHANG)
+      raise "tcp daemon did not become ready" if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+
+      sleep 0.05
     end
+  end
 
-    raise "tcp daemon did not become ready"
+  def listening?
+    return false unless TestDaemon.health_ok?(UNIXSocket, socket)
+
+    TCPSocket.new("127.0.0.1", port).close
+
+    true
+  rescue SystemCallError
+    false
   end
 end

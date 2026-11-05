@@ -2,7 +2,8 @@
 
 # A tiny sample app: every 5 seconds it records one visit in the shared
 # "visits" collection and prints how many visits each app has.
-# NDB_URL (default unix:///run/ndb/ndb.sock) sets the daemon. With
+# NDB_URL (default unix:///run/ndb/ndb.sock, or tcp://host:port) sets the daemon;
+# NDB_TOKEN is the bearer token the SDK sends on TCP. With
 # NDB_DIRECT_DIR set it appends the visit to a file instead (direct mode).
 
 require "json"
@@ -17,9 +18,7 @@ POD = Socket.gethostname
 
 url = ENV.fetch("NDB_URL", "unix:///run/ndb/ndb.sock")
 
-abort "ndb: the Ruby SDK has no TCP transport yet (E13.6); use a unix:// URL" unless url.start_with?("unix://")
-
-NdbRecord.configure { |c| c.socket = url.delete_prefix("unix://") }
+NdbRecord.configure { |c| c.url = url }
 
 class Visit < NdbRecord::Base
   self.collection_name = "visits"

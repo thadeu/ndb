@@ -75,4 +75,4 @@ The apps append one JSON line per visit to `/data/logs/<app>-<pod>.ndjson` (one 
 - **Never put `data_dir` on NFS, EFS or any network volume.** `flock` and `fsync` are not reliable there.
 - **One ndb replica owns the data dir** (`flock`). A second daemon on the same dir fails to start. Do not scale ndb to 2.
 - **Clients reconnect after a daemon restart.** The apps in this example keep running while you do `docker compose restart ndb`, and they print `waiting for ndb` until it is back (recovery returns `503 not_ready`).
-- The Ruby SDK supports the unix socket only today.
+- All SDKs accept `NDB_URL` as `unix://...` or `tcp://host:port`, so the same apps run unchanged on another VM. See [cross-vm-wireguard](../cross-vm-wireguard/).

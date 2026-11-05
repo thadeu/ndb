@@ -27,6 +27,19 @@ SDK tests:
 (cd sdk/ts && pnpm install && pnpm test && pnpm lint && pnpm typecheck && pnpm build)
 ```
 
+## Docs site
+
+The site in `docs-site/` is built from `docs/dev/*.md` (the only source; no copies). It uses VitePress with a custom theme and the tokens of `brand/`.
+
+```bash
+cd docs-site
+pnpm install
+pnpm docs:dev      # live reload
+pnpm docs:build    # static site in docs-site/.vitepress/dist
+```
+
+A push to `main` that changes `docs/`, `docs-site/` or `brand/` deploys it to GitHub Pages (`.github/workflows/docs.yml`). Links in the docs that point outside `docs/dev/` become GitHub links in the site.
+
 ## Rules
 
 - Test first. Each change starts with a failing test.

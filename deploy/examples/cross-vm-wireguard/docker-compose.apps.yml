@@ -3,7 +3,8 @@
 #   docker compose -f docker-compose.apps.yml up --build -d
 #
 # Build context is the repo root, as in ../single-vm. The apps are the ones of
-# the single-vm example; they read NDB_URL.
+# the single-vm example; they read NDB_URL and NDB_TOKEN (the SDKs send the
+# token on TCP). Run with: NDB_TOKEN=$(ssh db-vm cat /etc/ndb/token) docker compose ...
 name: ndb-apps
 
 x-ndb-url: &ndb_url tcp://ndb.internal:7070
@@ -16,6 +17,7 @@ services:
     restart: unless-stopped
     environment:
       NDB_URL: *ndb_url
+      NDB_TOKEN: ${NDB_TOKEN:?set NDB_TOKEN}
     extra_hosts:
       # Replace with private DNS (ndb.internal -> 10.10.0.1) when you have it.
       - "ndb.internal:10.10.0.1"
@@ -27,9 +29,17 @@ services:
     restart: unless-stopped
     environment:
       NDB_URL: *ndb_url
+      NDB_TOKEN: ${NDB_TOKEN:?set NDB_TOKEN}
     extra_hosts:
       - "ndb.internal:10.10.0.1"
 
-  # The Ruby SDK has no TCP transport yet (milestone item E13.6), so a Ruby
-  # app on another VM cannot use ndb today. When it lands, add the service of
-  # ../single-vm with NDB_URL: *ndb_url and the same extra_hosts.
+  ruby:
+    build:
+      context: ../../..
+      dockerfile: deploy/examples/single-vm/apps/ruby/Dockerfile
+    restart: unless-stopped
+    environment:
+      NDB_URL: *ndb_url
+      NDB_TOKEN: ${NDB_TOKEN:?set NDB_TOKEN}
+    extra_hosts:
+      - "ndb.internal:10.10.0.1"

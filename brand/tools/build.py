@@ -1,13 +1,16 @@
-"""Builds the ndb brand SVG files from the mark geometry.
+"""Builds the ndb brand SVG files from geometry.
 
     python3 brand/tools/build.py && brand/tools/render.sh
 
-The mark is a pair of braces with three NDJSON lines inside. The lines have
-different lengths, and the last line, the committed line, is the accent color.
-The wordmark `ndb` is drawn from geometry, so it needs no font.
+The mark is a mascot that is also the logo: a ramen bowl. "One line, one
+noodle": the noodles are the lines of an NDJSON file, and the last noodle, the
+committed line, is the accent color. The wordmark `ndb` and the supporting cast
+(onigiri, caterpillar, scroll) are drawn from geometry too, so no file needs a
+font. Only the tagline of the social preview is an outlined font text.
 """
 
 import json
+import math
 import pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -19,120 +22,222 @@ PAPER = '#FFFFFF'
 ACCENT = '#F0047F'
 MUTED = '#6B6B76'
 LINE = '#E5E5E5'
+NOODLE = '#F6D58E'
 
 DARK_INK = '#F4F4F6'
-DARK_PAPER = '#0E0E11'
-DARK_MUTED = '#9A9AA5'
-DARK_LINE = '#26262C'
 
-ON_LIGHT = {'ink': INK, 'commit': ACCENT}
-ON_DARK = {'ink': DARK_INK, 'commit': ACCENT}
+ON_LIGHT = {'outline': INK, 'bowl': PAPER, 'noodle': NOODLE, 'accent': ACCENT, 'steam': '#C9C9D1', 'cheek': ACCENT, 'cheek_opacity': 0.45}
+ON_DARK = {**ON_LIGHT, 'steam': '#B8B8C2', 'halo': PAPER}
+ON_ACCENT = {**ON_LIGHT, 'accent': INK, 'steam': PAPER, 'cheek': PAPER, 'cheek_opacity': 0.6}
 
-PRIMARY = {'top': 7, 'bottom': 57, 'spine': 14, 'radius': 8, 'tip': 4, 'brace': 5.5, 'bar': 5.5, 'ys': (22, 32, 42), 'x': 21, 'lengths': (20, 12, 23)}
-SMALL = {'top': 8, 'bottom': 56, 'spine': 14, 'radius': 6, 'tip': 3.5, 'brace': 7, 'bar': 7, 'ys': (22, 32, 42), 'x': 22, 'lengths': (17, 10, 21)}
+PRIMARY = {'outline': 5, 'steam': True, 'box': (6, 0, 188, 196), 'face': 1, 'dome': 'M28 112C28 76 60 56 100 56C140 56 172 76 172 112Z', 'lines': ((62, 76, 60, 2.2, 1.75), (52, 90, 74, 2.4, 2), (48, 103, 90, 2.4, 2)), 'line': 5.5, 'halo': 3}
+SMALL = {'outline': 7, 'steam': False, 'box': (4, 44, 192, 156), 'face': 1.3, 'dome': 'M26 112C26 76 58 56 100 56C142 56 174 76 174 112Z', 'lines': ((60, 82, 56, 3, 1.5), (50, 99, 84, 3, 1.5)), 'line': 9, 'halo': 4}
+TINY = {'outline': 8, 'steam': False, 'box': (2, 80, 196, 122), 'face': 1.45, 'dome': None, 'lines': ((52, 98, 96, 5, 1.5),), 'line': 13, 'halo': 4}
 
-LETTER_GAPS = (12, 18)
+LETTER_GAPS = (9, 14)
+LETTER_WIDTH = 116
+OVERSHOOT = 2
+MARK_BASELINE = 190.5
+MARK_BOX_HEIGHT = 196
 X_HEIGHT = 100
 ASCENDER = 145
-STEM = 19
+STEM = 35
 
 
-def layout(spec):
-    """Returns the spec with its ink bounds in the 64 grid. The bounds are
-    centered on x. The braces are centered on y by the spec values."""
-    left = spec['spine'] - spec['tip'] - spec['brace'] / 2
-    top = spec['top'] - spec['brace'] / 2
-    bottom = spec['bottom'] + spec['brace'] / 2
-    width = 64 - 2 * left
-
-    return {**spec, 'box': (left, top, width, bottom - top)}
+def mono(color):
+    """One color for everything: outlines and details only, no fills."""
+    return {'outline': color, 'bowl': 'none', 'noodle': 'none', 'accent': color, 'steam': color, 'cheek': 'none', 'cheek_opacity': 1}
 
 
-def brace(spec, side):
-    """One brace as a stroked path. The right brace mirrors the left one around
-    the vertical axis of the grid."""
-    s, r, t, top, bottom = spec['spine'], spec['radius'], spec['tip'], spec['top'], spec['bottom']
-    mid = (top + bottom) / 2
-    flip = side == 'right'
-    x = lambda value: 64 - value if flip else value
-    inward, outward = (0, 1) if flip else (1, 0)
+def face(cx, cy, scale, c):
+    """The shared face: dot eyes with a highlight, cheeks, a small smile."""
+    eye = c['outline']
+    shine = c['bowl'] if c['bowl'] != 'none' else 'none'
+    parts = [
+        f'<circle cx="-18" cy="0" r="6.5" fill="{eye}"/>',
+        f'<circle cx="18" cy="0" r="6.5" fill="{eye}"/>',
+        f'<circle cx="-16" cy="-2.5" r="2.2" fill="{shine}"/>',
+        f'<circle cx="20" cy="-2.5" r="2.2" fill="{shine}"/>',
+        f'<ellipse cx="-31" cy="11" rx="8" ry="4.5" fill="{c["cheek"]}" opacity="{c["cheek_opacity"]}"/>',
+        f'<ellipse cx="31" cy="11" rx="8" ry="4.5" fill="{c["cheek"]}" opacity="{c["cheek_opacity"]}"/>',
+        f'<path d="M-6 8Q0 15 6 8" fill="none" stroke="{eye}" stroke-width="3.5" stroke-linecap="round"/>',
+    ]
+
+    return f'<g transform="translate({cx:g} {cy:g}) scale({scale:g})">{"".join(parts)}</g>'
+
+
+def outline_attrs(c, width):
+    return f'stroke="{c["outline"]}" stroke-width="{width:g}" stroke-linejoin="round" stroke-linecap="round"'
+
+
+def wavy(x, y, length, amp, waves, samples=28):
+    """A soft sine line with round caps: one noodle."""
+    points = []
+
+    for step in range(samples + 1):
+        t = step / samples
+        points.append(f'{x + length * t:.2f} {y + amp * math.sin(2 * math.pi * waves * t):.2f}')
+
+    return 'M' + 'L'.join(points)
+
+
+BOWL = 'M14 112H186C186 160 150 188 100 188C50 188 14 160 14 112Z'
+
+
+def ramen(spec, c):
+    """The ramen bowl on a 200 unit grid. Back to front: a halo on dark
+    surfaces, steam, noodle dome, the wavy noodle lines, the bowl, the face."""
+    width = spec['outline']
+    out = []
+
+    if c.get('halo'):
+        extra = width + 2 * spec['halo']
+        halo = f'fill="{c["halo"]}" stroke="{c["halo"]}" stroke-width="{extra:g}" stroke-linejoin="round"'
+
+        if spec['dome']:
+            out.append(f'<path d="{spec["dome"]}" {halo}/>')
+
+        out.append(f'<path d="{BOWL}" {halo}/>')
+
+    if spec['steam']:
+        steam = 'M78 12q-6 7 0 14q6 7 0 14M100 6q-6 7 0 14q6 7 0 14M122 12q-6 7 0 14q6 7 0 14'
+        out.append(f'<path d="{steam}" fill="none" stroke="{c["steam"]}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>')
+
+    if spec['dome']:
+        out.append(f'<path d="{spec["dome"]}" fill="{c["noodle"]}" {outline_attrs(c, width)}/>')
+
+    last = len(spec['lines']) - 1
+
+    for index, (x, y, length, amp, waves) in enumerate(spec['lines']):
+        color = c['accent'] if index == last else c['outline']
+        out.append(f'<path d="{wavy(x, y, length, amp, waves)}" fill="none" stroke="{color}" stroke-width="{spec["line"]:g}" stroke-linecap="round" stroke-linejoin="round"/>')
+
+    out.append(f'<path d="{BOWL}" fill="{c["bowl"]}" {outline_attrs(c, width)}/>')
+    out.append(face(100, 148, spec['face'], c))
+
+    return ''.join(out)
+
+
+def onigiri(c):
+    shape = 'M100 24C113 24 121 33 129 47L174 128C185 148 174 172 150 172H50C26 172 15 148 26 128L71 47C79 33 87 24 100 24Z'
+    nori = c['outline']
+    line = '#3A3A44' if c['outline'] == INK else c['outline']
 
     return (
-        f'M{x(s + r):g} {top:g}'
-        f'A{r:g} {r:g} 0 0 {outward} {x(s):g} {top + r:g}'
-        f'V{mid - t:g}'
-        f'A{t:g} {t:g} 0 0 {inward} {x(s - t):g} {mid:g}'
-        f'A{t:g} {t:g} 0 0 {inward} {x(s):g} {mid + t:g}'
-        f'V{bottom - r:g}'
-        f'A{r:g} {r:g} 0 0 {outward} {x(s + r):g} {bottom:g}'
+        f'<clipPath id="shape"><path d="{shape}"/></clipPath>'
+        f'<path d="{shape}" fill="{c["bowl"]}"/>'
+        f'<g clip-path="url(#shape)"><rect x="58" y="122" width="84" height="60" fill="{nori}"/>'
+        f'<path d="M72 138H122M72 150H108" stroke="{line}" stroke-width="5" stroke-linecap="round"/>'
+        f'<path d="M72 162H128" stroke="{c["accent"]}" stroke-width="5" stroke-linecap="round"/></g>'
+        f'<path d="{shape}" fill="none" {outline_attrs(c, 5)}/>'
+        + face(100, 94, 1, c)
     )
 
 
-def mark_body(spec, colors=None, classes=False):
-    """SVG elements for the mark. With classes, colors come from a style."""
-    out = []
+def caterpillar(c):
+    o = c['outline']
 
-    for side in ('left', 'right'):
-        paint = 'class="ink"' if classes else f'stroke="{colors["ink"]}"'
-        out.append(f'<path d="{brace(spec, side)}" fill="none" {paint} stroke-width="{spec["brace"]}" stroke-linecap="round" stroke-linejoin="round"/>')
+    return (
+        f'<path d="M42 140v14M72 144v14M102 146v14" stroke="{o}" stroke-width="4.5" stroke-linecap="round"/>'
+        f'<circle cx="34" cy="122" r="22" fill="{c["accent"]}" {outline_attrs(c, 5)}/>'
+        f'<circle cx="66" cy="124" r="24" fill="{c["bowl"]}" {outline_attrs(c, 5)}/>'
+        f'<circle cx="100" cy="122" r="25" fill="{c["bowl"]}" {outline_attrs(c, 5)}/>'
+        f'<path d="M136 72q-8 -22 -22 -28M162 70q8 -22 24 -26" fill="none" stroke="{o}" stroke-width="4.5" stroke-linecap="round"/>'
+        f'<circle cx="113" cy="43" r="6" fill="{o}"/><circle cx="187" cy="43" r="6" fill="{o}"/>'
+        f'<circle cx="148" cy="108" r="40" fill="{c["bowl"]}" {outline_attrs(c, 5)}/>'
+        + face(148, 106, 0.9, c)
+    )
 
-    last = len(spec['ys']) - 1
 
-    for index, (y, length) in enumerate(zip(spec['ys'], spec['lengths'])):
-        role = 'commit' if index == last else 'ink'
-        paint = f'class="{role}"' if classes else f'stroke="{colors[role]}"'
-        out.append(f'<path d="M{spec["x"]:g} {y:g}h{length:g}" fill="none" {paint} stroke-width="{spec["bar"]}" stroke-linecap="round"/>')
+def scroll(c):
+    o = c['outline']
 
-    return ''.join(out)
+    return (
+        f'<rect x="46" y="44" width="108" height="114" fill="{c["bowl"]}" {outline_attrs(c, 5)}/>'
+        f'<path d="M66 112H130M66 126H112" stroke="{o}" stroke-width="6" stroke-linecap="round"/>'
+        f'<path d="M66 140H136" stroke="{c["accent"]}" stroke-width="6" stroke-linecap="round"/>'
+        + face(100, 80, 1, c)
+        + f'<rect x="32" y="28" width="136" height="26" rx="13" fill="{c["noodle"]}" {outline_attrs(c, 5)}/>'
+        f'<rect x="32" y="150" width="136" height="26" rx="13" fill="{c["noodle"]}" {outline_attrs(c, 5)}/>'
+    )
 
 
 def svg(view_box, body, title='ndb'):
     return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{view_box}" role="img" aria-label="{title}"><title>{title}</title>{body}</svg>\n'
 
 
-def ndb_letters():
-    """The three letters as one path, on a baseline at y = 0 and an x-height of
-    100 units. Bowls and arch are half or full rings with a stem width of 19."""
-    radius, inner = X_HEIGHT / 2, X_HEIGHT / 2 - STEM
-    gap_nd, gap_db = LETTER_GAPS
-    ring = lambda cx: (
-        f'M{cx - radius:g} {-radius:g}A{radius:g} {radius:g} 0 1 1 {cx + radius:g} {-radius:g}A{radius:g} {radius:g} 0 1 1 {cx - radius:g} {-radius:g}Z'
-        f'M{cx - inner:g} {-radius:g}A{inner:g} {inner:g} 0 1 0 {cx + inner:g} {-radius:g}A{inner:g} {inner:g} 0 1 0 {cx - inner:g} {-radius:g}Z'
+def box_string(box):
+    return ' '.join(f'{value:.3f}' for value in box)
+
+
+def capsule(x0, x1, top, bottom):
+    """A stem with full round ends, as a filled path."""
+    r = (x1 - x0) / 2
+
+    return f'M{x0:g} {top + r:g}A{r:g} {r:g} 0 0 1 {x1:g} {top + r:g}V{bottom - r:g}A{r:g} {r:g} 0 0 1 {x0:g} {bottom - r:g}Z'
+
+
+def foot(x0, x1, top, bottom):
+    """A stem with a flat top (hidden inside an arch) and a round foot."""
+    r = (x1 - x0) / 2
+
+    return f'M{x0:g} {top:g}H{x1:g}V{bottom - r:g}A{r:g} {r:g} 0 0 1 {x0:g} {bottom - r:g}Z'
+
+
+def ring(cx, cy, rx, ry, ix, iy):
+    """A ring of ellipses: the outer one runs clockwise, the counter runs the
+    other way, so the nonzero fill leaves the counter open."""
+    return (
+        f'M{cx - rx:g} {cy:g}A{rx:g} {ry:g} 0 1 1 {cx + rx:g} {cy:g}A{rx:g} {ry:g} 0 1 1 {cx - rx:g} {cy:g}Z'
+        f'M{cx - ix:g} {cy:g}A{ix:g} {iy:g} 0 1 0 {cx + ix:g} {cy:g}A{ix:g} {iy:g} 0 1 0 {cx - ix:g} {cy:g}Z'
     )
-    stem = lambda x, top: f'M{x:g} {-top:g}h{STEM}V0h{-STEM}Z'
+
+
+def ndb_letters():
+    """The three letters as filled paths, with the baseline at y = 0 and an
+    x-height of 100 units. The vertical stem is 35 units (0.35 x-heights), a
+    heavy weight; the horizontal parts are 30 units, a little lighter, so the
+    counters stay open. Ends and feet are fully round, like the mascot. The
+    bowls of d and b overshoot the baseline and the x-height by 2 units. The
+    gaps are optical: a round side needs less room than a straight one."""
+    gap_nd, gap_db = LETTER_GAPS
+    over = OVERSHOOT
+    width = LETTER_WIDTH
+    half = width / 2
+    mid = -X_HEIGHT / 2
+    thin = 30
 
     n_x = 0
-    d_x = n_x + X_HEIGHT + gap_nd
-    b_x = d_x + X_HEIGHT + gap_db
+    d_x = n_x + width + gap_nd
+    b_x = d_x + width + gap_db
 
     arch = (
-        f'M{n_x:g} {-radius:g}A{radius:g} {radius:g} 0 0 1 {n_x + X_HEIGHT:g} {-radius:g}'
-        f'V0h{-STEM}V{-radius:g}A{inner:g} {inner:g} 0 0 0 {n_x + STEM:g} {-radius:g}Z'
+        f'M{n_x:g} {mid:g}A{half:g} {X_HEIGHT / 2:g} 0 0 1 {n_x + width:g} {mid:g}'
+        f'H{n_x + width - STEM:g}A{half - STEM:g} {X_HEIGHT / 2 - thin:g} 0 0 0 {n_x + STEM:g} {mid:g}Z'
     )
+    bowl = lambda x: ring(x + half, mid, half, X_HEIGHT / 2 + over, half - STEM, X_HEIGHT / 2 + over - thin)
 
-    path = (
-        stem(n_x, X_HEIGHT) + arch
-        + ring(d_x + radius) + stem(d_x + X_HEIGHT - STEM, ASCENDER)
-        + stem(b_x, ASCENDER) + ring(b_x + radius)
-    )
+    n = capsule(n_x, n_x + STEM, -X_HEIGHT, 0) + arch + foot(n_x + width - STEM, n_x + width, mid, 0)
+    d = bowl(d_x) + capsule(d_x + width - STEM, d_x + width, -ASCENDER, over)
+    b = capsule(b_x, b_x + STEM, -ASCENDER, over) + bowl(b_x)
 
-    return path, [0, -ASCENDER, b_x + X_HEIGHT, 0]
+    return n + d + b, [0, -ASCENDER, b_x + width, over]
 
 
 NDB_PATH, NDB_BOUNDS = ndb_letters()
 TEXTS['wordmark'] = {'path': NDB_PATH, 'bounds': NDB_BOUNDS, 'x_height': X_HEIGHT}
 
 
-def box_string(box):
-    return ' '.join(f'{value:.3f}' for value in box)
-
-
 def text_group(name, x, baseline, x_height, color):
-    """Places an outlined text so that its x-height is x_height units."""
+    """Places an outlined text so that its x-height is x_height units. The
+    wordmark is stroked (round ends); the tagline is a filled outline."""
     entry = TEXTS[name]
     scale = x_height / entry['x_height']
+    place = f'transform="translate({x:.3f} {baseline:.3f}) scale({scale:.6f})"'
 
-    return f'<path transform="translate({x:.3f} {baseline:.3f}) scale({scale:.6f})" d="{entry["path"]}" fill="{color}"/>', scale
+    paint = f'fill="{color}"'
+
+    return f'<path {place} d="{entry["path"]}" {paint}/>', scale
 
 
 def ink(name, scale):
@@ -141,60 +246,58 @@ def ink(name, scale):
     return left * scale, top * scale, right * scale, bottom * scale
 
 
-def placed_mark(spec, colors, x, y, height):
+def placed_mark(spec, c, x, y, height):
     bx, by, bw, bh = spec['box']
     scale = height / bh
 
-    return f'<g transform="translate({x:.3f} {y:.3f}) scale({scale:.6f}) translate({-bx:.3f} {-by:.3f})">{mark_body(spec, colors)}</g>', bw * scale
+    return f'<g transform="translate({x:.3f} {y:.3f}) scale({scale:.6f}) translate({-bx:.3f} {-by:.3f})">{ramen(spec, c)}</g>', bw * scale
 
 
-def lockup(primary, colors, word_color):
-    """Horizontal lockup. The mark is as tall as the ascender of the wordmark
-    and sits on the baseline. The gap is 0.5 x-heights."""
-    x_height = 100
-    mark_height = ASCENDER
-    baseline = mark_height
+def lockup(c, word_color):
+    """Horizontal lockup. The x-height of the wordmark is 0.47 of the mascot
+    height, the wordmark sits on the visual baseline of the bowl, and the gap is
+    0.2 of the mascot height. A small pad keeps the last letter inside."""
+    height = float(MARK_BOX_HEIGHT)
+    xh = 0.47 * height
+    baseline = MARK_BASELINE - OVERSHOOT * xh / X_HEIGHT
 
-    mark, mark_width = placed_mark(primary, colors, 0, 0, mark_height)
-    _, scale = text_group('wordmark', 0, 0, x_height, word_color)
+    mark, mark_width = placed_mark(PRIMARY, c, 0, 0, height)
+    _, scale = text_group('wordmark', 0, 0, xh, word_color)
     left, top, right, bottom = ink('wordmark', scale)
-    word_x = mark_width + 0.5 * x_height - left
-    word, _ = text_group('wordmark', word_x, baseline, x_height, word_color)
+    word_x = mark_width + 0.2 * height - left
+    word, _ = text_group('wordmark', word_x, baseline, xh, word_color)
 
-    return svg(f'0 0 {word_x + right:.3f} {baseline:.3f}', mark + word)
+    return svg(f'0 0 {word_x + right + 3:.3f} {height:.3f}', mark + word)
 
 
-def stacked(primary, colors, word_color):
-    """Stacked lockup. The mark is 2.4 x-heights tall, with 0.8 x-heights of
+def stacked(c, word_color):
+    """Stacked lockup. The mascot is 3 x-heights tall, with 0.5 x-heights of
     space above the word."""
-    x_height = 100
-    mark_height = 2.4 * x_height
+    mark_height = 3 * X_HEIGHT
 
-    _, scale = text_group('wordmark', 0, 0, x_height, word_color)
+    _, scale = text_group('wordmark', 0, 0, X_HEIGHT, word_color)
     left, top, right, bottom = ink('wordmark', scale)
     word_width = right - left
 
-    bx, by, bw, bh = primary['box']
+    bx, by, bw, bh = PRIMARY['box']
     mark_width = bw * mark_height / bh
-    width = max(word_width, mark_width)
+    width = max(word_width, mark_width) + 6
 
-    mark, _ = placed_mark(primary, colors, (width - mark_width) / 2, 0, mark_height)
-    baseline = mark_height + 0.8 * x_height - top
-    word, _ = text_group('wordmark', (width - word_width) / 2 - left, baseline, x_height, word_color)
+    mark, _ = placed_mark(PRIMARY, c, (width - mark_width) / 2, 0, mark_height)
+    baseline = mark_height + 0.5 * X_HEIGHT - top
+    word, _ = text_group('wordmark', (width - word_width) / 2 - left, baseline, X_HEIGHT, word_color)
 
-    return svg(f'0 0 {width:.3f} {baseline + bottom:.3f}', mark + word)
+    return svg(f'0 0 {width:.3f} {baseline + bottom + 2:.3f}', mark + word)
 
 
 def wordmark(color):
-    entry = TEXTS['wordmark']
-    left, top, right, bottom = entry['bounds']
+    body, _ = text_group('wordmark', 0, 0, X_HEIGHT, color)
+    left, top, right, bottom = NDB_BOUNDS
 
-    return svg(f'{left} {top} {right - left} {bottom - top}', f'<path d="{entry["path"]}" fill="{color}"/>')
+    return svg(f'{left - 2} {top - 2} {right - left + 4} {bottom - top + 4}', body.replace(' transform="translate(0.000 0.000) scale(1.000000)"', ''))
 
 
 def squircle(size=100, power=5, steps=180):
-    import math
-
     points = []
 
     for step in range(steps):
@@ -209,15 +312,15 @@ def squircle(size=100, power=5, steps=180):
 
 TILES = {
     'paper': {'fill': PAPER, 'colors': ON_LIGHT, 'edge': (INK, 0.12)},
-    'ink': {'fill': INK, 'colors': {'ink': PAPER, 'commit': ACCENT}, 'edge': None},
-    'accent': {'fill': ACCENT, 'colors': {'ink': PAPER, 'commit': INK}, 'edge': None},
+    'ink': {'fill': INK, 'colors': ON_DARK, 'edge': None},
+    'accent': {'fill': ACCENT, 'colors': ON_ACCENT, 'edge': None},
 }
 
 
-def app_icon(primary, tile, shape):
+def app_icon(tile, shape):
     """An app icon. The squircle shape is for documents and stores. The square
     shape is for platforms that cut their own mask, such as iOS and Android.
-    The mark stays inside the maskable safe zone in both shapes."""
+    The mascot stays inside the maskable safe zone in both shapes."""
     outline = squircle() if shape == 'squircle' else 'M0 0H100V100H0Z'
     body = f'<path d="{outline}" fill="{tile["fill"]}"/>'
 
@@ -225,60 +328,55 @@ def app_icon(primary, tile, shape):
         color, opacity = tile['edge']
         body += f'<path d="{outline}" fill="none" stroke="{color}" stroke-opacity="{opacity}" stroke-width=".6" transform="translate(.3 .3) scale(.994)"/>'
 
-    body += f'<svg x="19" y="19" width="62" height="62" viewBox="0 0 64 64">{mark_body(primary, tile["colors"])}</svg>'
+    body += f'<svg x="15" y="15" width="70" height="70" viewBox="{box_string(PRIMARY["box"])}">{ramen(PRIMARY, tile["colors"])}</svg>'
 
     return svg('0 0 100 100', body)
 
 
-def small_box(small):
-    side = max(small['box'][2], small['box'][3]) + 3
+def square_box(spec, pad=0.0):
+    """A square view box that centers the box of the spec."""
+    x, y, w, h = spec['box']
+    side = max(w, h) * (1 + pad)
 
-    return side, f'{32 - side / 2:.3f} {32 - side / 2:.3f} {side:.3f} {side:.3f}'
-
-
-def favicon(small):
-    """The favicon follows the light or dark theme of the browser."""
-    style = (
-        f'<style>.ink{{stroke:{INK}}}.commit{{stroke:{ACCENT}}}'
-        f'@media (prefers-color-scheme:dark){{.ink{{stroke:{DARK_INK}}}}}</style>'
-    )
-
-    return svg(small_box(small)[1], style + mark_body(small, classes=True))
+    return side, (x + w / 2 - side / 2, y + h / 2 - side / 2, side, side)
 
 
-def favicon_tile(small):
-    """A favicon on an ink tile, for PNG and ICO files that cannot follow the
-    browser theme."""
-    side = small_box(small)[0]
-    inset = side * 0.06
-    full = side + 2 * inset
-    x0 = 32 - side / 2 - inset
-    body = f'<rect x="{x0:.3f}" y="{x0:.3f}" width="{full:.3f}" height="{full:.3f}" rx="{full * 0.22:.3f}" fill="{INK}"/>' + mark_body(small, {'ink': PAPER, 'commit': ACCENT})
+def small_mark(c, spec=SMALL):
+    side, box = square_box(spec, 0.04)
 
-    return svg(f'{x0:.3f} {x0:.3f} {full:.3f} {full:.3f}', body)
+    return svg(box_string(box), ramen(spec, c))
 
 
-def social(primary):
+def favicon_tile():
+    """A favicon on an ink tile, for PNG and ICO files."""
+    side, (x0, y0, full, _) = square_box(TINY, 0.25)
+    tile = f'<rect x="{x0:.3f}" y="{y0:.3f}" width="{full:.3f}" height="{full:.3f}" rx="{full * 0.22:.3f}" fill="{INK}"/>'
+
+    return svg(box_string((x0, y0, full, full)), tile + ramen(TINY, ON_DARK))
+
+
+def social():
     """The GitHub social preview, 1280 by 640, on paper."""
-    x_height = 84
-    mark_height = ASCENDER * x_height / X_HEIGHT
-    baseline = 330
+    height = 300.0
+    xh = 0.47 * height
+    top = 96
+    baseline = top + height * MARK_BASELINE / MARK_BOX_HEIGHT - OVERSHOOT * xh / X_HEIGHT
 
-    _, scale = text_group('wordmark', 0, 0, x_height, INK)
-    left, top, right, bottom = ink('wordmark', scale)
+    _, scale = text_group('wordmark', 0, 0, xh, INK)
+    left, _, right, _ = ink('wordmark', scale)
 
-    bx, by, bw, bh = primary['box']
-    mark_width = bw * mark_height / bh
-    total = mark_width + 0.5 * x_height + (right - left)
+    bx, by, bw, bh = PRIMARY['box']
+    mark_width = bw * height / bh
+    total = mark_width + 0.2 * height + (right - left)
     x = (1280 - total) / 2
 
-    mark, _ = placed_mark(primary, ON_LIGHT, x, baseline - mark_height, mark_height)
-    word, _ = text_group('wordmark', x + mark_width + 0.5 * x_height - left, baseline, x_height, INK)
+    mark, _ = placed_mark(PRIMARY, ON_LIGHT, x, top, height)
+    word, _ = text_group('wordmark', x + mark_width + 0.2 * height - left, baseline, xh, INK)
 
-    tag_height = 20
+    tag_height = 21
     _, tag_scale = text_group('tagline', 0, 0, tag_height, MUTED)
     tag_left, _, tag_right, _ = ink('tagline', tag_scale)
-    tagline, _ = text_group('tagline', (1280 - (tag_right - tag_left)) / 2 - tag_left, baseline + 96, tag_height, MUTED)
+    tagline, _ = text_group('tagline', (1280 - (tag_right - tag_left)) / 2 - tag_left, top + height + 70, tag_height, MUTED)
 
     rule = f'<rect x="0" y="624" width="1280" height="16" fill="{ACCENT}"/>'
     frame = f'<rect x=".5" y=".5" width="1279" height="639" fill="{PAPER}" stroke="{LINE}"/>'
@@ -289,35 +387,45 @@ def social(primary):
 def main():
     SVG.mkdir(exist_ok=True)
 
-    primary = layout(PRIMARY)
-    small = layout(SMALL)
-    box = small_box(small)[1]
+    box = box_string(PRIMARY['box'])
 
     files = {
-        'mark-on-dark.svg': svg('0 0 64 64', mark_body(primary, ON_DARK)),
-        'mark-on-light.svg': svg('0 0 64 64', mark_body(primary, ON_LIGHT)),
-        'mark-white.svg': svg('0 0 64 64', mark_body(primary, {'ink': PAPER, 'commit': PAPER})),
-        'mark-ink.svg': svg('0 0 64 64', mark_body(primary, {'ink': INK, 'commit': INK})),
-        'mark-small-on-dark.svg': svg(box, mark_body(small, ON_DARK)),
-        'mark-small-on-light.svg': svg(box, mark_body(small, ON_LIGHT)),
-        'favicon.svg': favicon(small),
-        'favicon-tile.svg': favicon_tile(small),
+        'mark-on-dark.svg': svg(box, ramen(PRIMARY, ON_DARK)),
+        'mark-on-light.svg': svg(box, ramen(PRIMARY, ON_LIGHT)),
+        'mark-white.svg': svg(box, ramen(PRIMARY, mono(PAPER))),
+        'mark-ink.svg': svg(box, ramen(PRIMARY, mono(INK))),
+        'mark-small-on-dark.svg': small_mark(ON_DARK),
+        'mark-small-on-light.svg': small_mark(ON_LIGHT),
+        'favicon.svg': small_mark(ON_LIGHT, TINY),
+        'favicon-tile.svg': favicon_tile(),
         'wordmark-on-dark.svg': wordmark(DARK_INK),
         'wordmark-on-light.svg': wordmark(INK),
-        'lockup-on-dark.svg': lockup(primary, ON_DARK, DARK_INK),
-        'lockup-on-light.svg': lockup(primary, ON_LIGHT, INK),
-        'lockup-stacked-on-dark.svg': stacked(primary, ON_DARK, DARK_INK),
-        'lockup-stacked-on-light.svg': stacked(primary, ON_LIGHT, INK),
-        'social-preview.svg': social(primary),
+        'lockup-on-dark.svg': lockup(ON_DARK, DARK_INK),
+        'lockup-on-light.svg': lockup(ON_LIGHT, INK),
+        'lockup-stacked-on-dark.svg': stacked(ON_DARK, DARK_INK),
+        'lockup-stacked-on-light.svg': stacked(ON_LIGHT, INK),
+        'social-preview.svg': social(),
     }
 
     for name, tile in TILES.items():
-        files[f'app-icon-{name}.svg'] = app_icon(primary, tile, 'squircle')
+        files[f'app-icon-{name}.svg'] = app_icon(tile, 'squircle')
 
-    files['app-icon-square.svg'] = app_icon(primary, TILES['ink'], 'square')
+    files['app-icon-square.svg'] = app_icon(TILES['ink'], 'square')
 
     for name, content in files.items():
         (SVG / name).write_text(content)
+
+    extras = SVG.parent / 'extras' / 'cast'
+    extras.mkdir(parents=True, exist_ok=True)
+
+    cast = {
+        'onigiri': onigiri(ON_LIGHT),
+        'caterpillar': caterpillar(ON_LIGHT),
+        'scroll': scroll(ON_LIGHT),
+    }
+
+    for name, body in cast.items():
+        (extras / f'cast-{name}.svg').write_text(svg('0 0 200 200', body, name))
 
     print(f'{len(files)} files in {SVG}')
 

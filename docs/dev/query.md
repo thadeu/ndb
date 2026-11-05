@@ -158,7 +158,9 @@ The body is `{"error":{"code":"...","message":"..."}}`.
 | `invalid_doc`, `missing_id`, `invalid_id`, `immutable_id`, `invalid_batch`, `invalid_path`, `invalid_index` | 400 | A document or definition is not valid. |
 | `request_too_large`, `line_too_large` | 413 | Body or line is over `max_line_size` (or the blob limit). |
 | `invalid_blob_ref` | 400 | The blob reference is not `sha256:<64 hex>`. |
+| `unauthorized` | 401 | TCP request without the right bearer token (`-token-file`). |
 | `forbidden` | 403 | For example, backup over TCP. |
+| `history_truncated` | 410 | A `watch` needs WAL files that `wal_retention` deleted. |
 | `not_ready` | 503 | The daemon is still recovering. Retry. |
 | `closed` | 503 | The daemon is shutting down. |
 | `canceled` | 499 | The client left before the answer. |

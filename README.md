@@ -7,7 +7,7 @@
 
 # ndb
 
-A query engine for NDJSON. It is one Go daemon with a MongoDB-style JSON query API over HTTP, on a unix socket (and optional TCP). Go, Ruby and TypeScript SDKs call the same API, so the same query gives the same result in every language and from `curl`.
+A query engine for NDJSON. It is one Go daemon with a MongoDB-style JSON query API over HTTP, on a unix socket (and optional TCP with a bearer token). Go, Ruby and TypeScript SDKs call the same API, so the same query gives the same result in every language and from `curl`.
 
 Your apps keep NDJSON as the source of truth: either they append to files (direct mode) or ndb keeps a write-ahead log for them (engine mode). ndb builds indexes and columnar segments from that data. If you delete the derived data, ndb rebuilds it.
 
@@ -82,7 +82,8 @@ Each `v*` tag publishes static binaries (no CGO) for Linux amd64/arm64 and macOS
 - Mongo-style `find` with `$eq $ne $gt $gte $lt $lte $in $nin $exists $and $or $not`, sort, offset and cursor pagination.
 - `aggregate` with `$match $group $sort $limit $skip $project`, `$dateTrunc` for time buckets.
 - Two write modes: direct (apps append NDJSON files, ndb follows them) and engine (`insert`, `update`, `delete` with a WAL, optimistic `if_version`).
-- `watch` and `ack` for outbox-style consumers.
+- `watch` and `ack` for outbox-style consumers, with an optional `where` filter and `wal_retention` to trim the WAL.
+- Optional bearer token on the TCP listener (`-token-file`); the unix socket needs none.
 - Secondary and unique indexes, built in the background.
 - TTL per document, retention, compaction, and a blob store for large values.
 - Quarantine for bad lines in direct mode. Online backup. Prometheus `/metrics`.

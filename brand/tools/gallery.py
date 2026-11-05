@@ -14,8 +14,8 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 PNG = ROOT / 'png'
 
 GROUPS = [
-    ('Mark', 'The mark alone. Use the small drawing at 24 px and below.', ('mark-',)),
-    ('Lockups', 'The mark with the wordmark. Keep clear space equal to the x-height.', ('lockup-', 'wordmark-')),
+    ('Mascot', 'The ramen bowl alone. Use the small drawing at 32 px and below.', ('mark-',)),
+    ('Lockups', 'The mascot with the wordmark. Keep clear space equal to the x-height.', ('lockup-', 'wordmark-')),
     ('App icons', 'Squircle tiles for documents and stores.', ('app-icon-',)),
     ('Platform icons', 'Square tiles. iOS, Android, and PWA cut their own mask.', ('icon-', 'apple-touch-icon')),
     ('Favicons', 'On an ink tile, for places that cannot use favicon.svg.', ('favicon-',)),

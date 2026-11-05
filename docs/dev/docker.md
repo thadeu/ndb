@@ -14,7 +14,7 @@ docker run -d --name ndb \
 - `/var/lib/ndb` is the data volume. Mount it for ndb only, on a local disk.
 - `/run/ndb` is the socket dir. Mount the same volume in every app container that talks to ndb. The apps must be allowed to open the socket: add `-unix-mode 0660` and run the apps with the same group (see [deploy/examples/single-vm](../../deploy/examples/single-vm/)).
 - The process runs as UID 65532. A bind mount must allow this user to write. Named volumes work as they are.
-- For TCP, add `-tcp 0.0.0.0:7070` and publish the port on a private network only. There is no authentication yet.
+- For TCP, add `-tcp 0.0.0.0:7070` and publish the port on a private network only, and add `-token-file` (mount the token file as a secret).
 - Run one replica. Two daemons cannot share one data dir.
 - No shell in the image: use `GET /health` over the socket or TCP for health checks, and `docker exec`-free tools. For backups run `ndb backup` in a second container that mounts the same two volumes, or use the host binary.
 - Stop timeout above 30 s, so that running requests finish.

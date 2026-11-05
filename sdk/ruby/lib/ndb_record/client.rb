@@ -155,7 +155,7 @@ module NdbRecord
       pending = +""
 
       response = @pool.with do |conn|
-        conn.stream("POST", target, JSON.generate(body)) do |chunk|
+        conn.stream("POST", target, JSON.generate(body), headers: authorize({})) do |chunk|
           pending << chunk
 
           while (newline = pending.index("\n"))

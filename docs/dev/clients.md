@@ -4,7 +4,15 @@ Every SDK has two layers: a small transport (HTTP over a unix socket or TCP) and
 
 Sources are in `sdk/`: `sdk/go`, `sdk/ruby`, `sdk/ts`. They are not published to a package registry yet (that is milestone E13.2), so use a path or Git source for now.
 
-Addresses are `unix:///run/ndb/ndb.sock` or `tcp://host:port`. The Ruby SDK supports the unix socket only today; TCP transport, bearer tokens and an `NDB_URL` default are planned (E13.6) and are not in the SDKs yet.
+Addresses are `unix:///run/ndb/ndb.sock` or `tcp://host:port`. All three SDKs speak both. Without an address, each SDK reads `NDB_URL`.
+
+When the daemon runs with `-token-file`, the TCP listener needs a bearer token (the unix socket never does). Each SDK takes a `token` option, or reads `NDB_TOKEN`. The token goes only in the `Authorization` header. A wrong or missing token is `401 unauthorized`. See [configuration.md](configuration.md#authentication).
+
+| SDK | Address | Token |
+|---|---|---|
+| Ruby | `url:` or `socket:` in `config/ndb.yml`, or `NdbRecord::Client.new(url:)` | `token:` in the same place |
+| Go | `ndb.Open(addr)`; empty `addr` reads `NDB_URL` | `ndb.Open(addr, ndb.WithToken(t))` |
+| TypeScript | `connect(addr)`; no `addr` reads `NDB_URL` | `connect(addr, { token })` |
 
 ## Rails (gem `ndb_record`)
 
@@ -18,12 +26,15 @@ gem "ndb_record", path: "vendor/ndb/sdk/ruby"
 
 ```yaml
 production:
-  socket: /run/ndb/ndb.sock
+  url: <%= ENV.fetch("NDB_URL", "unix:///run/ndb/ndb.sock") %>
+  token: <%= ENV["NDB_TOKEN"] %>
   timeout: 30
   pool_size: 16
 development:
   socket: /tmp/ndb.sock
 ```
+
+`url:` is `unix://...` or `tcp://host:port`. `socket:` is the short form for a unix socket path. Keys left out fall back to `NDB_URL` and `NDB_TOKEN`, then to the default socket.
 
 Models:
 
@@ -62,7 +73,21 @@ Call.group(:status).average(:duration)
 Call.where(status: "answered").limit(100).find_each { |c| puts c.call_id }   # cursor pagination
 ```
 
-Errors are `NdbRecord::Error` subclasses with `code` and `status`: `NotFound`, `StaleObjectError`, `RecordNotUnique`, `CatalogConflict`, `ReadOnlyCollection`, `InvalidQuery`, `InvalidCursor`, `ConnectionError`. The Ruby SDK has no `watch` yet.
+Errors are `NdbRecord::Error` subclasses with `code` and `status`: `NotFound`, `StaleObjectError`, `RecordNotUnique`, `CatalogConflict`, `ReadOnlyCollection`, `InvalidQuery`, `InvalidCursor`, `ConnectionError`, `Unauthorized`, `WatchLagged`, `HistoryTruncated`.
+
+The Ruby SDK has no model-level `watch`. Use the client, which streams events for a named consumer:
+
+```ruby
+client = NdbRecord.client
+
+client.watch("calls", "sweeper", where: { status: "failed" }) do |ev|
+  process(ev["doc"])
+
+  client.ack("calls", "sweeper", ev["pos"])
+end
+```
+
+Without a block, `watch` returns an Enumerator.
 
 ## Go (module `github.com/thadeu/ndb/sdk/go`)
 
@@ -102,10 +127,10 @@ err = calls.Delete(ctx, "c1")
 
 Filters: `Eq Ne Gt Gte Lt Lte In Exists Or Not`. Query methods: `Where Sort Limit Skip Page Fields After All First Count Iter NextCursor`. Aggregate with `calls.Aggregate(ctx, ndb.Pipeline{...})` or `ndb.AggregateAs[R](...)` for typed rows.
 
-Outbox consumer:
+Outbox consumer. `ndb.WatchWhere(...)` delivers only the events whose document matches:
 
 ```go
-for ev, err := range calls.Watch(ctx, "sweeper") {
+for ev, err := range calls.Watch(ctx, "sweeper", ndb.WatchWhere(ndb.Eq("status", "failed"))) {
 	if err != nil {
 		break // call Watch again: it resumes after the last Ack
 	}
@@ -118,7 +143,7 @@ for ev, err := range calls.Watch(ctx, "sweeper") {
 }
 ```
 
-A runnable example is in `sdk/go/examples/basic`.
+`ndb.ErrHistoryTruncated` means the consumer position was removed by `wal_retention`. A runnable example is in `sdk/go/examples/basic`.
 
 ## TypeScript (package `ndb`)
 
@@ -149,7 +174,7 @@ await calls.update('c1', { status: 'done' }, { ifVersion: row?._v })
 
 const byStatus = await calls.aggregate([{ $group: { _id: '$status', n: { $count: {} } } }])
 
-for await (const ev of calls.watch('sweeper')) {
+for await (const ev of calls.watch('sweeper', { where: { status: 'failed' } })) {
   await handle(ev.doc)
   await calls.ack(ev)
 }
@@ -157,7 +182,7 @@ for await (const ev of calls.watch('sweeper')) {
 await ndb.close()
 ```
 
-Errors are `NdbError` subclasses with `code` and `status` (`NotFoundError`, `VersionConflictError`, `DuplicateIdError`, `UniqueViolationError`, `InvalidQueryError`, `CursorError`, `WatchLaggedError`). A runnable example is `sdk/ts/examples/basic.mjs`.
+Errors are `NdbError` subclasses with `code` and `status` (`NotFoundError`, `VersionConflictError`, `DuplicateIdError`, `UniqueViolationError`, `InvalidQueryError`, `CursorError`, `WatchLaggedError`, `HistoryTruncatedError`, `UnauthorizedError`). A runnable example is `sdk/ts/examples/basic.mjs`.
 
 ## Direct mode from an app
 

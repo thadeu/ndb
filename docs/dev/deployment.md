@@ -12,7 +12,7 @@ Rules for both:
 - `data_dir` is on a local disk, never on NFS, EFS or another network volume.
 - One ndb replica owns the data dir.
 - Unix socket: share the socket dir, and set `-unix-mode 0660` with a shared group.
-- TCP: listen on a private (WireGuard) address only. There is no authentication yet.
+- TCP: listen on a private (WireGuard) address only, and add `-token-file` as defense in depth. The apps send the token with `NDB_TOKEN`.
 - Direct mode only for files on the same machine as ndb.
 
 For a plain host, use [deploy/systemd](../../deploy/systemd/). For one container, see [docker.md](docker.md).

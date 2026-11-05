@@ -88,9 +88,14 @@ If an `fsync` fails, the daemon exits on purpose, and recovery gives the right s
 ## Compaction, retention and TTL
 
 - **Compaction** runs by itself. It merges adjacent small segments and drops superseded versions, tombstones, and expired or past-retention rows. Blobs that no live document uses are deleted after a grace period.
+- **`wal_retention: 7d`** (engine mode) deletes a sealed WAL file when the checkpoint is past it, every saved `watch` cursor is after it, no open stream reads it, and it is older than 7 days. Files go from the oldest and the walk stops at the first one that stays. Without it the WAL is kept forever. A `watch` that needs a deleted file fails with `history_truncated` (410).
 - **`retention: 30d`** hides rows whose `time` is older than 30 days, at read time, and drops them from the derived data when segments are compacted. The source NDJSON is never deleted by ndb.
 - **`ttl: 24h`** or **`expires_field`**: expired documents are hidden from every read at once. In engine mode a sweeper (every 10 s) deletes them in the WAL, and `watch` shows the delete with `"_expired": true`. In direct mode the documents are only hidden; the files are not touched.
 - Disk use: watch the size of `data_dir`, and `ndb_segments`.
+
+## Version and token
+
+`ndb -version` prints the version. To protect the TCP listener, start with `-token-file`; rotate the token by changing the file, restarting the daemon, and updating `NDB_TOKEN` in the apps. See [configuration.md](configuration.md#authentication).
 
 ## Upgrade
 

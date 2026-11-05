@@ -103,6 +103,17 @@ class TcpTest < Minitest::Test
     assert_raises(NdbRecord::Unauthorized) { NdbRecord::Client.new(url: secured.url, token: "nope").collections }
   end
 
+  def test_watch_sends_the_token
+    tcp = NdbRecord::Client.new(url: secured.url, token: TcpDaemon::TOKEN)
+    tcp.insert("tcp_watch", [{ "_id" => "w1" }])
+
+    seen = []
+    tcp.watch("tcp_watch", "c", limit: 1) { |ev| seen << ev["id"] }
+
+    assert_equal ["w1"], seen
+    assert_raises(NdbRecord::Unauthorized) { NdbRecord::Client.new(url: secured.url).watch("tcp_watch", "c", limit: 1) { nil } }
+  end
+
   def test_blob_upload_sends_the_token
     tcp = NdbRecord::Client.new(url: secured.url, token: TcpDaemon::TOKEN)
 

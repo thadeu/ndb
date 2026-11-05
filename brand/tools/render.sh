@@ -49,6 +49,11 @@ done
 
 render social-preview 1280 social-preview
 
+# The cast is kept in extras/ for other projects; ndb uses only the bowl.
+for name in onigiri caterpillar scroll; do
+  rsvg-convert -w 512 "$root/extras/cast/cast-$name.svg" -o "$root/extras/cast/cast-$name-512.png"
+done
+
 echo "$(ls "$png" | wc -l | tr -d ' ') PNG files in $png"
 
 python3 "$root/tools/gallery.py"

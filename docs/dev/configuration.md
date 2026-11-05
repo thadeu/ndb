@@ -5,7 +5,7 @@
 ## Flags
 
 ```
-ndb [-config ndb.yml] [-data-dir DIR] [-unix PATH] [-tcp ADDR] [-unix-mode 0660] [-version]
+ndb [-config ndb.yml] [-data-dir DIR] [-unix PATH] [-tcp ADDR] [-unix-mode 0660] [-token-file FILE] [-version]
 ndb backup [-config f] [-data-dir d] [-unix sock] <dest>
 ```
 
@@ -16,6 +16,7 @@ ndb backup [-config f] [-data-dir d] [-unix sock] <dest>
 | `-unix` | overrides `listen.unix`. |
 | `-tcp` | overrides `listen.tcp`, for example `10.10.0.1:7070`. |
 | `-unix-mode` | permission of the socket file, octal (`0660`). Default: the process umask. |
+| `-token-file` | file with the bearer token that the TCP listener requires. See [Authentication](#authentication). |
 | `-version` | print the version and exit. |
 
 The daemon stops cleanly on SIGTERM and SIGINT: it stops new requests, waits up to 30 s for running ones, then closes the collections. Use a stop timeout above 30 s.
@@ -62,7 +63,7 @@ An unknown key is an error at start (the file is read in strict mode). Sizes are
 |---|---|
 | `data_dir` | where all data lives. Never put it on NFS, EFS or another network volume. |
 | `listen.unix` | unix socket path. |
-| `listen.tcp` | TCP address. Bind to a private address only. There is no authentication yet. |
+| `listen.tcp` | TCP address. Bind to a private address only, and set `-token-file`. |
 | `memory_limit` | Go heap soft limit (`GOMEMLIMIT`). |
 | `group_limit` | memory limit of one aggregate group table. Over it: `group_limit_exceeded`. |
 | `blob_max_size` | largest blob. Default 1 GiB. |
@@ -79,6 +80,7 @@ An unknown key is an error at start (the file is read in strict mode). Sizes are
 | `indexes` | fields with a secondary index (dot paths allowed). |
 | `unique` | fields with a unique constraint (engine mode). |
 | `durability` | `strict` or `relaxed`. Engine mode only. See below. |
+| `wal_retention` | engine mode: delete a WAL file once it is older than this, the checkpoint is past it, and no `watch` consumer still needs it. Default: keep forever. See [operations.md](operations.md#compaction-retention-and-ttl). |
 | `retention` | hide and drop derived data older than this (by `time`). The source NDJSON is never deleted. |
 | `ttl` | each document expires this long after its `time` field. Needs `time`. |
 | `expires_field` | each document expires at the time in this field (RFC 3339 or unix seconds). No field: never expires. |
@@ -86,6 +88,20 @@ An unknown key is an error at start (the file is read in strict mode). Sizes are
 | `blob_threshold` | engine mode: string values over this size go to the blob store. Default off. |
 
 Durations use Go syntax (`90m`, `1h30m`) plus `d` and `w` (`24h`, `30d`, `2w`).
+
+## Authentication
+
+`-token-file /etc/ndb/token` makes the TCP listener require `Authorization: Bearer <token>` on every request, `/health` and `/metrics` included. A missing or wrong token is `401 unauthorized`. The file holds one token; ndb trims the spaces around it, and an empty file stops the start. The token is compared in constant time.
+
+The unix socket never asks for a token: file permissions guard it (`-unix-mode`). `POST /v1/backup` stays unix-only.
+
+The token is defense in depth. Keep the listener on a private address (for example WireGuard) as well. SDKs take a `token` option or `NDB_TOKEN`; see [clients.md](clients.md).
+
+```bash
+head -c 32 /dev/urandom | base64 > /etc/ndb/token
+chown ndb:ndb /etc/ndb/token && chmod 600 /etc/ndb/token
+ndb -config /etc/ndb/ndb.yml -token-file /etc/ndb/token
+```
 
 ## Code and file together
 

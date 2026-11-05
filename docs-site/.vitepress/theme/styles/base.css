@@ -1,0 +1,140 @@
+/* part: reset and page */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 120px;
+}
+
+body {
+  margin: 0;
+  background: var(--ndb-paper);
+  color: var(--ndb-ink);
+  font-family: var(--ndb-font-sans);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+code,
+kbd,
+pre {
+  font-family: var(--ndb-font-mono);
+}
+
+/* part: layout variables */
+:root {
+  --topbar-h: 60px;
+  --tabs-h: 46px;
+  --sidebar-w: 272px;
+  --outline-w: 216px;
+  --content-w: 760px;
+}
+
+/* part: brand logo */
+.logo {
+  display: inline-flex;
+  align-items: center;
+}
+
+.logo img {
+  display: block;
+  height: 50px;
+  width: auto;
+}
+
+/* part: art that swaps between light and dark */
+
+.only-dark {
+  display: none !important;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .only-light {
+    display: none !important;
+  }
+
+  :root:not([data-theme='light']) .only-dark {
+    display: block !important;
+  }
+}
+
+:root[data-theme='dark'] .only-light {
+  display: none !important;
+}
+
+:root[data-theme='dark'] .only-dark {
+  display: block !important;
+}
+
+/* part: shared buttons */
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: var(--ndb-radius);
+  background: transparent;
+  color: var(--ndb-muted);
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  background: var(--ndb-accent-soft);
+  color: var(--ndb-accent);
+}
+
+.install-button {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: var(--ndb-radius);
+  background: var(--ndb-button);
+  color: var(--ndb-on-button);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.install-button.large {
+  height: 50px;
+  padding: 0 24px;
+  font-size: 15px;
+}
+
+.ghost-button {
+  display: inline-flex;
+  align-items: center;
+  height: 50px;
+  padding: 0 22px;
+  border: 1px solid var(--ndb-line);
+  border-radius: var(--ndb-radius);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.ghost-button:hover {
+  border-color: var(--ndb-accent);
+  color: var(--ndb-accent);
+}
+
+/* part: screen reader only text */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
