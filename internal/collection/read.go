@@ -126,15 +126,20 @@ func (c *Collection) ParseQuery(body []byte) (*query.Query, error) {
 	return query.Parse(body, query.Options{TimeField: c.def.Time})
 }
 
-// applyDurable applies op to the durable state, and keeps the insertion
-// position and the secondary indexes in step. Callers hold c.mu, or run
-// before the collection is shared.
-func (c *Collection) applyDurable(op wal.Op) {
+// applyDurable applies op, written by WAL tx, to the durable state. It keeps
+// the insertion position, the memtable size, the secondary indexes and the
+// deletes that a seal must write as tombstones in step. Callers hold c.mu, or
+// run before the collection is shared.
+func (c *Collection) applyDurable(op wal.Op, tx uint64) {
 	old := c.durable.docs[op.ID]
 
 	c.durable.apply(op)
 
 	cur := c.durable.docs[op.ID]
+
+	if cur != nil {
+		cur.tx = tx
+	}
 
 	if cur != nil && old != nil {
 		cur.seq = old.seq
@@ -143,12 +148,18 @@ func (c *Collection) applyDurable(op wal.Op) {
 		cur.seq = c.rd.seq
 	}
 
+	c.memBytes += int64(len(docOf(cur))) - int64(len(docOf(old)))
+
+	if op.Kind == wal.Del && c.seal != nil {
+		c.tombs[op.ID] = tx
+	}
+
 	if len(c.rd.idx) == 0 {
 		return
 	}
 
-	oldDoc := decodeEntry(old)
-	curDoc := decodeEntry(cur)
+	oldDoc := c.decodeEntry(old)
+	curDoc := c.decodeEntry(cur)
 
 	for _, s := range c.rd.idx {
 		if oldDoc != nil {
@@ -165,12 +176,29 @@ func (c *Collection) applyDurable(op wal.Op) {
 	}
 }
 
-func decodeEntry(e *entry) map[string]any {
+func docOf(e *entry) json.RawMessage {
 	if e == nil {
 		return nil
 	}
 
-	m, _ := query.Decode(e.doc)
+	return e.doc
+}
+
+// decodeEntry decodes the document of e. A failed segment read is fatal:
+// the index would miss the row.
+func (c *Collection) decodeEntry(e *entry) map[string]any {
+	if e == nil {
+		return nil
+	}
+
+	raw, err := e.raw()
+	if err != nil {
+		c.fail(err)
+
+		return nil
+	}
+
+	m, _ := query.Decode(raw)
 
 	return m
 }
@@ -239,7 +267,7 @@ func (c *Collection) build(s *secondary, items []cand) {
 		keys := make([][][]byte, len(chunk))
 
 		for i, it := range chunk {
-			if m := decodeEntry(it.e); m != nil {
+			if m := c.decodeEntry(it.e); m != nil {
 				keys[i] = index.Keys(m, s.field, s.isTime)
 			}
 		}
@@ -247,7 +275,7 @@ func (c *Collection) build(s *secondary, items []cand) {
 		c.mu.Lock()
 
 		for i, it := range chunk {
-			if c.durable.docs[it.id] != it.e {
+			if cur := c.durable.docs[it.id]; cur == nil || !sameVersion(cur, it.e) {
 				continue
 			}
 
@@ -263,6 +291,22 @@ func (c *Collection) build(s *secondary, items []cand) {
 	c.mu.Lock()
 	s.ready = true
 	c.mu.Unlock()
+}
+
+// Len is the number of durable documents.
+func (c *Collection) Len() int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return len(c.durable.docs)
+}
+
+// DropIndex removes a secondary index. Queries stop using it at once.
+func (c *Collection) DropIndex(field string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	delete(c.rd.idx, field)
 }
 
 // Indexes lists the secondary indexes with their build progress.
@@ -287,6 +331,12 @@ func (c *Collection) Indexes() []IndexInfo {
 	return out
 }
 
+// sameVersion tells whether a and b are the same change of a doc. A seal
+// swaps an entry for an equal sealed one, so the pointer is not enough.
+func sameVersion(a, b *entry) bool {
+	return a.seq == b.seq && a.v == b.v
+}
+
 type cand struct {
 	id string
 	e  *entry
@@ -294,7 +344,7 @@ type cand struct {
 
 type row struct {
 	query.Pos
-	e *entry
+	doc json.RawMessage
 }
 
 // Query runs a find. See the package notes above for the snapshot rules.
@@ -363,7 +413,7 @@ func slice(q *query.Query, rows []row) (Page, bool) {
 	out := make([]json.RawMessage, len(rows))
 
 	for i, r := range rows {
-		out[i] = project(q.Fields, r.e.doc)
+		out[i] = project(q.Fields, r.doc)
 	}
 
 	return Page{Rows: out}, more
@@ -452,14 +502,19 @@ func (c *Collection) evaluate(ctx context.Context, q *query.Query, cands []cand,
 			return nil, 0, ctx.Err()
 		}
 
-		m, err := query.Decode(cd.e.doc)
+		doc, err := cd.e.raw()
+		if err != nil {
+			return nil, 0, err
+		}
+
+		m, err := query.Decode(doc)
 		if err != nil || !q.Match(m) {
 			continue
 		}
 
 		total++
 
-		r := row{Pos: query.Pos{Keys: q.SortKeys(m), ID: cd.id, Seq: cd.e.seq}, e: cd.e}
+		r := row{Pos: query.Pos{Keys: q.SortKeys(m), ID: cd.id, Seq: cd.e.seq}, doc: doc}
 
 		if hasCur && q.Cmp(r.Pos, cur) <= 0 {
 			continue

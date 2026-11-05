@@ -1,6 +1,6 @@
 # M02 — Tailer (direct mode)
 
-Status: not started · Depends on: M01 · Plan: §6.1, §9, phase 2
+Status: done (light verification) · Depends on: M01 · Plan: §6.1, §9, phase 2
 
 ## Goal
 

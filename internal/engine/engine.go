@@ -1,0 +1,266 @@
+// Package engine opens a data dir: it takes the lock, loads the catalog and
+// opens one collection per catalog entry. Engine-mode collections are
+// written by ndb; direct-mode collections are fed by a tailer (plan §5, §6).
+package engine
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"sync"
+
+	"github.com/thadeu/ndb/internal/catalog"
+	"github.com/thadeu/ndb/internal/collection"
+	"github.com/thadeu/ndb/internal/config"
+	"github.com/thadeu/ndb/internal/fs"
+	"github.com/thadeu/ndb/internal/lock"
+	"github.com/thadeu/ndb/internal/tailer"
+)
+
+// DefaultMaxLine is the line limit of a collection without max_line_size.
+const DefaultMaxLine = 1 << 20
+
+// DB is one open data dir. It is safe for concurrent use.
+type DB struct {
+	dir  string
+	log  *slog.Logger
+	lock *lock.Lock
+	cat  *catalog.Catalog
+
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	// mu guards cols. Opening a collection (recovery) runs under it.
+	mu   sync.RWMutex
+	cols map[string]*Collection
+}
+
+// Open takes the lock on cfg.DataDir, opens the catalog, declares the
+// collections of ndb.yml and opens every collection in the catalog.
+func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
+	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
+		return nil, err
+	}
+
+	lk, err := lock.Acquire(cfg.DataDir)
+	if err != nil {
+		return nil, err
+	}
+
+	cat, err := catalog.Open(filepath.Join(cfg.DataDir, "catalog.bolt"), catalog.Options{AllowImplicit: cfg.AllowImplicit})
+	if err != nil {
+		lk.Release()
+
+		return nil, err
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	db := &DB{dir: cfg.DataDir, log: log, lock: lk, cat: cat, ctx: ctx, cancel: cancel, cols: map[string]*Collection{}}
+
+	if err := cfg.Apply(cat); err != nil {
+		db.Close()
+
+		return nil, err
+	}
+
+	for _, def := range cat.List() {
+		if err := db.attach(def); err != nil {
+			db.Close()
+
+			return nil, fmt.Errorf("collection %s: %w", def.Name, err)
+		}
+	}
+
+	return db, nil
+}
+
+// Close stops the tailers, closes the collections and the catalog, and
+// releases the lock. Writes that were acked are durable before it returns.
+func (db *DB) Close() error {
+	db.cancel()
+
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	var errs []error
+
+	for name, col := range db.cols {
+		errs = append(errs, col.close())
+
+		delete(db.cols, name)
+	}
+
+	errs = append(errs, db.cat.Close(), db.lock.Release())
+
+	return errors.Join(errs...)
+}
+
+// Get returns an open collection. An unknown name gives catalog.ErrUnknown.
+func (db *DB) Get(name string) (*Collection, error) {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+
+	col, ok := db.cols[name]
+
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", catalog.ErrUnknown, name)
+	}
+
+	return col, nil
+}
+
+// GetOrCreate returns the collection, or creates it with defaults for an
+// insert into an unknown name (plan §5.1, rule 3).
+func (db *DB) GetOrCreate(name string) (*Collection, error) {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	if col, ok := db.cols[name]; ok {
+		return col, nil
+	}
+
+	def, err := db.cat.EnsureImplicit(name)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := db.attach(def); err != nil {
+		return nil, err
+	}
+
+	return db.cols[name], nil
+}
+
+// Ensure is ensure_collection: it creates the collection or merges decl into
+// it by the rules of plan §5.2, and returns the final definition.
+func (db *DB) Ensure(decl catalog.Def) (catalog.Def, error) {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	def, err := db.cat.Ensure(decl, catalog.FromCode)
+	if err != nil {
+		return catalog.Def{}, err
+	}
+
+	return def, db.attach(def)
+}
+
+// DropIndex is drop_index: the catalog forgets the field and the live
+// collection stops using its index.
+func (db *DB) DropIndex(name, field string) (catalog.Def, error) {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	def, err := db.cat.DropIndex(name, field)
+	if err != nil {
+		return catalog.Def{}, err
+	}
+
+	if col, ok := db.cols[name]; ok {
+		col.rd.DropIndex(field)
+	}
+
+	return def, nil
+}
+
+// Definitions lists the catalog, sorted by name.
+func (db *DB) Definitions() []catalog.Def {
+	return db.cat.List()
+}
+
+// Definition returns one catalog entry.
+func (db *DB) Definition(name string) (catalog.Def, bool) {
+	return db.cat.Get(name)
+}
+
+// MaxLine is the line limit of a collection: its max_line_size, or the
+// default for an unknown name.
+func (db *DB) MaxLine(name string) int64 {
+	def, ok := db.cat.Get(name)
+
+	if !ok || def.MaxLineSize == 0 {
+		return DefaultMaxLine
+	}
+
+	return def.MaxLineSize
+}
+
+// attach opens def if it is not open yet, or adds its indexes to the open
+// collection. The caller holds db.mu.
+func (db *DB) attach(def catalog.Def) error {
+	if col, ok := db.cols[def.Name]; ok {
+		for _, f := range def.Indexes {
+			if err := col.rd.EnsureIndex(f); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
+
+	col, err := db.open(def)
+	if err != nil {
+		return err
+	}
+
+	db.cols[def.Name] = col
+
+	return nil
+}
+
+func (db *DB) open(def catalog.Def) (*Collection, error) {
+	dir := filepath.Join(db.dir, "collections", def.Name)
+
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+
+	if def.Write == catalog.Direct {
+		return db.openDirect(def, dir)
+	}
+
+	eng, err := collection.Open(collection.Config{Dir: dir, Data: dir, FS: fs.OS{}, Def: def})
+	if err != nil {
+		return nil, err
+	}
+
+	return &Collection{name: def.Name, write: catalog.Engine, eng: eng, rd: eng}, nil
+}
+
+// openDirect loads the files once before it returns, so a ready daemon
+// answers from the full data. The memtable is not persisted, so the tailer
+// starts from offset 0 (Rebuild).
+func (db *DB) openDirect(def catalog.Def, dir string) (*Collection, error) {
+	mem := collection.NewDirect(collection.DirectConfig{Def: def})
+
+	tail, err := tailer.Open(tailer.Config{Dir: dir, Def: def, Sink: mem, Rebuild: true, Logger: db.log})
+	if err != nil {
+		mem.Close()
+
+		return nil, err
+	}
+
+	if err := tail.Sync(db.ctx); err != nil {
+		tail.Close()
+		mem.Close()
+
+		return nil, err
+	}
+
+	ctx, stop := context.WithCancel(db.ctx)
+	col := &Collection{name: def.Name, write: catalog.Direct, mem: mem, rd: mem, tail: tail, stop: stop, done: make(chan struct{})}
+
+	go func() {
+		defer close(col.done)
+
+		if err := tail.Run(ctx); err != nil {
+			db.log.Error("tailer stopped", "collection", def.Name, "err", err)
+		}
+	}()
+
+	return col, nil
+}

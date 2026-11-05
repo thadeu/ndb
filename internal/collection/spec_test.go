@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/thadeu/ndb/internal/catalog"
@@ -16,6 +17,10 @@ import (
 type specEngine struct {
 	t    *testing.T
 	cols map[string]*collection.Collection
+
+	// seal seals every collection before each find, so the shared cases
+	// read from segments and memtable.
+	seal bool
 }
 
 func (e *specEngine) EnsureCollection(_ context.Context, name string, raw json.RawMessage) error {
@@ -27,7 +32,15 @@ func (e *specEngine) EnsureCollection(_ context.Context, name string, raw json.R
 
 	def.Name = name
 
-	c, err := collection.Open(collection.Config{Dir: e.t.TempDir(), FS: fs.OS{}, Def: def})
+	root := e.t.TempDir()
+
+	cfg := collection.Config{Dir: filepath.Join(root, "wal"), FS: fs.OS{}, Def: def}
+
+	if e.seal {
+		cfg.Data = root
+	}
+
+	c, err := collection.Open(cfg)
 	if err != nil {
 		return err
 	}
@@ -62,6 +75,10 @@ func (e *specEngine) Do(ctx context.Context, name string, step spec.Step) ([]jso
 
 		return nil, specErr(err)
 	case "find":
+		if err := c.Seal(); err != nil {
+			return nil, err
+		}
+
 		q, err := c.ParseQuery(step.Body)
 		if err != nil {
 			return nil, specErr(err)
@@ -93,5 +110,16 @@ func TestSharedCases(t *testing.T) {
 
 	spec.Run(t, cases, func(t *testing.T) spec.Engine {
 		return &specEngine{t: t, cols: map[string]*collection.Collection{}}
+	})
+}
+
+func TestSharedCasesAfterSealing(t *testing.T) {
+	cases, err := spec.Load("../../spec/cases")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	spec.Run(t, cases, func(t *testing.T) spec.Engine {
+		return &specEngine{t: t, cols: map[string]*collection.Collection{}, seal: true}
 	})
 }

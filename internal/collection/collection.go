@@ -9,7 +9,9 @@ package collection
 
 import (
 	"context"
+	"log"
 	"sync"
+	"time"
 
 	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/fs"
@@ -27,6 +29,18 @@ type Config struct {
 
 	// OnFatal is passed to the writer (default: exit the process).
 	OnFatal func(error)
+
+	// Data is the collection root that holds segments/ and meta.bolt. Empty
+	// means no sealing: the memtable keeps every row.
+	Data string
+
+	// SealBytes seals the memtable when its documents reach this size
+	// (default 64 MiB). SealAge seals a non-empty memtable after this time
+	// since the last seal (default 10 min). SealTick is how often the sealer
+	// checks both (default 1 s).
+	SealBytes int64
+	SealAge   time.Duration
+	SealTick  time.Duration
 }
 
 type Collection struct {
@@ -39,6 +53,15 @@ type Collection struct {
 	durable *state
 
 	rd *reader
+
+	// memBytes is the size of the documents in the memtable. tombs holds the
+	// deletes not yet written to a segment, by id and WAL tx. Both are
+	// guarded by mu, and tombs is only used when seal is set.
+	memBytes int64
+	tombs    map[string]uint64
+
+	seal    *sealer
+	onFatal func(error)
 }
 
 // Doc is a document and its version.
@@ -65,6 +88,7 @@ func Open(cfg Config) (*Collection, error) {
 		head:    newState(cfg.Def.Unique),
 		durable: newState(cfg.Def.Unique),
 		rd:      newReader(),
+		onFatal: cfg.OnFatal,
 	}
 
 	maxLine := int(cfg.Def.MaxLineSize)
@@ -73,13 +97,28 @@ func Open(cfg Config) (*Collection, error) {
 		maxLine = defaultMaxLine
 	}
 
-	res, err := recovery.Replay(recovery.Config{FS: cfg.FS, Dir: cfg.Dir, MaxLine: maxLine}, func(rec wal.Record) {
+	var from recovery.Position
+
+	if cfg.Data != "" {
+		c.tombs = map[string]uint64{}
+
+		pos, err := c.openSegments(cfg)
+		if err != nil {
+			return nil, err
+		}
+
+		from = pos
+	}
+
+	res, err := recovery.Replay(recovery.Config{FS: cfg.FS, Dir: cfg.Dir, MaxLine: maxLine, From: from}, func(rec wal.Record) {
 		for _, op := range rec.Ops {
 			c.head.apply(op)
-			c.applyDurable(op)
+			c.applyDurable(op, rec.Tx)
 		}
 	})
 	if err != nil {
+		c.closeSegments()
+
 		return nil, err
 	}
 
@@ -100,6 +139,8 @@ func Open(cfg Config) (*Collection, error) {
 		OnFatal:    cfg.OnFatal,
 	})
 	if err != nil {
+		c.closeSegments()
+
 		return nil, err
 	}
 
@@ -107,9 +148,14 @@ func Open(cfg Config) (*Collection, error) {
 		if err := c.EnsureIndex(f); err != nil {
 			c.rd.close()
 			c.w.Close()
+			c.closeSegments()
 
 			return nil, err
 		}
+	}
+
+	if c.seal != nil {
+		c.startSealer()
 	}
 
 	return c, nil
@@ -117,12 +163,31 @@ func Open(cfg Config) (*Collection, error) {
 
 func (c *Collection) Close() error {
 	c.rd.close()
+	c.stopSealer()
 
 	if c.w == nil {
+		c.closeSegments()
+
 		return nil
 	}
 
-	return c.w.Close()
+	err := c.w.Close()
+
+	c.closeSegments()
+
+	return err
+}
+
+// fail reports a read error that makes the state wrong. The default exits
+// the process, so the next start rebuilds from the WAL.
+func (c *Collection) fail(err error) {
+	if c.onFatal != nil {
+		c.onFatal(err)
+
+		return
+	}
+
+	log.Fatalf("ndb: segment read failed, exiting to recover: %v", err)
 }
 
 // Find returns the durable document with this id.
@@ -135,7 +200,14 @@ func (c *Collection) Find(id string) (Doc, bool) {
 		return Doc{}, false
 	}
 
-	return Doc{ID: id, V: e.v, Doc: e.doc}, true
+	raw, err := e.raw()
+	if err != nil {
+		c.fail(err)
+
+		return Doc{}, false
+	}
+
+	return Doc{ID: id, V: e.v, Doc: raw}, true
 }
 
 // Insert writes all docs in one transaction: all or nothing.
@@ -251,7 +323,12 @@ func (c *Collection) prepareUpdate(v *view, r updateReq) ([]wal.Op, error) {
 		return nil, err
 	}
 
-	doc, err := applyChange(cur.doc, r.change, c.def.ID)
+	raw, err := cur.raw()
+	if err != nil {
+		return nil, err
+	}
+
+	doc, err := applyChange(raw, r.change, c.def.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -291,6 +368,6 @@ func (c *Collection) applied(rec wal.Record) {
 	defer c.mu.Unlock()
 
 	for _, op := range rec.Ops {
-		c.applyDurable(op)
+		c.applyDurable(op, rec.Tx)
 	}
 }

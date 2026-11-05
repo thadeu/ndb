@@ -1,6 +1,6 @@
 # M03 — Query + indexes
 
-Status: not started · Depends on: M01 · Plan: §10.1, §10.6, §11.1, phase 3
+Status: done (light verification) · Depends on: M01 · Plan: §10.1, §10.6, §11.1, phase 3
 
 ## Goal
 

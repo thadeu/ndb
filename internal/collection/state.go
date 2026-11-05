@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/thadeu/ndb/internal/segment"
 	"github.com/thadeu/ndb/internal/wal"
 )
 
-// entry is immutable; head and durable states share entries.
+// entry is immutable. A memtable entry holds doc. A sealed entry has doc nil:
+// its bytes are in the segment at loc, and uniq keeps its unique keys.
 type entry struct {
 	v   uint64
 	doc json.RawMessage
@@ -16,6 +18,51 @@ type entry struct {
 	// seq is the insertion position (read.go). It is set once, before the
 	// entry is visible to readers, and kept across updates.
 	seq uint64
+
+	// tx is the WAL transaction of the last change.
+	tx uint64
+
+	loc  *location
+	uniq map[string]string
+}
+
+type location struct {
+	seg segment.Reader
+	row int
+}
+
+// raw returns the document. Only a sealed entry reads from a segment.
+func (e *entry) raw() (json.RawMessage, error) {
+	if e.doc != nil {
+		return e.doc, nil
+	}
+
+	b, err := e.loc.seg.Raw(e.loc.row)
+
+	return b, err
+}
+
+// key returns the canonical value of a unique field.
+func (e *entry) key(field string) (string, bool) {
+	if e.doc == nil {
+		k, ok := e.uniq[field]
+
+		return k, ok
+	}
+
+	return uniqueKey(e.doc, field)
+}
+
+func uniqueKeys(doc json.RawMessage, fields []string) map[string]string {
+	out := map[string]string{}
+
+	for _, f := range fields {
+		if k, ok := uniqueKey(doc, f); ok {
+			out[f] = k
+		}
+	}
+
+	return out
 }
 
 // state is documents by id plus the unique indexes (field → value → id).
@@ -35,31 +82,44 @@ func newState(uniqueFields []string) *state {
 }
 
 func (s *state) apply(op wal.Op) {
-	if old, ok := s.docs[op.ID]; ok {
-		s.unindex(op.ID, old.doc)
-	}
-
 	if op.Kind == wal.Del {
-		delete(s.docs, op.ID)
+		s.remove(op.ID)
 
 		return
 	}
 
-	s.docs[op.ID] = &entry{v: op.V, doc: op.Doc}
-	s.index(op.ID, op.Doc)
+	s.put(op.ID, &entry{v: op.V, doc: op.Doc})
 }
 
-func (s *state) index(id string, doc json.RawMessage) {
+// put sets the entry of id, replacing the old one and its unique keys.
+func (s *state) put(id string, e *entry) {
+	if old, ok := s.docs[id]; ok {
+		s.unindex(id, old)
+	}
+
+	s.docs[id] = e
+	s.index(id, e)
+}
+
+func (s *state) remove(id string) {
+	if old, ok := s.docs[id]; ok {
+		s.unindex(id, old)
+	}
+
+	delete(s.docs, id)
+}
+
+func (s *state) index(id string, e *entry) {
 	for f, idx := range s.unique {
-		if key, ok := uniqueKey(doc, f); ok {
+		if key, ok := e.key(f); ok {
 			idx[key] = id
 		}
 	}
 }
 
-func (s *state) unindex(id string, doc json.RawMessage) {
+func (s *state) unindex(id string, e *entry) {
 	for f, idx := range s.unique {
-		if key, ok := uniqueKey(doc, f); ok && idx[key] == id {
+		if key, ok := e.key(f); ok && idx[key] == id {
 			delete(idx, key)
 		}
 	}
@@ -154,7 +214,7 @@ func (v *view) setOwner(field, key, id string) {
 func (v *view) apply(op wal.Op) {
 	if old, ok := v.get(op.ID); ok {
 		for f := range v.head.unique {
-			if key, ok := uniqueKey(old.doc, f); ok && v.uniqueOwner(f, key) == op.ID {
+			if key, ok := old.key(f); ok && v.uniqueOwner(f, key) == op.ID {
 				v.setOwner(f, key, "")
 			}
 		}

@@ -70,6 +70,19 @@ type Prepared struct {
 	Stage func()
 }
 
+// Pos is the end of the WAL: the segment, the byte offset in it, and the
+// last tx written.
+type Pos struct {
+	Seq    int
+	Offset int64
+	Tx     uint64
+}
+
+type job struct {
+	fn   func(Pos)
+	done chan error
+}
+
 type request struct {
 	ctx  context.Context
 	req  any
@@ -85,9 +98,11 @@ type result struct {
 type Writer struct {
 	cfg Config
 
-	reqs chan *request
-	stop chan struct{}
-	wg   sync.WaitGroup
+	reqs   chan *request
+	jobs   chan job
+	stop   chan struct{}
+	exited chan struct{}
+	wg     sync.WaitGroup
 
 	mu     sync.RWMutex
 	closed bool
@@ -105,10 +120,12 @@ func Open(cfg Config) (*Writer, error) {
 	setDefaults(&cfg)
 
 	w := &Writer{
-		cfg:  cfg,
-		reqs: make(chan *request, maxBatch),
-		stop: make(chan struct{}),
-		tx:   cfg.StartTx,
+		cfg:    cfg,
+		reqs:   make(chan *request, maxBatch),
+		jobs:   make(chan job),
+		stop:   make(chan struct{}),
+		exited: make(chan struct{}),
+		tx:     cfg.StartTx,
 	}
 
 	if err := w.openLastSegment(); err != nil {
@@ -200,8 +217,41 @@ func (w *Writer) Close() error {
 	return err
 }
 
+// Run calls fn in the writer goroutine, between commit batches, with the end
+// of the WAL. The WAL is synced before fn runs, so every tx up to Pos.Tx is
+// durable when fn sees it. fn must not block for long: commits wait for it.
+func (w *Writer) Run(fn func(end Pos)) error {
+	j := job{fn: fn, done: make(chan error, 1)}
+
+	select {
+	case w.jobs <- j:
+	case <-w.exited:
+		return ErrClosed
+	}
+
+	return <-j.done
+}
+
+func (w *Writer) runJob(j job) bool {
+	if err := w.file.Sync(); err != nil {
+		j.done <- err
+		w.closeOnFatal(err)
+
+		return false
+	}
+
+	w.dirty = false
+
+	j.fn(Pos{Seq: w.seq, Offset: w.size, Tx: w.tx})
+	j.done <- nil
+
+	return true
+}
+
 func (w *Writer) loop() {
 	defer w.wg.Done()
+
+	defer close(w.exited)
 
 	var tick <-chan time.Time
 
@@ -216,6 +266,12 @@ func (w *Writer) loop() {
 		select {
 		case first := <-w.reqs:
 			if !w.commitBatch(w.drain(first)) {
+				w.failRest()
+
+				return
+			}
+		case j := <-w.jobs:
+			if !w.runJob(j) {
 				w.failRest()
 
 				return
@@ -457,12 +513,14 @@ func (w *Writer) flushDirty() bool {
 	return true
 }
 
+// fatal closes the writer first, then answers the batch. In the other order
+// a new Commit could enter the queue after failRest ran and wait forever.
 func (w *Writer) fatal(err error, ok []pending) bool {
+	w.closeOnFatal(err)
+
 	for _, p := range ok {
 		p.req.done <- result{err: fmt.Errorf("writer: commit not durable: %w", err)}
 	}
-
-	w.closeOnFatal(err)
 
 	return false
 }

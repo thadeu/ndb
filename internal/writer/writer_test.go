@@ -377,3 +377,35 @@ func TestStageRunsOnlyForAcceptedRecords(t *testing.T) {
 		t.Fatalf("staged = %v, want [ok]", staged)
 	}
 }
+
+func TestRunSeesTheWALEndAfterEveryCommit(t *testing.T) {
+	dir := t.TempDir()
+	w, _ := open(t, writer.Config{Dir: dir})
+
+	for i := range 3 {
+		if _, _, err := w.Commit(context.Background(), put(fmt.Sprint("d", i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var got writer.Pos
+
+	if err := w.Run(func(end writer.Pos) { got = end }); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(filepath.Join(dir, "000001.ndjson"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.Seq != 1 || got.Offset != info.Size() || got.Tx != 3 {
+		t.Fatalf("end = %+v, file size %d", got, info.Size())
+	}
+
+	w.Close()
+
+	if err := w.Run(func(writer.Pos) {}); !errors.Is(err, writer.ErrClosed) {
+		t.Fatalf("Run after Close = %v, want ErrClosed", err)
+	}
+}

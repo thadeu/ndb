@@ -15,7 +15,7 @@ import (
 var iterations = flag.Int("crash.iterations", 200, "kills per crash test")
 
 func TestMain(m *testing.M) {
-	crashtest.Children(map[string]func(){"counter": counterChild})
+	crashtest.Children(map[string]func(){"counter": counterChild, "sealer": sealerChild})
 	os.Exit(m.Run())
 }
 

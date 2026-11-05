@@ -47,9 +47,10 @@ type collection struct {
 
 func defaults() Config {
 	return Config{
-		DataDir:     "/var/lib/ndb",
-		Listen:      Listen{Unix: "/run/ndb.sock"},
-		Collections: map[string]catalog.Def{},
+		DataDir:       "/var/lib/ndb",
+		Listen:        Listen{Unix: "/run/ndb.sock"},
+		AllowImplicit: true,
+		Collections:   map[string]catalog.Def{},
 	}
 }
 

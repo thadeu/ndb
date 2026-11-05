@@ -1,6 +1,6 @@
 # M04 — Columnar segments
 
-Status: not started · Depends on: M03 · Plan: §7.3, §7.4, §8.3, §8.4, phase 4
+Status: done (light verification) · Depends on: M03 · Plan: §7.3, §7.4, §8.3, §8.4, phase 4
 
 ## Goal
 

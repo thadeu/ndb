@@ -1,6 +1,6 @@
 # M07 — HTTP API + daemon
 
-Status: not started · Depends on: M03 (grows with M04–M06) · Plan: §12.1, phase 7
+Status: done (light verification) · Depends on: M03 (grows with M04–M06) · Plan: §12.1, phase 7
 
 ## Goal
 

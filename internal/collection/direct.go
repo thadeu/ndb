@@ -79,6 +79,10 @@ func (d *Direct) EnsureIndex(field string) error {
 	return d.c.EnsureIndex(field)
 }
 
+func (d *Direct) DropIndex(field string) {
+	d.c.DropIndex(field)
+}
+
 func (d *Direct) Indexes() []IndexInfo {
 	return d.c.Indexes()
 }
@@ -110,7 +114,7 @@ func (d *Direct) Apply(file string, off int64, line []byte) error {
 			d.bytes += int64(len(op.Doc))
 		}
 
-		d.c.applyDurable(op)
+		d.c.applyDurable(op, 0)
 	}
 
 	return nil
