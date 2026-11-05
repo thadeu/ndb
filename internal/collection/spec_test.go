@@ -19,7 +19,8 @@ type specEngine struct {
 	cols map[string]*collection.Collection
 
 	// seal seals every collection before each find, so the shared cases
-	// read from segments and memtable.
+	// read from segments and memtable. The indexes are dropped, so the finds
+	// run the column scan.
 	seal bool
 }
 
@@ -46,6 +47,12 @@ func (e *specEngine) EnsureCollection(_ context.Context, name string, raw json.R
 	}
 
 	e.t.Cleanup(func() { c.Close() })
+
+	if e.seal {
+		for _, f := range def.Indexes {
+			c.DropIndex(f)
+		}
+	}
 
 	e.cols[name] = c
 

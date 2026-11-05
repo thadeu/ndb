@@ -22,10 +22,26 @@ func (q *Query) SortKeys(m map[string]any) []Value {
 		return nil
 	}
 
+	elems := make([][]Value, len(q.Sort))
+
+	for i, s := range q.Sort {
+		elems[i] = Elements(m, s.Path, q.IsTime(s.Path))
+	}
+
+	return q.SortKeysOf(elems)
+}
+
+// SortKeysOf picks the sort key of each sort field from its elements, as
+// SortKeys does for a document. elems is one list per sort field.
+func (q *Query) SortKeysOf(elems [][]Value) []Value {
+	if len(q.Sort) == 0 {
+		return nil
+	}
+
 	keys := make([]Value, len(q.Sort))
 
 	for i, s := range q.Sort {
-		keys[i] = pick(Elements(m, s.Path, q.IsTime(s.Path)), s.Desc)
+		keys[i] = pick(elems[i], s.Desc)
 	}
 
 	return keys

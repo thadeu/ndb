@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 
@@ -63,6 +64,12 @@ func run(args []string) error {
 
 	if set["tcp"] {
 		cfg.Listen.TCP = *tcp
+	}
+
+	// memory_limit is the Go heap soft limit (plan §11.4). Segment reads
+	// still decode into the heap; mmap is not used yet.
+	if cfg.MemoryLimit > 0 {
+		debug.SetMemoryLimit(cfg.MemoryLimit)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)

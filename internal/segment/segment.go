@@ -21,10 +21,13 @@ type Row struct {
 }
 
 // Column is one query column: its name and its type (string, int, float,
-// bool, json, or list<scalar>).
+// bool, json, or list<scalar>). Mixed is set when other kinds of the same
+// path went to _rest: the column then does not hold every value of the path,
+// so its zone map and bloom filter cannot prove absence.
 type Column struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
+	Name  string `json:"name"`
+	Type  string `json:"type"`
+	Mixed bool   `json:"mixed,omitempty"`
 }
 
 // Info describes an encoded segment. The collection stores it in meta.bolt.
@@ -40,12 +43,18 @@ type Writer interface {
 }
 
 // Reader reads one segment file. Entries reads the metadata of every row;
-// Raw loads one document.
+// Raw loads one document. The rest are the column reads of a scan (scan.go).
 type Reader interface {
 	Len() int
 	Entries(fn func(row int, r Row) error) error
 	Raw(row int) ([]byte, error)
 	Close() error
+
+	Groups() []Group
+	ColumnOf(path string) (Column, bool)
+	Zone(group int, path string) (Zone, bool)
+	Bloom(group int, path string, v Scalar) (may, known bool)
+	ReadGroup(group int, paths []string) (GroupRows, error)
 }
 
 func NewWriter() Writer {

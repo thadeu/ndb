@@ -25,10 +25,12 @@ type Query struct {
 	After    string
 	Count    bool
 	Snapshot bool
+	Explain  bool
 
 	opts  Options
 	where Node
 	raw   any
+	paths []string
 }
 
 // Cond is one index-friendly condition of the where clause (top level,
@@ -39,7 +41,7 @@ type Cond struct {
 	Vals []Value
 }
 
-var topKeys = []string{"where", "fields", "sort", "limit", "skip", "after", "count", "snapshot"}
+var topKeys = []string{"where", "fields", "sort", "limit", "skip", "after", "count", "snapshot", "explain"}
 
 // Parse validates a find body. An empty body is an empty query.
 func Parse(body []byte, opts Options) (*Query, error) {
@@ -84,7 +86,7 @@ func (q *Query) parseScalars(top map[string]json.RawMessage) error {
 		}
 	}
 
-	for key, dst := range map[string]*bool{"count": &q.Count, "snapshot": &q.Snapshot} {
+	for key, dst := range map[string]*bool{"count": &q.Count, "snapshot": &q.Snapshot, "explain": &q.Explain} {
 		if raw, ok := top[key]; ok && json.Unmarshal(raw, dst) != nil {
 			return invalid("%s must be a boolean", key)
 		}
@@ -267,7 +269,7 @@ func (q *Query) compileField(path string, v any) (Node, error) {
 		return nil, err
 	}
 
-	f := &fieldNode{path: path, parts: splitPath(path), isTime: path == q.opts.TimeField}
+	f := &fieldNode{path: path, parts: splitPath(path), isTime: path == q.opts.TimeField, slot: q.slot(path)}
 
 	m, isObj := v.(map[string]any)
 
@@ -379,9 +381,35 @@ func sortedKeys(m map[string]any) []string {
 	return keys
 }
 
+// slot numbers the where paths in order of first use: the index of a path
+// in the values that MatchCols takes.
+func (q *Query) slot(path string) int {
+	if i := slices.Index(q.paths, path); i >= 0 {
+		return i
+	}
+
+	q.paths = append(q.paths, path)
+
+	return len(q.paths) - 1
+}
+
+// Paths lists the distinct paths of where. MatchCols takes one value list
+// per path, in this order.
+func (q *Query) Paths() []string {
+	return slices.Clone(q.paths)
+}
+
 // Match reports whether the decoded document satisfies where.
 func (q *Query) Match(m map[string]any) bool {
 	return q.where.match(m)
+}
+
+// MatchCols evaluates where on the candidate values of each path, by the
+// order of Paths. Every path must have its values: a column scan passes the
+// values of a document only when it has them, and matches the rest on the
+// decoded document.
+func (q *Query) MatchCols(cands [][]Value) bool {
+	return q.where.matchCols(cands)
 }
 
 // IsTime tells if path is the collection time field.

@@ -189,6 +189,34 @@ func TestFindStreamsNDJSONWithMetadataHeaders(t *testing.T) {
 	}
 }
 
+func TestFindExplainHeader(t *testing.T) {
+	_, h := newHandler(t)
+
+	call(h, "PUT", "/v1/c/posts", `{"id":"post_id"}`)
+	call(h, "POST", "/v1/c/posts/insert", `{"insert":[{"post_id":"p1","n":1},{"post_id":"p2","n":2}]}`)
+
+	rec := call(h, "POST", "/v1/c/posts/find", `{"where":{"post_id":"p2"},"explain":true}`)
+
+	expectStatus(t, rec, http.StatusOK)
+
+	var ex struct {
+		Plan        string `json:"plan"`
+		RowsMatched int    `json:"rows_matched"`
+	}
+
+	if err := json.Unmarshal([]byte(rec.Header().Get("X-Ndb-Explain")), &ex); err != nil {
+		t.Fatalf("X-Ndb-Explain: %v", err)
+	}
+
+	if ex.Plan != "id" || ex.RowsMatched != 1 {
+		t.Fatalf("explain = %+v", ex)
+	}
+
+	if rec := call(h, "POST", "/v1/c/posts/find", `{"where":{"post_id":"p2"}}`); rec.Header().Get("X-Ndb-Explain") != "" {
+		t.Fatal("X-Ndb-Explain must be absent without explain")
+	}
+}
+
 func TestInsertUpdateDeleteRoundTrip(t *testing.T) {
 	_, h := newHandler(t)
 

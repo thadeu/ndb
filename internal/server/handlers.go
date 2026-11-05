@@ -52,7 +52,8 @@ type deleteReq struct {
 
 // find streams the rows as NDJSON. The page metadata goes in headers, which
 // are sent before the first row: X-Ndb-Next (absent on the last page),
-// X-Ndb-Plan, X-Ndb-Examined and, with count: true, X-Ndb-Total.
+// X-Ndb-Plan, X-Ndb-Examined and, with count: true, X-Ndb-Total. With
+// explain: true, X-Ndb-Explain is the JSON of the plan counters.
 func (s *Server) find(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
 
@@ -317,6 +318,12 @@ func writePage(w http.ResponseWriter, page collection.Page) {
 
 	if page.Total != nil {
 		h.Set("X-Ndb-Total", strconv.Itoa(*page.Total))
+	}
+
+	if page.Explain != nil {
+		if b, err := json.Marshal(page.Explain); err == nil {
+			h.Set("X-Ndb-Explain", string(b))
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)

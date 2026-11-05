@@ -58,8 +58,9 @@ type cell struct {
 }
 
 type column struct {
-	name string
-	kind kind
+	name  string
+	kind  kind
+	mixed bool
 }
 
 // infer returns the columns of a segment and, per row, its cells.
@@ -103,7 +104,7 @@ func infer(rows []Row) ([]column, []map[string]cell, error) {
 	columns := make([]column, 0, len(counts))
 
 	for p, byKind := range counts {
-		columns = append(columns, column{name: p, kind: dominant(byKind)})
+		columns = append(columns, column{name: p, kind: dominant(byKind), mixed: len(byKind) > 1})
 	}
 
 	sort.Slice(columns, func(a, b int) bool { return columns[a].name < columns[b].name })

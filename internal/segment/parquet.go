@@ -15,6 +15,10 @@ import (
 
 const rowGroupRows = 1024
 
+// columnsKey is the file metadata key that holds the columns of the segment
+// as JSON (Column). Readers look columns up by name through it.
+const columnsKey = "ndb.columns"
+
 // metaColumns are written for every segment, before the document columns.
 var metaColumns = []Column{
 	{Name: "_id", Type: "string"},
@@ -43,12 +47,20 @@ func (parquetWriter) Encode(rows []Row, indexed []string) ([]byte, Info, error) 
 		out = append(out, enc.row(r, cells[i]))
 	}
 
+	info := Info{Rows: len(rows), Columns: describe(columns)}
+
+	meta, err := json.Marshal(info.Columns)
+	if err != nil {
+		return nil, Info{}, err
+	}
+
 	var buf bytes.Buffer
 
 	w := parquet.NewWriter(&buf, schema,
 		parquet.Compression(&zstd.Codec{}),
 		parquet.MaxRowsPerRowGroup(rowGroupRows),
 		parquet.BloomFilters(bloomFilters(schema, indexed)...),
+		parquet.KeyValueMetadata(columnsKey, string(meta)),
 	)
 
 	if _, err := w.WriteRows(out); err != nil {
@@ -59,14 +71,14 @@ func (parquetWriter) Encode(rows []Row, indexed []string) ([]byte, Info, error) 
 		return nil, Info{}, err
 	}
 
-	return buf.Bytes(), Info{Rows: len(rows), Columns: describe(columns)}, nil
+	return buf.Bytes(), info, nil
 }
 
 func describe(columns []column) []Column {
 	out := append([]Column{}, metaColumns...)
 
 	for _, c := range columns {
-		out = append(out, Column{Name: c.name, Type: kindNames[c.kind]})
+		out = append(out, Column{Name: c.name, Type: kindNames[c.kind], Mixed: c.mixed})
 	}
 
 	return out
@@ -238,11 +250,12 @@ func restValue(rest map[string]json.RawMessage, idx int) parquet.Value {
 }
 
 type parquetReader struct {
-	file   *parquet.File
-	cols   readCols
-	starts []int
-	n      int
-	closer io.Closer
+	file    *parquet.File
+	cols    readCols
+	starts  []int
+	n       int
+	closer  io.Closer
+	columns map[string]Column
 
 	// mu guards the raw values of one row group, read by Raw in order.
 	mu    sync.Mutex
@@ -251,7 +264,7 @@ type parquetReader struct {
 }
 
 type readCols struct {
-	id, v, seq, tx, del, raw int
+	id, v, seq, tx, del, raw, rest int
 }
 
 func decode(ra io.ReaderAt, size int64) (*parquetReader, error) {
@@ -265,7 +278,7 @@ func decode(ra io.ReaderAt, size int64) (*parquetReader, error) {
 		return nil, err
 	}
 
-	r := &parquetReader{file: f, cols: cols, group: -1}
+	r := &parquetReader{file: f, cols: cols, group: -1, columns: readColumns(f)}
 
 	for _, rg := range f.RowGroups() {
 		r.starts = append(r.starts, r.n)
@@ -279,7 +292,7 @@ func leafIndexes(s *parquet.Schema) (readCols, error) {
 	var out readCols
 
 	targets := map[string]*int{
-		"_id": &out.id, "_v": &out.v, "_seq": &out.seq, "_tx": &out.tx, "_del": &out.del, "_raw": &out.raw,
+		"_id": &out.id, "_v": &out.v, "_seq": &out.seq, "_tx": &out.tx, "_del": &out.del, "_raw": &out.raw, "_rest": &out.rest,
 	}
 
 	for name, dst := range targets {
@@ -432,29 +445,21 @@ func (r *parquetReader) Raw(row int) ([]byte, error) {
 	return r.raws[row-r.starts[g]], nil
 }
 
+// readGroup decodes the _raw column of one row group. Only that column is
+// read, so a row costs its group's raw bytes, not the other columns.
 func (r *parquetReader) readGroup(g int) ([][]byte, error) {
-	rows := r.file.RowGroups()[g].Rows()
-
-	defer rows.Close()
-
-	out := make([][]byte, 0, r.rowsIn(g))
-	buf := make([]parquet.Row, 256)
-
-	for {
-		k, err := rows.ReadRows(buf)
-
-		for _, pr := range buf[:k] {
-			out = append(out, r.decodeRow(pr, true).Raw)
-		}
-
-		if errors.Is(err, io.EOF) {
-			return out, nil
-		}
-
-		if err != nil {
-			return nil, err
-		}
+	vals, err := columnValues(r.file.RowGroups()[g].ColumnChunks()[r.cols.raw])
+	if err != nil {
+		return nil, err
 	}
+
+	out := make([][]byte, len(vals))
+
+	for k, v := range vals {
+		out[k] = bytes.Clone(v.ByteArray())
+	}
+
+	return out, nil
 }
 
 func (r *parquetReader) rowsIn(g int) int {
@@ -463,31 +468,6 @@ func (r *parquetReader) rowsIn(g int) int {
 	}
 
 	return r.n - r.starts[g]
-}
-
-func (r *parquetReader) decodeRow(pr parquet.Row, withRaw bool) Row {
-	var out Row
-
-	for _, v := range pr {
-		switch v.Column() {
-		case r.cols.id:
-			out.ID = string(v.ByteArray())
-		case r.cols.v:
-			out.V = uint64(v.Int64())
-		case r.cols.seq:
-			out.Seq = uint64(v.Int64())
-		case r.cols.tx:
-			out.Tx = uint64(v.Int64())
-		case r.cols.del:
-			out.Del = v.Boolean()
-		case r.cols.raw:
-			if withRaw {
-				out.Raw = bytes.Clone(v.ByteArray())
-			}
-		}
-	}
-
-	return out
 }
 
 func (r *parquetReader) Close() error {

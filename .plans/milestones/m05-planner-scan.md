@@ -1,6 +1,6 @@
 # M05 — Planner + column scan
 
-Status: not started · Depends on: M04 · Plan: §11.2, §11.4, phase 5
+Status: done (light verification; time-field pruning, index cursor fast path and mmap open) · Depends on: M04 · Plan: §11.2, §11.4, phase 5
 
 ## Goal
 

@@ -47,10 +47,37 @@ type Page struct {
 	// Total is set when the query has count: true.
 	Total *int
 
-	// Plan is "id", "index:<field>" or "scan"; Examined is the number of
-	// candidate documents that were decoded and matched.
+	// Plan is "id", "index:<field>", "scan" or "snapshot"; Examined is the
+	// number of candidate rows whose where was evaluated.
 	Plan     string
 	Examined int
+
+	// Explain is set when the query has explain: true.
+	Explain *Explain
+}
+
+// Explain is the plan and the counters of one find (plan §11.2). Segments and
+// row groups count only for a scan.
+type Explain struct {
+	Plan             string `json:"plan"`
+	SegmentsRead     int    `json:"segments_read"`
+	SegmentsSkipped  int    `json:"segments_skipped"`
+	RowGroupsRead    int    `json:"row_groups_read"`
+	RowGroupsSkipped int    `json:"row_groups_skipped"`
+	RowsRead         int    `json:"rows_read"`
+	RowsMatched      int    `json:"rows_matched"`
+	RawFetched       int    `json:"raw_fetched"`
+	CacheHits        int    `json:"cache_hits"`
+}
+
+func (e *Explain) add(o Explain) {
+	e.SegmentsRead += o.SegmentsRead
+	e.SegmentsSkipped += o.SegmentsSkipped
+	e.RowGroupsRead += o.RowGroupsRead
+	e.RowGroupsSkipped += o.RowGroupsSkipped
+	e.RowsRead += o.RowsRead
+	e.RawFetched += o.RawFetched
+	e.CacheHits += o.CacheHits
 }
 
 // IndexInfo is the state of one secondary index, for stats.
@@ -367,16 +394,18 @@ func (c *Collection) Query(ctx context.Context, q *query.Query) (Page, error) {
 		return c.pageFromSnapshot(q, snapID, cur)
 	}
 
-	cands, plan := c.candidates(q)
+	src := c.source(q)
 
-	rows, total, err := c.evaluate(ctx, q, cands, cur, hasCur)
+	parts, err := c.execute(ctx, q, src, cur, hasCur)
 	if err != nil {
 		return Page{}, err
 	}
 
+	rows, total, ex := merge(q, parts)
+
 	page, more := slice(q, rows)
 
-	page.Plan, page.Examined = plan, len(cands)
+	page.Plan, page.Examined = src.plan, ex.RowsRead
 
 	if q.Count {
 		page.Total = &total
@@ -388,6 +417,11 @@ func (c *Collection) Query(ctx context.Context, q *query.Query) (Page, error) {
 
 	if more {
 		page.Next = q.EncodeCursor(lastPos(q, rows, len(page.Rows)), snapID)
+	}
+
+	if q.Explain {
+		ex.Plan, ex.RowsMatched = src.plan, total
+		page.Explain = &ex
 	}
 
 	return page, nil
@@ -434,6 +468,10 @@ func (c *Collection) pageFromSnapshot(q *query.Query, id string, cur query.Pos) 
 
 	if q.Count {
 		page.Total = &s.total
+	}
+
+	if q.Explain {
+		page.Explain = &Explain{Plan: "snapshot", RowsMatched: s.total}
 	}
 
 	if more {
@@ -484,59 +522,16 @@ func (r *reader) lookup(id string) (*snapshot, error) {
 	return s, nil
 }
 
-// evaluate matches the candidates and returns the rows after cur, sorted
-// and (with a limit and no snapshot) cut to what the page needs, plus the
-// number of rows that matched where.
-func (c *Collection) evaluate(ctx context.Context, q *query.Query, cands []cand, cur query.Pos, hasCur bool) ([]row, int, error) {
-	k := 0
-
-	if q.Limit > 0 && !q.Snapshot {
-		k = q.Skip + q.Limit + 1
-	}
-
-	top := &topK{q: q, k: k}
-	total := 0
-
-	for i, cd := range cands {
-		if i&1023 == 0 && ctx.Err() != nil {
-			return nil, 0, ctx.Err()
-		}
-
-		doc, err := cd.e.raw()
-		if err != nil {
-			return nil, 0, err
-		}
-
-		m, err := query.Decode(doc)
-		if err != nil || !q.Match(m) {
-			continue
-		}
-
-		total++
-
-		r := row{Pos: query.Pos{Keys: q.SortKeys(m), ID: cd.id, Seq: cd.e.seq}, doc: doc}
-
-		if hasCur && q.Cmp(r.Pos, cur) <= 0 {
-			continue
-		}
-
-		top.add(r)
-	}
-
-	return top.sorted(), total, nil
-}
-
-// candidates collects the entries to match, under the read lock. It uses
-// the id map or a ready index when a where condition allows it; otherwise
-// it lists every document.
-func (c *Collection) candidates(q *query.Query) ([]cand, string) {
+// source takes what the query reads. It uses the id map or a ready index
+// when a where condition allows it; otherwise it takes a scan source.
+func (c *Collection) source(q *query.Query) source {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	conds := q.Indexable()
 
 	if out, ok := c.byID(conds); ok {
-		return out, "id"
+		return source{plan: "id", cands: out}
 	}
 
 	for _, pass := range []func(string) bool{isPoint, isRange} {
@@ -547,17 +542,11 @@ func (c *Collection) candidates(q *query.Query) ([]cand, string) {
 				continue
 			}
 
-			return c.byIndex(s, cd, conds), "index:" + cd.Path
+			return source{plan: "index:" + cd.Path, cands: c.byIndex(s, cd, conds)}
 		}
 	}
 
-	out := make([]cand, 0, len(c.durable.docs))
-
-	for id, e := range c.durable.docs {
-		out = append(out, cand{id, e})
-	}
-
-	return out, "scan"
+	return c.scanSource()
 }
 
 func isPoint(op string) bool {
@@ -657,6 +646,18 @@ type topK struct {
 	q    *query.Query
 	k    int
 	rows []row
+}
+
+// newTopK keeps the rows a page of q needs: skip + limit + 1 of them. With no
+// limit, or with a snapshot, it keeps all rows.
+func newTopK(q *query.Query) *topK {
+	k := 0
+
+	if q.Limit > 0 && !q.Snapshot {
+		k = q.Skip + q.Limit + 1
+	}
+
+	return &topK{q: q, k: k}
 }
 
 func (t *topK) Len() int           { return len(t.rows) }

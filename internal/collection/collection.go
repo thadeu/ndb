@@ -22,6 +22,8 @@ import (
 
 const defaultMaxLine = 1 << 20
 
+const defaultScanWorkers = 2
+
 type Config struct {
 	Dir string
 	FS  fs.FS
@@ -41,6 +43,14 @@ type Config struct {
 	SealBytes int64
 	SealAge   time.Duration
 	SealTick  time.Duration
+
+	// ScanWorkers bounds the units of one scan that run at once: the
+	// memtable and one per segment (default 2).
+	ScanWorkers int
+
+	// DocCache is the number of decoded documents that find by id keeps
+	// (default 1024). A negative value turns the cache off.
+	DocCache int
 }
 
 type Collection struct {
@@ -62,6 +72,9 @@ type Collection struct {
 
 	seal    *sealer
 	onFatal func(error)
+
+	scanWorkers int
+	docs        *docCache
 }
 
 // Doc is a document and its version.
@@ -84,11 +97,17 @@ type Change struct {
 
 func Open(cfg Config) (*Collection, error) {
 	c := &Collection{
-		def:     cfg.Def,
-		head:    newState(cfg.Def.Unique),
-		durable: newState(cfg.Def.Unique),
-		rd:      newReader(),
-		onFatal: cfg.OnFatal,
+		def:         cfg.Def,
+		head:        newState(cfg.Def.Unique),
+		durable:     newState(cfg.Def.Unique),
+		rd:          newReader(),
+		onFatal:     cfg.OnFatal,
+		scanWorkers: cfg.ScanWorkers,
+		docs:        newDocCache(cfg.DocCache),
+	}
+
+	if c.scanWorkers <= 0 {
+		c.scanWorkers = defaultScanWorkers
 	}
 
 	maxLine := int(cfg.Def.MaxLineSize)

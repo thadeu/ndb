@@ -5,6 +5,9 @@ import "slices"
 // Node is a compiled where clause.
 type Node interface {
 	match(m map[string]any) bool
+
+	// matchCols takes the candidate values of every where path, by slot.
+	matchCols(cands [][]Value) bool
 }
 
 type andNode []Node
@@ -12,6 +15,16 @@ type andNode []Node
 func (n andNode) match(m map[string]any) bool {
 	for _, c := range n {
 		if !c.match(m) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (n andNode) matchCols(cands [][]Value) bool {
+	for _, c := range n {
+		if !c.matchCols(cands) {
 			return false
 		}
 	}
@@ -31,10 +44,24 @@ func (n orNode) match(m map[string]any) bool {
 	return false
 }
 
+func (n orNode) matchCols(cands [][]Value) bool {
+	for _, c := range n {
+		if c.matchCols(cands) {
+			return true
+		}
+	}
+
+	return false
+}
+
 type notNode struct{ inner Node }
 
 func (n notNode) match(m map[string]any) bool {
 	return !n.inner.match(m)
+}
+
+func (n notNode) matchCols(cands [][]Value) bool {
+	return !n.inner.matchCols(cands)
 }
 
 // op is one operator: name has no "$". sub is used by "not".
@@ -45,12 +72,14 @@ type op struct {
 	sub  []op
 }
 
-// fieldNode is the operators of one field, joined with AND.
+// fieldNode is the operators of one field, joined with AND. slot is its
+// index in Query.Paths.
 type fieldNode struct {
 	path   string
 	parts  []string
 	isTime bool
 	ops    []op
+	slot   int
 }
 
 func (f *fieldNode) match(m map[string]any) bool {
@@ -60,6 +89,12 @@ func (f *fieldNode) match(m map[string]any) bool {
 	cands := candidates(leaves, f.isTime)
 
 	return matchAll(f.ops, cands, found)
+}
+
+// matchCols is match for a path whose candidates are known. A column value
+// always exists, so the path is found.
+func (f *fieldNode) matchCols(cands [][]Value) bool {
+	return matchAll(f.ops, cands[f.slot], true)
 }
 
 func matchAll(ops []op, cands []Value, found bool) bool {
