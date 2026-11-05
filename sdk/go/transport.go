@@ -90,6 +90,10 @@ func (db *DB) find(ctx context.Context, coll string, body []byte) (*http.Respons
 	return db.do(ctx, http.MethodPost, collPath(coll)+"/find", body)
 }
 
+func (db *DB) aggregate(ctx context.Context, coll string, body []byte) (*http.Response, error) {
+	return db.do(ctx, http.MethodPost, collPath(coll)+"/aggregate", body)
+}
+
 // ndjsonRows yields each JSON value of r. A value cut short ends the stream
 // with an error.
 func ndjsonRows(r io.Reader) iter.Seq2[json.RawMessage, error] {

@@ -89,6 +89,8 @@ func statusOf(code string) int {
 		return http.StatusConflict
 	case "request_too_large", "line_too_large":
 		return http.StatusRequestEntityTooLarge
+	case "group_limit_exceeded":
+		return http.StatusUnprocessableEntity
 	case "canceled":
 		return StatusClientClosed
 	case "not_ready", "closed":

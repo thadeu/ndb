@@ -62,6 +62,9 @@ type findBody struct {
 	Skip   int            `json:"skip,omitempty"`
 	After  string         `json:"after,omitempty"`
 	Count  bool           `json:"count,omitempty"`
+
+	// Versions asks the daemon for "_v" in each row, for a version field.
+	Versions bool `json:"versions,omitempty"`
 }
 
 // Query builds a find on the collection of T. It builds JSON only: the
@@ -216,13 +219,19 @@ func (q *Query[T]) Iter(ctx context.Context) iter.Seq2[T, error] {
 
 func (q *Query[T]) body() findBody {
 	return findBody{
-		Where:  whereOf(q.filters),
-		Fields: q.fields,
-		Sort:   q.sort,
-		Limit:  q.limit,
-		Skip:   q.skip,
-		After:  q.after,
+		Where:    whereOf(q.filters),
+		Fields:   q.fields,
+		Sort:     q.sort,
+		Limit:    q.limit,
+		Skip:     q.skip,
+		After:    q.after,
+		Versions: q.wantsVersions(),
 	}
+}
+
+// wantsVersions is true when T has a version field to fill.
+func (q *Query[T]) wantsVersions() bool {
+	return q.coll != nil && q.coll.schema != nil && q.coll.schema.version != ""
 }
 
 // rows runs one find with body and yields each decoded row.

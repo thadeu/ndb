@@ -11,6 +11,7 @@ import (
 	"context"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/thadeu/ndb/internal/catalog"
@@ -23,6 +24,8 @@ import (
 const defaultMaxLine = 1 << 20
 
 const defaultScanWorkers = 2
+
+const defaultGroupLimit = 256 << 20
 
 type Config struct {
 	Dir string
@@ -48,9 +51,24 @@ type Config struct {
 	// memtable and one per segment (default 2).
 	ScanWorkers int
 
+	// GroupLimit is the memory an aggregate may use for its group tables, in
+	// bytes (default 256 MiB). Over it the aggregate fails with
+	// group_limit_exceeded.
+	GroupLimit int64
+
 	// DocCache is the number of decoded documents that find by id keeps
 	// (default 1024). A negative value turns the cache off.
 	DocCache int
+
+	// WatchBuffer is how many live events one watcher may hold before it is
+	// dropped as lagged (default 4096). WALSegmentSize overrides the WAL
+	// segment size (default 64 MiB); tests use it to force rotation.
+	WatchBuffer    int
+	WALSegmentSize int64
+
+	// FlushEvery is the background fsync interval in relaxed mode (default
+	// 200 ms). Watch events of a relaxed collection wait for that fsync.
+	FlushEvery time.Duration
 }
 
 type Collection struct {
@@ -58,6 +76,10 @@ type Collection struct {
 	w   *writer.Writer
 
 	head *state
+
+	// unsynced holds applied records that are not fsync'd yet (relaxed
+	// mode); watchers see them only after the fsync. Writer goroutine only.
+	unsynced []wal.Record
 
 	mu      sync.RWMutex
 	durable *state
@@ -74,7 +96,10 @@ type Collection struct {
 	onFatal func(error)
 
 	scanWorkers int
+	groupLimit  atomic.Int64
 	docs        *docCache
+
+	feed *engineFeed
 }
 
 // Doc is a document and its version.
@@ -106,9 +131,17 @@ func Open(cfg Config) (*Collection, error) {
 		docs:        newDocCache(cfg.DocCache),
 	}
 
+	c.feed = &engineFeed{fs: cfg.FS, dir: cfg.Dir, buf: cfg.WatchBuffer}
+
+	if c.feed.buf <= 0 {
+		c.feed.buf = defaultWatchBuffer
+	}
+
 	if c.scanWorkers <= 0 {
 		c.scanWorkers = defaultScanWorkers
 	}
+
+	c.SetGroupLimit(cfg.GroupLimit)
 
 	maxLine := int(cfg.Def.MaxLineSize)
 
@@ -141,6 +174,9 @@ func Open(cfg Config) (*Collection, error) {
 		return nil, err
 	}
 
+	c.feed.maxLine = maxLine
+	c.feed.last = res.LastTx
+
 	durability := writer.Strict
 
 	if cfg.Def.Durability == catalog.Relaxed {
@@ -148,14 +184,17 @@ func Open(cfg Config) (*Collection, error) {
 	}
 
 	c.w, err = writer.Open(writer.Config{
-		Dir:        cfg.Dir,
-		FS:         cfg.FS,
-		Durability: durability,
-		MaxLine:    maxLine,
-		StartTx:    res.LastTx,
-		Prepare:    c.prepare,
-		Applied:    c.applied,
-		OnFatal:    cfg.OnFatal,
+		Dir:         cfg.Dir,
+		FS:          cfg.FS,
+		Durability:  durability,
+		MaxLine:     maxLine,
+		SegmentSize: cfg.WALSegmentSize,
+		StartTx:     res.LastTx,
+		Prepare:     c.prepare,
+		Applied:     c.applied,
+		Synced:      c.synced,
+		FlushEvery:  cfg.FlushEvery,
+		OnFatal:     cfg.OnFatal,
 	})
 	if err != nil {
 		c.closeSegments()
@@ -389,4 +428,20 @@ func (c *Collection) applied(rec wal.Record) {
 	for _, op := range rec.Ops {
 		c.applyDurable(op, rec.Tx)
 	}
+
+	c.unsynced = append(c.unsynced, rec)
+}
+
+// synced runs on the writer goroutine after an fsync: the records applied
+// so far are durable, so watchers may see them. In relaxed mode a crash
+// before the fsync loses them, and no watcher ever saw them.
+func (c *Collection) synced() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for _, rec := range c.unsynced {
+		c.feed.publish(rec)
+	}
+
+	c.unsynced = c.unsynced[:0]
 }

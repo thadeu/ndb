@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/thadeu/ndb/internal/agg"
 	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/collection"
 	"github.com/thadeu/ndb/internal/query"
@@ -17,6 +18,9 @@ var ErrDirect = errors.New("direct_collection: writes go to the app files")
 type reader interface {
 	ParseQuery(body []byte) (*query.Query, error)
 	Query(ctx context.Context, q *query.Query) (collection.Page, error)
+	ParseAggregate(body []byte) (*agg.Pipeline, error)
+	Aggregate(ctx context.Context, p *agg.Pipeline) (collection.Page, error)
+	SetGroupLimit(n int64)
 	EnsureIndex(field string) error
 	DropIndex(field string)
 	Indexes() []collection.IndexInfo
@@ -53,6 +57,16 @@ func (c *Collection) Find(ctx context.Context, body []byte) (collection.Page, er
 	}
 
 	return c.rd.Query(ctx, q)
+}
+
+// Aggregate runs the pipeline of an aggregate body (plan §10.2).
+func (c *Collection) Aggregate(ctx context.Context, body []byte) (collection.Page, error) {
+	p, err := c.rd.ParseAggregate(body)
+	if err != nil {
+		return collection.Page{}, err
+	}
+
+	return c.rd.Aggregate(ctx, p)
 }
 
 func (c *Collection) Insert(ctx context.Context, docs ...[]byte) ([]collection.Result, error) {

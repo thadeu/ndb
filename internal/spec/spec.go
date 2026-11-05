@@ -31,6 +31,8 @@ type Setup struct {
 	Writes  []Step          `json:"writes"`
 }
 
+// Step is one call: Op is insert, find or aggregate, and Body is the JSON
+// body of the HTTP call of that name.
 type Step struct {
 	Op   string          `json:"op"`
 	Body json.RawMessage `json:"body"`

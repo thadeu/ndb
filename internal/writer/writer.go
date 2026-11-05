@@ -56,6 +56,11 @@ type Config struct {
 	// Applied runs after the record is durable, in commit order.
 	Applied func(rec wal.Record)
 
+	// Synced runs on the writer goroutine after every successful fsync of
+	// the WAL. In relaxed mode Applied runs before the fsync, so code that
+	// must only see durable records (watch) waits for Synced.
+	Synced func()
+
 	// OnFatal runs when a write or fsync fails. The default exits the
 	// process: after a failed fsync, Linux may drop dirty pages, so the only
 	// safe path is to crash and recover from the WAL.
@@ -210,6 +215,10 @@ func (w *Writer) Close() error {
 
 	err := w.file.Sync()
 
+	if err == nil {
+		w.synced()
+	}
+
 	if cerr := w.file.Close(); err == nil {
 		err = cerr
 	}
@@ -241,6 +250,8 @@ func (w *Writer) runJob(j job) bool {
 	}
 
 	w.dirty = false
+
+	w.synced()
 
 	j.fn(Pos{Seq: w.seq, Offset: w.size, Tx: w.tx})
 	j.done <- nil
@@ -382,6 +393,10 @@ func (w *Writer) commitBatch(batch []*request) bool {
 		p.req.done <- result{tx: p.rec.Tx, ops: p.rec.Ops}
 	}
 
+	if w.cfg.Durability == Strict {
+		w.synced()
+	}
+
 	return true
 }
 
@@ -467,6 +482,8 @@ func (w *Writer) rotateBefore(cut int) error {
 		return err
 	}
 
+	w.synced()
+
 	if err := w.file.Close(); err != nil {
 		return err
 	}
@@ -510,7 +527,15 @@ func (w *Writer) flushDirty() bool {
 
 	w.dirty = false
 
+	w.synced()
+
 	return true
+}
+
+func (w *Writer) synced() {
+	if w.cfg.Synced != nil {
+		w.cfg.Synced()
+	}
 }
 
 // fatal closes the writer first, then answers the batch. In the other order

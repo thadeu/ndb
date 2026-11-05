@@ -27,6 +27,10 @@ type Query struct {
 	Snapshot bool
 	Explain  bool
 
+	// Versions adds "_v" (the document version) to each output row, so a
+	// client can send it back as if_version.
+	Versions bool
+
 	opts  Options
 	where Node
 	raw   any
@@ -41,7 +45,7 @@ type Cond struct {
 	Vals []Value
 }
 
-var topKeys = []string{"where", "fields", "sort", "limit", "skip", "after", "count", "snapshot", "explain"}
+var topKeys = []string{"where", "fields", "sort", "limit", "skip", "after", "count", "snapshot", "explain", "versions"}
 
 // Parse validates a find body. An empty body is an empty query.
 func Parse(body []byte, opts Options) (*Query, error) {
@@ -86,7 +90,7 @@ func (q *Query) parseScalars(top map[string]json.RawMessage) error {
 		}
 	}
 
-	for key, dst := range map[string]*bool{"count": &q.Count, "snapshot": &q.Snapshot, "explain": &q.Explain} {
+	for key, dst := range map[string]*bool{"count": &q.Count, "snapshot": &q.Snapshot, "explain": &q.Explain, "versions": &q.Versions} {
 		if raw, ok := top[key]; ok && json.Unmarshal(raw, dst) != nil {
 			return invalid("%s must be a boolean", key)
 		}

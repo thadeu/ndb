@@ -1,6 +1,7 @@
 package collection
 
 import (
+	"bytes"
 	"container/heap"
 	"context"
 	"crypto/rand"
@@ -8,6 +9,7 @@ import (
 	"encoding/json"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -372,6 +374,9 @@ type cand struct {
 type row struct {
 	query.Pos
 	doc json.RawMessage
+
+	// v is the version of doc, from the same snapshot as doc.
+	v uint64
 }
 
 // Query runs a find. See the package notes above for the snapshot rules.
@@ -448,6 +453,10 @@ func slice(q *query.Query, rows []row) (Page, bool) {
 
 	for i, r := range rows {
 		out[i] = project(q.Fields, r.doc)
+
+		if q.Versions {
+			out[i] = withVersion(out[i], r.v)
+		}
 	}
 
 	return Page{Rows: out}, more
@@ -740,4 +749,20 @@ func copyPath(dst, src map[string]any, parts []string) {
 	}
 
 	copyPath(child, sub, parts[1:])
+}
+
+// withVersion adds "_v" as the first field of the doc object.
+func withVersion(doc json.RawMessage, v uint64) json.RawMessage {
+	out := make([]byte, 0, len(doc)+24)
+
+	out = append(out, `{"_v":`...)
+	out = strconv.AppendUint(out, v, 10)
+
+	body := bytes.TrimSpace(doc[1:])
+
+	if len(body) > 1 {
+		out = append(out, ',')
+	}
+
+	return append(out, body...)
 }

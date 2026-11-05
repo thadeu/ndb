@@ -8,14 +8,19 @@ import (
 )
 
 // schema is the mapping from a Go struct to a document, read from the
-// `ndb:"name[,option...]"` tags. Options: id, time, index, unique. A field
-// without a tag is not stored; `ndb:"-"` skips a field.
+// `ndb:"name[,option...]"` tags. Options: id, time, index, unique, and
+// version (the field holds "_v"). A field without an ndb tag uses its json
+// name or its Go name; `ndb:"-"` or `json:"-"` skips it.
 type schema struct {
 	fields  []schemaField
 	id      string
 	time    string
 	indexes []string
 	unique  []string
+
+	// version is the field that holds "_v". It is filled on reads and
+	// never sent on writes.
+	version string
 }
 
 type schemaField struct {
@@ -118,6 +123,8 @@ func (s *schema) option(name, opt string) error {
 		s.indexes = append(s.indexes, name)
 	case "unique":
 		s.unique = append(s.unique, name)
+	case "version":
+		s.version = name
 	default:
 		return fmt.Errorf("ndb: field %s has unknown option %q", name, opt)
 	}
@@ -142,7 +149,7 @@ func (s *schema) encode(v any) (json.RawMessage, error) {
 	for _, f := range s.fields {
 		fv := rv.Field(f.index)
 
-		if f.name == s.id && fv.IsZero() {
+		if f.name == s.id && fv.IsZero() || f.name == s.version {
 			continue
 		}
 

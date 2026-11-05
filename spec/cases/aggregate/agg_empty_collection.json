@@ -1,0 +1,34 @@
+{
+  "name": "no documents, no groups",
+  "collection": "calls",
+  "setup": {
+    "catalog": {
+      "id": "call_id",
+      "time": "ts",
+      "write": "engine",
+      "indexes": [
+        "status"
+      ]
+    },
+    "writes": []
+  },
+  "request": {
+    "op": "aggregate",
+    "body": {
+      "pipeline": [
+        {
+          "$group": {
+            "_id": "$status",
+            "n": {
+              "$count": {}
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "ordered": true,
+    "rows": []
+  }
+}

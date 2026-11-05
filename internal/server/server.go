@@ -23,16 +23,24 @@ type Server struct {
 	metrics metrics
 	handler http.Handler
 	http    *http.Server
+
+	// heartbeat is the idle time of a watch stream before a heartbeat line.
+	// stopCtx ends when Shutdown starts, so open watch streams do not hold it.
+	heartbeat time.Duration
+	stopCtx   context.Context
 }
 
 func New() *Server {
-	s := &Server{}
+	stopCtx, stop := context.WithCancel(context.Background())
+	s := &Server{heartbeat: defaultHeartbeat, stopCtx: stopCtx}
 	s.handler = s.routes()
 	s.http = &http.Server{
 		Handler:           s.handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
+
+	s.http.RegisterOnShutdown(stop)
 
 	return s
 }
@@ -67,9 +75,12 @@ func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /v1/c/{coll}/find", s.ready(s.find))
+	mux.HandleFunc("POST /v1/c/{coll}/aggregate", s.ready(s.aggregate))
 	mux.HandleFunc("POST /v1/c/{coll}/insert", s.ready(s.insert))
 	mux.HandleFunc("POST /v1/c/{coll}/update", s.ready(s.update))
 	mux.HandleFunc("POST /v1/c/{coll}/delete", s.ready(s.remove))
+	mux.HandleFunc("POST /v1/c/{coll}/watch", s.ready(s.watch))
+	mux.HandleFunc("POST /v1/c/{coll}/ack", s.ready(s.ack))
 	mux.HandleFunc("PUT /v1/c/{coll}", s.ready(s.ensure))
 	mux.HandleFunc("GET /v1/c", s.ready(s.list))
 	mux.HandleFunc("DELETE /v1/c/{coll}/indexes/{field}", s.ready(s.dropIndex))

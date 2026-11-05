@@ -25,6 +25,7 @@ type Config struct {
 	DataDir       string `yaml:"data_dir"`
 	Listen        Listen `yaml:"listen"`
 	MemoryLimit   int64  `yaml:"-"`
+	GroupLimit    int64  `yaml:"-"`
 	AllowImplicit bool   `yaml:"allow_implicit"`
 
 	Collections map[string]catalog.Def `yaml:"-"`
@@ -35,6 +36,7 @@ type file struct {
 	Config `yaml:",inline"`
 
 	MemoryLimit string                `yaml:"memory_limit"`
+	GroupLimit  string                `yaml:"group_limit"`
 	Collections map[string]collection `yaml:"collections"`
 }
 
@@ -80,6 +82,10 @@ func Load(path string) (Config, error) {
 
 	if cfg.MemoryLimit, err = parseSize(f.MemoryLimit); err != nil {
 		return Config{}, fmt.Errorf("%w: memory_limit: %v", ErrInvalid, err)
+	}
+
+	if cfg.GroupLimit, err = parseSize(f.GroupLimit); err != nil {
+		return Config{}, fmt.Errorf("%w: group_limit: %v", ErrInvalid, err)
 	}
 
 	for name, c := range f.Collections {

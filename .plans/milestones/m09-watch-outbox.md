@@ -1,6 +1,6 @@
 # M09 — Watch + first real use (fsw-esl outbox)
 
-Status: not started · Depends on: M08 · Plan: §10.4, phase 8
+Status: done (light verification; E9.4 fsw-esl outbox-sweeper and the watch where filter are open) · Depends on: M08 · Plan: §10.4, phase 8
 
 ## Goal
 

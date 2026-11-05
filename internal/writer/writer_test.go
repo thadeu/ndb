@@ -409,3 +409,25 @@ func TestRunSeesTheWALEndAfterEveryCommit(t *testing.T) {
 		t.Fatalf("Run after Close = %v, want ErrClosed", err)
 	}
 }
+
+func TestSyncedRunsAfterEverySync(t *testing.T) {
+	var synced atomic.Int64
+
+	w, _ := open(t, writer.Config{Durability: writer.Relaxed, FlushEvery: time.Hour, Synced: func() { synced.Add(1) }})
+
+	if _, _, err := w.Commit(context.Background(), put("a")); err != nil {
+		t.Fatal(err)
+	}
+
+	if synced.Load() != 0 {
+		t.Fatal("Synced ran before any fsync in relaxed mode")
+	}
+
+	if err := w.Run(func(writer.Pos) {}); err != nil {
+		t.Fatal(err)
+	}
+
+	if synced.Load() != 1 {
+		t.Fatalf("Synced ran %d times after Run's fsync, want 1", synced.Load())
+	}
+}

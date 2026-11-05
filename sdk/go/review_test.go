@@ -2,8 +2,10 @@ package ndb
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -90,4 +92,54 @@ func TestIterWalksAllPages(t *testing.T) {
 	if len(seen) != 25 {
 		t.Fatalf("Iter gave %d rows, want 25 (limit 10 is the batch size)", len(seen))
 	}
+}
+
+type Versioned struct {
+	ID     string `ndb:"_id,id"`
+	Status string `ndb:"status"`
+	V      uint64 `ndb:"_v,version"`
+}
+
+func TestVersionFieldEnablesIfVersion(t *testing.T) {
+	ctx := context.Background()
+	db := openTest(t, daemon.unix)
+
+	col, err := Collection[Versioned](ctx, db, newColl())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := col.Insert(ctx, Versioned{ID: "a", Status: "new"}); err != nil {
+		t.Fatal(err)
+	}
+
+	mine, err := col.Get(ctx, "a")
+	if err != nil || mine.V != 1 {
+		t.Fatalf("loaded V = %d err=%v, want 1", mine.V, err)
+	}
+
+	if _, err := col.Update(ctx, "a", map[string]any{"status": "theirs"}, IfVersion(mine.V)); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := col.Update(ctx, "a", map[string]any{"status": "mine"}, IfVersion(mine.V)); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("stale update: want ErrVersionConflict, got %v", err)
+	}
+
+	raw, _ := mustSchema[Versioned](t).encode(Versioned{ID: "a", V: 9})
+
+	if strings.Contains(string(raw), "_v") {
+		t.Fatalf("version field sent on write: %s", raw)
+	}
+}
+
+func mustSchema[T any](t *testing.T) *schema {
+	t.Helper()
+
+	s, err := schemaOf(reflect.TypeFor[T]())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return s
 }

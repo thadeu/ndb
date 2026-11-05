@@ -61,6 +61,7 @@ type Cell struct {
 type GroupRows struct {
 	IDs   []string
 	Seqs  []uint64
+	Vs    []uint64
 	Cells [][]Cell
 }
 
@@ -221,7 +222,7 @@ func probeOf(t string, v Scalar) (parquet.Value, bool) {
 }
 
 // ReadGroup reads the ids, positions and cells of paths for one row group.
-// Only the chunks of the paths and of _id, _seq and _rest are read.
+// Only the chunks of the paths and of _id, _seq, _v and _rest are read.
 func (r *parquetReader) ReadGroup(group int, paths []string) (GroupRows, error) {
 	rg := r.file.RowGroups()[group]
 	chunks := rg.ColumnChunks()
@@ -236,9 +237,15 @@ func (r *parquetReader) ReadGroup(group int, paths []string) (GroupRows, error) 
 		return GroupRows{}, err
 	}
 
+	vs, err := columnValues(chunks[r.cols.v])
+	if err != nil {
+		return GroupRows{}, err
+	}
+
 	out := GroupRows{
 		IDs:   make([]string, len(ids)),
 		Seqs:  make([]uint64, len(seqs)),
+		Vs:    make([]uint64, len(vs)),
 		Cells: make([][]Cell, len(paths)),
 	}
 
@@ -248,6 +255,10 @@ func (r *parquetReader) ReadGroup(group int, paths []string) (GroupRows, error) 
 
 	for i, v := range seqs {
 		out.Seqs[i] = uint64(v.Int64())
+	}
+
+	for i, v := range vs {
+		out.Vs[i] = uint64(v.Int64())
 	}
 
 	if len(paths) == 0 {

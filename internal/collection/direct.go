@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strconv"
 
+	"github.com/thadeu/ndb/internal/agg"
 	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/query"
 	"github.com/thadeu/ndb/internal/wal"
@@ -21,6 +22,10 @@ type DirectConfig struct {
 
 	// MaxBytes is the memtable limit in document bytes (0 = no limit).
 	MaxBytes int64
+
+	// WatchBuffer is how many live events one watcher may hold before it is
+	// dropped as lagged (default 4096).
+	WatchBuffer int
 }
 
 // Direct is a read-only direct-mode collection. The tailer feeds it with
@@ -34,6 +39,8 @@ type Direct struct {
 	seq   uint64
 	bytes int64
 	max   int64
+
+	feed *directFeed
 }
 
 func NewDirect(cfg DirectConfig) *Direct {
@@ -43,7 +50,19 @@ func NewDirect(cfg DirectConfig) *Direct {
 		_ = c.EnsureIndex(f)
 	}
 
-	return &Direct{c: c, max: cfg.MaxBytes}
+	d := &Direct{c: c, max: cfg.MaxBytes}
+
+	d.feed = &directFeed{d: d, buf: cfg.WatchBuffer, maxLine: int(cfg.Def.MaxLineSize), ends: map[string]dpos{}}
+
+	if d.feed.buf <= 0 {
+		d.feed.buf = defaultWatchBuffer
+	}
+
+	if d.feed.maxLine == 0 {
+		d.feed.maxLine = defaultMaxLine
+	}
+
+	return d
 }
 
 func (d *Direct) Close() error {
@@ -73,6 +92,18 @@ func (d *Direct) ParseQuery(body []byte) (*query.Query, error) {
 
 func (d *Direct) Query(ctx context.Context, q *query.Query) (Page, error) {
 	return d.c.Query(ctx, q)
+}
+
+func (d *Direct) ParseAggregate(body []byte) (*agg.Pipeline, error) {
+	return d.c.ParseAggregate(body)
+}
+
+func (d *Direct) Aggregate(ctx context.Context, p *agg.Pipeline) (Page, error) {
+	return d.c.Aggregate(ctx, p)
+}
+
+func (d *Direct) SetGroupLimit(n int64) {
+	d.c.SetGroupLimit(n)
 }
 
 func (d *Direct) EnsureIndex(field string) error {
@@ -116,6 +147,8 @@ func (d *Direct) Apply(file string, off int64, line []byte) error {
 
 		d.c.applyDurable(op, 0)
 	}
+
+	d.feed.publish(file, off, ops)
 
 	return nil
 }

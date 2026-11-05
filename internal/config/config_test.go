@@ -118,3 +118,20 @@ func TestApplyToCatalog(t *testing.T) {
 		t.Fatalf("def=%+v ok=%v", def, ok)
 	}
 }
+
+func TestGroupLimitIsASize(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ndb.yml")
+
+	if err := os.WriteFile(path, []byte("group_limit: 64MiB\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.GroupLimit != 64<<20 {
+		t.Fatalf("GroupLimit = %d", cfg.GroupLimit)
+	}
+}

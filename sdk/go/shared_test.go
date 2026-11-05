@@ -147,11 +147,19 @@ func runSharedCase(t *testing.T, db *DB, c sharedCase) {
 		discard(resp)
 	}
 
-	if c.request.Op != "find" {
+	var (
+		resp *http.Response
+		err  error
+	)
+
+	switch c.request.Op {
+	case "find":
+		resp, err = db.find(ctx, name, c.request.Body)
+	case "aggregate":
+		resp, err = db.aggregate(ctx, name, c.request.Body)
+	default:
 		t.Fatalf("%s: request op %q is not supported", c.file, c.request.Op)
 	}
-
-	resp, err := db.find(ctx, name, c.request.Body)
 
 	if c.wantError != "" {
 		var apiErr *Error

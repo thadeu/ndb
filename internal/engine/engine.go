@@ -15,6 +15,7 @@ import (
 	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/collection"
 	"github.com/thadeu/ndb/internal/config"
+	"github.com/thadeu/ndb/internal/cursors"
 	"github.com/thadeu/ndb/internal/fs"
 	"github.com/thadeu/ndb/internal/lock"
 	"github.com/thadeu/ndb/internal/tailer"
@@ -30,8 +31,14 @@ type DB struct {
 	lock *lock.Lock
 	cat  *catalog.Catalog
 
+	// cursors holds the position of each watch consumer.
+	cursors *cursors.Store
+
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// groupLimit is the group table memory of one aggregate (0 = default).
+	groupLimit int64
 
 	// mu guards cols. Opening a collection (recovery) runs under it.
 	mu   sync.RWMutex
@@ -57,9 +64,27 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		return nil, err
 	}
 
+	cur, err := cursors.Open(filepath.Join(cfg.DataDir, "cursors.bolt"))
+	if err != nil {
+		cat.Close()
+		lk.Release()
+
+		return nil, err
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 
-	db := &DB{dir: cfg.DataDir, log: log, lock: lk, cat: cat, ctx: ctx, cancel: cancel, cols: map[string]*Collection{}}
+	db := &DB{
+		dir:        cfg.DataDir,
+		log:        log,
+		lock:       lk,
+		cat:        cat,
+		cursors:    cur,
+		ctx:        ctx,
+		cancel:     cancel,
+		groupLimit: cfg.GroupLimit,
+		cols:       map[string]*Collection{},
+	}
 
 	if err := cfg.Apply(cat); err != nil {
 		db.Close()
@@ -94,7 +119,7 @@ func (db *DB) Close() error {
 		delete(db.cols, name)
 	}
 
-	errs = append(errs, db.cat.Close(), db.lock.Release())
+	errs = append(errs, db.cursors.Close(), db.cat.Close(), db.lock.Release())
 
 	return errors.Join(errs...)
 }
@@ -223,7 +248,7 @@ func (db *DB) open(def catalog.Def) (*Collection, error) {
 		return db.openDirect(def, dir)
 	}
 
-	eng, err := collection.Open(collection.Config{Dir: dir, Data: dir, FS: fs.OS{}, Def: def})
+	eng, err := collection.Open(collection.Config{Dir: dir, Data: dir, FS: fs.OS{}, Def: def, GroupLimit: db.groupLimit})
 	if err != nil {
 		return nil, err
 	}
@@ -236,6 +261,8 @@ func (db *DB) open(def catalog.Def) (*Collection, error) {
 // starts from offset 0 (Rebuild).
 func (db *DB) openDirect(def catalog.Def, dir string) (*Collection, error) {
 	mem := collection.NewDirect(collection.DirectConfig{Def: def})
+
+	mem.SetGroupLimit(db.groupLimit)
 
 	tail, err := tailer.Open(tailer.Config{Dir: dir, Def: def, Sink: mem, Rebuild: true, Logger: db.log})
 	if err != nil {

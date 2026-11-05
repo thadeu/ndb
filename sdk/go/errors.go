@@ -37,6 +37,8 @@ var (
 	ErrUnknownCollection = &Error{Code: "unknown_collection"}
 	ErrDirectCollection  = &Error{Code: "direct_collection"}
 	ErrInvalidQuery      = &Error{Code: "invalid_query"}
+	ErrInvalidPipeline   = &Error{Code: "invalid_pipeline"}
+	ErrGroupLimit        = &Error{Code: "group_limit_exceeded"}
 	ErrCursorInvalid     = &Error{Code: "cursor_invalid"}
 	ErrCursorMismatch    = &Error{Code: "cursor_mismatch"}
 	ErrCursorExpired     = &Error{Code: "cursor_expired"}
@@ -44,4 +46,6 @@ var (
 	ErrLineTooLarge      = &Error{Code: "line_too_large"}
 	ErrNotReady          = &Error{Code: "not_ready"}
 	ErrClosed            = &Error{Code: "closed"}
+	ErrWatchLagged       = &Error{Code: "watch_lagged"}
+	ErrInvalidPosition   = &Error{Code: "invalid_position"}
 )

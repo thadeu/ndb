@@ -441,6 +441,11 @@ All queries are JSON. The same body works from every client.
 }
 ```
 
+`"versions": true` adds `"_v"` (the document version, from the same snapshot
+as the document) to each row, so a client can send it back as `if_version`.
+The SDKs ask for it on every load (Ruby always; Go when the struct has a
+`version` field).
+
 Operators in v1: `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`,
 `$exists`, `$and`, `$or`, `$not`. Later: `$regex`, `$elemMatch`.
 
@@ -482,6 +487,11 @@ Expressions: field paths, `$dateTrunc` (needed for charts).
 - The response is a stream of NDJSON rows from the last `ack` position.
 - `ack` stores the position of the consumer.
 - Delivery is at least once. Consumers must be idempotent.
+- A watcher sees only durable records: with `durability: relaxed`, events wait
+  for the background fsync (a crash before it loses the commit, and no
+  watcher ever saw it). Reads still see relaxed writes at once.
+- Direct mode: a file rotated or deleted before a consumer reaches it loses
+  that history for the consumer (ndb never controls the apps' files).
 
 ### 10.5 Catalog calls
 

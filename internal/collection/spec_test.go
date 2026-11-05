@@ -81,6 +81,19 @@ func (e *specEngine) Do(ctx context.Context, name string, step spec.Step) ([]jso
 		_, err := c.Insert(ctx, docs...)
 
 		return nil, specErr(err)
+	case "aggregate":
+		if err := c.Seal(); err != nil {
+			return nil, err
+		}
+
+		p, err := c.ParseAggregate(step.Body)
+		if err != nil {
+			return nil, specErr(err)
+		}
+
+		page, err := c.Aggregate(ctx, p)
+
+		return page.Rows, specErr(err)
 	case "find":
 		if err := c.Seal(); err != nil {
 			return nil, err

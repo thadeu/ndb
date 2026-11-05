@@ -184,3 +184,32 @@ func waitDirectReady(t *testing.T, d *collection.Direct) {
 
 	t.Fatal("index not ready")
 }
+
+func TestDirectAggregate(t *testing.T) {
+	d := newDirect("event_id", 0)
+
+	for i, line := range []string{
+		`{"event_id":"a","k":"x","n":1}`,
+		`{"event_id":"b","k":"x","n":2}`,
+		`{"event_id":"c","k":"y","n":4}`,
+		`{"event_id":"b","k":"y","n":8}`,
+	} {
+		if err := d.Apply("f", int64(i*100), []byte(line)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	p, err := d.ParseAggregate([]byte(`{"pipeline":[{"$group":{"_id":"$k","s":{"$sum":"$n"}}}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := d.Aggregate(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(page.Rows) != 2 || string(page.Rows[0]) != `{"_id":"x","s":1}` || string(page.Rows[1]) != `{"_id":"y","s":12}` {
+		t.Fatalf("rows = %s", page.Rows)
+	}
+}

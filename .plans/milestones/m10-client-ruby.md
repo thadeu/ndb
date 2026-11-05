@@ -1,6 +1,6 @@
 # M10 — Ruby client (gem `ndb_record`)
 
-Status: not started · Depends on: M07 (blob attribute waits for M12) · Plan: §12.2
+Status: done (light verification) · Depends on: M07 (blob attribute waits for M12) · Plan: §12.2
 
 ## Goal
 

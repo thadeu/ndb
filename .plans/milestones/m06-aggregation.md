@@ -1,6 +1,6 @@
 # M06 — Aggregation
 
-Status: not started · Depends on: M05 · Plan: §10.2, §11.3, phase 6
+Status: done (light verification) · Depends on: M05 · Plan: §10.2, §11.3, phase 6
 
 ## Goal
 

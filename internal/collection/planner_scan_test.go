@@ -536,3 +536,45 @@ func TestQueryWithZeroScanWorkersDoesNotHang(t *testing.T) {
 		t.Fatal("query hung")
 	}
 }
+
+func TestVersionsFlagReturnsSnapshotVersion(t *testing.T) {
+	c := openSealed(t, t.TempDir(), collection.Config{})
+
+	sealBatch(t, c, []string{`{"id":"sealed"}`})
+	bulk(t, c, []string{`{"id":"mem"}`})
+
+	if _, err := c.Update(ctx, "sealed", collection.Change{Set: map[string]any{"n": 1}}, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := c.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	bulk(t, c, []string{`{"id":"tail"}`})
+
+	rows := rq(t, c, `{"where":{},"sort":{"id":1},"versions":true}`).Rows
+	got := map[string]float64{}
+
+	for _, r := range rows {
+		var m map[string]any
+
+		if err := json.Unmarshal(r, &m); err != nil {
+			t.Fatal(err)
+		}
+
+		got[m["id"].(string)], _ = m["_v"].(float64)
+	}
+
+	want := map[string]float64{"mem": 1, "sealed": 2, "tail": 1}
+
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("versions = %v, want %v", got, want)
+	}
+
+	plain := rq(t, c, `{"where":{"id":"tail"}}`).Rows
+
+	if strings.Contains(string(plain[0]), `"_v"`) {
+		t.Fatalf("_v without the flag: %s", plain[0])
+	}
+}

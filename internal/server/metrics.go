@@ -43,6 +43,11 @@ func (w *statusWriter) WriteHeader(status int) {
 	w.ResponseWriter.WriteHeader(status)
 }
 
+// Unwrap lets http.ResponseController reach the real writer (flush, deadlines).
+func (w *statusWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
 func (s *Server) metricsPage(w http.ResponseWriter, _ *http.Request) {
 	var ready, collections int
 

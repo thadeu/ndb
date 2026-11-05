@@ -83,6 +83,37 @@ func (s *Server) find(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	writePage(w, page)
 }
 
+// aggregate streams the output rows of a pipeline as NDJSON, with the same
+// headers as find (plan §10.2, §10.6).
+func (s *Server) aggregate(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+	name := r.PathValue("coll")
+
+	col, err := db.Get(name)
+	if err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	body, err := readBody(w, r, db.MaxLine(name))
+	if err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	page, err := col.Aggregate(r.Context(), body)
+	if err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	s.metrics.rows.Add(int64(len(page.Rows)))
+
+	writePage(w, page)
+}
+
 func (s *Server) insert(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
 

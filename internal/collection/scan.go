@@ -109,9 +109,9 @@ func (c *Collection) execute(ctx context.Context, q *query.Query, src source, cu
 
 // runPool calls do for 0..n-1 with at most workers goroutines (at least one:
 // zero workers would block the first send forever). The first error wins.
-func runPool(ctx context.Context, workers, n int, do func(i int) (part, error)) ([]part, error) {
+func runPool[T any](ctx context.Context, workers, n int, do func(i int) (T, error)) ([]T, error) {
 	workers = max(workers, 1)
-	out := make([]part, n)
+	out := make([]T, n)
 	errs := make([]error, n)
 	jobs := make(chan int)
 
@@ -204,7 +204,7 @@ func (c *Collection) evalCands(ctx context.Context, q *query.Query, src source, 
 			continue
 		}
 
-		top.add(row{Pos: pos, doc: doc})
+		top.add(row{Pos: pos, doc: doc, v: cd.e.v})
 	}
 
 	p.rows = top.sorted()
@@ -381,7 +381,7 @@ func (sc *segScan) row(rows segment.GroupRows, i, abs int) error {
 		return err
 	}
 
-	sc.top.add(row{Pos: pos, doc: doc})
+	sc.top.add(row{Pos: pos, doc: doc, v: rows.Vs[i]})
 
 	return nil
 }
