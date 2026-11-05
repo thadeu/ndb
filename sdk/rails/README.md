@@ -132,6 +132,32 @@ rescue Ndb::StaleObjectError
 end
 ```
 
+## Expiry (TTL like Redis)
+
+Give the model an `expires: true` attribute. The daemon sets it for you.
+
+```ruby
+class Session < Ndb::Record
+  primary_key :sid
+
+  attribute :user, :string
+  attribute :expires_at, :datetime, expires: true
+end
+
+Session.create!({ sid: "s1", user: "u" }, expire_in: 1.hour)   # also create, save, update (seconds, a Duration or "30m")
+session = Session.find("s1")
+
+session.expire(30.minutes)   # EXPIRE: sets expires_at in the object, other unsaved changes stay
+session.ttl                  # => 1799, -1 (never expires), or nil (missing or expired)
+session.persist_ttl!         # PERSIST: removes the expiry
+```
+
+- `persist_ttl!` is not called `persist!`: ActiveModel already uses `persisted?` for something else.
+- `expire_in:` on `create`, `save` and `update` goes in the same write. `expire_in` wins over the `expires_at` value. After a write with `expire_in`, load the record again (`Session.find`) to see `expires_at`.
+- `expire` and `persist_ttl!` raise `Ndb::NotFound` for a missing or expired document, and `Ndb::TtlNotEnabled` when the model has no `expires: true` attribute.
+- The class-level `ttl 24.hours` stays: every document expires that long after its time field. `expire` and `persist_ttl!` raise `Ndb::TtlDerived` for it.
+- Disk space of expired documents returns after compaction, and fully only with `wal_retention`; see [Freeing disk](https://github.com/thadeu/ndb/blob/main/docs/dev/configuration.md#freeing-disk).
+
 ## Query
 
 Relations are lazy and immutable. The request goes out when you call `to_a`, `first`, `each`, `count` and so on.
@@ -312,6 +338,7 @@ The transport and daemon errors are defined by the gem `ndb`. They all live in t
 | `InvalidCursor` | `cursor_invalid`, `cursor_mismatch`, `cursor_expired` |
 | `WatchLagged` | `watch_lagged` |
 | `HistoryTruncated` | `history_truncated` |
+| `TtlNotEnabled`, `TtlDerived` | `ttl_not_enabled`, `ttl_derived` |
 | `RecordInvalid` | ActiveModel validation failed (has `record`) |
 | `RecordNotSaved` | `save!` returned false without errors |
 | `ConnectionError` | cannot reach the daemon. Subclasses: `ConnectError` (nothing was sent), `TimeoutError` |

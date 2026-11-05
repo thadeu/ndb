@@ -100,6 +100,26 @@ rescue Ndb::VersionConflict
 end
 ```
 
+## Expiry (TTL like Redis)
+
+The collection needs `expires_field`.
+
+```ruby
+ndb.ensure_collection("sessions", { id: "sid", expires_field: "exp" })
+
+ndb.insert("sessions", [{ sid: "s1" }], expire_in: 3600)  # seconds, or "1h" / "30m" / "1d"
+ndb.update("sessions", "s1", set: { user: "u" }, expire_in: "30m")
+
+ndb.expire("sessions", "s1", in: 1800)                     # => {"id", "v", "expires_at"}
+ndb.expire("sessions", "s1", at: Time.now + 7200, if_version: 2)
+ndb.ttl("sessions", "s1")                                  # => 7199, -1 (never expires), or nil (missing or expired)
+ndb.persist("sessions", "s1")                              # => {"id", "v"}
+```
+
+- `expire_in` wins over a value of `expires_field` in the same call. `ttl` rounds up to whole seconds.
+- `expire` and `persist` raise `Ndb::NotFound` for a missing or expired document. `Ndb::TtlNotEnabled` means no `expires_field`; `Ndb::TtlDerived` means the expiry comes from `ttl` + `time`.
+- Disk space of expired documents returns after compaction, and fully only with `wal_retention`; see [Freeing disk](https://github.com/thadeu/ndb/blob/main/docs/dev/configuration.md#freeing-disk).
+
 ## Find
 
 `find` returns a `Ndb::Page` with `rows` (an array of Hash), `next_cursor`, `plan`, `examined` and `total`.
@@ -264,6 +284,7 @@ All errors inherit from `Ndb::Error`, which has `code` (the daemon code) and `st
 | `InvalidCursor` | `cursor_invalid`, `cursor_mismatch`, `cursor_expired` |
 | `WatchLagged` | `watch_lagged` |
 | `HistoryTruncated` | `history_truncated` |
+| `TtlNotEnabled`, `TtlDerived` | `ttl_not_enabled`, `ttl_derived` |
 | `ConnectionError` | cannot reach the daemon. Subclasses: `ConnectError` (nothing was sent), `TimeoutError` |
 
 Any other code is a plain `Ndb::Error`. A response that is not a daemon error has the code `http_status`.

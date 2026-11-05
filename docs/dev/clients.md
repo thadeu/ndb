@@ -2,11 +2,11 @@
 
 Every SDK has two layers: a small transport (HTTP over a unix socket or TCP) and an idiomatic model layer that declares the collection (`PUT /v1/c/{coll}`) on first use and builds query JSON. The daemon decides what a query means. See [query.md](query.md).
 
-Sources are in `sdk/`: `sdk/go`, `sdk/ruby` (gem `ndb`), `sdk/rails` (gem `ndb-rails`), `sdk/ts`. Version 0.1.0 is prepared for release; until the registries have it, use a path or Git source.
+Sources are in `sdk/`: `sdk/go`, `sdk/ruby` (gem `ndb`), `sdk/rails` (gem `ndb-rails`), `sdk/ts`. They are published on pkg.go.dev, rubygems.org and npm.
 
 | SDK | Install |
 |---|---|
-| Go | `go get github.com/thadeu/ndb/sdk/go@v0.1.0` (the module is tagged `sdk/go/v0.1.0`) |
+| Go | `go get github.com/thadeu/ndb/sdk/go@latest` (the module is tagged `sdk/go/vX.Y.Z`) |
 | Ruby (plain client, no dependencies) | `gem "ndb"` |
 | Rails (ActiveModel layer) | `gem "ndb-rails"` (installs `ndb`) |
 | TypeScript | `pnpm add @thadeu/ndb` (the name `ndb` is taken on npm) |
@@ -89,7 +89,7 @@ class Call < ApplicationRecord
 end
 ```
 
-The collection name follows Rails naming (`Call` becomes `calls`); `self.collection_name = "x"` changes it. `ttl 24.hours` and `attribute :x, expires: true` set expiry. `source "glob"` declares a direct-mode collection. The railtie declares every model's collection on boot when `eager_load` is on (production), and on first use otherwise.
+The collection name follows Rails naming (`Call` becomes `calls`); `self.collection_name = "x"` changes it. `ttl 24.hours` and `attribute :x, expires: true` set expiry; see [TTL like Redis](configuration.md#ttl-like-redis). `source "glob"` declares a direct-mode collection. The railtie declares every model's collection on boot when `eager_load` is on (production), and on first use otherwise.
 
 ```ruby
 Call.create!(call_id: "c1", status: "answered", duration: 42, ts: Time.current)

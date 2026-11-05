@@ -1,0 +1,12 @@
+produce evt-1 invoice.paid
+produce evt-2 user.signup
+produce evt-3 invoice.paid
+produce evt-4 user.signup
+produce evt-5 invoice.paid
+consumer billing, run 1 (where topic = invoice.paid):
+  evt-1 charged, acked
+  evt-3 charged, crash before ack
+consumer billing, run 2 (restart, resumes after the last ack):
+  evt-3 delivered again, receipt exists, skipped, acked
+  evt-5 charged, acked
+receipts: 3 (one per invoice, none twice)

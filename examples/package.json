@@ -1,0 +1,13 @@
+{
+  "name": "ndb-examples",
+  "private": true,
+  "type": "module",
+  "description": "Runnable TypeScript examples. Run with Node 24: node crud/ts/main.ts",
+  "dependencies": {
+    "@thadeu/ndb": "link:../sdk/ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^6.0.3"
+  }
+}

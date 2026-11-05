@@ -70,7 +70,8 @@ const calls = ndb.model('calls', {
 - `time` is the collection time field. Used by zone maps and `$dateTrunc`.
 - The model declares its collection on first use (`ensure_collection`). You can call `await calls.ready()` to do it at once.
 - Types come from the schema. Rows have the schema fields and `_v`, the document version. A `date` field is a `Date` in rows. Input takes `Date` values and ISO strings in filters.
-- The client has no `expires` or `ttl` option and no blob API. Use the HTTP API for those.
+- `expires` is the `date` field that holds when a document expires. It turns on `expireIn`, `expire`, `persist` and `ttl` (below).
+- The client has no `ttl` catalog option and no blob API. Use the HTTP API for those.
 
 ## Insert, find, update, delete
 
@@ -110,6 +111,28 @@ try {
 ```
 
 An insert with a duplicate id throws `DuplicateIdError`. A duplicate `unique` value throws `UniqueViolationError`. An insert without the id when the schema names one fails with code `missing_id`.
+
+### Expiry (TTL like Redis)
+
+```ts
+const sessions = db.model('sessions', {
+  id: 'sid',
+  expires: 'exp',
+  fields: { sid: { type: 'string' }, exp: { type: 'date', optional: true } },
+})
+
+await sessions.insert({ sid: 's1' }, { expireIn: '1h' }) // or 3600; all docs of the call
+await sessions.update('s1', { user: 'u' }, { expireIn: '30m' })
+
+const { v, expiresAt } = await sessions.expire('s1', '30m') // EXPIRE
+await sessions.expireAt('s1', new Date(Date.now() + 3_600_000))
+await sessions.ttl('s1') // seconds left, -1 = never expires, null = missing or expired
+await sessions.persist('s1') // PERSIST
+```
+
+- A duration is seconds or a string such as `"90m"`, `"1h30m"`, `"1d"`. `expireIn` wins over a value of the `expires` field in the same call.
+- `expire` and `persist` throw `NotFoundError` for a missing or expired document. `TtlError` (`ttl_not_enabled`, `ttl_derived`) means the schema has no `expires` field, or the expiry comes from `ttl` + `time`.
+- Disk space of expired documents returns after compaction, and fully only with `wal_retention`; see [Freeing disk](https://github.com/thadeu/ndb/blob/main/docs/dev/configuration.md#freeing-disk).
 
 ## Query
 
@@ -252,6 +275,7 @@ Daemon errors are `NdbError` or a subclass. They have `code` (the daemon code) a
 | `CursorError` | `cursor_invalid`, `cursor_mismatch`, `cursor_expired` |
 | `WatchLaggedError` | `watch_lagged` |
 | `HistoryTruncatedError` | `history_truncated` |
+| `TtlError` | `ttl_not_enabled`, `ttl_derived` |
 | `NdbError` | every other code: `not_ready`, `catalog_conflict`, `catalog_invalid`, `direct_collection`, `invalid_request`, `group_limit_exceeded`, `request_too_large`, `line_too_large`, `closed`, `invalid_position`, `http_status`, ... |
 
 ```ts

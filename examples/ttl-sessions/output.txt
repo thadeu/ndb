@@ -1,0 +1,7 @@
+insert s-short (expire_in 2s), s-long and s-keep (expire_in 1h)
+ttl s-short: 2s, s-long: 3600s
+expire s-long 30m -> ttl 1800s
+persist s-keep -> ttl -1 (never expires)
+waiting 3s...
+live sessions: 2 (s-long, s-keep)
+ttl s-short: gone

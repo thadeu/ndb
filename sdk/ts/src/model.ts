@@ -1,10 +1,14 @@
+import { NotFoundError } from './errors.js'
 import type { Ndb } from './ndb.js'
 import { Query } from './query.js'
 import type {
   AggregateOptions,
   AggregateResult,
+  Duration,
+  ExpireResult,
   Fields,
   Input,
+  InsertOptions,
   Row,
   Schema,
   SortSpec,
@@ -47,25 +51,26 @@ export class Model<F extends Fields> {
     return this.ensured
   }
 
-  async insert(docs: Input<F> | Input<F>[]): Promise<WriteResult[]> {
+  async insert(docs: Input<F> | Input<F>[], opts: InsertOptions = {}): Promise<WriteResult[]> {
     await this.ready()
 
     const list = Array.isArray(docs) ? docs : [docs]
     const out = await this.db.transport.request<{ results: WriteResult[] }>('POST', this.path('insert'), {
       insert: list,
+      expire_in: opts.expireIn,
     })
 
     return out.results
   }
 
-  create(docs: Input<F> | Input<F>[]): Promise<WriteResult[]> {
-    return this.insert(docs)
+  create(docs: Input<F> | Input<F>[], opts: InsertOptions = {}): Promise<WriteResult[]> {
+    return this.insert(docs, opts)
   }
 
   async update(id: string, set: Input<F>, opts: UpdateOptions = {}): Promise<WriteResult> {
     await this.ready()
 
-    const update = { id, set, unset: opts.unset, if_version: opts.ifVersion }
+    const update = { id, set, unset: opts.unset, if_version: opts.ifVersion, expire_in: opts.expireIn }
 
     return this.db.transport.request<WriteResult>('POST', this.path('update'), { update })
   }
@@ -73,6 +78,50 @@ export class Model<F extends Fields> {
   async delete(id: string, opts: WriteOptions = {}): Promise<void> {
     await this.ready()
     await this.db.transport.request('POST', this.path('delete'), { delete: { id, if_version: opts.ifVersion } })
+  }
+
+  // Makes a document expire, like EXPIRE in Redis: seconds or "30m". It throws
+  // NotFoundError for a missing or expired document, and TtlError when the
+  // schema has no expires field.
+  expire(id: string, duration: Duration, opts: WriteOptions = {}): Promise<ExpireResult> {
+    return this.setExpiry({ id, in: duration, if_version: opts.ifVersion })
+  }
+
+  expireAt(id: string, at: Date, opts: WriteOptions = {}): Promise<ExpireResult> {
+    return this.setExpiry({ id, at: at.toISOString(), if_version: opts.ifVersion })
+  }
+
+  // Removes the expiry of a document (PERSIST in Redis).
+  async persist(id: string): Promise<WriteResult> {
+    await this.ready()
+
+    return this.db.transport.request<WriteResult>('POST', this.path('persist'), { id })
+  }
+
+  // The seconds left (rounded up), -1 when the document never expires, null
+  // when it is missing or expired.
+  async ttl(id: string): Promise<number | null> {
+    await this.ready()
+
+    try {
+      const out = await this.db.transport.request<{ ttl: number }>('GET', `${this.path('ttl')}/${encodeURIComponent(id)}`)
+
+      return out.ttl
+    } catch (err) {
+      if (err instanceof NotFoundError) {
+        return null
+      }
+
+      throw err
+    }
+  }
+
+  private async setExpiry(body: Record<string, unknown>): Promise<ExpireResult> {
+    await this.ready()
+
+    const out = await this.db.transport.request<WriteResult & { expires_at: string }>('POST', this.path('expire'), body)
+
+    return { id: out.id, v: out.v, expiresAt: new Date(out.expires_at) }
   }
 
   find(id: string): Promise<Row<F> | null> {
@@ -188,6 +237,7 @@ export class Model<F extends Fields> {
     return {
       id: this.schema.id,
       time: this.schema.time,
+      expires_field: this.schema.expires,
       indexes: entries.filter(([, d]) => d.index).map(([n]) => n),
       unique: entries.filter(([, d]) => d.unique).map(([n]) => n),
     }

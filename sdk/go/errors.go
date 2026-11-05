@@ -50,4 +50,6 @@ var (
 	ErrWatchLagged       = &Error{Code: "watch_lagged"}
 	ErrInvalidPosition   = &Error{Code: "invalid_position"}
 	ErrHistoryTruncated  = &Error{Code: "history_truncated"}
+	ErrTTLNotEnabled     = &Error{Code: "ttl_not_enabled"}
+	ErrTTLDerived        = &Error{Code: "ttl_derived"}
 )

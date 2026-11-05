@@ -5,39 +5,65 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"strings"
+	"time"
+
+	"github.com/thadeu/ndb/internal/diskusage"
+	"github.com/thadeu/ndb/internal/tui"
 )
 
 type indexStat struct {
 	Field string `json:"field"`
 	State string `json:"state"`
+	Done  int    `json:"done,omitempty"`
+	Total int    `json:"total,omitempty"`
 }
 
-// collectionStats has pointers where a source may not know the value: the
-// HTTP API has no sizes, a stopped daemon has no row counts.
+type partBytes struct {
+	WAL      int64 `json:"wal"`
+	Segments int64 `json:"segments"`
+	Meta     int64 `json:"meta"`
+}
+
+// collectionStats has pointers where a source may not know the value: a
+// stopped daemon has no row counts.
 type collectionStats struct {
-	Name         string      `json:"name"`
-	Write        string      `json:"write,omitempty"`
-	Rows         *int        `json:"rows,omitempty"`
-	Quarantined  *int64      `json:"quarantined,omitempty"`
-	Indexes      []indexStat `json:"indexes,omitempty"`
-	Bytes        *int64      `json:"bytes,omitempty"`
-	SegmentFiles *int        `json:"segment_files,omitempty"`
-	WALFiles     *int        `json:"wal_files,omitempty"`
+	Name        string      `json:"name"`
+	Write       string      `json:"write,omitempty"`
+	Rows        *int        `json:"rows,omitempty"`
+	Quarantined *int64      `json:"quarantined,omitempty"`
+	Indexes     []indexStat `json:"indexes,omitempty"`
+	Segments    int         `json:"segments"`
+	WALFiles    int         `json:"wal_files"`
+	Bytes       partBytes   `json:"bytes"`
+	Total       int64       `json:"total"`
+}
+
+type statsTotals struct {
+	Collections int    `json:"collections"`
+	Rows        *int   `json:"rows,omitempty"`
+	Quarantined *int64 `json:"quarantined,omitempty"`
+	Segments    int    `json:"segments"`
+	WALFiles    int    `json:"wal_files"`
+	Bytes       int64  `json:"bytes"`
 }
 
 type statsReport struct {
-	Source      string            `json:"source"`
-	DataDir     string            `json:"data_dir,omitempty"`
-	Collections []collectionStats `json:"collections"`
+	Source        string            `json:"source"`
+	DataDir       string            `json:"data_dir,omitempty"`
+	Version       string            `json:"version,omitempty"`
+	UptimeSeconds *float64          `json:"uptime_seconds,omitempty"`
+	Collections   []collectionStats `json:"collections"`
+	Totals        statsTotals       `json:"totals"`
+	BlobsBytes    int64             `json:"blobs_bytes"`
+	CursorsBytes  int64             `json:"cursors_bytes"`
+	SharedBytes   int64             `json:"shared_bytes"`
 }
 
-// runStats is "ndb stats". With -url, or a reachable socket from ndb.yml, or
-// NDB_URL, it asks the daemon for rows, indexes and quarantine. Sizes and file
-// counts come from the data dir when it is readable. With -data-dir, or when
-// no daemon answers, it reads the data dir only.
+// runStats is "ndb stats". It asks the daemon (GET /v1/stats). With -data-dir,
+// or when no daemon answers, it reads the data dir: sizes and file counts
+// only, because rows, indexes and quarantine live in the daemon.
 func runStats(args []string) error {
 	return stats(args, os.Stdout)
 }
@@ -45,9 +71,7 @@ func runStats(args []string) error {
 func stats(args []string, out io.Writer) error {
 	fl := flag.NewFlagSet("ndb stats", flag.ContinueOnError)
 
-	common := addDataDirFlags(fl)
-	rawURL := fl.String("url", "", "running daemon: unix:///path/to.sock or tcp://host:port (default NDB_URL)")
-	asJSON := fl.Bool("json", false, "machine output")
+	cf := addConnFlags(fl)
 
 	if err := fl.Parse(args); err != nil {
 		return err
@@ -57,21 +81,17 @@ func stats(args []string, out io.Writer) error {
 		return errors.New("usage: ndb stats [-config f] [-data-dir d | -url u] [-json]")
 	}
 
-	if *rawURL != "" && flagSet(fl, "data-dir") {
-		return errors.New("stats: use -url or -data-dir, not both")
+	t, err := cf.resolve(fl)
+	if err != nil {
+		return fmt.Errorf("stats: %w", err)
 	}
 
-	cfg, err := common.load(fl)
+	rep, err := collectStats(t)
 	if err != nil {
 		return err
 	}
 
-	rep, err := collectStats(fl, *rawURL, cfg.DataDir, cfg.Listen.Unix)
-	if err != nil {
-		return err
-	}
-
-	if *asJSON {
+	if *cf.asJSON {
 		return writeJSON(out, rep)
 	}
 
@@ -80,122 +100,107 @@ func stats(args []string, out io.Writer) error {
 	return nil
 }
 
-func collectStats(fl *flag.FlagSet, rawURL, dataDir, cfgSock string) (statsReport, error) {
-	if rawURL == "" && !flagSet(fl, "data-dir") {
-		rawURL = os.Getenv("NDB_URL")
+func collectStats(t target) (statsReport, error) {
+	if t.client == nil {
+		return statsOffline(t.cfg.DataDir)
 	}
 
-	switch {
-	case rawURL != "":
-		c, err := newAPIClient(rawURL)
-		if err != nil {
-			return statsReport{}, err
-		}
+	rep := statsReport{Source: t.source}
 
-		return statsOnline(c, rawURL, dataDir)
-	case flagSet(fl, "data-dir") || cfgSock == "":
-		return statsOffline(dataDir)
-	}
-
-	rep, err := statsOnline(newUnixClient(cfgSock, os.Getenv("NDB_TOKEN")), "unix://"+cfgSock, dataDir)
-	if err != nil {
-		return statsOffline(dataDir)
-	}
-
-	return rep, nil
-}
-
-// statsOnline asks the daemon, then adds sizes from dataDir if it is there.
-func statsOnline(c *apiClient, source, dataDir string) (statsReport, error) {
-	rep := statsReport{Source: source}
-
-	var list struct {
-		Collections []struct {
-			Name string `json:"name"`
-		} `json:"collections"`
-	}
-
-	if err := c.get("/v1/c", &list); err != nil {
+	if err := t.client.get("/v1/stats", &rep); err != nil {
 		return rep, err
 	}
 
-	for _, d := range list.Collections {
-		var st struct {
-			Write       string      `json:"write"`
-			Rows        int         `json:"rows"`
-			Quarantined int64       `json:"quarantined"`
-			Indexes     []indexStat `json:"indexes"`
-		}
-
-		if err := c.get("/v1/c/"+url.PathEscape(d.Name)+"/stats", &st); err != nil {
-			return rep, err
-		}
-
-		rep.Collections = append(rep.Collections, collectionStats{
-			Name: d.Name, Write: st.Write, Rows: &st.Rows, Quarantined: &st.Quarantined, Indexes: st.Indexes,
-		})
-	}
-
-	if u, err := scanUsage(dataDir); err == nil {
-		rep.DataDir = dataDir
-		mergeUsage(rep.Collections, u)
-	}
+	rep.Source = t.source
 
 	return rep, nil
 }
 
 func statsOffline(dataDir string) (statsReport, error) {
-	rep := statsReport{Source: "data-dir", DataDir: dataDir}
+	rep := statsReport{Source: "data-dir", DataDir: dataDir, Collections: []collectionStats{}}
 
-	u, err := scanUsage(dataDir)
+	u, err := diskusage.Scan(dataDir)
 	if err != nil {
 		return rep, fmt.Errorf("stats: %w", err)
 	}
 
 	for _, c := range u.Collections {
-		rep.Collections = append(rep.Collections, collectionStats{Name: c.Name})
+		rep.Collections = append(rep.Collections, collectionStats{
+			Name:     c.Name,
+			Segments: c.SegmentFiles,
+			WALFiles: c.WALFiles,
+			Bytes:    partBytes{WAL: c.Bytes.WAL, Segments: c.Bytes.Segments, Meta: c.Bytes.Meta},
+			Total:    c.Total,
+		})
+
+		rep.Totals.Collections++
+		rep.Totals.Segments += c.SegmentFiles
+		rep.Totals.WALFiles += c.WALFiles
 	}
 
-	mergeUsage(rep.Collections, u)
+	rep.Totals.Bytes = u.Total
+	rep.BlobsBytes = u.Shared.Blobs
+	rep.CursorsBytes = u.Shared.Cursors
+	rep.SharedBytes = u.Shared.Total()
 
 	return rep, nil
 }
 
-func mergeUsage(cols []collectionStats, u usage) {
-	byName := map[string]collectionUsage{}
-
-	for _, c := range u.Collections {
-		byName[c.Name] = c
-	}
-
-	for i := range cols {
-		c, ok := byName[cols[i].Name]
-		if !ok {
-			continue
-		}
-
-		bytes, segs, wals := c.Total, c.SegmentFiles, c.WALFiles
-
-		cols[i].Bytes, cols[i].SegmentFiles, cols[i].WALFiles = &bytes, &segs, &wals
-	}
-}
-
 func printStats(out io.Writer, rep statsReport) {
-	tw := newTable(out)
-
-	fmt.Fprintln(tw, "COLLECTION\tMODE\tROWS\tSIZE\tSEGMENTS\tWAL\tQUARANTINED\tINDEXES")
+	tb := tui.Table{
+		Columns: []tui.Column{
+			{Title: "collection", Keep: true},
+			{Title: "mode"},
+			{Title: "rows", Align: tui.Right},
+			{Title: "size", Align: tui.Right},
+			{Title: "segments", Align: tui.Right},
+			{Title: "wal", Align: tui.Right},
+			{Title: "quarantined", Align: tui.Right},
+			{Title: "indexes"},
+		},
+	}
 
 	for _, c := range rep.Collections {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", c.Name, dash(c.Write),
-			numOrDash(c.Rows), sizeOrDash(c.Bytes), numOrDash(c.SegmentFiles),
-			numOrDash(c.WALFiles), numOrDash(c.Quarantined), indexList(c.Indexes))
+		tb.Rows = append(tb.Rows, []string{
+			c.Name, dash(c.Write), numOrDash(c.Rows), tui.HumanBytes(c.Total),
+			tui.Thousands(int64(c.Segments)), tui.Thousands(int64(c.WALFiles)),
+			numOrDash(c.Quarantined), indexList(c.Indexes),
+		})
 	}
 
-	tw.Flush()
+	tb.Footer = []string{
+		"total", "", numOrDash(rep.Totals.Rows), tui.HumanBytes(rep.Totals.Bytes),
+		tui.Thousands(int64(rep.Totals.Segments)), tui.Thousands(int64(rep.Totals.WALFiles)),
+		numOrDash(rep.Totals.Quarantined), "",
+	}
+
+	tb.Render(out, styleFor(out))
+
+	fmt.Fprintln(out, statsFootnote(rep))
+}
+
+// statsFootnote is the line under the table: daemon identity and the files
+// that belong to no collection.
+func statsFootnote(rep statsReport) string {
+	parts := []string{}
+
+	if rep.Version != "" {
+		parts = append(parts, "ndb "+rep.Version)
+	}
+
+	if rep.UptimeSeconds != nil {
+		parts = append(parts, "up "+(time.Duration(*rep.UptimeSeconds)*time.Second).Round(time.Second).String())
+	}
+
+	parts = append(parts, "blobs "+tui.HumanBytes(rep.BlobsBytes), "cursors "+tui.HumanBytes(rep.CursorsBytes))
+
+	line := strings.Join(parts, " · ")
 
 	if rep.Source == "data-dir" {
-		fmt.Fprintln(out, "\nrows, quarantine and indexes need a running daemon (-url or a reachable socket)")
+		line += "\nrows, quarantine and indexes need a running daemon (-url or a reachable socket)"
 	}
+
+	return line
 }
 
 func dash(s string) string {
@@ -211,15 +216,7 @@ func numOrDash[T int | int64](n *T) string {
 		return "-"
 	}
 
-	return fmt.Sprint(*n)
-}
-
-func sizeOrDash(n *int64) string {
-	if n == nil {
-		return "-"
-	}
-
-	return humanBytes(*n)
+	return tui.Thousands(int64(*n))
 }
 
 func indexList(ix []indexStat) string {
@@ -230,8 +227,16 @@ func indexList(ix []indexStat) string {
 	parts := make([]string, len(ix))
 
 	for i, x := range ix {
-		parts[i] = x.Field + "(" + x.State + ")"
+		parts[i] = x.Field + " (" + indexState(x) + ")"
 	}
 
-	return strings.Join(parts, ",")
+	return strings.Join(parts, ", ")
+}
+
+func indexState(x indexStat) string {
+	if x.State == "building" && x.Total > 0 {
+		return fmt.Sprintf("building %d%%", x.Done*100/x.Total)
+	}
+
+	return x.State
 }

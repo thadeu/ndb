@@ -8,6 +8,8 @@ require (
 	github.com/parquet-go/parquet-go v0.32.0
 	go.etcd.io/bbolt v1.5.0
 	go.yaml.in/yaml/v3 v3.0.6
+	golang.org/x/term v0.44.0
+	golang.org/x/text v0.39.0
 )
 
 require (
@@ -18,6 +20,6 @@ require (
 	github.com/parquet-go/jsonlite v1.0.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect
 	github.com/twpayne/go-geom v1.6.1 // indirect
-	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 )

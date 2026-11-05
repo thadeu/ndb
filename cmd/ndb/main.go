@@ -146,6 +146,7 @@ func serve(ctx context.Context, cfg config.Config, token string) error {
 
 	srv := server.New()
 
+	srv.SetVersion(version)
 	srv.SetBlobLimit(cfg.BlobMaxSize)
 	srv.SetToken(token)
 

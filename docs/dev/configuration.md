@@ -89,6 +89,78 @@ An unknown key is an error at start (the file is read in strict mode). Sizes are
 
 Durations use Go syntax (`90m`, `1h30m`) plus `d` and `w` (`24h`, `30d`, `2w`).
 
+## TTL like Redis
+
+A collection with `expires_field` (engine mode) expires documents one by one, like `SET key value EX` in Redis. Reads hide an expired document at once; a sweeper deletes it within about 10 seconds; `watch` shows the delete with `"_expired": true`.
+
+```yaml
+collections:
+  sessions:
+    id: sid
+    expires_field: exp
+```
+
+| Redis | ndb | Notes |
+|---|---|---|
+| `SET k v EX 3600` | `insert` with `"expire_in": "1h"` (or `3600`) | also on `update` |
+| `EXPIRE k 1800` | `POST /v1/c/sessions/expire {"id","in":"30m"}` | `"at": "<RFC 3339>"` is `EXPIREAT` |
+| `PERSIST k` | `POST /v1/c/sessions/persist {"id"}` | |
+| `TTL k` | `GET /v1/c/sessions/ttl/{id}` | `-1` = never expires; `404` = missing or expired |
+
+- `expire_in` wins over a value of `expires_field` that the same call carries.
+- `ttl: 24h` + `time` (every document expires a fixed time after its `time` field) is a derived expiry: `expire` and `persist` fail with `ttl_derived`.
+- Each call is a normal write: new version, WAL record, `watch` event, and `if_version` works.
+- CLI: `ndb expire sessions s1 30m`, `ndb persist sessions s1`, `ndb ttl sessions s1`.
+
+```bash
+curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/sessions/insert -d '{"insert":[{"sid":"s1"}],"expire_in":"1h"}'
+curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/sessions/ttl/s1
+```
+
+```go
+sessions.InsertWith(ctx, []Session{{ID: "s1"}}, ndb.ExpireIn(time.Hour))
+sessions.Expire(ctx, "s1", 30*time.Minute)
+left, expires, err := sessions.TTL(ctx, "s1")
+sessions.Persist(ctx, "s1")
+```
+
+```ruby
+client.insert("sessions", [{ sid: "s1" }], expire_in: 3600)
+client.expire("sessions", "s1", in: 1800)
+client.ttl("sessions", "s1")   # 1799, -1, or nil when missing
+client.persist("sessions", "s1")
+
+Session.create!({ sid: "s1" }, expire_in: 1.hour)   # ndb-rails
+session.expire(30.minutes)
+session.ttl
+session.persist_ttl!
+```
+
+```ts
+await sessions.insert({ sid: 's1' }, { expireIn: '1h' })
+await sessions.expire('s1', '30m')
+await sessions.ttl('s1') // 1799, -1, or null
+await sessions.persist('s1')
+```
+
+### Freeing disk
+
+An expired document is deleted in the WAL, but its insert is still in older WAL files, and in older segments until compaction. Space comes back in two steps:
+
+1. **Compaction** drops the expired rows from the segments. It runs by itself, or with `ndb compact <collection>`.
+2. **WAL files** are deleted only with `wal_retention`. The default keeps every WAL file forever, so without it the data of expired documents stays on disk (hidden from reads, but present).
+
+For a TTL collection, set `wal_retention` to the longest time a `watch` consumer can be offline, for example:
+
+```yaml
+collections:
+  sessions:
+    expires_field: exp
+    wal_retention: 1d
+```
+
+A WAL file is never deleted while a stored `watch` position still needs it. See [operations.md](operations.md#compaction-retention-and-ttl).
+
 ## Authentication
 
 `-token-file /etc/ndb/token` makes the TCP listener require `Authorization: Bearer <token>` on every request, `/health` and `/metrics` included. A missing or wrong token is `401 unauthorized`. The file holds one token; ndb trims the spaces around it, and an empty file stops the start. The token is compared in constant time.

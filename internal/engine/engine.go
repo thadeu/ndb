@@ -219,6 +219,11 @@ func (db *DB) DropIndex(name, field string) (catalog.Def, error) {
 	return def, nil
 }
 
+// Dir is the data dir.
+func (db *DB) Dir() string {
+	return db.dir
+}
+
 // Definitions lists the catalog, sorted by name.
 func (db *DB) Definitions() []catalog.Def {
 	return db.cat.List()
@@ -294,7 +299,7 @@ func (db *DB) open(def catalog.Def) (*Collection, error) {
 		return nil, err
 	}
 
-	return &Collection{name: def.Name, write: catalog.Engine, eng: eng, rd: eng, wm: wm}, nil
+	return &Collection{name: def.Name, dir: dir, write: catalog.Engine, eng: eng, rd: eng, wm: wm}, nil
 }
 
 // openDirect loads the files once before it returns, so a ready daemon
@@ -320,7 +325,7 @@ func (db *DB) openDirect(def catalog.Def, dir string) (*Collection, error) {
 	}
 
 	ctx, stop := context.WithCancel(db.ctx)
-	col := &Collection{name: def.Name, write: catalog.Direct, mem: mem, rd: mem, tail: tail, stop: stop, done: make(chan struct{})}
+	col := &Collection{name: def.Name, dir: dir, write: catalog.Direct, mem: mem, rd: mem, tail: tail, stop: stop, done: make(chan struct{})}
 
 	go func() {
 		defer close(col.done)

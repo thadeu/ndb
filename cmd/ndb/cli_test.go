@@ -13,6 +13,7 @@ import (
 
 	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/config"
+	"github.com/thadeu/ndb/internal/diskusage"
 	"github.com/thadeu/ndb/internal/engine"
 	"github.com/thadeu/ndb/internal/server"
 )
@@ -114,7 +115,7 @@ func TestVersionAndHelp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, cmd := range []string{"restore", "stats", "size", "version", "serve", "backup"} {
+	for _, cmd := range []string{"restore", "stats", "size", "version", "serve", "backup", "collections", "compact", "expire", "persist", "ttl", "quarantine", "query"} {
 		if !strings.Contains(helpText, "ndb "+cmd) {
 			t.Errorf("help does not list %q", cmd)
 		}
@@ -132,7 +133,7 @@ func TestSizeReportsPartsPerCollection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var u usage
+	var u diskusage.Usage
 
 	if err := json.Unmarshal([]byte(out.String()), &u); err != nil {
 		t.Fatal(err)
@@ -148,7 +149,7 @@ func TestSizeReportsPartsPerCollection(t *testing.T) {
 		}
 	}
 
-	if u.Shared.Meta == 0 || u.Total <= u.Shared.total() {
+	if u.Shared.Meta == 0 || u.Total <= u.Shared.Total() {
 		t.Errorf("shared = %+v total = %d", u.Shared, u.Total)
 	}
 
@@ -158,7 +159,7 @@ func TestSizeReportsPartsPerCollection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, want := range []string{"NAME", "orders", "events", "(shared)", "TOTAL", "KiB"} {
+	for _, want := range []string{"name", "orders", "events", "(shared)", "total", "KiB"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("table lacks %q:\n%s", want, out.String())
 		}
@@ -195,7 +196,7 @@ func TestStatsOfflineReadsSizesWithoutLock(t *testing.T) {
 		t.Fatalf("report = %+v", rep)
 	}
 
-	if rep.Collections[0].Rows != nil || rep.Collections[0].Bytes == nil || *rep.Collections[0].WALFiles == 0 {
+	if rep.Collections[0].Rows != nil || rep.Collections[0].Total == 0 || rep.Collections[0].WALFiles == 0 {
 		t.Errorf("offline collection = %+v", rep.Collections[0])
 	}
 
@@ -205,7 +206,7 @@ func TestStatsOfflineReadsSizesWithoutLock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !strings.Contains(out.String(), "COLLECTION") || !strings.Contains(out.String(), "need a running daemon") {
+	if !strings.Contains(out.String(), "collection") || !strings.Contains(out.String(), "need a running daemon") {
 		t.Errorf("table:\n%s", out.String())
 	}
 }
@@ -357,15 +358,5 @@ func TestServeAliasAndFlagsStillStartTheDaemon(t *testing.T) {
 
 	if err := run([]string{"-version"}); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestHumanBytes(t *testing.T) {
-	cases := map[int64]string{0: "0 B", 1023: "1023 B", 1024: "1.0 KiB", 1536: "1.5 KiB", 3 << 30: "3.0 GiB"}
-
-	for n, want := range cases {
-		if got := humanBytes(n); got != want {
-			t.Errorf("humanBytes(%d) = %q, want %q", n, got, want)
-		}
 	}
 }

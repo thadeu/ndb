@@ -137,10 +137,10 @@ module Ndb
         Rails.client.aggregate(collection_name, body)
       end
 
-      def ndb_insert(doc)
+      def ndb_insert(doc, expire_in: nil)
         ensure_collection!
 
-        Rails.client.insert(collection_name, [doc]).first
+        Rails.client.insert(collection_name, [doc], expire_in: expire_in).first
       end
 
       def ndb_update(id, **change)

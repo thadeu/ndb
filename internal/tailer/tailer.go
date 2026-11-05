@@ -151,9 +151,16 @@ func (t *Tailer) setLag(fl *file, size int64) {
 	fl.lagged = left
 }
 
-// Quarantined is how many lines went to quarantine since Open.
+// Quarantined is how many distinct lines (file and offset) the quarantine
+// file holds: lines found at Open plus new ones. A rebuild adds none twice.
 func (t *Tailer) Quarantined() int64 {
 	return t.quar.count.Load()
+}
+
+// QuarantineRows is the last limit quarantined lines, oldest first, and how
+// many distinct lines the file holds.
+func (t *Tailer) QuarantineRows(limit int) ([]QuarantineRow, int, error) {
+	return t.quar.rows(limit)
 }
 
 func (t *Tailer) Close() error {

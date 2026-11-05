@@ -1,0 +1,48 @@
+# One config for every example. Paths are relative to this file.
+# The socket lives in /tmp: a unix socket path must stay under 104 bytes on macOS.
+data_dir: ./.data
+
+listen:
+  unix: /tmp/ndb-examples.sock
+
+collections:
+  # region users
+  users:
+    id: user_id
+    indexes: [plan]
+  # endregion users
+
+  # region app_logs
+  app_logs:
+    write: direct
+    path: ./data/logs/*.ndjson
+    id: id
+    time: ts
+    indexes: [app, level]
+  # endregion app_logs
+
+  # region orders
+  orders:
+    id: order_id
+    time: created_at
+    indexes: [status]
+  # endregion orders
+
+  # region outbox
+  outbox:
+    write: engine
+    id: event_id
+    time: created_at
+    indexes: [topic]
+    durability: strict
+
+  receipts:
+    id: event_id
+  # endregion outbox
+
+  # region sessions
+  sessions:
+    id: sid
+    time: created_at
+    expires_field: expires_at
+  # endregion sessions

@@ -1,0 +1,10 @@
+orders: 12
+paid orders per hour, best revenue first:
+  2026-11-01T10:00:00Z orders=3 revenue=360 avg=120
+  2026-11-01T11:00:00Z orders=3 revenue=210 avg=70
+  2026-11-01T09:00:00Z orders=2 revenue=120 avg=60
+by status:
+  paid     orders=8 revenue=690
+  pending  orders=2 revenue=80
+  refunded orders=2 revenue=120
+paid orders of 100 or more: 3

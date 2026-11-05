@@ -33,6 +33,10 @@ module Ndb
   class InvalidQuery < Error; end
   class InvalidCursor < Error; end
 
+  # The collection has no expires_field, or its expiry comes from ttl + time.
+  class TtlNotEnabled < Error; end
+  class TtlDerived < Error; end
+
   # The consumer was too slow: call watch again, it resumes from the last ack.
   class WatchLagged < Error; end
 
@@ -58,7 +62,9 @@ module Ndb
     "cursor_mismatch" => InvalidCursor,
     "cursor_expired" => InvalidCursor,
     "watch_lagged" => WatchLagged,
-    "history_truncated" => HistoryTruncated
+    "history_truncated" => HistoryTruncated,
+    "ttl_not_enabled" => TtlNotEnabled,
+    "ttl_derived" => TtlDerived
   }.freeze
 
   def self.error_for(code, message, status)

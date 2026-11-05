@@ -603,3 +603,75 @@ func TestLagIsTheUnreadTail(t *testing.T) {
 		t.Fatalf("lag = %d after the line completed", tl.Lag())
 	}
 }
+
+func TestQuarantineRowsReturnsTheLatestWithoutDuplicates(t *testing.T) {
+	e := newEnv(t, "*.ndjson", "id")
+	tl := e.open(nil)
+
+	e.write("a.ndjson", line("ok1")+"{bad one\n"+"{bad two\n"+line("ok2")+"{bad three\n")
+	syncOnce(t, tl)
+
+	rows, total, err := tl.QuarantineRows(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if total != 3 || len(rows) != 2 {
+		t.Fatalf("total = %d rows = %d", total, len(rows))
+	}
+
+	if rows[0].Line != "{bad two" || rows[1].Line != "{bad three" || rows[1].Reason == "" || rows[1].File != e.path("a.ndjson") {
+		t.Fatalf("rows = %+v", rows)
+	}
+
+	if err := tl.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	again := e.open(nil)
+
+	syncOnce(t, again)
+
+	if _, total, err = again.QuarantineRows(10); err != nil || total != 3 {
+		t.Fatalf("after reopen: total = %d err = %v, want the same 3 lines once", total, err)
+	}
+}
+
+func TestQuarantineRowsWithoutFileIsEmpty(t *testing.T) {
+	e := newEnv(t, "*.ndjson", "id")
+	tl := e.open(nil)
+
+	rows, total, err := tl.QuarantineRows(10)
+	if err != nil || total != 0 || len(rows) != 0 {
+		t.Fatalf("rows = %v total = %d err = %v", rows, total, err)
+	}
+}
+
+func TestQuarantineFileKeepsOneEntryPerBadLineAcrossRebuilds(t *testing.T) {
+	e := newEnv(t, "*.ndjson", "id")
+	e.write("a.ndjson", line("ok1")+"{bad one\n"+line("ok2")+"{bad two\n")
+
+	for run := 0; run < 3; run++ {
+		fresh := collection.NewDirect(collection.DirectConfig{Def: e.def})
+		tl := e.open(func(c *tailer.Config) { c.Sink = fresh; c.Rebuild = true })
+
+		syncOnce(t, tl)
+
+		if got := tl.Quarantined(); got != 2 {
+			t.Fatalf("run %d: quarantined = %d, want 2 distinct lines", run, got)
+		}
+
+		if err := tl.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	data, err := os.ReadFile(filepath.Join(e.col, "quarantine", "calls.ndjson"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if n := strings.Count(string(data), "\n"); n != 2 {
+		t.Fatalf("quarantine file has %d entries, want 2:\n%s", n, data)
+	}
+}

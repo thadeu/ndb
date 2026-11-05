@@ -170,6 +170,8 @@ The body is `{"error":{"code":"...","message":"..."}}`.
 | `catalog_conflict` | 409 | Two declarations of the collection disagree (`id`, `write`, `path`, `time`). |
 | `direct_collection` | 409 | Write call on a direct-mode collection. |
 | `catalog_invalid` | 400 | The collection definition is not valid. |
+| `ttl_not_enabled` | 400 | `expire_in`, `expire` or `persist` on a collection without `expires_field`. |
+| `ttl_derived` | 400 | `expire_in`, `expire` or `persist` on a collection whose expiry comes from `ttl` + `time`. |
 | `invalid_doc`, `missing_id`, `invalid_id`, `immutable_id`, `invalid_batch`, `invalid_path`, `invalid_index` | 400 | A document or definition is not valid. |
 | `request_too_large`, `line_too_large` | 413 | Body or line is over `max_line_size` (or the blob limit). |
 | `invalid_blob_ref` | 400 | The blob reference is not `sha256:<64 hex>`. |

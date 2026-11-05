@@ -4,6 +4,7 @@ import { Content, useData, useRoute, withBase } from 'vitepress'
 
 import bowl from '../../../brand/svg/mark-on-light.svg'
 import { pageTab, tabs } from '../nav'
+import { useCodeTabs } from './composables/useCodeTabs'
 import CopyPage from './components/CopyPage.vue'
 import Landing from './components/Landing.vue'
 import Outline from './components/Outline.vue'
@@ -15,6 +16,8 @@ const route = useRoute()
 const { page, frontmatter } = useData()
 
 const drawerOpen = ref(false)
+
+useCodeTabs()
 
 const path = computed(() => route.path.replace(/\.html$/, '').replace(/\/$/, '') || '/')
 const isHome = computed(() => frontmatter.value.layout === 'home')

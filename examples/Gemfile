@@ -1,0 +1,7 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+# From this checkout. In your app: gem "ndb" (and gem "ndb-rails" for models).
+gem "ndb", path: "../sdk/ruby"
+gem "ndb-rails", path: "../sdk/rails"

@@ -1,0 +1,12 @@
+history: 12 lines from 2 files
+errors, newest first:
+  10:06:00 web    db connection reset
+  10:05:30 worker job failed: smtp refused
+  10:04:00 web    payment declined
+  10:02:30 worker job failed: smtp timeout
+  10:01:10 web    payment gateway timeout
+slow (ms >= 800): 3
+payment paths ($regex): 2
+pages (limit 5): 5, 5, 2
+append: cli wrote one line
+the new line is in the collection

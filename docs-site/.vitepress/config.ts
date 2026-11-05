@@ -5,7 +5,9 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, type Plugin } from 'vitepress'
 
+import { codeGroup } from './code-group'
 import { tabs } from './nav'
+import { expandSnippets } from './snippets'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const brand = resolve(here, '../../brand')
@@ -36,9 +38,13 @@ function docsVersion(): string {
   }
 }
 
-// llms.txt (index) and llms-full.txt (every page), built from docs/dev so
-// they never drift from the site. Each page is also served as raw .md.
-const docsDir = resolve(here, '../../docs/dev')
+// llms.txt (index) and llms-full.txt (every page), built from docs/dev and
+// docs/examples so they never drift from the site. Each page is also served as
+// raw .md, with the example code imports expanded into code blocks.
+const docsRoots = [
+  { dir: resolve(here, '../../docs/dev'), prefix: '' },
+  { dir: resolve(here, '../../docs/examples'), prefix: 'examples/' },
+]
 const siteUrl = (process.env.DOCS_URL ?? '').replace(/\/$/, '')
 
 interface DocPage {
@@ -48,24 +54,35 @@ interface DocPage {
   body: string
 }
 
+// docs/examples/index.md is the page /examples; the other files are /examples/<name>.
+function slugOf(prefix: string, name: string): string {
+  return prefix && name === 'index' ? 'examples' : `${prefix}${name}`
+}
+
 function docPages(): DocPage[] {
-  const files = readdirSync(docsDir).filter((name) => name.endsWith('.md'))
+  const files = new Map<string, string>()
+
+  for (const { dir, prefix } of docsRoots) {
+    for (const name of readdirSync(dir).filter((file) => file.endsWith('.md'))) {
+      files.set(slugOf(prefix, name.replace(/\.md$/, '')), resolve(dir, name))
+    }
+  }
 
   const navOrder = tabs
     .flatMap((tab) => tab.groups.flatMap((group) => group.items))
-    .map((item) => item.link.split('#')[0].replace(/^\//, ''))
+    .map((item) => item.link.split('#')[0].replace(/^\//, '').replace(/\/$/, ''))
 
-  const order = [...new Set([...navOrder, ...files.map((name) => name.replace(/\.md$/, ''))])]
+  const order = [...new Set([...navOrder, ...files.keys()])]
 
   return order
-    .filter((slug) => files.includes(`${slug}.md`))
+    .filter((slug) => files.has(slug))
     .map((slug) => {
-      const body = readFileSync(resolve(docsDir, `${slug}.md`), 'utf8')
+      const body = expandSnippets(readFileSync(files.get(slug)!, 'utf8'), repoRoot)
       const title = /^#\s+(.+)$/m.exec(body)?.[1]?.trim() ?? slug
       const summary = body
         .split(/\n\s*\n/)
         .map((block) => block.trim())
-        .find((block) => block && !block.startsWith('#') && !block.startsWith('```') && !block.startsWith('|') && !block.startsWith('<') && !block.startsWith('-') && !block.startsWith('>') && !block.endsWith(':'))
+        .find((block) => block && !block.startsWith('#') && !block.startsWith('```') && !block.startsWith('|') && !block.startsWith('<') && !block.startsWith('-') && !block.startsWith('>') && !block.startsWith('*') && !block.endsWith(':'))
         ?.replace(/\s+/g, ' ') ?? ''
 
       return { slug, title, summary, body }
@@ -101,7 +118,10 @@ function writeLlms(outDir: string, version: string) {
   writeFileSync(resolve(outDir, 'llms-full.txt'), full)
 
   for (const page of pages) {
-    writeFileSync(resolve(outDir, `${page.slug}.md`), page.body)
+    const target = resolve(outDir, `${page.slug}.md`)
+
+    mkdirSync(dirname(target), { recursive: true })
+    writeFileSync(target, page.body)
   }
 }
 
@@ -161,6 +181,7 @@ export default defineConfig({
     '.plans/**',
     'brand/**',
     'sdk/**',
+    'examples/**',
     'deploy/**',
     'spec/**',
     'test/**',
@@ -170,6 +191,8 @@ export default defineConfig({
 
   rewrites: {
     'docs/dev/:page.md': ':page.md',
+    'docs/examples/index.md': 'examples.md',
+    'docs/examples/:page.md': 'examples/:page.md',
     'docs-site/landing.md': 'index.md',
   },
 
@@ -186,6 +209,8 @@ export default defineConfig({
     headers: { level: [2, 3] },
 
     config(md) {
+      md.use(codeGroup)
+
       md.core.ruler.push('ndb-repo-links', (state) => {
         const source = posix.relative(repoRoot, String(state.env.path ?? '').split(sep).join('/'))
 
@@ -218,7 +243,7 @@ export default defineConfig({
     const source = siteConfig.rewrites.inv[pageData.relativePath] ?? pageData.relativePath
     const file = resolve(here, '../..', source)
 
-    pageData.frontmatter.raw = readFileSync(file, 'utf8')
+    pageData.frontmatter.raw = expandSnippets(readFileSync(file, 'utf8'), repoRoot)
   },
 
   buildEnd(config) {

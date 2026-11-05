@@ -20,6 +20,10 @@ export type Fields = Record<string, FieldDef>
 export interface Schema<F extends Fields> {
   id?: Extract<keyof F, string>
   time?: Extract<keyof F, string>
+
+  // The date field that holds when a document expires. Needed by expireIn,
+  // expire, persist and ttl.
+  expires?: Extract<keyof F, string>
   fields: F
 }
 
@@ -76,8 +80,23 @@ export interface WriteOptions {
   ifVersion?: number
 }
 
+// A duration for the daemon: seconds, or a string such as "90m", "1h30m", "1d".
+export type Duration = number | string
+
 export interface UpdateOptions extends WriteOptions {
   unset?: string[]
+
+  // The daemon sets the expires field to now + expireIn, in the same write.
+  expireIn?: Duration
+}
+
+export interface InsertOptions {
+  // Applies to every document of the call.
+  expireIn?: Duration
+}
+
+export interface ExpireResult extends WriteResult {
+  expiresAt: Date
 }
 
 export interface AggregateOptions {

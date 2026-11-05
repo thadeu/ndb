@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { withBase } from 'vitepress'
 
-import markLight from '../../../../brand/svg/mark-on-light.svg'
-import markDark from '../../../../brand/svg/mark-on-dark.svg'
+import markLight from '../../../../brand/svg/mark-animated-on-light.svg'
+import markDark from '../../../../brand/svg/mark-animated-on-dark.svg'
 </script>
 
 <template>

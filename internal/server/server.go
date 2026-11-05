@@ -32,13 +32,17 @@ type Server struct {
 	// blobLimit is the largest blob in bytes (0 = DefaultBlobLimit).
 	blobLimit int64
 
+	// version is what /v1/stats reports; started is when New ran.
+	version string
+	started time.Time
+
 	// token, when set, is the bearer token every non-unix request must carry.
 	token []byte
 }
 
 func New() *Server {
 	stopCtx, stop := context.WithCancel(context.Background())
-	s := &Server{heartbeat: defaultHeartbeat, stopCtx: stopCtx}
+	s := &Server{heartbeat: defaultHeartbeat, stopCtx: stopCtx, started: time.Now()}
 	s.handler = s.authenticate(s.routes())
 	s.http = &http.Server{
 		Handler:           s.handler,
@@ -55,6 +59,11 @@ func New() *Server {
 // "Authorization: Bearer <token>". Call it before Serve. Empty = no token.
 func (s *Server) SetToken(token string) {
 	s.token = []byte(token)
+}
+
+// SetVersion is the daemon version that GET /v1/stats reports.
+func (s *Server) SetVersion(v string) {
+	s.version = v
 }
 
 // Attach gives the server the open engine. Until then it is not ready.
@@ -91,12 +100,20 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/c/{coll}/insert", s.ready(s.insert))
 	mux.HandleFunc("POST /v1/c/{coll}/update", s.ready(s.update))
 	mux.HandleFunc("POST /v1/c/{coll}/delete", s.ready(s.remove))
+	mux.HandleFunc("POST /v1/c/{coll}/expire", s.ready(s.expire))
+	mux.HandleFunc("POST /v1/c/{coll}/persist", s.ready(s.persist))
+	mux.HandleFunc("GET /v1/c/{coll}/ttl/{id}", s.ready(s.ttl))
 	mux.HandleFunc("POST /v1/c/{coll}/watch", s.ready(s.watch))
 	mux.HandleFunc("POST /v1/c/{coll}/ack", s.ready(s.ack))
 	mux.HandleFunc("PUT /v1/c/{coll}", s.ready(s.ensure))
 	mux.HandleFunc("GET /v1/c", s.ready(s.list))
 	mux.HandleFunc("DELETE /v1/c/{coll}/indexes/{field}", s.ready(s.dropIndex))
+	mux.HandleFunc("GET /v1/c/{coll}", s.ready(s.getCollection))
 	mux.HandleFunc("GET /v1/c/{coll}/stats", s.ready(s.stats))
+	mux.HandleFunc("POST /v1/c/{coll}/compact", s.ready(s.compact))
+	mux.HandleFunc("GET /v1/c/{coll}/quarantine", s.ready(s.quarantine))
+	mux.HandleFunc("GET /v1/stats", s.ready(s.globalStats))
+	mux.HandleFunc("GET /v1/size", s.ready(s.size))
 	mux.HandleFunc("PUT /v1/blobs", s.ready(s.putBlob))
 	mux.HandleFunc("GET /v1/blobs/{ref}", s.ready(s.getBlob))
 	mux.HandleFunc("POST /v1/backup", s.ready(s.backup))

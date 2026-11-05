@@ -106,6 +106,28 @@ export const tabs: Tab[] = [
     ],
   },
   {
+    id: 'examples',
+    text: 'Examples',
+    icon: 'code',
+    link: '/examples',
+    groups: [
+      {
+        text: 'Start',
+        items: [{ text: 'Overview', link: '/examples' }],
+      },
+      {
+        text: 'Examples',
+        items: [
+          { text: 'CRUD', link: '/examples/crud' },
+          { text: 'Logs (direct mode)', link: '/examples/logs' },
+          { text: 'Reports (aggregate)', link: '/examples/reports' },
+          { text: 'Outbox (watch and ack)', link: '/examples/outbox' },
+          { text: 'Expiring sessions', link: '/examples/ttl-sessions' },
+        ],
+      },
+    ],
+  },
+  {
     id: 'operations',
     text: 'Operations',
     icon: 'gauge',
@@ -129,7 +151,7 @@ export const tabs: Tab[] = [
       {
         text: 'Deploy',
         items: [
-          { text: 'Examples', link: '/deployment' },
+          { text: 'Deployment', link: '/deployment' },
           { text: 'Docker', link: '/docker' },
         ],
       },
@@ -149,6 +171,12 @@ export const pageTab: Record<string, string> = {
   '/http-api': 'daemon',
   '/query': 'query',
   '/clients': 'clients',
+  '/examples': 'examples',
+  '/examples/crud': 'examples',
+  '/examples/logs': 'examples',
+  '/examples/reports': 'examples',
+  '/examples/outbox': 'examples',
+  '/examples/ttl-sessions': 'examples',
   '/operations': 'operations',
   '/docker': 'operations',
   '/deployment': 'deploy',

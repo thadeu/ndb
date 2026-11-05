@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { withBase } from 'vitepress'
 
-import wordDark from '../../../../brand/svg/wordmark-on-dark.svg'
-import wordLight from '../../../../brand/svg/wordmark-on-light.svg'
-import markDark from '../../../../brand/svg/mark-animated-on-dark.svg'
-import markLight from '../../../../brand/svg/mark-animated-on-light.svg'
+import { ref } from 'vue'
+
+import HeroDemo from './HeroDemo.vue'
 import Icon from './Icon.vue'
 
 interface Card {
@@ -89,6 +88,82 @@ const sections: Section[] = [
   },
 ]
 
+interface UseCase {
+  icon: string
+  title: string
+  text: string
+  snippet: string
+  link: string
+}
+
+const useCases: UseCase[] = [
+  {
+    icon: 'server',
+    title: 'Logs and events',
+    text: 'Your app already writes NDJSON. Query and aggregate it in place, no ELK, no import.',
+    snippet: 'write: direct\npath: /var/log/app/*.ndjson',
+    link: '/examples/logs',
+  },
+  {
+    icon: 'bell',
+    title: 'Outbox and queues',
+    text: 'watch with ack and a where filter: a reliable consumer without Kafka or Redis.',
+    snippet: 'POST /v1/c/outbox/watch\n{"consumer":"mailer","where":{"type":"email"}}',
+    link: '/examples/outbox',
+  },
+  {
+    icon: 'chart',
+    title: 'Reports and dashboards',
+    text: '$group and $dateTrunc answer "calls per hour" straight from the files.',
+    snippet: '{"$group":{"_id":{"$dateTrunc":\n  {"date":"$ts","unit":"hour"}},\n  "n":{"$sum":1}}}',
+    link: '/examples/reports',
+  },
+  {
+    icon: 'database',
+    title: 'Small apps',
+    text: 'One binary and one data dir hold your app state. No Postgres to run.',
+    snippet: 'class Post < Ndb::Record',
+    link: '/examples/crud',
+  },
+  {
+    icon: 'rocket',
+    title: 'Scripts and CI',
+    text: 'ndb query in the terminal, -json in a pipe, the same answer as the SDKs.',
+    snippet: "ndb query calls '{\"status\":\"missed\"}' -json | jq",
+    link: '/examples',
+  },
+]
+
+const installCommand = 'curl -fsSL https://ndb.clowk.in/install.sh | bash'
+const copied = ref(false)
+const installBox = ref<HTMLElement | null>(null)
+let copiedTimer: ReturnType<typeof setTimeout> | undefined
+
+function markCopied() {
+  copied.value = true
+  clearTimeout(copiedTimer)
+  copiedTimer = setTimeout(() => {
+    copied.value = false
+  }, 1500)
+}
+
+async function copyInstall() {
+  try {
+    await navigator.clipboard.writeText(installCommand)
+    markCopied()
+  } catch {
+    const target = installBox.value
+
+    if (target) {
+      const range = document.createRange()
+
+      range.selectNodeContents(target)
+      window.getSelection()?.removeAllRanges()
+      window.getSelection()?.addRange(range)
+    }
+  }
+}
+
 interface Step {
   title: string
   text: string
@@ -137,27 +212,58 @@ const capabilities = [
   <main class="landing">
     <section class="hero">
       <div class="hero-text">
-        <p class="eyebrow">Documentation</p>
+        <p class="eyebrow">NoSQL on NDJSON</p>
 
         <h1 class="hero-title">
-          <span class="sr-only">ndb</span>
-          <img class="only-light" :src="wordLight" alt="" aria-hidden="true" />
-          <img class="only-dark" :src="wordDark" alt="" aria-hidden="true" />
+          <span class="sr-only">ndb: </span>
+          Your NDJSON files are already a database.
         </h1>
 
         <p class="hero-lead">
-          Drop NDJSON. Query it. NoSQL, from one Go daemon, with Go, Ruby, and TypeScript SDKs that answer like <code>curl</code>.
+          Drop NDJSON. Query it. NoSQL. Filters, aggregations and live watch over the files your app already writes, from one Go binary with Go, Ruby and TypeScript SDKs.
         </p>
 
         <div class="hero-actions">
-          <a class="install-button large" :href="withBase('/query')">Get started</a>
-          <a class="ghost-button" :href="withBase('/docker')">Run with Docker</a>
+          <div class="install-box">
+            <code ref="installBox" class="install-command">{{ installCommand }}</code>
+
+            <button
+              class="install-copy"
+              type="button"
+              :aria-label="copied ? 'Copied' : 'Copy install command'"
+              @click="copyInstall"
+            >
+              <Icon :name="copied ? 'check' : 'copy'" :size="15" />
+
+              <span class="install-copy-label">{{ copied ? 'Copied' : 'Copy' }}</span>
+            </button>
+          </div>
+
+          <div class="hero-buttons">
+            <a class="install-button large" :href="withBase('/query')">Get started</a>
+            <a class="ghost-button" href="#use-cases">Use cases</a>
+          </div>
         </div>
       </div>
 
-      <div class="hero-art">
-        <img class="only-light" :src="markLight" alt="The ndb ramen bowl mascot" />
-        <img class="only-dark" :src="markDark" alt="The ndb ramen bowl mascot" />
+      <HeroDemo class="hero-demo" />
+    </section>
+
+    <section id="use-cases" class="use-cases">
+      <h2 class="card-section-title">Use cases</h2>
+
+      <p class="quick-lead">Where ndb earns its place.</p>
+
+      <div class="use-grid">
+        <a v-for="item in useCases" :key="item.title" class="use-card" :href="withBase(item.link)">
+          <Icon class="card-icon" :name="item.icon" :size="22" />
+
+          <h3 class="card-title">{{ item.title }}</h3>
+
+          <p class="card-text">{{ item.text }}</p>
+
+          <pre class="use-snippet"><code>{{ item.snippet }}</code></pre>
+        </a>
       </div>
     </section>
 

@@ -107,6 +107,32 @@ err = calls.Delete(ctx, "c1", ndb.IfVersion(v))
 - `Insert` fails with `ErrDuplicateID` when the id exists.
 - `Update` takes field names as they are in the document (the tag names).
 
+### Expiry (TTL like Redis)
+
+Tag one field `expires` (a `time.Time`). The daemon then expires documents one by one.
+
+```go
+type Session struct {
+	ID        string    `ndb:"id,id"`
+	ExpiresAt time.Time `ndb:"expires_at,expires"`
+}
+
+// Insert takes no options (it is variadic); InsertWith does.
+_, err = sessions.InsertWith(ctx, []Session{{ID: "s1"}}, ndb.ExpireIn(time.Hour))
+_, err = sessions.Update(ctx, "s1", map[string]any{"x": 1}, ndb.ExpireIn(30*time.Minute))
+
+_, err = sessions.Expire(ctx, "s1", 30*time.Minute)         // EXPIRE
+_, err = sessions.ExpireAt(ctx, "s1", time.Now().Add(time.Hour))
+left, expires, err := sessions.TTL(ctx, "s1")               // expires is false when it never expires
+_, err = sessions.Persist(ctx, "s1")                        // PERSIST
+```
+
+- `Expire`, `ExpireAt` and `Persist` return the new version. `IfVersion` works on `Expire` and `ExpireAt`.
+- `TTL` rounds up to whole seconds. A missing or expired document is `ErrNotFound`.
+- `ErrTTLNotEnabled`: no `expires` field. `ErrTTLDerived`: the expiry comes from `ttl` + `time`.
+- `ExpireIn` wins over the value of the `expires` field in the document.
+- Disk space of expired documents returns after compaction, and fully only with `wal_retention`; see [Freeing disk](https://github.com/thadeu/ndb/blob/main/docs/dev/configuration.md#freeing-disk).
+
 ## Query
 
 ```go
@@ -295,6 +321,7 @@ if errors.As(err, &apiErr) {
 | `ErrWatchLagged` | `watch_lagged` |
 | `ErrInvalidPosition` | `invalid_position` |
 | `ErrHistoryTruncated` | `history_truncated` |
+| `ErrTTLNotEnabled`, `ErrTTLDerived` | `ttl_not_enabled`, `ttl_derived` |
 
 Other codes (for example `invalid_request`) are still `*ndb.Error`, but have no sentinel. A response that is not a daemon error has the code `http_status`. A failed connection returns the normal `net` error.
 

@@ -2,6 +2,7 @@
 
 require "json"
 require "uri"
+require "time"
 
 module Ndb
   Page = Struct.new(:rows, :next_cursor, :plan, :examined, :total)
@@ -40,13 +41,19 @@ module Ndb
       page(post(coll, "aggregate", Conditions.regexps(body)))
     end
 
-    def insert(coll, docs)
-      json(post(coll, "insert", insert: docs)).fetch("results")
+    # expire_in (seconds, or "30m" / "1h" / "1d") sets the expires_field of
+    # every document to now + expire_in, in the same transaction.
+    def insert(coll, docs, expire_in: nil)
+      body = { insert: docs }
+      body[:expire_in] = expire_in if expire_in
+
+      json(post(coll, "insert", body)).fetch("results")
     end
 
-    def update(coll, id, set: {}, unset: [], if_version: nil)
+    def update(coll, id, set: {}, unset: [], if_version: nil, expire_in: nil)
       change = { id: id, set: set, unset: unset }
       change[:if_version] = if_version if if_version
+      change[:expire_in] = expire_in if expire_in
 
       json(post(coll, "update", update: change))
     end
@@ -56,6 +63,33 @@ module Ndb
       change[:if_version] = if_version if if_version
 
       json(post(coll, "delete", delete: change))
+    end
+
+    # Makes a document expire, like EXPIRE in Redis: in: seconds or "30m", or
+    # at: a Time or an RFC 3339 String. Returns {"id", "v", "expires_at"}.
+    # Raises NotFound for a missing or expired document, TtlNotEnabled when
+    # the collection has no expires_field, TtlDerived when the expiry comes
+    # from ttl + time.
+    def expire(coll, id, if_version: nil, **time)
+      body = { id: id }
+      body[:in] = time[:in] if time[:in]
+      body[:at] = time[:at].respond_to?(:utc) ? time[:at].utc.iso8601(9) : time[:at] if time[:at]
+      body[:if_version] = if_version if if_version
+
+      json(post(coll, "expire", body))
+    end
+
+    # Removes the expiry of a document, like PERSIST in Redis.
+    def persist(coll, id)
+      json(post(coll, "persist", id: id))
+    end
+
+    # The seconds left of a document (an Integer, rounded up), -1 when it
+    # never expires, nil when it is missing or expired.
+    def ttl(coll, id)
+      json(request("GET", "#{path(coll)}/ttl/#{URI.encode_www_form_component(id).gsub('+', '%20')}", nil)).fetch("ttl")
+    rescue NotFound
+      nil
     end
 
     # Streams the changes of a collection for a named consumer: first the ones

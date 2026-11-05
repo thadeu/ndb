@@ -1,4 +1,6 @@
-package main
+// Package diskusage measures the bytes of a data dir, split by what they are
+// for. It only stats files: it takes no lock and works while a daemon runs.
+package diskusage
 
 import (
 	"errors"
@@ -9,8 +11,8 @@ import (
 	"strings"
 )
 
-// parts is the disk usage of a data dir, split by what the bytes are for.
-type parts struct {
+// Parts is the disk usage of a data dir, split by what the bytes are for.
+type Parts struct {
 	WAL      int64 `json:"wal"`
 	Segments int64 `json:"segments"`
 	Meta     int64 `json:"meta"`
@@ -18,11 +20,13 @@ type parts struct {
 	Cursors  int64 `json:"cursors"`
 }
 
-func (p parts) total() int64 {
+// Total is the sum of all parts.
+func (p Parts) Total() int64 {
 	return p.WAL + p.Segments + p.Meta + p.Blobs + p.Cursors
 }
 
-func (p *parts) add(o parts) {
+// Add adds o to p.
+func (p *Parts) Add(o Parts) {
 	p.WAL += o.WAL
 	p.Segments += o.Segments
 	p.Meta += o.Meta
@@ -30,25 +34,27 @@ func (p *parts) add(o parts) {
 	p.Cursors += o.Cursors
 }
 
-type collectionUsage struct {
+// Collection is the usage of one collection dir.
+type Collection struct {
 	Name         string `json:"name"`
-	Bytes        parts  `json:"bytes"`
+	Bytes        Parts  `json:"bytes"`
 	Total        int64  `json:"total"`
 	WALFiles     int    `json:"wal_files"`
 	SegmentFiles int    `json:"segment_files"`
 }
 
-type usage struct {
-	DataDir     string            `json:"data_dir"`
-	Total       int64             `json:"total"`
-	Collections []collectionUsage `json:"collections"`
-	Shared      parts             `json:"shared"`
+// Usage is the usage of a whole data dir.
+type Usage struct {
+	DataDir     string       `json:"data_dir"`
+	Total       int64        `json:"total"`
+	Collections []Collection `json:"collections"`
+	Shared      Parts        `json:"shared"`
 }
 
-// scanUsage reads the sizes under a data dir. It only stats files: it takes
+// Scan reads the sizes under a data dir. It only stats files: it takes
 // no lock and works while a daemon runs.
-func scanUsage(dataDir string) (usage, error) {
-	u := usage{DataDir: dataDir}
+func Scan(dataDir string) (Usage, error) {
+	u := Usage{DataDir: dataDir}
 
 	entries, err := os.ReadDir(dataDir)
 	if err != nil {
@@ -64,16 +70,16 @@ func scanUsage(dataDir string) (usage, error) {
 				return u, err
 			}
 		case e.Name() == "blobs":
-			u.Shared.Blobs, _ = treeSize(path)
+			u.Shared.Blobs, _ = TreeSize(path)
 		case e.Name() == "cursors.bolt":
-			u.Shared.Cursors, _ = treeSize(path)
+			u.Shared.Cursors, _ = TreeSize(path)
 		default:
-			size, _ := treeSize(path)
+			size, _ := TreeSize(path)
 			u.Shared.Meta += size
 		}
 	}
 
-	u.Total = u.Shared.total()
+	u.Total = u.Shared.Total()
 
 	for _, c := range u.Collections {
 		u.Total += c.Total
@@ -82,17 +88,17 @@ func scanUsage(dataDir string) (usage, error) {
 	return u, nil
 }
 
-func scanCollections(dir string) ([]collectionUsage, error) {
+func scanCollections(dir string) ([]Collection, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
 
-	var out []collectionUsage
+	var out []Collection
 
 	for _, e := range entries {
 		if e.IsDir() {
-			out = append(out, scanCollection(filepath.Join(dir, e.Name()), e.Name()))
+			out = append(out, ScanCollection(filepath.Join(dir, e.Name()), e.Name()))
 		}
 	}
 
@@ -101,16 +107,16 @@ func scanCollections(dir string) ([]collectionUsage, error) {
 	return out, nil
 }
 
-// scanCollection sorts the files of one collection dir: *.ndjson are WAL
+// ScanCollection sorts the files of one collection dir: *.ndjson are WAL
 // files, segments/ holds the segments, the rest (meta.bolt) is meta.
-func scanCollection(dir, name string) collectionUsage {
-	c := collectionUsage{Name: name}
+func ScanCollection(dir, name string) Collection {
+	c := Collection{Name: name}
 
 	entries, _ := os.ReadDir(dir)
 
 	for _, e := range entries {
 		path := filepath.Join(dir, e.Name())
-		size, files := treeSize(path)
+		size, files := TreeSize(path)
 
 		switch {
 		case e.IsDir() && e.Name() == "segments":
@@ -124,14 +130,14 @@ func scanCollection(dir, name string) collectionUsage {
 		}
 	}
 
-	c.Total = c.Bytes.total()
+	c.Total = c.Bytes.Total()
 
 	return c
 }
 
-// treeSize is the byte size and file count of a file or a dir tree. A file
+// TreeSize is the byte size and file count of a file or a dir tree. A file
 // that vanishes during the walk (a compaction) counts as zero.
-func treeSize(path string) (size int64, files int) {
+func TreeSize(path string) (size int64, files int) {
 	_ = filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
@@ -157,4 +163,15 @@ func treeSize(path string) (size int64, files int) {
 	})
 
 	return size, files
+}
+
+// Sum is the total per part: every collection plus the shared files.
+func (u Usage) Sum() Parts {
+	sum := u.Shared
+
+	for _, c := range u.Collections {
+		sum.Add(c.Bytes)
+	}
+
+	return sum
 }

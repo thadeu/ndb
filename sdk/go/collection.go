@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"time"
 )
 
 // Coll is one collection of documents of type T.
@@ -41,6 +42,12 @@ type Result struct {
 
 // Insert writes docs in one transaction (all or nothing).
 func (c *Coll[T]) Insert(ctx context.Context, docs ...T) ([]Result, error) {
+	return c.InsertWith(ctx, docs)
+}
+
+// InsertWith is Insert with options. ExpireIn applies to every document.
+func (c *Coll[T]) InsertWith(ctx context.Context, docs []T, opts ...Option) ([]Result, error) {
+	o := newOptions(opts)
 	rows := make([]json.RawMessage, len(docs))
 
 	for i, d := range docs {
@@ -52,7 +59,7 @@ func (c *Coll[T]) Insert(ctx context.Context, docs ...T) ([]Result, error) {
 		rows[i] = raw
 	}
 
-	resp, err := c.post(ctx, "insert", insertBody{Insert: rows})
+	resp, err := c.post(ctx, "insert", insertBody{Insert: rows, ExpireIn: o.expireIn.seconds()})
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +86,7 @@ func (c *Coll[T]) Get(ctx context.Context, id string) (T, error) {
 // version. Use IfVersion to fail with ErrVersionConflict on a stale write.
 func (c *Coll[T]) Update(ctx context.Context, id string, set map[string]any, opts ...Option) (uint64, error) {
 	o := newOptions(opts)
-	args := updateArgs{ID: id, Set: set, Unset: o.unset, IfVersion: o.ifVersion}
+	args := updateArgs{ID: id, Set: set, Unset: o.unset, IfVersion: o.ifVersion, ExpireIn: o.expireIn.seconds()}
 
 	resp, err := c.post(ctx, "update", updateBody{Update: args})
 	if err != nil {
@@ -131,12 +138,26 @@ func (c *Coll[T]) decode(raw json.RawMessage) (T, error) {
 	return v, err
 }
 
-// Option changes an Update or a Delete.
+// Option changes a write: IfVersion, Unset and ExpireIn.
 type Option func(*options)
 
 type options struct {
 	ifVersion uint64
 	unset     []string
+	expireIn  ttlSecs
+}
+
+// ttlSecs is a duration in seconds for the wire. Zero is omitted.
+type ttlSecs float64
+
+func (d ttlSecs) seconds() *float64 {
+	if d <= 0 {
+		return nil
+	}
+
+	f := float64(d)
+
+	return &f
 }
 
 // IfVersion makes the write fail with ErrVersionConflict unless the document
@@ -144,6 +165,16 @@ type options struct {
 func IfVersion(v uint64) Option {
 	return func(o *options) {
 		o.ifVersion = v
+	}
+}
+
+// ExpireIn makes the daemon set the expires field of the written documents
+// to now + d, in the same transaction (Insert and Update). It wins over a
+// value of the field in the document. The collection needs a field tagged
+// `expires`, or the call fails with ErrTTLNotEnabled.
+func ExpireIn(d time.Duration) Option {
+	return func(o *options) {
+		o.expireIn = ttlSecs(d.Seconds())
 	}
 }
 
@@ -209,7 +240,8 @@ type ensureBody struct {
 }
 
 type insertBody struct {
-	Insert []json.RawMessage `json:"insert"`
+	Insert   []json.RawMessage `json:"insert"`
+	ExpireIn *float64          `json:"expire_in,omitempty"`
 }
 
 type updateBody struct {
@@ -221,6 +253,7 @@ type updateArgs struct {
 	Set       map[string]any `json:"set,omitempty"`
 	Unset     []string       `json:"unset,omitempty"`
 	IfVersion uint64         `json:"if_version,omitempty"`
+	ExpireIn  *float64       `json:"expire_in,omitempty"`
 }
 
 type deleteBody struct {

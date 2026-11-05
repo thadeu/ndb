@@ -12,3 +12,9 @@
 /docs-site/.vitepress/.temp/
 .dev/
 .wrangler/
+node_modules/
+/examples/.data/
+/examples/data/
+/examples/node_modules/
+/examples/Gemfile.lock
+/examples/pnpm-lock.yaml

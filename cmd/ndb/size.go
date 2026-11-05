@@ -7,10 +7,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/thadeu/ndb/internal/diskusage"
+	"github.com/thadeu/ndb/internal/tui"
 )
 
-// runSize is "ndb size": disk usage per collection and per part. It reads
-// the data dir and works with the daemon stopped or running.
+// runSize is "ndb size": disk usage per collection and per part. It asks the
+// daemon (GET /v1/size); with -data-dir, or when no daemon answers, it scans
+// the data dir itself, which works with the daemon stopped or running.
 func runSize(args []string) error {
 	return size(args, os.Stdout)
 }
@@ -18,34 +22,45 @@ func runSize(args []string) error {
 func size(args []string, out io.Writer) error {
 	fl := flag.NewFlagSet("ndb size", flag.ContinueOnError)
 
-	common := addDataDirFlags(fl)
-	asJSON := fl.Bool("json", false, "machine output")
+	cf := addConnFlags(fl)
 
 	if err := fl.Parse(args); err != nil {
 		return err
 	}
 
 	if fl.NArg() != 0 {
-		return errors.New("usage: ndb size [-config f] [-data-dir d] [-json]")
+		return errors.New("usage: ndb size [-config f] [-data-dir d | -url u] [-json]")
 	}
 
-	cfg, err := common.load(fl)
-	if err != nil {
-		return err
-	}
-
-	u, err := scanUsage(cfg.DataDir)
+	t, err := cf.resolve(fl)
 	if err != nil {
 		return fmt.Errorf("size: %w", err)
 	}
 
-	if *asJSON {
+	u, err := collectUsage(t)
+	if err != nil {
+		return fmt.Errorf("size: %w", err)
+	}
+
+	if *cf.asJSON {
 		return writeJSON(out, u)
 	}
 
 	printUsage(out, u)
 
 	return nil
+}
+
+func collectUsage(t target) (diskusage.Usage, error) {
+	if t.client == nil {
+		return diskusage.Scan(t.cfg.DataDir)
+	}
+
+	var u diskusage.Usage
+
+	err := t.client.get("/v1/size", &u)
+
+	return u, err
 }
 
 func writeJSON(w io.Writer, v any) error {
@@ -56,28 +71,32 @@ func writeJSON(w io.Writer, v any) error {
 	return enc.Encode(v)
 }
 
-func printUsage(out io.Writer, u usage) {
-	tw := newTable(out)
-
-	fmt.Fprintln(tw, "NAME\tWAL\tSEGMENTS\tMETA\tBLOBS\tCURSORS\tTOTAL")
-
-	var sum parts
-
-	for _, c := range u.Collections {
-		printPartsRow(tw, c.Name, c.Bytes)
-		sum.add(c.Bytes)
+func printUsage(out io.Writer, u diskusage.Usage) {
+	tb := tui.Table{
+		Columns: []tui.Column{
+			{Title: "name", Keep: true},
+			{Title: "wal", Align: tui.Right},
+			{Title: "segments", Align: tui.Right},
+			{Title: "meta", Align: tui.Right},
+			{Title: "blobs", Align: tui.Right},
+			{Title: "cursors", Align: tui.Right},
+			{Title: "total", Align: tui.Right},
+		},
 	}
 
-	printPartsRow(tw, "(shared)", u.Shared)
-	sum.add(u.Shared)
+	for _, c := range u.Collections {
+		tb.Rows = append(tb.Rows, partsRow(c.Name, c.Bytes))
+	}
 
-	printPartsRow(tw, "TOTAL", sum)
+	tb.Rows = append(tb.Rows, partsRow("(shared)", u.Shared))
+	tb.Footer = partsRow("total", u.Sum())
 
-	tw.Flush()
+	tb.Render(out, styleFor(out))
 }
 
-func printPartsRow(w io.Writer, name string, p parts) {
-	fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", name,
-		humanBytes(p.WAL), humanBytes(p.Segments), humanBytes(p.Meta),
-		humanBytes(p.Blobs), humanBytes(p.Cursors), humanBytes(p.total()))
+func partsRow(name string, p diskusage.Parts) []string {
+	return []string{
+		name, tui.HumanBytes(p.WAL), tui.HumanBytes(p.Segments), tui.HumanBytes(p.Meta),
+		tui.HumanBytes(p.Blobs), tui.HumanBytes(p.Cursors), tui.HumanBytes(p.Total()),
+	}
 }

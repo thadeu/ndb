@@ -23,24 +23,18 @@ type indexBody struct {
 	Total int    `json:"total"`
 }
 
-type statsBody struct {
-	Name        string            `json:"name"`
-	Write       catalog.WriteMode `json:"write"`
-	Rows        int               `json:"rows"`
-	Quarantined int64             `json:"quarantined"`
-	Indexes     []indexBody       `json:"indexes"`
-}
-
 type insertReq struct {
-	Insert []json.RawMessage `json:"insert"`
+	Insert   []json.RawMessage `json:"insert"`
+	ExpireIn json.RawMessage   `json:"expire_in"`
 }
 
 type updateReq struct {
 	Update struct {
-		ID        string         `json:"id"`
-		Set       map[string]any `json:"set"`
-		Unset     []string       `json:"unset"`
-		IfVersion uint64         `json:"if_version"`
+		ID        string          `json:"id"`
+		Set       map[string]any  `json:"set"`
+		Unset     []string        `json:"unset"`
+		IfVersion uint64          `json:"if_version"`
+		ExpireIn  json.RawMessage `json:"expire_in"`
 	} `json:"update"`
 }
 
@@ -155,6 +149,13 @@ func (s *Server) insert(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		docs[i] = d
 	}
 
+	expireIn, err := parseExpireIn(req.ExpireIn)
+	if err != nil {
+		writeError(w, err)
+
+		return
+	}
+
 	col, err := db.GetOrCreate(name)
 	if err != nil {
 		writeError(w, err)
@@ -162,7 +163,14 @@ func (s *Server) insert(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
-	res, err := col.Insert(r.Context(), docs...)
+	var res []collection.Result
+
+	if expireIn > 0 {
+		res, err = col.InsertIn(r.Context(), expireIn, docs...)
+	} else {
+		res, err = col.Insert(r.Context(), docs...)
+	}
+
 	if err != nil {
 		writeError(w, err)
 
@@ -206,7 +214,15 @@ func (s *Server) update(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	}
 
 	u := req.Update
-	ch := collection.Change{Set: u.Set, Unset: u.Unset}
+
+	expireIn, err := parseExpireIn(u.ExpireIn)
+	if err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	ch := collection.Change{Set: u.Set, Unset: u.Unset, ExpireIn: expireIn}
 
 	v, err := col.Update(r.Context(), u.ID, ch, u.IfVersion)
 	if err != nil {
@@ -316,25 +332,6 @@ func (s *Server) dropIndex(w http.ResponseWriter, r *http.Request, db *engine.DB
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"collection": name, "indexes": def.Indexes})
-}
-
-func (s *Server) stats(w http.ResponseWriter, r *http.Request, db *engine.DB) {
-	col, err := db.Get(r.PathValue("coll"))
-	if err != nil {
-		writeError(w, err)
-
-		return
-	}
-
-	st := col.Stats()
-
-	writeJSON(w, http.StatusOK, statsBody{
-		Name:        st.Name,
-		Write:       st.Write,
-		Rows:        st.Rows,
-		Quarantined: st.Quarantined,
-		Indexes:     indexBodies(st),
-	})
 }
 
 func indexBodies(st engine.Stats) []indexBody {

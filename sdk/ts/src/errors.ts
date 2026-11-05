@@ -22,6 +22,8 @@ export type ErrorCode =
   | 'watch_lagged'
   | 'invalid_position'
   | 'history_truncated'
+  | 'ttl_not_enabled'
+  | 'ttl_derived'
   | 'http_status'
   | (string & {})
 
@@ -47,6 +49,10 @@ export class CursorError extends NdbError {}
 export class WatchLaggedError extends NdbError {}
 export class HistoryTruncatedError extends NdbError {}
 
+// The collection has no expires field (ttl_not_enabled), or its expiry comes
+// from ttl + time (ttl_derived).
+export class TtlError extends NdbError {}
+
 const subclasses: Record<string, typeof NdbError> = {
   unauthorized: UnauthorizedError,
   not_found: NotFoundError,
@@ -61,6 +67,8 @@ const subclasses: Record<string, typeof NdbError> = {
   cursor_expired: CursorError,
   watch_lagged: WatchLaggedError,
   history_truncated: HistoryTruncatedError,
+  ttl_not_enabled: TtlError,
+  ttl_derived: TtlError,
 }
 
 export function makeError(code: ErrorCode, message: string, status = 0): NdbError {

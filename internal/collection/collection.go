@@ -154,6 +154,9 @@ type Result struct {
 type Change struct {
 	Set   map[string]any
 	Unset []string
+
+	// ExpireIn, when positive, sets the expires_field to now + ExpireIn.
+	ExpireIn time.Duration
 }
 
 func Open(cfg Config) (*Collection, error) {
@@ -328,7 +331,11 @@ func (c *Collection) Find(id string) (Doc, bool) {
 
 // Insert writes all docs in one transaction: all or nothing.
 func (c *Collection) Insert(ctx context.Context, docs ...[]byte) ([]Result, error) {
-	_, ops, err := c.w.Commit(ctx, insertReq{docs: docs})
+	return c.insert(ctx, insertReq{docs: docs})
+}
+
+func (c *Collection) insert(ctx context.Context, req insertReq) ([]Result, error) {
+	_, ops, err := c.w.Commit(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -344,6 +351,15 @@ func (c *Collection) Insert(ctx context.Context, docs ...[]byte) ([]Result, erro
 
 // Update applies ch to the doc. ifVersion 0 means any version.
 func (c *Collection) Update(ctx context.Context, id string, ch Change, ifVersion uint64) (uint64, error) {
+	if ch.ExpireIn > 0 {
+		if _, err := c.expiryField(); err != nil {
+			return 0, err
+		}
+
+		ch = c.stampChange(ch, c.clock().Add(ch.ExpireIn))
+		ch.ExpireIn = 0
+	}
+
 	_, ops, err := c.w.Commit(ctx, updateReq{id: id, change: ch, ifVersion: ifVersion})
 	if err != nil {
 		return 0, err
@@ -360,7 +376,8 @@ func (c *Collection) Delete(ctx context.Context, id string, ifVersion uint64) er
 }
 
 type insertReq struct {
-	docs [][]byte
+	docs     [][]byte
+	expireIn time.Duration
 }
 
 type updateReq struct {
@@ -392,6 +409,8 @@ func (c *Collection) prepare(req any) (writer.Prepared, error) {
 		ops, err = c.prepareDelete(v, r)
 	case expireReq:
 		ops, err = c.prepareExpire(v, r)
+	case setExpiryReq:
+		ops, err = c.prepareSetExpiry(v, r)
 	default:
 		err = errf("internal", "unknown request %T", req)
 	}
@@ -412,10 +431,23 @@ func (c *Collection) prepare(req any) (writer.Prepared, error) {
 func (c *Collection) prepareInsert(v *view, r insertReq) ([]wal.Op, error) {
 	ops := make([]wal.Op, 0, len(r.docs))
 
+	var at time.Time
+
+	if r.expireIn > 0 {
+		at = c.clock().Add(r.expireIn)
+	}
+
 	for _, raw := range r.docs {
 		id, doc, err := c.withID(raw)
 		if err != nil {
 			return nil, err
+		}
+
+		if !at.IsZero() {
+			doc, err = c.stampDoc(doc, at)
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		if _, exists := v.get(id); exists {

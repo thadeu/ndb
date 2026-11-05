@@ -20,8 +20,21 @@ The `ndb` binary is the daemon and the CLI. `ndb` with only flags still runs the
 | `ndb restore <backup-dir>` | Put a backup in a data dir. |
 | `ndb stats` | Per collection: rows, size, segments, WAL files, indexes, quarantined lines. |
 | `ndb size` | Disk usage per collection and per part. |
+| `ndb collections [name]` | The catalog, or the definition of one collection. |
+| `ndb compact <collection>` | Seal and merge the segments now. |
+| `ndb quarantine <collection>` | The bad lines of a direct collection. |
+| `ndb query <collection> ['<where>']` | Find rows (`-aggregate` for a pipeline). |
 | `ndb version` | Print the version. `ndb -version` still works. |
 | `ndb help` | List the commands. |
+
+Every command except `backup`, `restore`, `serve`, `version` and `help` is a thin client of the [HTTP API](http-api.md#stats-size-and-admin). They share these flags:
+
+- `-url unix:///run/ndb/ndb.sock` or `tcp://host:7070` picks the daemon. The default is `NDB_URL`, then the `listen.unix` socket of `ndb.yml` when something answers on it. `NDB_TOKEN` is the bearer token for TCP.
+- `-config FILE` and `-data-dir DIR`. `-data-dir` and `-url` together are an error.
+- `-json` prints the JSON of the API (`query`: NDJSON rows).
+- Only `stats` and `size` have an offline mode: with `-data-dir`, or when no daemon answers, they read the data dir (no lock, so a running daemon is fine). `collections`, `compact`, `quarantine` and `query` need a daemon and say so when none answers.
+
+Tables use box-drawing characters. On a terminal they fit its width: the widest text columns (more than 8 cells) shrink first, in proportion, down to 10 cells and then further, and their cells end in `…`; short text such as `direct` or `engine`, numbers and ids are cut last. Headers are lowercase, like the field names that `ndb query` prints. The width is the terminal size, then `COLUMNS`, then 100. Piped output is never cut. ASCII borders are used when the locale (`LC_ALL`, `LC_CTYPE`, `LANG`) is not UTF-8 or `TERM=dumb`. Color (bold header, dim borders) needs a terminal and no `NO_COLOR`. A CJK or emoji character counts as two cells; a ZWJ emoji sequence is counted per character, so it can look a little wide.
 
 ### restore
 
@@ -34,15 +47,107 @@ The `ndb` binary is the daemon and the CLI. `ndb` with only flags still runs the
 
 ### stats
 
-`ndb stats [-data-dir DIR | -url URL] [-json]`
+`ndb stats [-data-dir DIR | -url URL] [-json]` calls `GET /v1/stats`.
 
-- `-url unix:///run/ndb/ndb.sock` or `tcp://host:7070` (default `NDB_URL`; `NDB_TOKEN` is the bearer token) asks the daemon: `GET /v1/c` and `GET /v1/c/{coll}/stats` give rows, write mode, indexes and quarantined lines. Size, segment and WAL file counts are added from the data dir when it is readable.
-- With no flag, the `listen.unix` socket of `ndb.yml` is tried; when nothing answers, it falls back to the data dir.
-- `-data-dir` reads the data dir only. It takes no lock, so it works with the daemon running. Rows, indexes and quarantine show `-` (they need the daemon).
+```
+┌────────────┬────────┬──────┬───────────┬──────────┬─────┬─────────────┬────────────────┐
+│ collection │ mode   │ rows │      size │ segments │ wal │ quarantined │ indexes        │
+├────────────┼────────┼──────┼───────────┼──────────┼─────┼─────────────┼────────────────┤
+│ calls      │ direct │    3 │ 128.1 KiB │        0 │   0 │           1 │ status (ready) │
+│ posts      │ engine │    4 │ 131.1 KiB │        1 │   1 │           0 │ author (ready) │
+├────────────┼────────┼──────┼───────────┼──────────┼─────┼─────────────┼────────────────┤
+│ total      │        │    7 │ 515.2 KiB │        1 │   1 │           1 │                │
+└────────────┴────────┴──────┴───────────┴──────────┴─────┴─────────────┴────────────────┘
+ndb dev · up 12s · blobs 0 B · cursors 128.0 KiB
+```
+
+At 80 columns the stats table cuts `indexes` and keeps `direct` and `engine` whole:
+
+```
+┌────────────┬────────┬──────┬───────────┬──────────┬─────┬─────────────┬──────┐
+│ collection │ mode   │ rows │      size │ segments │ wal │ quarantined │ ind… │
+├────────────┼────────┼──────┼───────────┼──────────┼─────┼─────────────┼──────┤
+│ calls      │ direct │    3 │ 128.1 KiB │        0 │   0 │           1 │ sta… │
+│ posts      │ engine │    4 │ 131.1 KiB │        1 │   1 │           0 │ aut… │
+├────────────┼────────┼──────┼───────────┼──────────┼─────┼─────────────┼──────┤
+│ total      │        │    7 │ 515.2 KiB │        1 │   1 │           1 │      │
+└────────────┴────────┴──────┴───────────┴──────────┴─────┴─────────────┴──────┘
+ndb dev · up 3s · blobs 0 B · cursors 128.0 KiB
+```
+
+Offline (`-data-dir`, or no daemon) the table shows `-` for rows, mode, quarantined and indexes: they live in the daemon.
 
 ### size
 
-`ndb size [-data-dir DIR] [-json]` prints bytes per collection split in `wal`, `segments` and `meta` (`meta.bolt`), plus the shared `blobs`, `cursors.bolt` and catalog (`meta` of the `(shared)` row). Units are KiB, MiB, GiB. It only stats files, so it takes no lock.
+`ndb size [-data-dir DIR | -url URL] [-json]` calls `GET /v1/size`: bytes per collection split in `wal`, `segments` and `meta` (`meta.bolt`), plus the shared `blobs`, `cursors.bolt` and catalog (`meta` of the `(shared)` row). It only stats files, so it takes no lock.
+
+```
+┌──────────┬───────┬──────────┬───────────┬───────┬───────────┬───────────┐
+│ name     │   wal │ segments │      meta │ blobs │   cursors │     total │
+├──────────┼───────┼──────────┼───────────┼───────┼───────────┼───────────┤
+│ calls    │   0 B │      0 B │ 128.1 KiB │   0 B │       0 B │ 128.1 KiB │
+│ posts    │ 524 B │  2.6 KiB │ 128.0 KiB │   0 B │       0 B │ 131.1 KiB │
+│ (shared) │   0 B │      0 B │ 128.0 KiB │   0 B │ 128.0 KiB │ 256.0 KiB │
+├──────────┼───────┼──────────┼───────────┼───────┼───────────┼───────────┤
+│ total    │ 524 B │  2.6 KiB │ 384.1 KiB │   0 B │ 128.0 KiB │ 515.2 KiB │
+└──────────┴───────┴──────────┴───────────┴───────┴───────────┴───────────┘
+```
+
+### collections
+
+`ndb collections [name] [-json]` calls `GET /v1/c`, or `GET /v1/c/{name}` for one collection (every definition field and the index state).
+
+```
+┌───────┬────────┬─────────┬──────┬─────────┬─────┬───────────┬─────────────────────────┐
+│ name  │ write  │ id      │ time │ indexes │ ttl │ retention │ path                    │
+├───────┼────────┼─────────┼──────┼─────────┼─────┼───────────┼─────────────────────────┤
+│ calls │ direct │ call_id │ -    │ status  │ -   │ -         │ /tmp/ndbd/logs/*.ndjson │
+│ posts │ engine │ post_id │ -    │ author  │ -   │ -         │ -                       │
+└───────┴────────┴─────────┴──────┴─────────┴─────┴───────────┴─────────────────────────┘
+```
+
+### compact
+
+`ndb compact <collection> [-json]` calls `POST /v1/c/{coll}/compact`: it seals the memtable and merges all segments into one. It waits for the end (up to 10 minutes). A direct collection fails with `not_supported`.
+
+```
+┌────────────┬──────────┬────────────────────┬──────┐
+│ collection │ segments │               size │ time │
+├────────────┼──────────┼────────────────────┼──────┤
+│ posts      │   1 -> 1 │ 2.6 KiB -> 2.6 KiB │ 24ms │
+└────────────┴──────────┴────────────────────┴──────┘
+```
+
+### quarantine
+
+`ndb quarantine <collection> [-limit N] [-json]` calls `GET /v1/c/{coll}/quarantine`. The default `-limit` is 20. See [Quarantine](#quarantine).
+
+```
+┌─────────────────────────┬────────┬───────────────────────────────────────────┬──────────┐
+│ file                    │ offset │ error                                     │ line     │
+├─────────────────────────┼────────┼───────────────────────────────────────────┼──────────┤
+│ /tmp/ndbd/logs/a.ndjson │     62 │ invalid_doc: a line must be a JSON object │ not json │
+└─────────────────────────┴────────┴───────────────────────────────────────────┴──────────┘
+showing 1 of 1 quarantined lines (newest last)
+```
+
+### query
+
+`ndb query <collection> ['<where-json>'] [-sort JSON] [-fields a,b] [-limit N] [-json|-ndjson]` calls `POST /v1/c/{coll}/find`. `ndb query <collection> -aggregate '<pipeline-json>'` calls `aggregate`. Flags may come before or after the positional arguments. The table has one column per top-level key of the first 200 rows, in order of appearance; nested values are compact JSON; number columns are right-aligned. With `-json` (or `-ndjson`) the output is the NDJSON of the API, ready for `jq`.
+
+```
+$ ndb query posts '{}' -sort '{"likes":-1}'
+┌─────────┬──────────┬───────┬─────────────────────────────────────────────────┐
+│ post_id │ author   │ likes │ title                                           │
+├─────────┼──────────┼───────┼─────────────────────────────────────────────────┤
+│ p3      │ author-3 │  4500 │ A fairly long post title number 3, to test shr… │
+│ p2      │ author-2 │  3000 │ A fairly long post title number 2, to test shr… │
+│ p1      │ author-1 │  1500 │ A fairly long post title number 1, to test shr… │
+└─────────┴──────────┴───────┴─────────────────────────────────────────────────┘
+3 rows · plan scan · examined 3
+```
+
+(The example is at 80 columns. At 160 columns, or piped, the title is whole.)
 
 ## Health
 
@@ -98,7 +203,7 @@ Copy the backup to other storage (for example S3) from there; ndb does not uploa
 | `ndb_memtable_bytes{collection}` | gauge | unsealed rows in memory |
 | `ndb_segments{collection}` | gauge | number of segments |
 | `ndb_tailer_lag_bytes{collection}` | gauge | direct mode: bytes not read yet |
-| `ndb_quarantined_total{collection}` | counter | lines in quarantine |
+| `ndb_quarantined_total{collection}` | counter | distinct lines in the quarantine file (file and offset), not events |
 | `ndb_watch_subscribers{collection}` | gauge | open watch streams |
 | `ndb_index_build_progress{collection,field}` | gauge | 0 to 1 |
 | `ndb_wal_records_total`, `ndb_commit_seconds`, `ndb_fsync_seconds` | counter, histograms | engine-mode write path |
@@ -114,7 +219,7 @@ In direct mode, a line that is not a JSON object, has a bad id, or is over `max_
 {"ts":"2026-11-05T16:00:18Z","file":"/data/logs/app-1.ndjson","offset":63,"reason":"invalid_doc: a line must be a JSON object","line":"not json"}
 ```
 
-Find the writer that produced the line with `file` and `offset`, fix it, and watch `ndb_quarantined_total`. The quarantine file is not read again; delete it when you are done. `stats` shows the count as `quarantined`.
+Find the writer that produced the line with `file` and `offset`, fix it, and watch `ndb_quarantined_total`. ndb does not read the quarantine file back to recover; delete it when you are done. `stats` shows the count as `quarantined`, and `ndb quarantine <collection>` (or `GET /v1/c/{coll}/quarantine`) lists the last lines. A direct collection is rebuilt from offset 0 at each start, but a line already in the file (same `file` and `offset`) is not written again, so the file has one entry per bad line however often the daemon restarts. The count (`quarantined`, `ndb_quarantined_total`) is the number of distinct lines in the file: it is read from the file at start, so a restart does not raise it, and it drops if you delete the file. A file written by an older version may still hold repeats; the API shows each line once.
 
 ## Recovery
 
@@ -135,6 +240,7 @@ If an `fsync` fails, the daemon exits on purpose, and recovery gives the right s
 - **`wal_retention: 7d`** (engine mode) deletes a sealed WAL file when the checkpoint is past it, every saved `watch` cursor is after it, no open stream reads it, and it is older than 7 days. Files go from the oldest and the walk stops at the first one that stays. Without it the WAL is kept forever. A `watch` that needs a deleted file fails with `history_truncated` (410).
 - **`retention: 30d`** hides rows whose `time` is older than 30 days, at read time, and drops them from the derived data when segments are compacted. The source NDJSON is never deleted by ndb.
 - **`ttl: 24h`** or **`expires_field`**: expired documents are hidden from every read at once. In engine mode a sweeper (every 10 s) deletes them in the WAL, and `watch` shows the delete with `"_expired": true`. In direct mode the documents are only hidden; the files are not touched.
+- **Freeing disk after expiry:** deleting an expired document does not shrink the files. Compaction removes it from the segments, and only `wal_retention` removes it from the WAL, so a TTL collection should set `wal_retention` (for example `1d`). See [configuration.md](configuration.md#freeing-disk).
 - Disk use: watch the size of `data_dir`, and `ndb_segments`.
 
 ## Version and token

@@ -35,13 +35,13 @@ build:
 dist:
 	mkdir -p dist
 	@for t in $(TARGETS); do \
-		os=$${t%/*}; arch=$${t#*/}; name=ndb-$(VERSION)-$$os-$$arch; \
+		os=$${t%/*}; arch=$${t#*/}; name=ndb-v$(VERSION)-$$os-$$arch; \
 		mkdir -p bin/stage/$$name; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o bin/stage/$$name/ndb ./cmd/ndb || exit 1; \
 		cp LICENSE README.md bin/stage/$$name/; \
 		tar -C bin/stage -czf dist/$$name.tar.gz $$name; \
 	done
-	cd dist && (sha256sum ndb-$(VERSION)-*.tar.gz 2>/dev/null || shasum -a 256 ndb-$(VERSION)-*.tar.gz) > checksums.txt
+	cd dist && (sha256sum ndb-v$(VERSION)-*.tar.gz 2>/dev/null || shasum -a 256 ndb-v$(VERSION)-*.tar.gz) > checksums.txt
 
 # Local daemon for development: data and socket live in .dev/ (git-ignored).
 # Apps connect with NDB_URL=unix://$(CURDIR)/.dev/ndb.sock or tcp://127.0.0.1:7070.

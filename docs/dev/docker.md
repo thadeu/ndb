@@ -36,7 +36,7 @@ ndb size -data-dir /var/lib/docker/volumes/ndb-data/_data
 ndb stats -data-dir /var/lib/docker/volumes/ndb-data/_data
 ```
 
-- The CLI exists from the first release after 0.1.0. The image entrypoint is `/usr/local/bin/ndb`, so `docker run ... ghcr.io/thadeu/ndb <command>` also works.
+- The CLI exists from 0.1.1. The image entrypoint is `/usr/local/bin/ndb`, so `docker run ... ghcr.io/thadeu/ndb <command>` also works.
 - `-data-dir` stats show sizes only. Use the socket (or `-url tcp://...` with `NDB_TOKEN`) for rows, indexes and quarantine.
 - `ndb restore` needs the daemon stopped: `docker stop ndb`, then `ndb restore <backup> -data-dir <volume path>` (or `docker run --rm -v ndb-data:/var/lib/ndb -v /backups:/backups:ro ghcr.io/thadeu/ndb restore /backups/x -data-dir /var/lib/ndb`), then `docker start ndb`. The files must stay owned by UID 65532.
 - `ndb backup` runs the same way, in a second container with both volumes, or with the host binary.
