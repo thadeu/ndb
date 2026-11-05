@@ -1,0 +1,80 @@
+{
+  "name": "find with $in on an indexed field",
+  "collection": "posts",
+  "setup": {
+    "catalog": {
+      "id": "post_id",
+      "write": "engine",
+      "indexes": [
+        "ref"
+      ]
+    },
+    "writes": [
+      {
+        "op": "insert",
+        "body": {
+          "insert": [
+            {
+              "post_id": "c0",
+              "ref": "p0"
+            },
+            {
+              "post_id": "c1",
+              "ref": "p1"
+            },
+            {
+              "post_id": "c2",
+              "ref": "p2"
+            },
+            {
+              "post_id": "c3",
+              "ref": "p0"
+            },
+            {
+              "post_id": "c4",
+              "ref": "p1"
+            },
+            {
+              "post_id": "c5",
+              "ref": "p2"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "request": {
+    "op": "find",
+    "body": {
+      "where": {
+        "ref": {
+          "$in": [
+            "p1",
+            "p2"
+          ]
+        }
+      }
+    }
+  },
+  "expect": {
+    "ordered": false,
+    "rows": [
+      {
+        "post_id": "c1",
+        "ref": "p1"
+      },
+      {
+        "post_id": "c2",
+        "ref": "p2"
+      },
+      {
+        "post_id": "c4",
+        "ref": "p1"
+      },
+      {
+        "post_id": "c5",
+        "ref": "p2"
+      }
+    ]
+  }
+}

@@ -1,11 +1,12 @@
-# M12 — Compaction, retention, blobs, metrics
+# M12 — Compaction, retention, TTL, blobs, metrics
 
-Status: not started · Depends on: M05 (blobs API needs M07) · Plan: §7.5, §8.5, phase 9
+Status: not started · Depends on: M05 (blobs API needs M07) · Plan: §7.5, §8.5, §11.5, phase 9
 
 ## Goal
 
-ndb runs for months on one server: disk use stays under control, large
-values live in the blob store, and the operator can see what happens.
+ndb runs for months on one server: disk use stays under control, documents
+can expire like Redis keys, large values live in the blob store, and the
+operator can see what happens.
 
 ## Epics
 
@@ -19,6 +20,15 @@ values live in the blob store, and the operator can see what happens.
 
 - [ ] Tests first: data older than `retention` is gone from queries; source NDJSON is never deleted
 - [ ] Drop derived data by the `time` field (whole segments when possible)
+
+### E12.6 Document TTL (plan §11.5)
+
+- [ ] Tests first: an expired doc is hidden from find/count/aggregate at once (no job ran); an update that moves `expires_at` forward keeps it; a doc without `expires_field` never expires; `ttl` needs a `time` field (catalog validation)
+- [ ] Catalog: `ttl` and `expires_field` (one of the two), merge rules like `time` (conflict on change)
+- [ ] Read filter against the snapshot time; range skip when `expires_field` is indexed
+- [ ] Engine-mode sweeper: tombstones for expired docs in small batches; `watch` shows `"_expired": true`; crash during a sweep is safe (tombstones are idempotent)
+- [ ] Direct mode: hide only, never touch the apps' files; compaction drops expired rows from derived data
+- [ ] Model layers: Rails `ttl` / `expires_field`, Go tag `expires`, TS `expires`
 
 ### E12.3 Blob store
 
@@ -43,6 +53,7 @@ values live in the blob store, and the operator can see what happens.
 - [ ] Compaction and blob crash tests pass
 - [ ] A 10 MB value round-trips through the Go client blob API
 - [ ] Disk use goes down after compaction on a dataset with many updates
+- [ ] TTL: expired docs are hidden at once and, in engine mode, swept to tombstones that `watch` delivers
 - [ ] Backup + restore test passes
 
 ## Out of scope

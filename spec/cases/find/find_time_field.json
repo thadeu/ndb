@@ -1,0 +1,51 @@
+{
+  "name": "find compares the time field as time, not as text",
+  "collection": "posts",
+  "setup": {
+    "catalog": {
+      "id": "post_id",
+      "write": "engine",
+      "time": "at"
+    },
+    "writes": [
+      {
+        "op": "insert",
+        "body": {
+          "insert": [
+            {
+              "post_id": "a",
+              "at": "2026-11-04T10:00:00-03:00"
+            },
+            {
+              "post_id": "b",
+              "at": "2026-11-04T12:30:00Z"
+            },
+            {
+              "post_id": "c",
+              "at": "2026-11-04T11:00:00Z"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "request": {
+    "op": "find",
+    "body": {
+      "where": {
+        "at": {
+          "$lt": "2026-11-04T12:00:00Z"
+        }
+      }
+    }
+  },
+  "expect": {
+    "ordered": false,
+    "rows": [
+      {
+        "post_id": "c",
+        "at": "2026-11-04T11:00:00Z"
+      }
+    ]
+  }
+}

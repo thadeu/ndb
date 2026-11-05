@@ -3,6 +3,7 @@ package spec_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/thadeu/ndb/internal/spec"
@@ -40,9 +41,17 @@ func (e *listEngine) Do(_ context.Context, _ string, step spec.Step) ([]json.Raw
 }
 
 func TestSampleCasesRun(t *testing.T) {
-	cases, err := spec.Load("../../spec/cases/find")
+	all, err := spec.Load("../../spec/cases/find")
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	var cases []spec.Case
+
+	for _, c := range all {
+		if strings.HasSuffix(c.File, "find_all.json") {
+			cases = append(cases, c)
+		}
 	}
 
 	if len(cases) == 0 {

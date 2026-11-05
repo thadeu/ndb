@@ -1,0 +1,93 @@
+{
+  "name": "find with $ne also matches a missing field and null",
+  "collection": "posts",
+  "setup": {
+    "catalog": {
+      "id": "post_id",
+      "write": "engine"
+    },
+    "writes": [
+      {
+        "op": "insert",
+        "body": {
+          "insert": [
+            {
+              "post_id": "p1",
+              "status": "draft",
+              "n": 1,
+              "tags": [
+                "a",
+                "b"
+              ],
+              "meta": {
+                "city": "Rio"
+              }
+            },
+            {
+              "post_id": "p2",
+              "status": "published",
+              "n": 2,
+              "tags": [
+                "b"
+              ],
+              "meta": {
+                "city": "SP"
+              }
+            },
+            {
+              "post_id": "p3",
+              "status": "published",
+              "n": 3,
+              "meta": {}
+            },
+            {
+              "post_id": "p4",
+              "status": null,
+              "n": 4,
+              "tags": []
+            },
+            {
+              "post_id": "p5"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "request": {
+    "op": "find",
+    "body": {
+      "where": {
+        "status": {
+          "$ne": "published"
+        }
+      }
+    }
+  },
+  "expect": {
+    "ordered": false,
+    "rows": [
+      {
+        "post_id": "p1",
+        "status": "draft",
+        "n": 1,
+        "tags": [
+          "a",
+          "b"
+        ],
+        "meta": {
+          "city": "Rio"
+        }
+      },
+      {
+        "post_id": "p4",
+        "status": null,
+        "n": 4,
+        "tags": []
+      },
+      {
+        "post_id": "p5"
+      }
+    ]
+  }
+}

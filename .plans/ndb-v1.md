@@ -181,6 +181,8 @@ collections:
 | `retention` | drop derived data older than this. The source NDJSON is never deleted by ndb. |
 | `max_line_size` | largest accepted line. Default 1 MiB, hard maximum 16 MiB (§7.5). |
 | `blob_threshold` | engine mode: string fields larger than this move to the blob store. Default off; suggested 64 KiB (§7.5). |
+| `ttl` | each document expires this long after its `time` field (§11.5) |
+| `expires_field` | each document expires at the time in this field, like Redis `EXPIRE` per key (§11.5) |
 
 The same keys are accepted by `ensure_collection` (§10.5), so code and
 YAML declare the same things.
@@ -577,6 +579,38 @@ the memtable position. Writes after this point are not visible to the query.
 - Memtable size limit: 64 MiB per collection (config).
 - LRU of decoded documents for repeated `find` by id.
 
+### 11.5 Document TTL
+
+Per-document expiry, like Redis `EXPIRE`. Uses: sessions, locks, tokens,
+webhook dedupe, caches.
+
+**Config** (per collection, one of the two):
+
+- `ttl: 24h` — a document expires 24 h after the value of its `time` field.
+  Needs `time`.
+- `expires_field: expires_at` — each document carries its own expiry time
+  (RFC 3339 or unix seconds). A document without the field never expires.
+
+**Reads:** an expired document is hidden from every read (`find`, `aggregate`,
+`watch` snapshots, `count`) at once. The filter runs at read time against
+the snapshot time, so it does not wait for any background job. With
+`expires_field` indexed, the planner can skip expired rows by range.
+
+**Physical removal:**
+
+- Engine mode: a sweeper writes tombstones to the WAL for expired documents,
+  in small batches. The expiry also shows in the change feed (`watch`),
+  with `"_expired": true`, so consumers can react (outbox, cache eviction).
+  An update that moves `expires_at` forward keeps the document alive.
+- Direct mode: the document is only hidden. ndb never deletes or changes the
+  apps' files. Compaction drops expired rows from derived data.
+
+**Not the same as `retention`:** `retention` drops old *derived data* in
+whole segments to control disk use. TTL is a per-document business rule.
+
+**Model layers:** Rails `ttl 24.hours` / `expires_field :expires_at` in the
+model; Go tag `ndb:"expires_at,expires"`; TS `expires: 'expires_at'`.
+
 ## 12. API and clients
 
 ### 12.1 HTTP API
@@ -831,11 +865,13 @@ Each phase ends with a usable result.
    → verify: a consumer killed at random points resumes with no gaps.
    First real use: fsw-esl `outbox-sweeper`.
 
-9. **Compaction + retention + blobs + metrics**
+9. **Compaction + retention + TTL + blobs + metrics**
    Merge segments, drop old versions and tombstones, retention by `time`,
-   blob store with upload, streaming, auto-externalize and GC, Prometheus metrics.
+   document TTL (§11.5), blob store with upload, streaming, auto-externalize
+   and GC, Prometheus metrics.
    → verify: results are the same before and after compaction; disk use
-   goes down; blob crash tests pass; a 10 MB value round-trips through
+   goes down; expired documents are hidden at once and swept in engine mode;
+   blob crash tests pass; a 10 MB value round-trips through
    `attribute :recording, :blob`.
 
 10. **Packaging**

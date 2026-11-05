@@ -1,0 +1,46 @@
+{
+  "name": "no sort returns insertion order",
+  "collection": "posts",
+  "setup": {
+    "catalog": {
+      "id": "post_id",
+      "write": "engine"
+    },
+    "writes": [
+      {
+        "op": "insert",
+        "body": {
+          "insert": [
+            {
+              "post_id": "z"
+            },
+            {
+              "post_id": "a"
+            },
+            {
+              "post_id": "m"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "request": {
+    "op": "find",
+    "body": {}
+  },
+  "expect": {
+    "ordered": true,
+    "rows": [
+      {
+        "post_id": "z"
+      },
+      {
+        "post_id": "a"
+      },
+      {
+        "post_id": "m"
+      }
+    ]
+  }
+}

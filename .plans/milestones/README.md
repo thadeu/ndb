@@ -29,7 +29,7 @@ Deferred ideas: [`../backlog/`](../backlog/).
 | [M09](m09-watch-outbox.md) | Watch + first real use | `watch`/`ack`; fsw-esl outbox-sweeper | M08 | §10.4, phase 8 |
 | [M10](m10-client-ruby.md) | Ruby client | gem `ndb_record`, `NdbRecord::Base` | M07 | §12.2 |
 | [M11](m11-client-ts.md) | TS client | package `ndb`, `ndb.model` | M07 | §12.2 |
-| [M12](m12-compaction-blobs-metrics.md) | Compaction, retention, blobs, metrics | long-running operation | M05 | §7.5, phase 9 |
+| [M12](m12-compaction-blobs-metrics.md) | Compaction, retention, TTL, blobs, metrics | long-running operation; Redis-like document expiry | M05 | §7.5, phase 9 |
 | [M13](m13-packaging-adoption.md) | Packaging + adoption | release, Docker, docs, use in 3 apps | all | phase 10 |
 
 ## Dependencies

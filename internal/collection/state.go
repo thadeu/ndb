@@ -12,6 +12,10 @@ import (
 type entry struct {
 	v   uint64
 	doc json.RawMessage
+
+	// seq is the insertion position (read.go). It is set once, before the
+	// entry is visible to readers, and kept across updates.
+	seq uint64
 }
 
 // state is documents by id plus the unique indexes (field → value → id).

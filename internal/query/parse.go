@@ -1,0 +1,424 @@
+package query
+
+import (
+	"bytes"
+	"encoding/json"
+	"slices"
+	"strings"
+)
+
+type Options struct {
+	// TimeField is the collection time field: RFC 3339 strings compare as time.
+	TimeField string
+}
+
+type SortKey struct {
+	Path string
+	Desc bool
+}
+
+type Query struct {
+	Fields   []string
+	Sort     []SortKey
+	Limit    int
+	Skip     int
+	After    string
+	Count    bool
+	Snapshot bool
+
+	opts  Options
+	where Node
+	raw   any
+}
+
+// Cond is one index-friendly condition of the where clause (top level,
+// AND-ed). Op is eq, in, gt, gte or lt, lte. Every value is a scalar.
+type Cond struct {
+	Path string
+	Op   string
+	Vals []Value
+}
+
+var topKeys = []string{"where", "fields", "sort", "limit", "skip", "after", "count", "snapshot"}
+
+// Parse validates a find body. An empty body is an empty query.
+func Parse(body []byte, opts Options) (*Query, error) {
+	q := &Query{opts: opts, where: andNode{}}
+
+	if len(bytes.TrimSpace(body)) == 0 {
+		return q, nil
+	}
+
+	var top map[string]json.RawMessage
+
+	if err := json.Unmarshal(body, &top); err != nil {
+		return nil, invalid("body is not a JSON object: %v", err)
+	}
+
+	for k := range top {
+		if !slices.Contains(topKeys, k) {
+			return nil, invalid("unknown key %q", k)
+		}
+	}
+
+	if err := q.parseWhere(top["where"]); err != nil {
+		return nil, err
+	}
+
+	if err := q.parseSort(top["sort"]); err != nil {
+		return nil, err
+	}
+
+	return q, q.parseScalars(top)
+}
+
+func (q *Query) parseScalars(top map[string]json.RawMessage) error {
+	for key, dst := range map[string]*int{"limit": &q.Limit, "skip": &q.Skip} {
+		raw, ok := top[key]
+		if !ok {
+			continue
+		}
+
+		if err := json.Unmarshal(raw, dst); err != nil || *dst < 0 {
+			return invalid("%s must be a non-negative integer", key)
+		}
+	}
+
+	for key, dst := range map[string]*bool{"count": &q.Count, "snapshot": &q.Snapshot} {
+		if raw, ok := top[key]; ok && json.Unmarshal(raw, dst) != nil {
+			return invalid("%s must be a boolean", key)
+		}
+	}
+
+	if raw, ok := top["after"]; ok && json.Unmarshal(raw, &q.After) != nil {
+		return invalid("after must be a string")
+	}
+
+	if raw, ok := top["fields"]; ok {
+		if json.Unmarshal(raw, &q.Fields) != nil {
+			return invalid("fields must be an array of strings")
+		}
+
+		for _, f := range q.Fields {
+			if err := checkPath(f); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (q *Query) parseWhere(raw json.RawMessage) error {
+	if raw == nil {
+		return nil
+	}
+
+	var v any
+
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+
+	if err := dec.Decode(&v); err != nil {
+		return invalid("where: %v", err)
+	}
+
+	m, ok := v.(map[string]any)
+	if !ok {
+		return invalid("where must be an object")
+	}
+
+	node, err := q.compileWhere(m)
+	if err != nil {
+		return err
+	}
+
+	q.where = node
+	q.raw = v
+
+	return nil
+}
+
+// parseSort reads the sort object in key order: the order of the keys is
+// the order of the sort.
+func (q *Query) parseSort(raw json.RawMessage) error {
+	if raw == nil {
+		return nil
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(raw))
+
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return invalid("sort must be an object")
+	}
+
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return invalid("sort: %v", err)
+		}
+
+		path := tok.(string)
+
+		if err := checkPath(path); err != nil {
+			return err
+		}
+
+		var dir int
+
+		if err := dec.Decode(&dir); err != nil || (dir != 1 && dir != -1) {
+			return invalid("sort %q must be 1 or -1", path)
+		}
+
+		q.Sort = append(q.Sort, SortKey{Path: path, Desc: dir == -1})
+	}
+
+	return nil
+}
+
+func checkPath(p string) error {
+	if p == "" || slices.Contains(strings.Split(p, "."), "") {
+		return invalid("bad field path %q", p)
+	}
+
+	return nil
+}
+
+func splitPath(p string) []string {
+	return strings.Split(p, ".")
+}
+
+func (q *Query) compileWhere(m map[string]any) (Node, error) {
+	keys := sortedKeys(m)
+	out := make(andNode, 0, len(keys))
+
+	for _, k := range keys {
+		var (
+			n   Node
+			err error
+		)
+
+		switch {
+		case k == "$and" || k == "$or":
+			n, err = q.compileList(k, m[k])
+		case k == "$not":
+			n, err = q.compileNot(m[k])
+		case strings.HasPrefix(k, "$"):
+			err = invalid("unknown operator %s", k)
+		default:
+			n, err = q.compileField(k, m[k])
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
+		out = append(out, n)
+	}
+
+	return out, nil
+}
+
+func (q *Query) compileList(name string, v any) (Node, error) {
+	list, ok := v.([]any)
+	if !ok || len(list) == 0 {
+		return nil, invalid("%s must be a non-empty array of objects", name)
+	}
+
+	nodes := make([]Node, 0, len(list))
+
+	for _, e := range list {
+		m, ok := e.(map[string]any)
+		if !ok {
+			return nil, invalid("%s must be a non-empty array of objects", name)
+		}
+
+		n, err := q.compileWhere(m)
+		if err != nil {
+			return nil, err
+		}
+
+		nodes = append(nodes, n)
+	}
+
+	if name == "$or" {
+		return orNode(nodes), nil
+	}
+
+	return andNode(nodes), nil
+}
+
+func (q *Query) compileNot(v any) (Node, error) {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil, invalid("$not must be an object")
+	}
+
+	n, err := q.compileWhere(m)
+	if err != nil {
+		return nil, err
+	}
+
+	return notNode{n}, nil
+}
+
+func (q *Query) compileField(path string, v any) (Node, error) {
+	if err := checkPath(path); err != nil {
+		return nil, err
+	}
+
+	f := &fieldNode{path: path, parts: splitPath(path), isTime: path == q.opts.TimeField}
+
+	m, isObj := v.(map[string]any)
+
+	if isObj && operatorKeys(m) > 0 && operatorKeys(m) < len(m) {
+		return nil, invalid("%s mixes operators and plain keys", path)
+	}
+
+	if !isObj || operatorKeys(m) == 0 {
+		f.ops = []op{{name: "eq", vals: []Value{FromJSON(v, f.isTime)}}}
+
+		return f, nil
+	}
+
+	ops, err := compileOps(m, f.isTime)
+	if err != nil {
+		return nil, err
+	}
+
+	f.ops = ops
+
+	return f, nil
+}
+
+// operatorKeys counts the "$" keys of m: all of them is an operator
+// object ({"$gt": 1}), none is an object literal, some is a mistake.
+func operatorKeys(m map[string]any) int {
+	n := 0
+
+	for k := range m {
+		if strings.HasPrefix(k, "$") {
+			n++
+		}
+	}
+
+	return n
+}
+
+func compileOps(m map[string]any, isTime bool) ([]op, error) {
+	ops := make([]op, 0, len(m))
+
+	for _, k := range sortedKeys(m) {
+		o, err := compileOp(k, m[k], isTime)
+		if err != nil {
+			return nil, err
+		}
+
+		ops = append(ops, o)
+	}
+
+	return ops, nil
+}
+
+func compileOp(key string, v any, isTime bool) (op, error) {
+	name := strings.TrimPrefix(key, "$")
+
+	switch name {
+	case "eq", "ne":
+		return op{name: name, vals: []Value{FromJSON(v, isTime)}}, nil
+	case "gt", "gte", "lt", "lte":
+		val := FromJSON(v, isTime)
+		if !val.Scalar() {
+			return op{}, invalid("%s needs a scalar operand", key)
+		}
+
+		return op{name: name, vals: []Value{val}}, nil
+	case "in", "nin":
+		list, ok := v.([]any)
+		if !ok {
+			return op{}, invalid("%s needs an array", key)
+		}
+
+		vals := make([]Value, len(list))
+
+		for i, e := range list {
+			vals[i] = FromJSON(e, isTime)
+		}
+
+		return op{name: name, vals: vals}, nil
+	case "exists":
+		b, ok := v.(bool)
+		if !ok {
+			return op{}, invalid("$exists needs a boolean")
+		}
+
+		return op{name: name, flag: b}, nil
+	case "not":
+		m, ok := v.(map[string]any)
+		if !ok || len(m) == 0 || operatorKeys(m) != len(m) {
+			return op{}, invalid("$not needs an operator object")
+		}
+
+		sub, err := compileOps(m, isTime)
+
+		return op{name: name, sub: sub}, err
+	}
+
+	return op{}, invalid("unknown operator %s", key)
+}
+
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+
+	for k := range m {
+		keys = append(keys, k)
+	}
+
+	slices.Sort(keys)
+
+	return keys
+}
+
+// Match reports whether the decoded document satisfies where.
+func (q *Query) Match(m map[string]any) bool {
+	return q.where.match(m)
+}
+
+// IsTime tells if path is the collection time field.
+func (q *Query) IsTime(path string) bool {
+	return path == q.opts.TimeField
+}
+
+// Indexable lists the conditions an index can answer. The caller still
+// runs Match on every candidate, so an index only has to return a superset.
+func (q *Query) Indexable() []Cond {
+	var out []Cond
+
+	collect(q.where, &out)
+
+	return out
+}
+
+func collect(n Node, out *[]Cond) {
+	switch x := n.(type) {
+	case andNode:
+		for _, c := range x {
+			collect(c, out)
+		}
+	case *fieldNode:
+		for _, o := range x.ops {
+			if indexableOp(o) {
+				*out = append(*out, Cond{Path: x.path, Op: o.name, Vals: o.vals})
+			}
+		}
+	}
+}
+
+func indexableOp(o op) bool {
+	switch o.name {
+	case "eq", "in", "gt", "gte", "lt", "lte":
+		return !slices.ContainsFunc(o.vals, func(v Value) bool { return !v.Scalar() })
+	}
+
+	return false
+}

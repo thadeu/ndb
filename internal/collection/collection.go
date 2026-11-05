@@ -37,6 +37,8 @@ type Collection struct {
 
 	mu      sync.RWMutex
 	durable *state
+
+	rd *reader
 }
 
 // Doc is a document and its version.
@@ -62,6 +64,7 @@ func Open(cfg Config) (*Collection, error) {
 		def:     cfg.Def,
 		head:    newState(cfg.Def.Unique),
 		durable: newState(cfg.Def.Unique),
+		rd:      newReader(),
 	}
 
 	maxLine := int(cfg.Def.MaxLineSize)
@@ -73,7 +76,7 @@ func Open(cfg Config) (*Collection, error) {
 	res, err := recovery.Replay(recovery.Config{FS: cfg.FS, Dir: cfg.Dir, MaxLine: maxLine}, func(rec wal.Record) {
 		for _, op := range rec.Ops {
 			c.head.apply(op)
-			c.durable.apply(op)
+			c.applyDurable(op)
 		}
 	})
 	if err != nil {
@@ -100,10 +103,25 @@ func Open(cfg Config) (*Collection, error) {
 		return nil, err
 	}
 
+	for _, f := range cfg.Def.Indexes {
+		if err := c.EnsureIndex(f); err != nil {
+			c.rd.close()
+			c.w.Close()
+
+			return nil, err
+		}
+	}
+
 	return c, nil
 }
 
 func (c *Collection) Close() error {
+	c.rd.close()
+
+	if c.w == nil {
+		return nil
+	}
+
 	return c.w.Close()
 }
 
@@ -273,6 +291,6 @@ func (c *Collection) applied(rec wal.Record) {
 	defer c.mu.Unlock()
 
 	for _, op := range rec.Ops {
-		c.durable.apply(op)
+		c.applyDurable(op)
 	}
 }
