@@ -47,3 +47,12 @@ it('rejects wrong field names and wrong value types', () => {
 it('accepts operators, dot paths on json fields and Date operands', () => {
   calls.where({ dur: { $gt: 1, $lt: 9 }, 'meta.city': 'Rio', ts: { $gte: new Date() } })
 })
+
+it('allows RegExp on string fields only', () => {
+  void calls.where({ status: /^a/i })
+  void calls.where({ status: { $regex: /^a/ } })
+  void calls.where({ status: { $regex: '^a', $options: 'i' } })
+
+  // @ts-expect-error a RegExp is not a number
+  calls.where({ dur: /1/ })
+})

@@ -16,6 +16,7 @@ import type {
   Where,
 } from './types.js'
 import { watchEvents } from './watch.js'
+import { toWhere } from './where.js'
 
 export class Model<F extends Fields> {
   private ensured?: Promise<void>
@@ -155,7 +156,7 @@ export class Model<F extends Fields> {
   async *watch(consumer: string, opts: WatchOptions<F> = {}): AsyncGenerator<WatchEvent<Row<F>>> {
     await this.ready()
 
-    const body = { consumer, from: opts.from, limit: opts.limit, where: opts.where }
+    const body = { consumer, from: opts.from, limit: opts.limit, where: opts.where === undefined ? undefined : toWhere(opts.where) }
     const res = await this.db.transport.stream('POST', this.path('watch'), body, opts.signal)
 
     for await (const ev of watchEvents(res.rows(), consumer)) {

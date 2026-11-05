@@ -95,6 +95,10 @@ func TestPlannerChoosesIDIndexOrScan(t *testing.T) {
 		{`{"where":{"status":{"$gt":"a"}}}`, "index:status"},
 		{`{"where":{"$or":[{"status":"open"},{"status":"closed"}]}}`, "scan"},
 		{`{"where":{"n":{"$gt":1}}}`, "scan"},
+		{`{"where":{"status":{"$regex":"^op"}}}`, "index:status"},
+		{`{"where":{"status":{"$regex":"^OP","$options":"i"}}}`, "scan"},
+		{`{"where":{"status":{"$regex":"pen"}}}`, "scan"},
+		{`{"where":{"status":{"$not":{"$regex":"^op"}}}}`, "scan"},
 	}
 
 	for _, tc := range cases {
@@ -576,5 +580,36 @@ func TestVersionsFlagReturnsSnapshotVersion(t *testing.T) {
 
 	if strings.Contains(string(plain[0]), `"_v"`) {
 		t.Fatalf("_v without the flag: %s", plain[0])
+	}
+}
+
+// TestRegexPrefixPrunesSegments checks that an anchored literal prefix skips
+// the segments whose zone map is outside the prefix range, and that an
+// unanchored pattern reads them all with the same answer.
+func TestRegexPrefixPrunesSegments(t *testing.T) {
+	c := openSealed(t, t.TempDir(), collection.Config{})
+
+	for _, p := range []string{"a", "b", "c"} {
+		sealBatch(t, c, rangeDocs(0, 2000, func(i int) string {
+			return fmt.Sprintf(`{"id":"%s%d","name":"%s-%04d"}`, p, i, p, i)
+		}))
+	}
+
+	anchored := explainOf(t, c, `{"where":{"name":{"$regex":"^b-"}}}`)
+
+	if anchored.SegmentsRead != 1 || anchored.SegmentsSkipped != 2 || anchored.RowsMatched != 2000 {
+		t.Fatalf("anchored: %+v", anchored)
+	}
+
+	open := explainOf(t, c, `{"where":{"name":{"$regex":"b-"}}}`)
+
+	if open.SegmentsSkipped != 0 || open.RowsMatched != 2000 {
+		t.Fatalf("unanchored: %+v", open)
+	}
+
+	folded := explainOf(t, c, `{"where":{"name":{"$regex":"^B-","$options":"i"}}}`)
+
+	if folded.SegmentsSkipped != 0 || folded.RowsMatched != 2000 {
+		t.Fatalf("case folded: %+v", folded)
 	}
 }

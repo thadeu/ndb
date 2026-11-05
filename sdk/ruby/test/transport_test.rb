@@ -43,7 +43,7 @@ class TransportTest < Minitest::Test
   end
 
   def test_keep_alive_reuses_one_connection
-    fresh = NdbRecord::Client.new(socket: TestDaemon.socket)
+    fresh = Ndb::Client.new(socket: TestDaemon.socket)
 
     fresh.ensure_collection(@coll, id: "cid")
     20.times { fresh.find(@coll, {}) }
@@ -55,19 +55,19 @@ class TransportTest < Minitest::Test
     client.ensure_collection(@coll, id: "cid", unique: ["u"])
     client.insert(@coll, [{ cid: "1", u: "a" }])
 
-    assert_raises(NdbRecord::RecordNotUnique) { client.insert(@coll, [{ cid: "1" }]) }
-    assert_raises(NdbRecord::RecordNotUnique) { client.insert(@coll, [{ cid: "2", u: "a" }]) }
-    assert_raises(NdbRecord::NotFound) { client.update(@coll, "nope", set: { a: 1 }) }
-    assert_raises(NdbRecord::StaleObjectError) { client.update(@coll, "1", set: { a: 1 }, if_version: 99) }
-    assert_raises(NdbRecord::UnknownCollection) { client.find("missing_coll", {}) }
-    assert_raises(NdbRecord::InvalidQuery) { client.find(@coll, where: { a: { "$bogus" => 1 } }) }
-    assert_raises(NdbRecord::CatalogConflict) { client.ensure_collection(@coll, id: "other") }
+    assert_raises(Ndb::UniqueViolation) { client.insert(@coll, [{ cid: "1" }]) }
+    assert_raises(Ndb::UniqueViolation) { client.insert(@coll, [{ cid: "2", u: "a" }]) }
+    assert_raises(Ndb::NotFound) { client.update(@coll, "nope", set: { a: 1 }) }
+    assert_raises(Ndb::VersionConflict) { client.update(@coll, "1", set: { a: 1 }, if_version: 99) }
+    assert_raises(Ndb::UnknownCollection) { client.find("missing_coll", {}) }
+    assert_raises(Ndb::InvalidQuery) { client.find(@coll, where: { a: { "$bogus" => 1 } }) }
+    assert_raises(Ndb::CatalogConflict) { client.ensure_collection(@coll, id: "other") }
   end
 
   def test_error_carries_code_and_status
     client.ensure_collection(@coll, id: "cid")
 
-    error = assert_raises(NdbRecord::NotFound) { client.update(@coll, "x", set: { a: 1 }) }
+    error = assert_raises(Ndb::NotFound) { client.update(@coll, "x", set: { a: 1 }) }
 
     assert_equal "not_found", error.code
     assert_equal 404, error.status
@@ -77,7 +77,7 @@ class TransportTest < Minitest::Test
     client.ensure_collection(@coll, id: "cid")
     client.insert(@coll, [{ cid: "1" }])
 
-    fresh = NdbRecord::Client.new(socket: TestDaemon.socket)
+    fresh = Ndb::Client.new(socket: TestDaemon.socket)
 
     counts = 8.times.map do
       Thread.new { 25.times.map { fresh.find(@coll, {}).rows.size }.sum }
@@ -88,9 +88,9 @@ class TransportTest < Minitest::Test
   end
 
   def test_connection_refused_is_connection_error
-    dead = NdbRecord::Client.new(socket: "/tmp/ndb-no-such.sock")
+    dead = Ndb::Client.new(socket: "/tmp/ndb-no-such.sock")
 
-    assert_raises(NdbRecord::ConnectionError) { dead.find("x", {}) }
+    assert_raises(Ndb::ConnectionError) { dead.find("x", {}) }
   end
 
   def test_reconnects_after_the_server_closed_an_idle_connection

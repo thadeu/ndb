@@ -56,7 +56,7 @@
     "body": {
       "where": {
         "n": {
-          "$regex": "x"
+          "$foo": "x"
         }
       }
     }

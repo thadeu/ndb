@@ -1,10 +1,10 @@
-# M10 — Ruby client (gem `ndb_record`)
+# M10 — Ruby client (gem `ndb-rails`)
 
 Status: done (light verification) · Depends on: M07 (blob attribute waits for M12) · Plan: §12.2
 
 ## Goal
 
-`NdbRecord::Base` on ActiveModel, so a Rails app uses `Post.create`,
+`Ndb::Record` on ActiveModel, so a Rails app uses `Post.create`,
 `Post.where`, `Post.group(...).count` with no config on the daemon side.
 No query semantics in the gem: it only builds JSON.
 
@@ -15,26 +15,26 @@ No query semantics in the gem: it only builds JSON.
 - [ ] Tests first: against a real daemon started by the test suite
 - [ ] HTTP on a unix socket. Note: `Net::HTTP` has no native unix socket support; choose between `httpx` (supports unix sockets) or a small `Socket`-based adapter
 - [ ] Keep-alive / connection pool (thread-safe for Puma)
-- [ ] NDJSON stream reader; errors mapped to `NdbRecord::*Error`
+- [ ] NDJSON stream reader; errors mapped to `Ndb::*Error`
 
 ### E10.2 Base and attributes
 
 - [ ] Tests first: naming (`Post` → `posts`), `collection_name=`, `abstract_class`, `primary_key`
-- [ ] `NdbRecord::Base` with `ActiveModel::Model`, `Attributes`, `Validations`, `Callbacks`, `Dirty`, `Serializers::JSON`
+- [ ] `Ndb::Record` with `ActiveModel::Model`, `Attributes`, `Validations`, `Callbacks`, `Dirty`, `Serializers::JSON`
 - [ ] `attribute :x, :type, index: true`
 - [ ] `source "<glob>"` for direct-mode collections
 
 ### E10.3 Relation
 
 - [ ] Tests first: the Ruby → JSON table in §12.2, one test per row
-- [ ] Lazy `NdbRecord::Relation`: `where`, `where.not`, `or`, `order`, `limit`, `offset`
+- [ ] Lazy `Ndb::Relation`: `where`, `where.not`, `or`, `order`, `limit`, `offset`
 - [ ] Loaders: `each`, `to_a`, `first`, `find`, `find_by`, `count`, `pluck`, `exists?`
 - [ ] Pagination: `page(n).per(size)`, `after(token)` + `next_cursor`, `find_each`, `in_batches`
 - [ ] Aggregates: `group(...).count`, `sum`, `average`, `minimum`, `maximum`
 
 ### E10.4 Persistence
 
-- [ ] Tests first: dirty fields → `$set`; `if_version` → `NdbRecord::StaleObjectError`; validation failure stops the write
+- [ ] Tests first: dirty fields → `$set`; `if_version` → `Ndb::StaleObjectError`; validation failure stops the write
 - [ ] `create`, `create!`, `save`, `update`, `update!`, `destroy`
 - [ ] Callbacks: `before/after_save`, `before/after_create`, `before/after_destroy`
 

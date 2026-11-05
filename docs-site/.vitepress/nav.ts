@@ -95,6 +95,7 @@ export const tabs: Tab[] = [
       {
         text: 'SDKs',
         items: [
+          { text: 'Ruby', link: '/clients#ruby-gem-ndb' },
           { text: 'Rails', link: '/clients#rails-gem-ndb-record' },
           { text: 'Go', link: '/clients#go-module-github-com-thadeu-ndb-sdk-go' },
           { text: 'TypeScript', link: '/clients#typescript-package-ndb' },

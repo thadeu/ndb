@@ -48,8 +48,8 @@ const sections: Section[] = [
       {
         icon: 'plug',
         title: 'Clients',
-        text: 'Go, Rails, and TypeScript SDKs over a unix socket or TCP with a token.',
-        command: 'gem "ndb_record"',
+        text: 'Go, Ruby, Rails, and TypeScript SDKs over a unix socket or TCP with a token.',
+        command: 'gem "ndb-rails"',
         link: '/clients',
       },
     ],

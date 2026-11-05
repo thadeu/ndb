@@ -48,6 +48,11 @@ jobs:
   ruby:
     runs-on: ubuntu-latest
 
+    strategy:
+      fail-fast: false
+      matrix:
+        gem: [ruby, rails]
+
     steps:
       - uses: actions/checkout@v4
 
@@ -59,10 +64,10 @@ jobs:
         with:
           ruby-version: "3.4"
           bundler-cache: true
-          working-directory: sdk/ruby
+          working-directory: sdk/${{ matrix.gem }}
 
-      - name: Test Ruby SDK
-        working-directory: sdk/ruby
+      - name: Test sdk/${{ matrix.gem }}
+        working-directory: sdk/${{ matrix.gem }}
         run: bundle exec rake test
 
   ts:

@@ -5,7 +5,7 @@
 import { appendFile } from 'node:fs/promises'
 import { hostname } from 'node:os'
 import { randomUUID } from 'node:crypto'
-import { connect } from 'ndb'
+import { connect } from '@thadeu/ndb'
 
 const APP = 'node'
 const POD = hostname()

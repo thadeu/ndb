@@ -2,9 +2,6 @@
 # is kept, so the path in the Gemfile points to the SDK.
 FROM ruby:3.4-slim
 
-# Some gems (json, bigdecimal) compile a native extension.
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /repo
 
 COPY sdk/ruby ./sdk/ruby

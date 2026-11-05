@@ -96,7 +96,7 @@ fast, from any language.
 | `watch` | consumer cursors, `ack`, streaming of new rows |
 | `compactor` | merge segments; drop old versions and tombstones |
 | `server` | HTTP/JSON API, unix socket and TCP |
-| `sdk/` | model layers for Ruby (ActiveModel), Go (struct tags + generics), JS/TS (schema objects) |
+| `sdk/` | Ruby: plain client (gem `ndb`) and ActiveModel layer (gem `ndb-rails`); model layers for Go (struct tags + generics), JS/TS (schema objects) |
 
 ## 5. Catalog and config
 
@@ -727,24 +727,35 @@ Each language gets two layers:
 Operators, types, sort order and last-version-wins live in the daemon. This
 keeps the result the same in every language.
 
-#### Ruby / Rails (gem `ndb_record`)
+#### Ruby: gem `ndb` (plain client) and gem `ndb-rails` (Rails)
+
+The Ruby SDK is two gems. The gem `ndb` (`sdk/ruby`, module `Ndb`) is the plain
+client: `Ndb::Client`, the connection pool, retry, watch and blobs. It has no
+runtime dependency (stdlib only) and works in any script. The gem `ndb-rails`
+(`sdk/rails`) is the model layer below. It depends on `ndb ~> 0.1`, uses
+`Ndb::Client` inside. Everything lives under the `Ndb` module. The errors are those
+of `ndb`; `ndb-rails` adds `Ndb::RecordInvalid`, `Ndb::RecordNotSaved` and the
+ActiveRecord-like aliases `Ndb::StaleObjectError = Ndb::VersionConflict` and
+`Ndb::RecordNotUnique = Ndb::UniqueViolation`. The core gem never defines
+`Ndb::Record`, so it stays free of ActiveModel.
 
 Built on `ActiveModel::Model`, `Attributes`, `Validations`, `Callbacks`,
 `Dirty`, so it works with `form_with`, validations and `to_json`.
 
-Naming follows ActiveRecord: the module is `NdbRecord`, the base class is
-`NdbRecord::Base`, and the other classes live in the same module
-(`NdbRecord::Relation`, `NdbRecord::StaleObjectError`, `NdbRecord::Railtie`).
+Naming follows ActiveRecord: the gem is `ndb-rails` (`require "ndb/rails"`, like
+rspec-rails), the base class is `Ndb::Record`, and the other classes live in the
+same module (`Ndb::Relation`, `Ndb::StaleObjectError`, `Ndb::Rails::Railtie`,
+`Ndb::Rails::Configuration`).
 The app adds one abstract class, like `ApplicationRecord`:
 
 ```ruby
-class ApplicationNdbRecord < NdbRecord::Base
+class ApplicationRecord < Ndb::Record
   self.abstract_class = true
 end
 ```
 
 ```ruby
-class Post < ApplicationNdbRecord
+class Post < ApplicationRecord
   primary_key :call_id
 
   attribute :status, :string, index: true
@@ -762,8 +773,8 @@ end
 - `where` returns a lazy relation. The request goes to the daemon on
   `each`, `to_a`, `first`, `count`, `pluck`.
 - `update!` sends `if_version` from the loaded record. A conflict raises
-  `NdbRecord::StaleObjectError`.
-- `NdbRecord::Railtie` reads `config/ndb.yml` (socket path, per environment)
+  `Ndb::StaleObjectError`.
+- `Ndb::Rails::Railtie` reads `config/ndb.yml` (socket path, per environment)
   and calls `ensure_collection` for each model on boot (eager load in
   production; on first use in development).
 
@@ -919,7 +930,7 @@ Each phase ends with a usable result.
 
 7. **HTTP API + model layers**
    Unix socket + TCP, streaming NDJSON responses, catalog endpoints.
-   Transports and model layers: `NdbRecord::Base` (Rails), `ndb.Collection[T]`
+   Transports and model layers: `Ndb::Record` (Rails), `ndb.Collection[T]`
    (Go), `ndb.model` (TS).
    → verify: the shared suite passes in the three languages; a small Rails
    app does `Post.create`, `Post.where`, `Post.group(...).count` with no `ndb.yml`.
@@ -1012,7 +1023,8 @@ ndb/
 │   └── cases/                  ← shared JSON suite (engine + 3 SDKs)
 ├── sdk/
 │   ├── go/                     ← own go.mod, stdlib only
-│   ├── ruby/                   ← ndb_record.gemspec, lib/ndb_record/, test/
+│   ├── ruby/                   ← gem ndb: ndb.gemspec, lib/ndb/, test/ (plain client, no deps)
+│   ├── rails/                  ← gem ndb-rails: ndb-rails.gemspec, lib/ndb/rails/, test/
 │   └── ts/                     ← package.json, src/, test/, eslint.config.mjs
 ├── test/
 │   ├── crash/                  ← SIGKILL harness
@@ -1037,7 +1049,7 @@ Decisions:
 3. **The Go SDK has its own `go.mod`** (`sdk/go/go.mod`), so an app that
    imports it does not get the engine dependencies (parquet-go, bbolt,
    fsnotify). Tags use a prefix: `sdk/go/v0.1.0`.
-4. **CI uses path filters.** A change in `sdk/ruby/` runs the Ruby tests and
+4. **CI uses path filters.** A change in `sdk/ruby/` or `sdk/rails/` runs the Ruby tests and
    the shared suite. A change in `internal/` or `spec/` runs everything.
 
 Versioning: the daemon and the SDKs share the **major** version. SDK 1.x

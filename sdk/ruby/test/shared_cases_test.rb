@@ -4,12 +4,9 @@ require "test_helper"
 require "json"
 
 # The shared suite of plan §12.3: every spec/cases/**/*.json runs through
-# the gem. The request goes out through the client (transport + errors). When
-# the body is something a Relation can say, the Relation must build the same
-# JSON, so the model layer is checked against the case too.
+# the gem. The request goes out through the client (transport + errors).
 class SharedCasesTest < Minitest::Test
   CASES_DIR = File.expand_path("../../../spec/cases", __dir__)
-  RELATION_KEYS = %w[where sort limit skip after].freeze
 
   Dir[File.join(CASES_DIR, "**", "*.json")].sort.each do |path|
     spec = JSON.parse(File.read(path))
@@ -31,13 +28,10 @@ class SharedCasesTest < Minitest::Test
     Array(spec.dig("setup", "writes")).each { |step| write(coll, step, path) }
 
     request = spec.fetch("request")
-    body = request.fetch("body")
     expect = spec.fetch("expect")
 
-    assert_relation_builds(coll, spec, body) if request["op"] == "find"
-
     if expect["error"]
-      error = assert_raises(NdbRecord::Error, path) { send_request(coll, request) }
+      error = assert_raises(Ndb::Error, path) { send_request(coll, request) }
 
       assert_equal expect["error"], error.code, path
     else
@@ -55,7 +49,7 @@ class SharedCasesTest < Minitest::Test
 
   def aggregate(coll, body)
     client.aggregate(coll, body)
-  rescue NdbRecord::Error => e
+  rescue Ndb::Error => e
     skip "daemon has no /aggregate endpoint yet (HTTP #{e.status})" if e.code == "http_status" && [404, 405].include?(e.status)
 
     raise
@@ -75,32 +69,6 @@ class SharedCasesTest < Minitest::Test
   def update(coll, change)
     client.update(coll, change["id"], set: change["set"] || {}, unset: change["unset"] || [],
                                       if_version: change["if_version"])
-  end
-
-  def assert_relation_builds(coll, spec, body)
-    return unless (body.keys - RELATION_KEYS).empty?
-    return if contains_null?(body["where"])
-
-    klass = model(coll)
-    relation = klass.where(body["where"] || {})
-    relation = relation.order(*body["sort"].map { |f, d| { f => d == -1 ? :desc : :asc } }) if body["sort"]
-    relation = relation.limit(body["limit"]) if body["limit"]
-    relation = relation.offset(body["skip"]) if body["skip"]
-    relation = relation.after(body["after"]) if body["after"]
-
-    expected = body.reject { |key, value| key == "where" && value.empty? }
-
-    assert_equal canonical(expected), canonical(relation.to_query), spec["name"]
-  end
-
-  # {"a": null} is an equality with null; Ruby nil means "$exists": false.
-  def contains_null?(value)
-    case value
-    when nil then true
-    when Hash then value.each_value.any? { |v| contains_null?(v) }
-    when Array then value.any? { |v| contains_null?(v) }
-    else false
-    end
   end
 
   def compare(expect, rows, path)

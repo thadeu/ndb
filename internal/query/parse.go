@@ -318,7 +318,28 @@ func operatorKeys(m map[string]any) int {
 func compileOps(m map[string]any, isTime bool) ([]op, error) {
 	ops := make([]op, 0, len(m))
 
+	if _, ok := m["$options"]; ok {
+		if _, ok := m["$regex"]; !ok {
+			return nil, invalid("$options needs $regex")
+		}
+	}
+
 	for _, k := range sortedKeys(m) {
+		if k == "$options" {
+			continue
+		}
+
+		if k == "$regex" {
+			o, err := compileRegexOp(m)
+			if err != nil {
+				return nil, err
+			}
+
+			ops = append(ops, o)
+
+			continue
+		}
+
 		o, err := compileOp(k, m[k], isTime)
 		if err != nil {
 			return nil, err
@@ -375,6 +396,28 @@ func compileOp(key string, v any, isTime bool) (op, error) {
 	}
 
 	return op{}, invalid("unknown operator %s", key)
+}
+
+func compileRegexOp(m map[string]any) (op, error) {
+	pattern, ok := m["$regex"].(string)
+	if !ok {
+		return op{}, invalid("$regex needs a string pattern")
+	}
+
+	options := ""
+
+	if v, has := m["$options"]; has {
+		if options, ok = v.(string); !ok {
+			return op{}, invalid("$options needs a string")
+		}
+	}
+
+	re, prefix, err := compileRegex(pattern, options)
+	if err != nil {
+		return op{}, err
+	}
+
+	return op{name: "regex", re: re, prefix: prefix}, nil
 }
 
 func sortedKeys(m map[string]any) []string {
@@ -446,6 +489,10 @@ func collect(n Node, out *[]Cond) {
 			if indexableOp(o) {
 				*out = append(*out, Cond{Path: x.path, Op: o.name, Vals: o.vals})
 			}
+
+			if o.name == "regex" && o.prefix != "" && !x.isTime {
+				*out = append(*out, prefixConds(x.path, o.prefix)...)
+			}
 		}
 	}
 }
@@ -457,4 +504,16 @@ func indexableOp(o op) bool {
 	}
 
 	return false
+}
+
+// prefixConds is the range of the strings that start with prefix, as gte
+// and lt conditions: an index or a zone map can answer them.
+func prefixConds(path, prefix string) []Cond {
+	out := []Cond{{Path: path, Op: "gte", Vals: []Value{{Kind: String, Str: prefix, Raw: prefix}}}}
+
+	if hi := prefixSuccessor(prefix); hi != "" {
+		out = append(out, Cond{Path: path, Op: "lt", Vals: []Value{{Kind: String, Str: hi, Raw: hi}}})
+	}
+
+	return out
 }

@@ -49,6 +49,43 @@ func Exists(field string, exists bool) Filter {
 	return operator(field, "$exists", exists)
 }
 
+// RegexOption is a flag of Regex. The values are the $options letters.
+type RegexOption string
+
+const (
+	// IgnoreCase makes the pattern case insensitive (i).
+	IgnoreCase RegexOption = "i"
+
+	// Multiline makes ^ and $ match at each line (m).
+	Multiline RegexOption = "m"
+
+	// DotAll makes . match a newline (s).
+	DotAll RegexOption = "s"
+
+	// Extended ignores white space and # comments in the pattern (x).
+	Extended RegexOption = "x"
+)
+
+// Regex matches a string field that matches pattern. The syntax is Go RE2:
+// no backreferences and no look-around. Only strings match; on an array
+// field, any string element may match. A bad pattern makes the query fail
+// with ErrInvalidQuery.
+func Regex(field, pattern string, opts ...RegexOption) Filter {
+	cond := map[string]any{"$regex": pattern}
+
+	if len(opts) > 0 {
+		var flags string
+
+		for _, o := range opts {
+			flags += string(o)
+		}
+
+		cond["$options"] = flags
+	}
+
+	return Filter{doc: map[string]any{field: cond}}
+}
+
 // Or matches when at least one of the filters matches.
 func Or(filters ...Filter) Filter {
 	return Filter{doc: map[string]any{"$or": docsOf(filters)}}

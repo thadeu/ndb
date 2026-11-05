@@ -19,7 +19,7 @@ fsw-esl, anway and voodu-webui.
 ### E13.2 Clients release
 
 - [ ] Go module tagged
-- [ ] Gem `ndb_record` published
+- [ ] Gem `ndb-rails` published
 - [ ] npm package `ndb` (name to confirm) published
 
 ### E13.3 Docs

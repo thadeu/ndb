@@ -11,7 +11,7 @@ func TestParseInvalid(t *testing.T) {
 		"not json":            `{`,
 		"unknown key":         `{"wher": {}}`,
 		"where not object":    `{"where": 5}`,
-		"unknown operator":    `{"where": {"a": {"$regex": "x"}}}`,
+		"unknown operator":    `{"where": {"a": {"$foo": "x"}}}`,
 		"mixed operator":      `{"where": {"a": {"$gt": 1, "b": 2}}}`,
 		"in not array":        `{"where": {"a": {"$in": 1}}}`,
 		"exists not bool":     `{"where": {"a": {"$exists": 1}}}`,
@@ -74,6 +74,8 @@ func FuzzParse(f *testing.F) {
 	for _, s := range []string{
 		`{}`, `{"where":{"a":{"$in":[1,2]}}}`, `{"where":{"$or":[{"a":1},{"b":{"$not":{"$gt":2}}}]},"sort":{"a":1}}`,
 		`{"limit":3,"after":"abc"}`, `{"where":{"a.b":{"$exists":false}}}`,
+		`{"where":{"a":{"$regex":"^ab+","$options":"i"}}}`, `{"where":{"a":{"$not":{"$regex":"[a-z]+","$options":"msx"}}}}`,
+		`{"where":{"a":{"$regex":"(?P<n>x)|\\d{2,}"}}}`, `{"where":{"a":{"$options":"i"}}}`,
 	} {
 		f.Add([]byte(s))
 	}

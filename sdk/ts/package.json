@@ -1,7 +1,22 @@
 {
-  "name": "ndb",
+  "name": "@thadeu/ndb",
   "version": "0.1.0",
   "description": "TypeScript client for the ndb daemon",
+  "keywords": [
+    "ndb",
+    "ndjson",
+    "database",
+    "client"
+  ],
+  "homepage": "https://github.com/thadeu/ndb#readme",
+  "bugs": {
+    "url": "https://github.com/thadeu/ndb/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thadeu/ndb.git",
+    "directory": "sdk/ts"
+  },
   "type": "module",
   "engines": {
     "node": ">=24"
@@ -22,7 +37,9 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsup",
@@ -43,5 +60,9 @@
     "typescript-eslint": "^8.72.1",
     "vitest": "^5.1.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
 }

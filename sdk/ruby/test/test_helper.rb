@@ -2,20 +2,12 @@
 
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
 
-ENV["RAILS_ENV"] = "test"
-
 require "socket"
 require "minitest/autorun"
-require "rails"
-require "ndb_record"
+require "ndb"
 require_relative "daemon"
 
 TestDaemon.start
-
-NdbRecord.configure do |c|
-  c.socket = TestDaemon.socket
-  c.timeout = 10
-end
 
 module NdbTestHelpers
   @counter = 0
@@ -26,20 +18,13 @@ module NdbTestHelpers
     "t#{Process.pid}_#{@counter}"
   end
 
-  # A model class with a fresh collection per test.
-  def model(name = nil, &block)
-    coll = name || NdbTestHelpers.next_name
-    klass = Class.new(NdbRecord::Base)
-
-    klass.define_singleton_method(:name) { "TestPost" }
-    klass.collection_name = coll
-    klass.class_eval(&block) if block
-
-    klass
+  # A client on the shared test daemon.
+  def client
+    @client ||= Ndb::Client.new(socket: TestDaemon.socket, timeout: 10)
   end
 
-  def client
-    NdbRecord.client
+  def collection_name
+    NdbTestHelpers.next_name
   end
 end
 

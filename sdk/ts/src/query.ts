@@ -1,5 +1,6 @@
 import type { Model } from './model.js'
 import type { Fields, Row, SortSpec, Where } from './types.js'
+import { toWhere } from './where.js'
 
 interface State {
   clauses: Record<string, unknown>[]
@@ -19,15 +20,15 @@ export class Query<F extends Fields, R = Row<F>> implements PromiseLike<R[]> {
   ) {}
 
   where(w: Where<F>): Query<F, R> {
-    return this.with({ clauses: [...this.state.clauses, w as Record<string, unknown>] })
+    return this.with({ clauses: [...this.state.clauses, toWhere(w) as Record<string, unknown>] })
   }
 
   not(w: Where<F>): Query<F, R> {
-    return this.with({ clauses: [...this.state.clauses, { $not: w }] })
+    return this.with({ clauses: [...this.state.clauses, { $not: toWhere(w) }] })
   }
 
   or(...ws: Where<F>[]): Query<F, R> {
-    return this.with({ clauses: [...this.state.clauses, { $or: ws }] })
+    return this.with({ clauses: [...this.state.clauses, { $or: ws.map(toWhere) }] })
   }
 
   sort(spec: SortSpec<F>): Query<F, R> {

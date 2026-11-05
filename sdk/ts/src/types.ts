@@ -47,15 +47,20 @@ export interface Ops<V> {
   $in?: V[]
   $nin?: V[]
   $exists?: boolean
-  $regex?: string
+  $regex?: string | RegExp
+
+  // i, m, s and x. A RegExp in $regex brings its own flags: use one or the other.
+  $options?: string
 }
 
 type Operand<V> = V extends Date ? Date | string : V
 
+type RegexOperand<V> = V extends string ? RegExp : never
+
 type JsonKeys<F extends Fields> = Extract<{ [K in keyof F]: F[K]['type'] extends 'json' ? K : never }[keyof F], string>
 
 export type Where<F extends Fields> = {
-  [K in keyof F]?: Operand<ValueOf<F[K]>> | Ops<Operand<ValueOf<F[K]>>>
+  [K in keyof F]?: Operand<ValueOf<F[K]>> | Ops<Operand<ValueOf<F[K]>>> | RegexOperand<ValueOf<F[K]>>
 } & {
   [P in `${JsonKeys<F>}.${string}`]?: unknown
 }

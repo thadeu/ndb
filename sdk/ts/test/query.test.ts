@@ -97,3 +97,69 @@ describe('query builder', () => {
     ])
   })
 })
+
+describe('$regex', () => {
+  const regexDb = unixDb()
+  const people = regexDb.model(`rx${process.pid}`, {
+    id: 'pid',
+    fields: {
+      pid: { type: 'string' },
+      name: { type: 'string', index: true, optional: true },
+      tags: { type: 'json', optional: true },
+      n: { type: 'number', optional: true },
+    },
+  })
+
+  beforeAll(async () => {
+    await people.insert([
+      { pid: 'p1', name: 'Alice', tags: ['red', 'blue'], n: 1 },
+      { pid: 'p2', name: 'alina', tags: ['green'], n: 2 },
+      { pid: 'p3', name: 'Bob', tags: [], n: 3 },
+      { pid: 'p4', n: 4 },
+    ])
+  })
+
+  afterAll(() => regexDb.close())
+
+  const ids = (rows: { pid: string }[]) => rows.map((r) => r.pid).sort()
+
+  it('matches a string pattern and $options', async () => {
+    expect(ids(await people.where({ name: { $regex: '^Al' } }))).toEqual(['p1'])
+    expect(ids(await people.where({ name: { $regex: '^al', $options: 'i' } }))).toEqual(['p1', 'p2'])
+  })
+
+  it('accepts a RegExp as the value and as $regex', async () => {
+    expect(ids(await people.where({ name: /^al/i }))).toEqual(['p1', 'p2'])
+    expect(ids(await people.where({ name: { $regex: /^Al/ } }))).toEqual(['p1'])
+    expect(ids(await people.where({ name: { $regex: /LI/i, $ne: 'alina' } }))).toEqual(['p1'])
+  })
+
+  it('works in not, or, array fields and counts', async () => {
+    expect(ids(await people.not({ name: /^Al/i }))).toEqual(['p3', 'p4'])
+    expect(ids(await people.or({ name: /^B/ }, { name: /na$/ }))).toEqual(['p2', 'p3'])
+    expect(ids(await people.where({ tags: { $regex: '^gr' } } as never))).toEqual(['p2'])
+    expect(await people.where({ name: /^al/i }).count()).toBe(2)
+  })
+
+  it('never matches non-strings', async () => {
+    expect(ids(await people.where({ n: { $regex: '.' } } as never))).toEqual([])
+  })
+
+  it('rejects unsupported RegExp flags before sending', () => {
+    expect(() => people.where({ name: /a/g })).toThrow(InvalidQueryError)
+    expect(() => people.where({ name: { $regex: /a/u } })).toThrow(/flag "u"/)
+    expect(() => people.not({ name: /a/y })).toThrow(/flag "y"/)
+  })
+
+  it('rejects RegExp flags together with $options', () => {
+    expect(() => people.where({ name: { $regex: /a/i, $options: 's' } })).toThrow(InvalidQueryError)
+  })
+
+  it('maps a bad pattern or flag to InvalidQueryError', async () => {
+    await expect(people.where({ name: { $regex: '(' } }).then((r) => r)).rejects.toBeInstanceOf(InvalidQueryError)
+    await expect(people.where({ name: { $regex: 'a(?=b)' } }).then((r) => r)).rejects.toBeInstanceOf(InvalidQueryError)
+    await expect(people.where({ name: { $regex: 'a', $options: 'g' } }).then((r) => r)).rejects.toBeInstanceOf(
+      InvalidQueryError,
+    )
+  })
+})

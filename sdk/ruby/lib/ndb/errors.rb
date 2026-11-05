@@ -1,0 +1,67 @@
+# frozen_string_literal: true
+
+module Ndb
+  # An error the daemon answered (code + HTTP status), or a transport failure.
+  class Error < StandardError
+    attr_reader :code, :status
+
+    def initialize(message = nil, code: nil, status: nil)
+      super(message)
+
+      @code = code
+      @status = status
+    end
+  end
+
+  class ConnectionError < Error; end
+  class TimeoutError < ConnectionError; end
+
+  # The connect failed: the socket is missing or refuses. Nothing was sent.
+  class ConnectError < ConnectionError; end
+
+  # The daemon is up but still recovering (HTTP 503). Nothing was done.
+  class NotReady < Error; end
+
+  class Unauthorized < Error; end
+  class NotFound < Error; end
+  class UnknownCollection < Error; end
+  class VersionConflict < Error; end
+  class UniqueViolation < Error; end
+  class CatalogConflict < Error; end
+  class CatalogInvalid < Error; end
+  class ReadOnlyCollection < Error; end
+  class InvalidQuery < Error; end
+  class InvalidCursor < Error; end
+
+  # The consumer was too slow: call watch again, it resumes from the last ack.
+  class WatchLagged < Error; end
+
+  # The WAL files that hold the history were deleted (wal_retention): the
+  # consumer cannot resume from its position and must start over.
+  class HistoryTruncated < Error; end
+
+  # The daemon error code -> the Ruby class.
+  CODE_TO_ERROR = {
+    "unauthorized" => Unauthorized,
+    "not_ready" => NotReady,
+    "not_found" => NotFound,
+    "unknown_collection" => UnknownCollection,
+    "version_conflict" => VersionConflict,
+    "unique_violation" => UniqueViolation,
+    "duplicate_id" => UniqueViolation,
+    "catalog_conflict" => CatalogConflict,
+    "catalog_invalid" => CatalogInvalid,
+    "direct_collection" => ReadOnlyCollection,
+    "invalid_query" => InvalidQuery,
+    "invalid_request" => InvalidQuery,
+    "cursor_invalid" => InvalidCursor,
+    "cursor_mismatch" => InvalidCursor,
+    "cursor_expired" => InvalidCursor,
+    "watch_lagged" => WatchLagged,
+    "history_truncated" => HistoryTruncated
+  }.freeze
+
+  def self.error_for(code, message, status)
+    CODE_TO_ERROR.fetch(code, Error).new("#{code}: #{message}", code: code, status: status)
+  end
+end

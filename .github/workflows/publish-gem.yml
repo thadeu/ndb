@@ -1,0 +1,76 @@
+name: publish-gem
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    env:
+      GEM_HOST_API_KEY: ${{ secrets.GEM_HOST_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+          working-directory: sdk/ruby
+
+      - name: Check versions match the tag
+        run: |
+          test "v$(ruby -Isdk/ruby/lib -rndb/version -e 'puts Ndb::VERSION')" = "$GITHUB_REF_NAME"
+          test "v$(ruby -Isdk/rails/lib -rndb/rails/version -e 'puts Ndb::Rails::VERSION')" = "$GITHUB_REF_NAME"
+
+      - name: Test ndb
+        working-directory: sdk/ruby
+        run: bundle exec rake test
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+          working-directory: sdk/rails
+
+      - name: Test ndb-rails
+        working-directory: sdk/rails
+        run: bundle exec rake test
+
+      - name: Build
+        run: |
+          (cd sdk/ruby && gem build ndb.gemspec)
+          (cd sdk/rails && gem build ndb-rails.gemspec)
+
+      - name: Configure RubyGems credentials (trusted publishing)
+        if: ${{ env.GEM_HOST_API_KEY == '' }}
+        uses: rubygems/configure-rubygems-credentials@v2.1.0
+        with:
+          trusted-publisher: true
+
+      - name: "Push ndb (first, ndb-rails depends on it)"
+        working-directory: sdk/ruby
+        run: gem push ndb-*.gem
+
+      - name: Wait for ndb on the index
+        run: |
+          for i in $(seq 1 30); do
+            gem search -r '^ndb$' --exact | grep -q "$(ruby -Isdk/ruby/lib -rndb/version -e 'puts Ndb::VERSION')" && exit 0
+            sleep 10
+          done
+          exit 1
+
+      - name: Push ndb-rails
+        working-directory: sdk/rails
+        run: gem push ndb-rails-*.gem

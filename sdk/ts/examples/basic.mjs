@@ -1,5 +1,5 @@
 // Run after `pnpm build`, with a daemon: ndb -unix /tmp/ndb.sock -data-dir /tmp/ndb-data
-import { connect } from 'ndb'
+import { connect } from '@thadeu/ndb'
 
 const ndb = connect(process.env.NDB_ADDR ?? 'unix:///tmp/ndb.sock')
 

@@ -12,15 +12,15 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
+  deployments: write
 
 concurrency:
-  group: pages
+  group: docs-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-deploy:
+    name: Build & Deploy
     runs-on: ubuntu-latest
 
     steps:
@@ -36,31 +36,18 @@ jobs:
           cache: pnpm
           cache-dependency-path: docs-site/pnpm-lock.yaml
 
-      - uses: actions/configure-pages@v5
-        id: pages
-
       - name: Install
         working-directory: docs-site
         run: pnpm install --frozen-lockfile
 
       - name: Build
         working-directory: docs-site
-        env:
-          DOCS_BASE: /${{ github.event.repository.name }}/
         run: pnpm docs:build
 
-      - uses: actions/upload-pages-artifact@v3
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
         with:
-          path: docs-site/.vitepress/dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy docs-site/.vitepress/dist --project-name=ndb-docs --branch=main
+          workingDirectory: '.'

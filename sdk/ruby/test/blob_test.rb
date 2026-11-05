@@ -3,96 +3,35 @@
 require "test_helper"
 require "stringio"
 require "securerandom"
-require "tempfile"
 require "digest"
 
 class BlobTest < Minitest::Test
-  def call_model
-    model do
-      primary_key :call_id
-      attribute :recording, :blob
-    end
+  def test_put_and_get_round_trip
+    stored = client.put_blob(StringIO.new("RIFF-fake-wav"), "audio/wav")
+
+    assert_match(/\Asha256:\h{64}\z/, stored["$blob"])
+    assert_equal 13, stored["size"]
+    assert_equal "audio/wav", stored["type"]
+    assert_equal "RIFF-fake-wav", client.get_blob(stored["$blob"])
   end
 
-  def test_upload_on_save_and_read_back
-    calls = call_model
-    call = calls.new(call_id: "c1", recording: StringIO.new("RIFF-fake-wav"))
+  def test_range_read
+    stored = client.put_blob(StringIO.new("0123456789"))
 
-    refute call.recording.uploaded?
-
-    call.save!
-
-    assert call.recording.uploaded?
-    assert_match(/\Asha256:\h{64}\z/, call.recording.ref)
-    assert_equal 13, call.recording.size
-
-    loaded = calls.find("c1")
-
-    assert_equal call.recording.ref, loaded.recording.ref
-    assert_equal "RIFF-fake-wav", loaded.recording.read
+    assert_equal "2345", client.get_blob(stored["$blob"], from: 2, to: 5)
   end
 
-  def test_read_is_io_like
-    calls = call_model
-    calls.create!(call_id: "c1", recording: StringIO.new("0123456789"))
-
-    blob = calls.find("c1").recording
-
-    assert_equal "0123", blob.read(4)
-    assert_equal "4567", blob.read(4)
-    assert_equal "89", blob.read(4)
-    assert_nil blob.read(4)
-    assert_predicate blob, :eof?
-
-    blob.rewind
-
-    assert_equal "0123456789", blob.read
-  end
-
-  def test_large_file_round_trip_is_chunked
+  def test_large_upload_is_streamed
     data = SecureRandom.random_bytes((2.5 * 1024 * 1024).to_i)
-    file = Tempfile.new("blob", binmode: true)
-    file.write(data)
-    file.rewind
+    stored = client.put_blob(StringIO.new(data))
 
-    calls = call_model
-    calls.create!(call_id: "big", recording: file)
-
-    digest = Digest::SHA256.new
-    chunks = 0
-
-    calls.find("big").recording.each_chunk do |chunk|
-      digest << chunk
-      chunks += 1
-    end
-
-    assert_equal Digest::SHA256.hexdigest(data), digest.hexdigest
-    assert_operator chunks, :>=, 3
-  end
-
-  def test_replacing_the_blob_updates_the_reference
-    calls = call_model
-    call = calls.create!(call_id: "c1", recording: StringIO.new("one"))
-    first = call.recording.ref
-
-    call.update!(recording: StringIO.new("two"))
-
-    assert_equal "two", calls.find("c1").recording.read
-    refute_equal first, calls.find("c1").recording.ref
+    assert_equal Digest::SHA256.hexdigest(data), client.get_blob(stored["$blob"]).then { |bytes| Digest::SHA256.hexdigest(bytes) }
   end
 
   def test_same_content_has_the_same_reference
-    calls = call_model
-    a = calls.create!(call_id: "a", recording: StringIO.new("same"))
-    b = calls.create!(call_id: "b", recording: StringIO.new("same"))
+    a = client.put_blob(StringIO.new("same"))
+    b = client.put_blob(StringIO.new("same"))
 
-    assert_equal a.recording.ref, b.recording.ref
-  end
-
-  def test_nil_blob_stays_out_of_the_document
-    calls = call_model
-    calls.create!(call_id: "c1")
-
-    assert_nil calls.find("c1").recording
+    assert_equal a["$blob"], b["$blob"]
   end
 end

@@ -75,7 +75,7 @@ The socket is `/run/ndb/ndb.sock`. Share the `/run/ndb` volume with your app con
 
 ## Download
 
-Each `v*` tag publishes static binaries (no CGO) for Linux amd64/arm64 and macOS arm64, with a `checksums.txt`, at [Releases](https://github.com/thadeu/ndb/releases). A systemd unit is in [deploy/systemd/](deploy/systemd/).
+Each `v*` tag publishes static binaries (no CGO) for Linux amd64/arm64 and macOS arm64, with a `checksums.txt`, at [Releases](https://github.com/thadeu/ndb/releases). A systemd unit is in [deploy/systemd/](deploy/systemd/). The image is `ghcr.io/thadeu/ndb`. Client SDKs: Go `github.com/thadeu/ndb/sdk/go`, Ruby gems `ndb` (plain client) and `ndb-rails` (Rails), npm `@thadeu/ndb`. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Features
 
@@ -101,11 +101,12 @@ Each `v*` tag publishes static binaries (no CGO) for Linux amd64/arm64 and macOS
 - [docs/dev/docker.md](docs/dev/docker.md): Docker image.
 - [docs/dev/deployment.md](docs/dev/deployment.md): Single VM and cross-VM examples.
 - [docs/dev/development.md](docs/dev/development.md): Tests and release.
+- [docs/dev/releasing.md](docs/dev/releasing.md): Release checklist.
 - [.plans/ndb-v1.md](.plans/ndb-v1.md): The design plan.
 
 ## Contributing
 
-Bug reports and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first. It explains the tests, the code style and how to open a pull request. Report security problems as described in [SECURITY.md](SECURITY.md), not in a public issue.
+Bug reports and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first. It explains the tests, the code style and how to open a pull request. Maintainers: the release steps are in [docs/dev/releasing.md](docs/dev/releasing.md). Report security problems as described in [SECURITY.md](SECURITY.md), not in a public issue.
 
 ## Community
 

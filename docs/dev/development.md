@@ -23,7 +23,8 @@ SDK tests:
 
 ```bash
 (cd sdk/go && go test -race ./...)          # starts the daemon it needs
-(cd sdk/ruby && bundle install && bundle exec rake test)
+(cd sdk/ruby && bundle install && bundle exec rake test)   # gem ndb
+(cd sdk/rails && bundle install && bundle exec rake test)  # gem ndb-rails
 (cd sdk/ts && pnpm install && pnpm test && pnpm lint && pnpm typecheck && pnpm build)
 ```
 
@@ -38,7 +39,7 @@ pnpm docs:dev      # live reload
 pnpm docs:build    # static site in docs-site/.vitepress/dist
 ```
 
-A push to `main` that changes `docs/`, `docs-site/` or `brand/` deploys it to GitHub Pages (`.github/workflows/docs.yml`). Links in the docs that point outside `docs/dev/` become GitHub links in the site.
+A push to `main` that changes `docs/`, `docs-site/` or `brand/` deploys it to Cloudflare Pages with wrangler (`.github/workflows/docs.yml`, project `ndb-docs`). Links in the docs that point outside `docs/dev/` become GitHub links in the site.
 
 ## Rules
 
@@ -49,9 +50,11 @@ A push to `main` that changes `docs/`, `docs-site/` or `brand/` deploys it to Gi
 
 ## Release
 
-Push a tag `vX.Y.Z`.
+Push a tag `vX.Y.Z`. The full checklist is in [releasing.md](releasing.md).
 
 - `release.yml` runs the tests, builds the static binaries with the version in `-ldflags "-X main.version=..."`, makes tar.gz files and `checksums.txt`, and creates the GitHub release with generated notes.
+- `release.yml` also pushes the Go submodule tag `sdk/go/vX.Y.Z`.
+- `publish-npm.yml` publishes `@thadeu/ndb`; `publish-gem.yml` publishes `ndb`, then `ndb-rails`.
 - `image.yml` builds the multi-arch image and pushes `ghcr.io/<owner>/ndb`.
 
 `ndb -version` prints the version. Locally: `make dist VERSION=0.1.0`.

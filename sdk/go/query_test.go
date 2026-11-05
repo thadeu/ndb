@@ -175,6 +175,77 @@ func TestQueryFilters(t *testing.T) {
 	}
 }
 
+func TestRegexBodyJSON(t *testing.T) {
+	calls := new(Coll[Call])
+
+	cases := []struct {
+		name  string
+		query *Query[Call]
+		want  string
+	}{
+		{"plain", calls.Where(Regex("status", "^an")), `{"where":{"status":{"$regex":"^an"}}}`},
+		{"options", calls.Where(Regex("status", "^an", IgnoreCase, DotAll)), `{"where":{"status":{"$options":"is","$regex":"^an"}}}`},
+		{"not", calls.Where(Not(Regex("status", "x"))), `{"where":{"$not":{"status":{"$regex":"x"}}}}`},
+		{"two on one field", calls.Where(Regex("a", "x"), Regex("a", "y")), `{"where":{"$and":[{"a":{"$regex":"x"}},{"a":{"$regex":"y"}}]}}`},
+	}
+
+	for _, tc := range cases {
+		raw, err := json.Marshal(tc.query.body())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if string(raw) != tc.want {
+			t.Fatalf("%s: got %s\nwant %s", tc.name, raw, tc.want)
+		}
+	}
+}
+
+func TestQueryRegex(t *testing.T) {
+	ctx := context.Background()
+	calls := seedCalls(t)
+
+	cases := []struct {
+		name  string
+		query *Query[Call]
+		want  []string
+	}{
+		{"prefix", calls.Where(Regex("status", "^an")), []string{"c1", "c2", "c4"}},
+		{"case sensitive", calls.Where(Regex("status", "^AN")), nil},
+		{"ignore case", calls.Where(Regex("status", "^AN", IgnoreCase)), []string{"c1", "c2", "c4"}},
+		{"not", calls.Where(Not(Regex("status", "^an"))), []string{"c3", "c5"}},
+		{"with another filter", calls.Where(Regex("dnis", "^11[34]"), Gte("duration", 10)), []string{"c1", "c2", "c4"}},
+		{"number field never matches", calls.Where(Regex("duration", "0")), nil},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := tc.query.All(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			gotIDs := ids(got)
+
+			slices.Sort(gotIDs)
+
+			if !slices.Equal(gotIDs, tc.want) && (len(gotIDs) != 0 || len(tc.want) != 0) {
+				t.Fatalf("got %v, want %v", gotIDs, tc.want)
+			}
+		})
+	}
+}
+
+func TestQueryRegexInvalid(t *testing.T) {
+	calls := seedCalls(t)
+
+	for _, f := range []Filter{Regex("status", "("), Regex("status", "a(?=b)"), Regex("status", "a", RegexOption("g"))} {
+		if _, err := calls.Where(f).All(context.Background()); !errors.Is(err, ErrInvalidQuery) {
+			t.Fatalf("got %v, want ErrInvalidQuery", err)
+		}
+	}
+}
+
 func TestQuerySortLimitSkipFields(t *testing.T) {
 	ctx := context.Background()
 	calls := seedCalls(t)

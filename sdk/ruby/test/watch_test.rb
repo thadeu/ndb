@@ -43,7 +43,7 @@ class WatchTest < Minitest::Test
   end
 
   def test_watch_with_a_bad_where_raises_invalid_query
-    error = assert_raises(NdbRecord::InvalidQuery) do
+    error = assert_raises(Ndb::InvalidQuery) do
       client.watch(@coll, "bad", where: { n: { "$bogus" => 1 } }) { |_| nil }
     end
 
@@ -51,9 +51,9 @@ class WatchTest < Minitest::Test
   end
 
   def test_error_codes_of_the_history_are_mapped
-    error = NdbRecord.error_for("history_truncated", "gone", 410)
+    error = Ndb.error_for("history_truncated", "gone", 410)
 
-    assert_instance_of NdbRecord::HistoryTruncated, error
-    assert_instance_of NdbRecord::WatchLagged, NdbRecord.error_for("watch_lagged", "slow", 200)
+    assert_instance_of Ndb::HistoryTruncated, error
+    assert_instance_of Ndb::WatchLagged, Ndb.error_for("watch_lagged", "slow", 200)
   end
 end

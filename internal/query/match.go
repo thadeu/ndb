@@ -1,6 +1,9 @@
 package query
 
-import "slices"
+import (
+	"regexp"
+	"slices"
+)
 
 // Node is a compiled where clause.
 type Node interface {
@@ -70,6 +73,11 @@ type op struct {
 	vals []Value
 	flag bool
 	sub  []op
+
+	// re is the compiled $regex, and prefix its literal start when the
+	// pattern is anchored with "^" and has no i or m option.
+	re     *regexp.Regexp
+	prefix string
 }
 
 // fieldNode is the operators of one field, joined with AND. slot is its
@@ -121,6 +129,8 @@ func matchOp(o op, cands []Value, found bool) bool {
 		return found == o.flag
 	case "not":
 		return !matchAll(o.sub, cands, found)
+	case "regex":
+		return matchRegex(o.re, cands)
 	}
 
 	return slices.ContainsFunc(cands, func(c Value) bool {

@@ -9,34 +9,26 @@
 require "json"
 require "securerandom"
 require "socket"
-require "ndb_record"
+require "ndb"
 
 $stdout.sync = true
 
 APP = "ruby"
 POD = Socket.gethostname
 
-url = ENV.fetch("NDB_URL", "unix:///run/ndb/ndb.sock")
+ndb = Ndb::Client.new(url: ENV.fetch("NDB_URL", "unix:///run/ndb/ndb.sock"))
 
-NdbRecord.configure { |c| c.url = url }
-
-class Visit < NdbRecord::Base
-  self.collection_name = "visits"
-
-  primary_key :id
-
-  attribute :app, :string, index: true
-  attribute :pod, :string
-  attribute :ts, :datetime, time: true
+def count(ndb, where = {})
+  ndb.find("visits", where: where, count: true, limit: 1, fields: ["id"]).total
 end
 
-def record
+def record(ndb)
   dir = ENV["NDB_DIRECT_DIR"]
   id = "#{APP}-#{POD}-#{SecureRandom.hex(6)}"
   ts = Time.now.utc
 
   if dir.nil? || dir.empty?
-    Visit.create!(id: id, app: APP, pod: POD, ts: ts)
+    ndb.insert("visits", [{ id: id, app: APP, pod: POD, ts: ts.iso8601(6) }])
   else
     line = { id: id, app: APP, pod: POD, ts: ts.iso8601(6) }.to_json
 
@@ -46,10 +38,11 @@ end
 
 loop do
   begin
-    record
+    ndb.ensure_collection("visits", id: "id", indexes: ["app"], time: "ts")
+    record(ndb)
 
-    puts "#{APP} visits: #{Visit.where(app: APP).count}, all apps: #{Visit.count}"
-  rescue NdbRecord::Error, SystemCallError => e
+    puts "#{APP} visits: #{count(ndb, app: APP)}, all apps: #{count(ndb)}"
+  rescue Ndb::Error, SystemCallError => e
     puts "waiting for ndb: #{e.message}"
   end
 

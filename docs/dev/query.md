@@ -56,6 +56,7 @@ A field with a plain value means equality: `{"status": "answered"}`. Several fie
 | `$in`, `$nin` | in / not in an array. `$nin` also matches a missing field. |
 | `$exists` | `true` or `false`. Missing is not `null`. |
 | `$not` (in a field) | negate an operator object: `{"duration": {"$not": {"$gt": 10}}}`. |
+| `$regex`, `$options` | string match, see [Regular expressions](#regular-expressions). |
 | `$and`, `$or` | non-empty array of where objects. |
 | `$not` (top level) | negate a where object: `{"$not": {"status": "failed"}}`. |
 
@@ -64,9 +65,23 @@ Rules:
 - `{"a": null}` matches an explicit `null` only. Use `{"a": {"$exists": false}}` for a missing field.
 - Arrays: a field matches when any element matches. Dot paths walk into arrays of objects (`items.sku`).
 - Mixing operators and plain keys in one field object is an error: `{"a": {"$gt": 1, "b": 2}}`.
-- Unknown operators are `invalid_query`: `$regex` and `$elemMatch` do not exist yet.
+- Unknown operators are `invalid_query`: `$nor` and `$elemMatch` do not exist yet.
 - Time: for the collection `time` field, RFC 3339 strings are compared as instants, so offsets do not matter.
 - Cross-type order (sort, cursors, indexes): `missing < null < number < string < time < object < array < bool`.
+
+### Regular expressions
+
+```json
+{ "where": { "title": { "$regex": "^alpha", "$options": "i" } } }
+```
+
+- `$regex` is a string pattern, at most 1 KiB. `$options` is optional and needs `$regex`. Flags: `i` (ignore case), `m` (`^` and `$` match at each line), `s` (`.` matches a newline), `x` (extended, see below). Any other flag is `invalid_query`.
+- Syntax is Go **RE2**, not PCRE as in MongoDB: there are no backreferences (`\1`) and no look-around (`(?=...)`, `(?<!...)`). Matching is linear in the text, so a pattern cannot cause catastrophic backtracking. An invalid pattern or flag is `invalid_query` with the RE2 message.
+- `x` is done by ndb, not by RE2: white space and `# ...` comments outside a character class are removed before compiling. Escape them (`\ `, `\#`) or put them in a class (`[ ]`) to keep them.
+- Only strings match. A number, `null`, a boolean, an object or a missing field never matches. On an array field the row matches when any string element matches. `$regex` works in dot paths, in `$not` (field and top level), `$and` and `$or`, and next to other operators of the same field. `{"a": {"$not": {"$regex": "x"}}}` also matches a missing field, like the other negations.
+- A time field is matched as its RFC 3339 text.
+- The pattern is compiled once per query, not once per row.
+- Planner: a pattern anchored with `^`, with a literal start (`^abc`, `^abc.*`, `^ab*`), and without `i` or `m`, is turned into the range `[abc, abd)` on that field. A ready index on the field answers it (`X-Ndb-Plan: index:<field>`), and the zone maps of the segments skip row groups outside the range (`row_groups_skipped`). The regex is still run on every candidate. Without such a prefix (no `^`, a group or alternation first, `i`, `m`, or only `$not`/`$or`) the regex is a filter on a scan. `explain: true` shows which one ran.
 
 ## aggregate
 
