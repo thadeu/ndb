@@ -6,7 +6,7 @@ The day-to-day runbook for a running ndb: is it healthy, how to back it up, what
 
 ### Health
 
-`GET /health` is `200 {"status":"ok"}` after recovery and `503` before. Use it for readiness. Clients should retry `not_ready` and reconnect after a daemon restart.
+`ndb health` (exit 0 when ready) and `GET /health` answer the same question. `GET /health` is `200 {"status":"ok"}` after recovery and `503` before. Use it for readiness. Clients should retry `not_ready` and reconnect after a daemon restart.
 
 ```bash
 curl --unix-socket /run/ndb/ndb.sock http://ndb/health
@@ -48,7 +48,7 @@ ndb backup - | aws s3 cp - s3://bucket/daily.ndb # stdout
 The file is readable with `head`, `grep` and `jq`:
 
 ```json
-{"ndb_backup":1,"version":"0.1.3","created_at":"2026-11-06T14:13:52Z","collections":["users"]}
+{"ndb_backup":1,"version":"0.2.0","created_at":"2026-11-06T14:13:52Z","collections":["users"]}
 {"_section":"catalog","name":"users","definition":{"name":"users","write":"engine","unique":["email"]}}
 {"_section":"cursor","collection":"users","consumer":"mailer","pos":"e2.1"}
 {"_section":"wal","collection":"users"}

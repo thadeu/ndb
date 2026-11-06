@@ -20,6 +20,7 @@ var subcommands = map[string]func(args []string) error{
 	"collections": runCollections,
 	"compact":     runCompact,
 	"get":         runGet,
+	"health":      runHealth,
 	"update":      runUpdate,
 	"delete":      runDelete,
 	"expire":      runExpire,
@@ -113,6 +114,7 @@ Usage:
   ndb size                      disk usage per collection and per part
   ndb collections [name]        the catalog, or the definition of one collection
   ndb compact <collection>      seal and merge the segments now (engine mode)
+  ndb health                    exit 0 when the daemon is ready (for container health checks)
   ndb get <coll> <_id>          one document by _id
   ndb update <coll> '<json>'    atomic update by filter: the JSON mixes the filter and the
                                 write operators ($set $unset $inc $push $pull $min $max)
@@ -133,7 +135,7 @@ Common flags:
   -config FILE      ndb.yml (default ndb.yml; absent = defaults)
   -data-dir DIR     data dir (overrides ndb.yml)
 
-Talking to the daemon (backup, stats, size, collections, compact, get, update, delete, expire, persist, ttl, quarantine, query):
+Talking to the daemon (backup, stats, size, collections, compact, health, get, update, delete, expire, persist, ttl, quarantine, query):
   -url unix:///sock|tcp://host:port   which daemon (default NDB_URL, then the
                                       unix socket of ndb.yml); NDB_TOKEN is the bearer token
   -json                               machine output (query: NDJSON rows)

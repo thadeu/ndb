@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-06
+
+### Added
+
+- CLI `ndb health`: exit 0 and print `ok` when the daemon is ready. Use it as the container health check (the image has no shell or curl).
+
+### Fixed
+
+- Docs: the Go install line uses `@latest`; the Go guide shows `Where().All()` for every document; the backup example shows version 0.2.0.
+
 ## [0.2.0] - 2026-11-06
 
 ### Changed
@@ -87,7 +97,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/thadeu/ndb/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/thadeu/ndb/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/thadeu/ndb/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/thadeu/ndb/compare/v0.1.0...v0.1.1

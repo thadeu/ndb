@@ -9,7 +9,7 @@ Docs: [client guide](https://github.com/thadeu/ndb/blob/main/docs/dev/clients.md
 ## Install
 
 ```sh
-go get github.com/thadeu/ndb/sdk/go@v0.1.0
+go get github.com/thadeu/ndb/sdk/go@latest
 ```
 
 ```go
@@ -152,6 +152,9 @@ _, err = sessions.Persist(ctx, "s1")                        // PERSIST
 ## Query
 
 ```go
+// Every document: Where with no filter.
+all, err := calls.Where().All(ctx)
+
 rows, err := calls.
 	Where(
 		ndb.Eq("status", "answered"),

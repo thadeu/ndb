@@ -20,6 +20,7 @@ The `ndb` binary is the daemon and the CLI. `ndb` with only flags still runs the
 | `ndb get <collection> <_id>` | One document by `_id`. |
 | `ndb update <collection> '<json>'` | [Atomic update by filter](../query.md#update-by-filter): the JSON mixes the filter and the write operators. `--many`, `--upsert`, `--expire-in 60s`. `ndb update <collection> <_id> '<ops>'` updates one by `_id`. |
 | `ndb delete <collection> '<json>'` | Delete the documents that the JSON filter matches. `--many`. `ndb delete <collection> <_id>` deletes one by `_id`. |
+| `ndb health` | Exit 0 and print `ok` when the daemon is ready; exit 1 otherwise. For container health checks. |
 | `ndb version` | Print the version. `ndb -version` still works. |
 | `ndb help` | List the commands. |
 

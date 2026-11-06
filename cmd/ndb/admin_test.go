@@ -500,3 +500,20 @@ func TestGetUpdateDeleteByIDCommands(t *testing.T) {
 		t.Fatalf("get after delete = %v", err)
 	}
 }
+
+func TestHealthCommand(t *testing.T) {
+	sock, _ := startDaemon(t, t.TempDir())
+
+	out := runCmd(t, func(a []string, o *strings.Builder) error { return health(a, o) }, "-config", "none.yml", "-url", "unix://"+sock)
+
+	if strings.TrimSpace(out) != "ok" {
+		t.Fatalf("health = %q", out)
+	}
+
+	var sb strings.Builder
+
+	err := health([]string{"-config", "none.yml", "-url", "unix://" + filepath.Join(t.TempDir(), "none.sock")}, &sb)
+	if err == nil {
+		t.Fatal("health on a missing socket must fail")
+	}
+}

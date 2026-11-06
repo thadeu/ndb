@@ -22,8 +22,30 @@ docker run -d --name ndb \
 - The process runs as UID 65532. A bind mount must allow this user to write. Named volumes work as they are.
 - For TCP, add `-tcp 0.0.0.0:7070` and publish the port on a private network only, and add `-token-file` (mount the token file as a secret).
 - Run one replica. Two daemons cannot share one data dir.
-- No shell in the image, but `ndb` is the entrypoint binary: see [CLI](#cli). For health checks use `GET /health` over the socket or TCP.
+- No shell in the image, but `ndb` is the entrypoint binary: see [CLI](#cli). For health checks use `ndb health` (see [Health check](#health-check)).
 - Stop timeout above 30 s, so that running requests finish.
+
+## Health check
+
+The image has no shell and no curl. `ndb health` asks the daemon on its socket and exits 0 when it is ready, so Compose can wait for it:
+
+```yaml
+services:
+  ndb:
+    image: ghcr.io/thadeu/ndb:latest
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/ndb", "health", "-url", "unix:///run/ndb/ndb.sock"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  app:
+    depends_on:
+      ndb:
+        condition: service_healthy
+```
+
+`ndb health` exists from 0.2.1.
 
 ## CLI
 

@@ -35,7 +35,7 @@ git push origin v0.1.0
 ## Verify
 
 - Release: `gh release view v0.1.0`. Download one archive, check it with `sha256sum -c checksums.txt`, run `ndb -version` (prints `ndb 0.1.0`).
-- Go tag: `git ls-remote --tags origin 'sdk/go/*'`, then in a temp module `go get github.com/thadeu/ndb/sdk/go@v0.1.0`.
+- Go tag: `git ls-remote --tags origin 'sdk/go/*'`, then in a temp module `go get github.com/thadeu/ndb/sdk/go@vX.Y.Z`.
 - Image: `docker run --rm ghcr.io/thadeu/ndb:0.1.0 -version`.
 - npm: `npm view @thadeu/ndb version`; the package page shows the provenance badge.
 - Gems: `gem search -r '^ndb$'`, `gem search -r ndb-rails`, or `gem install ndb-rails -v 0.1.0` (it installs `ndb` too).
