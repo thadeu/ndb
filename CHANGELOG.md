@@ -6,7 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
-## 0.1.2 (unreleased)
+## [0.1.2] - 2026-11-06
 
 ### Changed
 
@@ -21,6 +21,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - `$nor` in `where` and in update filters.
 - CLI `ndb update <collection> '<json>' [--many] [--upsert] [--expire-in 60s]` and `ndb delete <collection> '<json>' [--many]`.
+- Docs: dedicated Query, Aggregate and Watch pages with SDK tabs; the error table moved to the HTTP API page.
 - ndb-rails: `record.increment!(attr, by = 1)`, `record.decrement!(attr, by = 1)`, `Model.where(...).update(ops)` and `Model.where(...).delete`.
 
 ## [0.1.1] - 2026-11-05
@@ -61,5 +62,6 @@ First release.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
 [Unreleased]: https://github.com/thadeu/ndb/compare/v0.1.1...HEAD
+[0.1.2]: https://github.com/thadeu/ndb/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/thadeu/ndb/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/thadeu/ndb/releases/tag/v0.1.0

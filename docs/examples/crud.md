@@ -160,7 +160,7 @@ The four programs print the same text.
 
 - The Rails tab runs with `ndb-rails` as a plain Ruby script. In a Rails app, `config/ndb.yml` does the connect step. See [Clients](/clients#rails-gem-ndb-record).
 - Every SDK supports every step of this example.
-- Errors and codes: [Query errors](/query#errors).
+- Errors and codes: [Errors](/http-api#errors).
 
 ## Run it
 

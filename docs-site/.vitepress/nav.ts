@@ -36,6 +36,7 @@ export const tabs: Tab[] = [
         items: [
           { text: 'Configuration', link: '/configuration' },
           { text: 'HTTP API', link: '/http-api' },
+          { text: 'Errors', link: '/http-api#errors' },
         ],
       },
     ],
@@ -47,12 +48,22 @@ export const tabs: Tab[] = [
     link: '/query',
     groups: [
       {
-        text: 'Query language',
+        text: 'Read',
         items: [
           { text: 'find', link: '/query#find' },
-          { text: 'Operators', link: '/query#operators' },
+          { text: 'Filters', link: '/query#filters' },
+          { text: 'Regular expressions', link: '/query#regular-expressions' },
           { text: 'Pagination', link: '/query#pagination' },
-          { text: 'Errors', link: '/query#errors' },
+        ],
+      },
+      {
+        text: 'Write',
+        items: [
+          { text: 'Update by filter', link: '/query#update-by-filter' },
+          { text: 'Write operators', link: '/query#write-operators' },
+          { text: 'Arrays', link: '/query#arrays' },
+          { text: 'Upsert', link: '/query#upsert' },
+          { text: 'Delete by filter', link: '/query#delete-by-filter' },
         ],
       },
     ],
@@ -61,13 +72,17 @@ export const tabs: Tab[] = [
     id: 'aggregate',
     text: 'Aggregate',
     icon: 'chart',
-    link: '/query#aggregate',
+    link: '/aggregate',
     groups: [
       {
         text: 'Aggregate',
         items: [
-          { text: 'Pipeline', link: '/query#aggregate' },
-          { text: 'Cursor pages', link: '/query#pagination' },
+          { text: 'Overview', link: '/aggregate' },
+          { text: 'Pipeline shape', link: '/aggregate#pipeline-shape' },
+          { text: 'Group key', link: '/aggregate#group-key' },
+          { text: 'Accumulators', link: '/aggregate#accumulators' },
+          { text: 'Time buckets', link: '/aggregate#time-buckets' },
+          { text: 'Limits', link: '/aggregate#limits' },
         ],
       },
     ],
@@ -76,13 +91,16 @@ export const tabs: Tab[] = [
     id: 'watch',
     text: 'Watch',
     icon: 'bell',
-    link: '/http-api#watch-and-ack',
+    link: '/watch',
     groups: [
       {
-        text: 'Outbox consumers',
+        text: 'Watch',
         items: [
-          { text: 'watch and ack', link: '/http-api#watch-and-ack' },
-          { text: 'Clients', link: '/clients' },
+          { text: 'Overview', link: '/watch' },
+          { text: 'Request', link: '/watch#request' },
+          { text: 'Events', link: '/watch#events' },
+          { text: 'Ack and delivery', link: '/watch#ack-and-delivery' },
+          { text: 'Errors', link: '/watch#errors' },
         ],
       },
     ],
@@ -170,6 +188,8 @@ export const pageTab: Record<string, string> = {
   '/configuration': 'daemon',
   '/http-api': 'daemon',
   '/query': 'query',
+  '/aggregate': 'aggregate',
+  '/watch': 'watch',
   '/clients': 'clients',
   '/examples': 'examples',
   '/examples/crud': 'examples',

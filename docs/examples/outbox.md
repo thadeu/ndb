@@ -86,7 +86,7 @@ The four programs print the same text.
 
 - The consumer name (`billing`) is the stored cursor. Keep it stable.
 - `limit: 2` ends the stream after two events, so the example finishes. A real consumer leaves it out and loops.
-- After `watch_lagged`, call `watch` again: it resumes after the last ack. `history_truncated` means `wal_retention` removed the position. See [watch and ack](/http-api#watch-and-ack).
+- After `watch_lagged`, call `watch` again: it resumes after the last ack. `history_truncated` means `wal_retention` removed the position. See [Watch](/watch#errors).
 - The Ruby model layer (`ndb-rails`) has no `watch`. Use the client, as this example does.
 - Every SDK supports every step of this example.
 

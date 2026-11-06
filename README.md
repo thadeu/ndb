@@ -104,7 +104,9 @@ The socket is `/run/ndb/ndb.sock`. Share the `/run/ndb` volume with your app con
 ## Documentation
 
 - [docs/dev/architecture.md](docs/dev/architecture.md): Components and data flow.
-- [docs/dev/query.md](docs/dev/query.md): Query language, pagination and errors.
+- [docs/dev/query.md](docs/dev/query.md): find, filters, update and delete by filter, pagination.
+- [docs/dev/aggregate.md](docs/dev/aggregate.md): the aggregate pipeline.
+- [docs/dev/watch.md](docs/dev/watch.md): watch and ack for outbox consumers.
 - [docs/dev/http-api.md](docs/dev/http-api.md): HTTP endpoints.
 - [docs/dev/configuration.md](docs/dev/configuration.md): `ndb.yml`, flags, durability.
 - [docs/dev/storage.md](docs/dev/storage.md): On-disk layout.

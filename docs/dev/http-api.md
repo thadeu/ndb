@@ -35,68 +35,15 @@ Details:
 
 - Request bodies are limited by the collection `max_line_size` (default 1 MiB). Unknown JSON fields are `invalid_request`.
 - `insert` creates an unknown collection (unless `allow_implicit: false`). A document without the id field gets a generated id. Insert on a direct-mode collection is `direct_collection`.
-- `update` and `delete` are [atomic update by filter](#atomic-update-by-filter).
+- `update` and `delete` are [atomic update by filter](query.md#update-by-filter).
 - `PUT /v1/c/{coll}` is idempotent. Keys: `id`, `time`, `write`, `path`, `indexes`, `unique`, `durability`, `retention`, `wal_retention`, `ttl`, `expires_field`, `max_line_size`, `blob_threshold` (bytes). Merge rules: `indexes` are united; a different `id`, `write`, `path` or `time` is `catalog_conflict`; `ndb.yml` wins for `durability`, `retention` and `wal_retention`.
 - `GET /v1/c/{coll}` answers like `PUT`: the final `definition` and the state of each index. An unknown name is `404 unknown_collection`.
-- Errors are described in [query.md](query.md#errors).
-- `where` operators are in [query.md](query.md#operators). `{"field": {"$regex": "^abc", "$options": "i"}}` matches strings with Go RE2 (no backreferences, no look-around; flags `i`, `m`, `s`, `x`); a bad pattern or flag is `400 invalid_query`. An anchored literal prefix without `i`/`m` can use an index and zone maps, see [Regular expressions](query.md#regular-expressions).
+- Errors are described in [Errors](#errors).
+- `where` operators are in [Filters](query.md#filters). `{"field": {"$regex": "^abc", "$options": "i"}}` matches strings with Go RE2 (no backreferences, no look-around; flags `i`, `m`, `s`, `x`); a bad pattern or flag is `400 invalid_query`. An anchored literal prefix without `i`/`m` can use an index and zone maps, see [Regular expressions](query.md#regular-expressions).
 
-## Atomic update by filter
+## Update and delete
 
-`POST /v1/c/{coll}/update` takes one JSON object that mixes a filter and write operators. The daemon matches the filter and writes the result inside the single writer of the collection, against the newest state, so two updates never interleave. A guarded decrement or an `$inc` needs no retry.
-
-Top-level keys of the body:
-
-| Key | Meaning |
-|---|---|
-| `$set`, `$unset`, `$inc`, `$push`, `$pull`, `$min`, `$max` | write operators, each an object of fields (dot paths allowed) |
-| `$and`, `$or`, `$nor` | filter (same as in `where`, see [query.md](query.md#operators)) |
-| any key without `$` (the id field, `qty`, `_v`, `meta.k`) | filter |
-| any other `$...` key | `400 unknown_operator` |
-
-Options are in the query string: `many=true`, `upsert=true`, `expire_in=<duration>`.
-
-```bash
-# take one unit of stock, only if there is one
-curl --unix-socket /run/ndb/ndb.sock -X POST http://ndb/v1/c/stock/update \
-  -d '{"sku":"a","qty":{"$gte":1},"$inc":{"qty":-1}}'
-# {"matched":1,"modified":1,"doc":{"sku":"a","qty":4,"_v":7}}
-
-# optimistic concurrency is a filter: matched 0 means somebody else wrote first
-curl --unix-socket /run/ndb/ndb.sock -X POST http://ndb/v1/c/stock/update \
-  -d '{"sku":"a","_v":7,"$set":{"note":"x"}}'
-```
-
-Answers (always HTTP 200 when the body is valid):
-
-- One document: `{"matched":1,"modified":1,"doc":{...}}`. `doc` is the new document with `_v`. Nothing matched: `{"matched":0,"modified":0}`. That is not an error.
-- With `many=true`: `{"matched":N,"modified":N}`, with no `doc`.
-- `modified` is 0 when the operators leave the document as it is (for example `$max` with a lower value). No new version is written then.
-
-Which documents are updated:
-
-- Without `many`, a filter with the id field uses the id lookup. Without the id, the first matching document is used.
-- With `many=true`, the filter must be served by the id or a ready secondary index. Otherwise the call is `400 unindexed_many`.
-- A filter must not be empty (`400 empty_filter`). Expired documents are never matched.
-- `_v` in the filter is the version of the document.
-- With `upsert=true` and no match, a document is created from the plain equality fields of the filter (dot paths too). Then the operators run on it: `$inc` starts from 0, `$push` creates the array, `$min` and `$max` set the value. Without the id field in the filter, an id is generated like `insert` does. The answer is `matched: 0`, `modified: 1` and the `doc`. If the id exists but the rest of the filter does not match, the call is `409 duplicate_id`.
-
-Operators:
-
-| Operator | Meaning |
-|---|---|
-| `{"$set": {"f": v}}` | set the field |
-| `{"$unset": {"f": true}}` | remove the field (`true` or `""`) |
-| `{"$inc": {"f": n}}` | add a number (negative allowed). A missing field is 0. A field that is not a number is `invalid_field`. |
-| `{"$push": {"f": v}}` | append. `{"$each": [...]}` appends many. A missing field becomes a new array. A field that is not an array is `invalid_field`. |
-| `{"$pull": {"f": v}}` | remove every element equal to `v`. A condition (`{"$gte": 5}`, or `{"status": "done"}` for objects) removes the elements that match it. |
-| `{"$min": {"f": v}}`, `{"$max": {"f": v}}` | set when the field is missing or `v` is lower (higher). Numbers, or strings in lexical order. Other types, or a different type than the field, are `invalid_field`. |
-
-Contract errors (HTTP 400): `unknown_operator`, `no_update` (no write operator), `conflicting_update` (the same field, or a field and its parent, in two operators), `invalid_field` (a field name that starts with `$`, or a value of the wrong type), `unindexed_many`, `empty_filter`. The id cannot change (`immutable_id`), and `_v` cannot be written.
-
-`POST /v1/c/{coll}/delete` takes a filter as the body and answers `{"deleted":N}`. Nothing matched is `{"deleted":0}`. `many=true` follows the same index rule as `update`. A write operator in a delete body is `unknown_operator`.
-
-The WAL line of each changed document is the resulting document with the next version, so replay and `watch` need no operators. In direct mode, `update` and `delete` are `409 direct_collection`.
+`update` and `delete` take a filter, and `update` also takes write operators (`$set`, `$unset`, `$inc`, `$push`, `$pull`, `$min`, `$max`) in the same body. See [Update by filter](query.md#update-by-filter) and [Delete by filter](query.md#delete-by-filter).
 
 ## Expiry (TTL like Redis)
 
@@ -149,22 +96,7 @@ The CLI (`ndb stats`, `ndb size`, `ndb collections`, `ndb compact`, `ndb quarant
 
 ## watch and ack
 
-`watch` is a long-lived stream, one JSON object per line. `from` is `beginning` or `now` and is used only for a consumer with no saved position. A consumer that acked before resumes after its last ack.
-
-```json
-{"pos":"e1.1","op":"put","id":"c1","v":1,"doc":{"_id":"c1","status":"answered"}}
-{"pos":"e1.2","op":"del","id":"c2","v":2}
-{"heartbeat":true}
-{"error":{"code":"watch_lagged","message":"..."}}
-```
-
-- `op` is `put` or `del`. A delete by the TTL sweeper has `"_expired": true`.
-- A heartbeat line comes after 15 s without events.
-- `where` has the same operators as `find`. A `put` is sent when its document matches. A `del` has no document, so it is sent only if the last `put` of that id seen by this stream matched (the stream remembers the last 65 536 ids). Events that are left out still move the saved position.
-- `limit` closes the stream after that many events (0 = no limit).
-- `ack` stores the `pos` of an event the consumer has processed. Delivery is at least once.
-- `watch_lagged` means the consumer was too slow. Reconnect: the stream resumes from the last ack.
-- `history_truncated` (HTTP 410) means the WAL files that the watch must read were deleted by `wal_retention` (no saved position with `from: "beginning"`, or a position before the oldest kept file). The stream never skips the gap in silence. Start from `now`, or rebuild from `find`. A saved position is safe: ndb keeps the file that holds it.
+`watch` is a long-lived NDJSON stream of the changes of a collection, for a named consumer, and `ack` stores its position. See [Watch](watch.md).
 
 ## Backup endpoint
 
@@ -173,3 +105,39 @@ The CLI (`ndb stats`, `ndb size`, `ndb collections`, `ndb compact`, `ndb quarant
 ## Blobs
 
 `PUT /v1/blobs` with the raw body returns the reference to keep in a document: `{"$blob":"sha256:<hex>","size":N,"type":"..."}`. `GET /v1/blobs/sha256:<hex>` streams the content (`?type=` sets the content type). The limit is `blob_max_size` (default 1 GiB).
+
+## Errors
+
+The body is `{"error":{"code":"...","message":"..."}}`.
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `invalid_request` | 400 | Bad body, unknown field, empty `insert`. |
+| `invalid_query` | 400 | Bad `where`, `sort`, operator or key. |
+| `invalid_pipeline` | 400 | Bad aggregate pipeline. |
+| `cursor_invalid` | 400 | The `after` token is broken. |
+| `cursor_mismatch` | 400 | The token was made for another query. |
+| `cursor_expired` | 400 | The snapshot of the cursor expired. |
+| `group_limit_exceeded` | 422 | The group table is over its memory limit. |
+| `not_found` | 404 | No document (or blob) with this id. |
+| `unknown_collection` | 404 | The collection does not exist. |
+| `unknown_operator`, `no_update`, `conflicting_update`, `invalid_field`, `unindexed_many`, `empty_filter` | 400 | The body of an update or delete breaks the [contract](query.md#contract-errors). |
+| `duplicate_id` | 409 | A document with this id exists. |
+| `unique_violation` | 409 | A `unique` field value exists. |
+| `catalog_conflict` | 409 | Two declarations of the collection disagree (`id`, `write`, `path`, `time`). |
+| `direct_collection` | 409 | Write call on a direct-mode collection. |
+| `catalog_invalid` | 400 | The collection definition is not valid. |
+| `ttl_not_enabled` | 400 | `expire_in`, `expire` or `persist` on a collection without `expires_field`. |
+| `ttl_derived` | 400 | `expire_in`, `expire` or `persist` on a collection whose expiry comes from `ttl` + `time`. |
+| `invalid_doc`, `missing_id`, `invalid_id`, `immutable_id`, `invalid_batch`, `invalid_path`, `invalid_index` | 400 | A document or definition is not valid. |
+| `request_too_large`, `line_too_large` | 413 | Body or line is over `max_line_size` (or the blob limit). |
+| `invalid_blob_ref` | 400 | The blob reference is not `sha256:<64 hex>`. |
+| `unauthorized` | 401 | TCP request without the right bearer token (`-token-file`). |
+| `forbidden` | 403 | For example, backup over TCP. |
+| `history_truncated` | 410 | A `watch` needs WAL files that `wal_retention` deleted. |
+| `not_ready` | 503 | The daemon is still recovering. Retry. |
+| `closed` | 503 | The daemon is shutting down. |
+| `canceled` | 499 | The client left before the answer. |
+| `internal` | 500 | A bug or disk error. The message stays in the daemon log. |
+
+A `watch` stream reports `watch_lagged` and `invalid_position` as an error line in the stream. See [Watch](watch.md#errors).

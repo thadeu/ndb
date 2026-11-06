@@ -35,14 +35,14 @@ const sections: Section[] = [
         title: 'Aggregate',
         text: 'Group, match, and bucket by time with $dateTrunc.',
         command: 'POST /v1/c/calls/aggregate',
-        link: '/query#aggregate',
+        link: '/aggregate',
       },
       {
         icon: 'bell',
         title: 'Watch',
         text: 'Outbox consumers with ack, a where filter, and wal_retention.',
         command: 'POST /v1/c/calls/watch',
-        link: '/http-api#watch-and-ack',
+        link: '/watch',
       },
       {
         icon: 'plug',

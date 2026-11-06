@@ -69,7 +69,7 @@ The four programs print the same text.
 ## Notes
 
 - The first run inserts 12 fixed orders. A later run finds them and does not insert again.
-- A pipeline has exactly one `$group`. See [Aggregate](/query#aggregate).
+- A pipeline has exactly one `$group`. See [Aggregate](/aggregate).
 - Go returns rows as maps (`AggregateAs` gives typed rows). Ruby and TypeScript return plain hashes and objects.
 - Every SDK supports every step of this example. `ndb-rails` also has `group(:status).count` style calls.
 

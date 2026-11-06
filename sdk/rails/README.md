@@ -195,7 +195,7 @@ Call.where(status: "answered").first(5)
 Call.where(status: "failed").exists?
 ```
 
-- Chained `where` calls are ANDed. `$regex` does not exist in the daemon yet. See the [query language](https://github.com/thadeu/ndb/blob/main/docs/dev/query.md) for the full operator list.
+- Chained `where` calls are ANDed. See the [query language](https://github.com/thadeu/ndb/blob/main/docs/dev/query.md) for the full operator list.
 - The order of the `order` keys is the order of the sort. The id is always the last key.
 - `page(n).per(size)` sets offset paging. The default page size is 25.
 - `pluck` asks the daemon for only those fields.
