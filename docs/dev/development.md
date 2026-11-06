@@ -68,6 +68,7 @@ A push to `main` that changes `docs/`, `docs-site/` or `brand/` deploys it to Cl
 - `gofmt` and `GOOS=linux go vet ./...` must be clean.
 - Code style: a blank line before `if`, `for`, `switch`, `return`, `defer`, `go`, after a closing `}`, and between groups that do different things.
 - Docs in `docs/dev/` change with the behavior.
+- `examples/` is not run in CI. Check it locally with `cd examples && make check` when an API changes.
 
 ## Release
 

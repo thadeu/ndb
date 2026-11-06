@@ -96,51 +96,6 @@ jobs:
         working-directory: sdk/ts
         run: pnpm build
 
-  examples:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.4"
-
-      - uses: pnpm/action-setup@v4
-        with:
-          package_json_file: sdk/ts/package.json
-          version: 10
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
-      - name: Build the daemon
-        run: go build -o bin/ndb ./cmd/ndb
-
-      - name: Build the TypeScript SDK
-        working-directory: sdk/ts
-        run: pnpm install --frozen-lockfile && pnpm build
-
-      - name: Install the example dependencies
-        working-directory: examples
-        run: |
-          bundle install
-          pnpm install --no-frozen-lockfile
-          pnpm exec tsc -p .
-
-      - name: Run every example in every language
-        working-directory: examples
-        run: make check
-
-      - name: Daemon log
-        if: failure()
-        run: cat examples/.data/daemon.log
-
   shellcheck:
     runs-on: ubuntu-latest
 

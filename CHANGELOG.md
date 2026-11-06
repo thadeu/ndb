@@ -61,7 +61,7 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v0.1.2...HEAD
 [0.1.2]: https://github.com/thadeu/ndb/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/thadeu/ndb/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/thadeu/ndb/releases/tag/v0.1.0
