@@ -31,6 +31,7 @@ Deferred ideas: [`../backlog/`](../backlog/).
 | [M11](m11-client-ts.md) | TS client | package `ndb`, `ndb.model` | M07 | §12.2 |
 | [M12](m12-compaction-blobs-metrics.md) | Compaction, retention, TTL, blobs, metrics | long-running operation; Redis-like document expiry | M05 | §7.5, phase 9 |
 | [M13](m13-packaging-adoption.md) | Packaging + adoption | release, Docker, docs, use in 3 apps | all | phase 10 |
+| [M14](m14-console.md) | Ndb Console | self-hosted web UI: connections, browser, dev tools | M07, M13 | — |
 
 ## Next (after 0.1.2)
 

@@ -1,0 +1,19 @@
+{
+  "name": "ndb-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "client": "bun build src/components/ui/client.ts --minify --outfile dist/ui.js && bun build src/components/document-editor.tsx --minify --outfile dist/document-editor.js && bun build src/components/devtools.tsx --minify --outfile dist/devtools.js && bun build src/components/watch.tsx --minify --outfile dist/watch.js",
+    "dev": "bun run client && bun --hot src/main.ts",
+    "build": "bun run client && bun build --compile --minify src/main.ts --outfile dist/ndb-ui",
+    "test": "bun run client && bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.10.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "typescript": "^5.9.0"
+  }
+}

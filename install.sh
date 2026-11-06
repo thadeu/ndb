@@ -3,13 +3,16 @@
 #
 #   curl -fsSL https://ndb.clowk.in/install.sh | bash
 #   curl -fsSL https://ndb.clowk.in/install.sh | bash -s -- --systemd
+#   curl -fsSL https://ndb.clowk.in/install.sh | bash -s -- --ui
 #
 # Installs the ndb binary from GitHub Releases, after checking its sha256.
 # With --systemd (Linux, root) it also creates the ndb user, /var/lib/ndb and
 # /etc/ndb/ndb.yml, installs the systemd unit and starts it.
+# With --ui it installs the web console (ndb-ui) instead of the daemon.
 #
 # Environment:
 #   NDB_VERSION      version to install, with or without "v" (default: latest)
+#   NDB_COMPONENT    ndb (default) or ui; the same as --ui
 #   NDB_INSTALL_DIR  where to put the binary
 #                    (default: /usr/local/bin when writable, else ~/.local/bin)
 
@@ -22,6 +25,7 @@ CONFIG_DIR="/etc/ndb"
 UNIT_PATH="/etc/systemd/system/ndb.service"
 
 SYSTEMD=0
+COMPONENT="${NDB_COMPONENT:-ndb}"
 TMP=""
 
 if [ -t 1 ]; then
@@ -49,13 +53,15 @@ usage() {
   cat <<USAGE
 ndb installer
 
-Usage: install.sh [--systemd]
+Usage: install.sh [--systemd | --ui]
 
   --systemd   Linux, as root: create the ndb user, /var/lib/ndb and
               /etc/ndb/ndb.yml (only if missing), install and start ndb.service
+  --ui        install the web console (ndb-ui) instead of the daemon
 
 Environment:
   NDB_VERSION      version to install, with or without "v" (default: latest)
+  NDB_COMPONENT    ndb (default) or ui; the same as --ui
   NDB_INSTALL_DIR  directory for the binary
                    (default: /usr/local/bin when writable, else ~/.local/bin)
 USAGE
@@ -65,12 +71,23 @@ parse_args() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --systemd) SYSTEMD=1 ;;
+      --ui) COMPONENT=ui ;;
       -h|--help) usage; exit 0 ;;
       *) fail "unknown option: $1 (try --help)" ;;
     esac
 
     shift
   done
+
+  case "$COMPONENT" in
+    ndb) BIN=ndb; CHECKSUMS=checksums.txt ;;
+    ui)  BIN=ndb-ui; CHECKSUMS=ndb-ui-checksums.txt ;;
+    *) fail "unknown component: $COMPONENT (use ndb or ui)" ;;
+  esac
+
+  if [ "$COMPONENT" = ui ] && [ "$SYSTEMD" -eq 1 ]; then
+    fail "--systemd installs the daemon; it cannot go with --ui"
+  fi
 }
 
 need() {
@@ -120,7 +137,7 @@ sha256_of() {
 }
 
 download_and_verify() {
-  NAME="ndb-$TAG-$OS-$ARCH"
+  NAME="$BIN-$TAG-$OS-$ARCH"
   BASE="https://github.com/$REPO/releases/download/$TAG"
 
   log "downloading $NAME.tar.gz"
@@ -128,13 +145,13 @@ download_and_verify() {
   curl -fsSL -o "$TMP/$NAME.tar.gz" "$BASE/$NAME.tar.gz" ||
     fail "download failed: $BASE/$NAME.tar.gz (does $TAG exist for $OS/$ARCH?)"
 
-  curl -fsSL -o "$TMP/checksums.txt" "$BASE/checksums.txt" ||
-    fail "download failed: $BASE/checksums.txt"
+  curl -fsSL -o "$TMP/$CHECKSUMS" "$BASE/$CHECKSUMS" ||
+    fail "download failed: $BASE/$CHECKSUMS"
 
-  WANT=$(awk -v f="$NAME.tar.gz" '$2 == f || $2 == "*" f { print $1 }' "$TMP/checksums.txt")
+  WANT=$(awk -v f="$NAME.tar.gz" '$2 == f || $2 == "*" f { print $1 }' "$TMP/$CHECKSUMS")
 
   if [ -z "$WANT" ]; then
-    fail "$NAME.tar.gz is not in checksums.txt"
+    fail "$NAME.tar.gz is not in $CHECKSUMS"
   fi
 
   GOT=$(sha256_of "$TMP/$NAME.tar.gz")
@@ -161,15 +178,15 @@ pick_install_dir() {
 install_binary() {
   tar -xzf "$TMP/$NAME.tar.gz" -C "$TMP" || fail "cannot unpack $NAME.tar.gz"
 
-  if [ ! -f "$TMP/$NAME/ndb" ]; then
-    fail "the archive has no $NAME/ndb"
+  if [ ! -f "$TMP/$NAME/$BIN" ]; then
+    fail "the archive has no $NAME/$BIN"
   fi
 
-  cp "$TMP/$NAME/ndb" "$BIN_DIR/.ndb.new" || fail "cannot write to $BIN_DIR"
-  chmod 0755 "$BIN_DIR/.ndb.new"
-  mv -f "$BIN_DIR/.ndb.new" "$BIN_DIR/ndb"
+  cp "$TMP/$NAME/$BIN" "$BIN_DIR/.$BIN.new" || fail "cannot write to $BIN_DIR"
+  chmod 0755 "$BIN_DIR/.$BIN.new"
+  mv -f "$BIN_DIR/.$BIN.new" "$BIN_DIR/$BIN"
 
-  ok "installed $BIN_DIR/ndb ($TAG)"
+  ok "installed $BIN_DIR/$BIN ($TAG)"
 
   case ":$PATH:" in
     *":$BIN_DIR:"*) ;;
@@ -280,7 +297,9 @@ main() {
   download_and_verify
   install_binary
 
-  if [ "$SYSTEMD" -eq 1 ]; then
+  if [ "$COMPONENT" = ui ]; then
+    log "run it: ndb-ui   (http://127.0.0.1:4321, opens unix:///run/ndb/ndb.sock; set NDB_URL for another daemon)"
+  elif [ "$SYSTEMD" -eq 1 ]; then
     install_systemd
   else
     log "run it: ndb -data-dir ~/ndb-data -unix ~/ndb.sock   (or re-run with --systemd)"

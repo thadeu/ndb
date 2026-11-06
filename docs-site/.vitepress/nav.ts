@@ -191,6 +191,10 @@ export const tabs: Tab[] = [
         ],
       },
       {
+        text: 'Tools',
+        items: [{ text: 'Console (ndb-ui)', link: '/console' }],
+      },
+      {
         text: 'Topologies',
         items: [
           { text: 'Single VM', link: '/deploy/single-vm' },
@@ -236,6 +240,7 @@ export const pageTab: Record<string, string> = {
   '/deploy/voodu': 'deploy',
   '/deploy/single-vm': 'deploy',
   '/deploy/cross-vm': 'deploy',
+  '/console': 'deploy',
   '/releasing': 'deploy',
   '/development': 'deploy',
 }
