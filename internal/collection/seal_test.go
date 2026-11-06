@@ -95,7 +95,7 @@ func update(t *testing.T, c *collection.Collection, id string, status string) {
 
 	ch := collection.Change{Set: map[string]any{"status": status}}
 
-	if _, err := c.Update(context.Background(), id, ch, 0); err != nil {
+	if _, err := c.UpdateID(context.Background(), id, ch, 0); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -103,7 +103,7 @@ func update(t *testing.T, c *collection.Collection, id string, status string) {
 func remove(t *testing.T, c *collection.Collection, id string) {
 	t.Helper()
 
-	if err := c.Delete(context.Background(), id, 0); err != nil {
+	if err := c.DeleteID(context.Background(), id); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -568,7 +568,7 @@ func TestUniqueKeysOfSealedRows(t *testing.T) {
 		t.Fatalf("duplicate of a sealed unique value: %v", err)
 	}
 
-	if _, err := c.Update(ctx, "u1", collection.Change{Set: map[string]any{"email": "b@x"}}, 0); err != nil {
+	if _, err := c.UpdateID(ctx, "u1", collection.Change{Set: map[string]any{"email": "b@x"}}, 0); err != nil {
 		t.Fatal(err)
 	}
 

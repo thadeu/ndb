@@ -19,6 +19,8 @@ var subcommands = map[string]func(args []string) error{
 
 	"collections": runCollections,
 	"compact":     runCompact,
+	"update":      runUpdate,
+	"delete":      runDelete,
 	"expire":      runExpire,
 	"persist":     runPersist,
 	"ttl":         runTTL,
@@ -110,6 +112,9 @@ Usage:
   ndb size                      disk usage per collection and per part
   ndb collections [name]        the catalog, or the definition of one collection
   ndb compact <collection>      seal and merge the segments now (engine mode)
+  ndb update <coll> '<json>'    atomic update by filter: the JSON mixes the filter and the
+                                write operators ($set $unset $inc $push $pull $min $max)
+  ndb delete <coll> '<json>'    delete the documents the JSON filter matches
   ndb expire <coll> <id> <dur>  the document expires <dur> from now (30m, 1h, 3600)
   ndb persist <coll> <id>       remove the expiry of a document
   ndb ttl <coll> <id>           time left of a document (-1 = never expires)
@@ -123,7 +128,7 @@ Common flags:
   -config FILE      ndb.yml (default ndb.yml; absent = defaults)
   -data-dir DIR     data dir (overrides ndb.yml)
 
-Talking to the daemon (stats, size, collections, compact, expire, persist, ttl, quarantine, query):
+Talking to the daemon (stats, size, collections, compact, update, delete, expire, persist, ttl, quarantine, query):
   -url unix:///sock|tcp://host:port   which daemon (default NDB_URL, then the
                                       unix socket of ndb.yml); NDB_TOKEN is the bearer token
   -json                               machine output (query: NDJSON rows)
@@ -133,6 +138,8 @@ Talking to the daemon (stats, size, collections, compact, expire, persist, ttl, 
 Per command:
   restore     -force                  replace a data dir that is not empty
   quarantine  -limit N                last N bad lines (default 20, at most 1000)
+  update      --many --upsert --expire-in DUR   (many needs the id or an indexed field)
+  delete      --many
   query       -sort JSON -fields a,b -limit N -aggregate JSON -ndjson
 
 Tables fit the terminal width (COLUMNS when there is no tty size), use ASCII

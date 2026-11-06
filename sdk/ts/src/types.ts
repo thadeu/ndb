@@ -76,18 +76,68 @@ export interface WriteResult {
   v: number
 }
 
-export interface WriteOptions {
-  ifVersion?: number
-}
-
 // A duration for the daemon: seconds, or a string such as "90m", "1h30m", "1d".
 export type Duration = number | string
 
-export interface UpdateOptions extends WriteOptions {
-  unset?: string[]
+// The filter of update and delete: a where object, plus the version "_v" (a
+// guard for optimistic concurrency) and the boolean operators.
+export type Filter<F extends Fields> = Where<F> & {
+  _v?: number | Ops<number>
+  $and?: Filter<F>[]
+  $or?: Filter<F>[]
+  $nor?: Filter<F>[]
+}
+
+// The write operators of an update. Every key of a field map is a field name
+// or a dot path. Keys of this object must start with "$".
+export interface UpdateOps<F extends Fields = Fields> {
+  $set?: Input<F> & Record<string, unknown>
+  $unset?: Record<string, true | ''>
+
+  // Negative numbers subtract. A missing field counts as 0.
+  $inc?: Record<string, number>
+
+  // A value is appended; { $each: [...] } appends many. A missing field
+  // becomes a new array.
+  $push?: Record<string, unknown>
+
+  // A value removes every equal element; a condition ({ $gte: 5 }, or
+  // { status: 'done' } for objects) removes the elements that match it.
+  $pull?: Record<string, unknown>
+
+  // Set the field when it is missing or the value is lower (higher).
+  $min?: Record<string, number | string>
+  $max?: Record<string, number | string>
+}
+
+export interface UpdateOptions {
+  // Update every match. The filter needs the id or an indexed field
+  // (UnindexedManyError otherwise).
+  many?: boolean
+
+  // Create the document from the equality fields of the filter when nothing
+  // matches.
+  upsert?: boolean
 
   // The daemon sets the expires field to now + expireIn, in the same write.
   expireIn?: Duration
+}
+
+export interface DeleteOptions {
+  many?: boolean
+}
+
+// matched is 0 when the filter matched nothing (that is not an error), and
+// modified is 0 when the operators left the document as it was. doc is the
+// new document with its version; it is absent for many.
+export interface UpdateResult<F extends Fields = Fields> {
+  matched: number
+  modified: number
+  doc?: Row<F>
+}
+
+export interface DeleteResult {
+  deleted: number
 }
 
 export interface InsertOptions {

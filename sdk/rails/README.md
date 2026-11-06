@@ -112,13 +112,21 @@ call = Call.find("c1")        # raises Ndb::NotFound
 Call.find_by(status: "failed") # nil when missing
 Call.find_by!(status: "x")     # raises NotFound
 
-call.update!(status: "done")  # sends only the changed fields
+call.update!(status: "done")  # $set of the changed fields only, filtered by id and version
 call.version                   # the document version
 
+call.increment!(:duration)     # atomic $inc on the daemon, refreshes the attribute and the version
+call.decrement!(:duration, 5)
+
 call.destroy
+
+# Atomic writes on every match of a where (it needs the id or an indexed field).
+# update takes the operators of the client and returns the number of modified documents.
+Call.where(status: "failed").update({ "$set" => { "status" => "retry" } })
+Call.where(status: "retry").delete       # returns how many it deleted
 ```
 
-- Every load asks for the version (`_v`). `save`, `update` and `destroy` send it back as `if_version`. If another writer changed the document first, you get `Ndb::StaleObjectError` (code `version_conflict`).
+- Every load asks for the version (`_v`). `save`, `update` and `destroy` put the id and `_v` in the filter of the write. If another writer changed the document first, the filter matches nothing and you get `Ndb::StaleObjectError` (code `stale_object`).
 - Setting an attribute to `nil` and saving removes the field from the document.
 - A duplicate id raises `RecordNotUnique` (code `duplicate_id`).
 - `persisted?`, `new_record?`, `destroyed?`, `id` and `version` work as in ActiveRecord.
@@ -321,7 +329,7 @@ A blob behaves like a read-only IO (`read`, `each_chunk`, `eof?`, `rewind`). A l
 
 ## Errors
 
-The transport and daemon errors are defined by the gem `ndb`. They all live in the `Ndb` module (`Ndb::Error`, `Ndb::NotFound`, ...). For an ActiveRecord-like `rescue`, this gem adds two aliases: `Ndb::StaleObjectError` is `Ndb::VersionConflict`, and `Ndb::RecordNotUnique` is `Ndb::UniqueViolation`. They are the same classes, so a `rescue` of either name catches the same error. `Ndb::RecordInvalid` and `Ndb::RecordNotSaved` exist only here, and they inherit from `Ndb::Error`. Every error has `code` (the daemon code) and `status` (the HTTP status).
+The transport and daemon errors are defined by the gem `ndb`. They all live in the `Ndb` module (`Ndb::Error`, `Ndb::NotFound`, ...). For an ActiveRecord-like `rescue`, this gem adds one alias: `Ndb::RecordNotUnique` is `Ndb::UniqueViolation` (the same class). `Ndb::StaleObjectError`, `Ndb::RecordInvalid` and `Ndb::RecordNotSaved` exist only here, and they inherit from `Ndb::Error`. Every error has `code` (the daemon code) and `status` (the HTTP status).
 
 | Class | Code |
 |---|---|
@@ -329,7 +337,8 @@ The transport and daemon errors are defined by the gem `ndb`. They all live in t
 | `NotReady` | `not_ready` |
 | `NotFound` | `not_found` |
 | `UnknownCollection` | `unknown_collection` |
-| `StaleObjectError` | `version_conflict` |
+| `StaleObjectError` | `stale_object` (raised by the gem, not sent by the daemon) |
+| `InvalidUpdate` and its subclasses | `unknown_operator`, `no_update`, `conflicting_update`, `invalid_field`, `unindexed_many`, `empty_filter` |
 | `RecordNotUnique` | `unique_violation`, `duplicate_id` |
 | `CatalogConflict` | `catalog_conflict` |
 | `CatalogInvalid` | `catalog_invalid` |

@@ -14,7 +14,7 @@ class TtlTest < Minitest::Test
 
     assert_in_delta 3600, client.ttl(@coll, "a"), 2
 
-    client.update(@coll, "a", set: { n: 1 }, expire_in: "30m")
+    client.update(@coll, { id: "a" }, { "$set" => { n: 1 } }, expire_in: "30m")
 
     assert_in_delta 1800, client.ttl(@coll, "a"), 2
     assert_in_delta 3600, client.ttl(@coll, "b"), 2
@@ -31,7 +31,7 @@ class TtlTest < Minitest::Test
     assert res["expires_at"]
     assert_in_delta 1800, client.ttl(@coll, "s1"), 2
 
-    assert_equal 3, client.expire(@coll, "s1", at: Time.now + 7200, if_version: 2)["v"]
+    assert_equal 3, client.expire(@coll, "s1", at: Time.now + 7200)["v"]
     assert_in_delta 7200, client.ttl(@coll, "s1"), 2
 
     assert_equal 4, client.persist(@coll, "s1")["v"]

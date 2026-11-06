@@ -91,7 +91,7 @@ func TestInsertAndUpdateExternalizeLargeStrings(t *testing.T) {
 		t.Fatalf("refs = %v", refs)
 	}
 
-	if _, err := c.Update(ctx, "c1", collection.Change{Set: map[string]any{"audio": other}}, 0); err != nil {
+	if _, err := c.UpdateID(ctx, "c1", collection.Change{Set: map[string]any{"audio": other}}, 0); err != nil {
 		t.Fatal(err)
 	}
 

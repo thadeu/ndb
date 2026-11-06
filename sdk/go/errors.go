@@ -29,7 +29,6 @@ func (e *Error) Is(target error) bool {
 // Sentinels for errors.Is. Each one matches every error with its code.
 var (
 	ErrNotFound          = &Error{Code: "not_found"}
-	ErrVersionConflict   = &Error{Code: "version_conflict"}
 	ErrDuplicateID       = &Error{Code: "duplicate_id"}
 	ErrUniqueViolation   = &Error{Code: "unique_violation"}
 	ErrCatalogConflict   = &Error{Code: "catalog_conflict"}
@@ -52,4 +51,10 @@ var (
 	ErrHistoryTruncated  = &Error{Code: "history_truncated"}
 	ErrTTLNotEnabled     = &Error{Code: "ttl_not_enabled"}
 	ErrTTLDerived        = &Error{Code: "ttl_derived"}
+	ErrUnknownOperator   = &Error{Code: "unknown_operator"}
+	ErrNoUpdate          = &Error{Code: "no_update"}
+	ErrConflictingUpdate = &Error{Code: "conflicting_update"}
+	ErrInvalidField      = &Error{Code: "invalid_field"}
+	ErrUnindexedMany     = &Error{Code: "unindexed_many"}
+	ErrEmptyFilter       = &Error{Code: "empty_filter"}
 )

@@ -80,25 +80,25 @@ results = ndb.insert("calls", [
 ])
 results   # => [{"id" => "c1", "v" => 1}, {"id" => "c2", "v" => 1}]
 
-ndb.update("calls", "c1", set: { status: "done" }, unset: ["caller"])   # => {"id" => "c1", "v" => 2}
-ndb.update("calls", "c1", set: { duration: 50 }, if_version: 2)         # only if the version is still 2
+# Atomic update by filter: the filter, then the write operators.
+ndb.update("calls", { call_id: "c1" }, { "$set" => { status: "done" }, "$unset" => { caller: true } })
+# => {"matched" => 1, "modified" => 1, "doc" => {"call_id" => "c1", ..., "_v" => 2}}
 
-ndb.delete("calls", "c2")
-ndb.delete("calls", "c1", if_version: 3)
+ndb.update("calls", { call_id: "c1", _v: 2 }, { "$set" => { duration: 50 } })   # only if the version is still 2
+ndb.update("stock", { sku: "a", qty: { "$gte" => 1 } }, { "$inc" => { qty: -1 } })   # guarded decrement
+
+ndb.update("calls", { status: "failed" }, { "$set" => { status: "retry" } }, many: true)   # => {"matched" => 3, "modified" => 3}
+ndb.update("counters", { name: "hits" }, { "$inc" => { n: 1 } }, upsert: true)
+
+ndb.delete("calls", { call_id: "c2" })                  # => {"deleted" => 1}
+ndb.delete("calls", { status: "failed" }, many: true)
 ```
 
-- `if_version:` is optimistic locking. If another writer changed the document first, you get `Ndb::VersionConflict` (code `version_conflict`). Reload and try again.
+- Operators: `$set`, `$unset`, `$inc`, `$push` (with `{ "$each" => [...] }`), `$pull`, `$min`, `$max`. Field names can be dot paths. A key of the operators without `$` raises `ArgumentError` before anything is sent.
+- Nothing matched is not an error: `matched` is 0. A stale `_v` is a filter that matches nothing, so read again and retry. `modified` is 0 when the operators leave the document as it is.
+- `many: true` needs the id or an indexed field in the filter (`Ndb::UnindexedMany`). `upsert: true` creates the document from the equality fields of the filter. The answer has `doc` only for one document.
+- The contract errors are `Ndb::UnknownOperator`, `NoUpdate`, `ConflictingUpdate`, `InvalidField`, `UnindexedMany` and `EmptyFilter`, all under `Ndb::InvalidUpdate`.
 - A duplicate id raises `Ndb::UniqueViolation` (code `duplicate_id`). A broken unique field raises it too (code `unique_violation`).
-- A missing document raises `Ndb::NotFound`.
-
-```ruby
-begin
-  ndb.update("calls", "c1", set: { status: "done" }, if_version: version)
-rescue Ndb::VersionConflict
-  version = ndb.find("calls", where: { call_id: "c1" }, versions: true).rows.first["_v"]
-  retry
-end
-```
 
 ## Expiry (TTL like Redis)
 
@@ -108,10 +108,10 @@ The collection needs `expires_field`.
 ndb.ensure_collection("sessions", { id: "sid", expires_field: "exp" })
 
 ndb.insert("sessions", [{ sid: "s1" }], expire_in: 3600)  # seconds, or "1h" / "30m" / "1d"
-ndb.update("sessions", "s1", set: { user: "u" }, expire_in: "30m")
+ndb.update("sessions", { sid: "s1" }, { "$set" => { user: "u" } }, expire_in: "30m")
 
 ndb.expire("sessions", "s1", in: 1800)                     # => {"id", "v", "expires_at"}
-ndb.expire("sessions", "s1", at: Time.now + 7200, if_version: 2)
+ndb.expire("sessions", "s1", at: Time.now + 7200)
 ndb.ttl("sessions", "s1")                                  # => 7199, -1 (never expires), or nil (missing or expired)
 ndb.persist("sessions", "s1")                              # => {"id", "v"}
 ```
@@ -275,7 +275,7 @@ All errors inherit from `Ndb::Error`, which has `code` (the daemon code) and `st
 | `NotReady` | `not_ready` |
 | `NotFound` | `not_found` |
 | `UnknownCollection` | `unknown_collection` |
-| `VersionConflict` | `version_conflict` |
+| `InvalidUpdate` and its subclasses | `unknown_operator`, `no_update`, `conflicting_update`, `invalid_field`, `unindexed_many`, `empty_filter` |
 | `UniqueViolation` | `unique_violation`, `duplicate_id` |
 | `CatalogConflict` | `catalog_conflict` |
 | `CatalogInvalid` | `catalog_invalid` |

@@ -551,10 +551,22 @@ func (c *Collection) source(q *query.Query) source {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	conds := q.Indexable()
+	if plan, cands, ok := c.indexedCands(q.Indexable()); ok {
+		return source{plan: plan, cands: cands, held: c.holdSegments()}
+	}
 
+	src := c.scanSource()
+	src.held = c.holdSegments()
+
+	return src
+}
+
+// indexedCands is the candidate list that the id map or a ready index gives
+// for conds, with the plan name. ok is false when neither can answer. The
+// caller holds c.mu.
+func (c *Collection) indexedCands(conds []query.Cond) (string, []cand, bool) {
 	if out, ok := c.byID(conds); ok {
-		return source{plan: "id", cands: out, held: c.holdSegments()}
+		return "id", out, true
 	}
 
 	for _, pass := range []func(string) bool{isPoint, isRange} {
@@ -565,14 +577,11 @@ func (c *Collection) source(q *query.Query) source {
 				continue
 			}
 
-			return source{plan: "index:" + cd.Path, cands: c.byIndex(s, cd, conds), held: c.holdSegments()}
+			return "index:" + cd.Path, c.byIndex(s, cd, conds), true
 		}
 	}
 
-	src := c.scanSource()
-	src.held = c.holdSegments()
-
-	return src
+	return "", nil, false
 }
 
 func isPoint(op string) bool {

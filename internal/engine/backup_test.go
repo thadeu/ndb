@@ -166,11 +166,11 @@ func TestOfflineRestoreGivesSameResults(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := col.Update(ctx, "e001", collection.Change{Set: map[string]any{"n": 99}}, 0); err != nil {
+	if _, err := col.Update(ctx, []byte(`{"k":"e001","$set":{"n":99}}`), collection.UpdateOpts{}); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := col.Delete(ctx, "e002", 0); err != nil {
+	if _, err := col.Delete(ctx, []byte(`{"k":"e002"}`), false); err != nil {
 		t.Fatal(err)
 	}
 

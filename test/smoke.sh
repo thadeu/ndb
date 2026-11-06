@@ -65,14 +65,15 @@ call POST /v1/c/posts/find '{"where":{"status":"live"}}' >/dev/null
 expect 200 "$(cat "$tmp/status")"
 [[ "$(cat "$tmp/body")" == *'"p2"'* ]] || fail "find did not return p2"
 
-call POST /v1/c/posts/update '{"update":{"id":"p1","set":{"status":"live"},"if_version":1}}' >/dev/null
+call POST /v1/c/posts/update '{"post_id":"p1","_v":1,"$set":{"status":"live"}}' >/dev/null
 expect 200 "$(cat "$tmp/status")"
+[[ "$(cat "$tmp/body")" == *'"matched":1'* ]] || fail "update did not match: $(cat "$tmp/body")"
 
-call POST /v1/c/posts/update '{"update":{"id":"p1","set":{"status":"gone"},"if_version":1}}' >/dev/null
-expect 409 "$(cat "$tmp/status")"
-[[ "$(cat "$tmp/body")" == *'version_conflict'* ]] || fail "stale update: no version_conflict code"
+call POST /v1/c/posts/update '{"post_id":"p1","_v":1,"$set":{"status":"gone"}}' >/dev/null
+expect 200 "$(cat "$tmp/status")"
+[[ "$(cat "$tmp/body")" == *'"matched":0'* ]] || fail "stale update matched: $(cat "$tmp/body")"
 
-call POST /v1/c/posts/delete '{"delete":{"id":"p2"}}' >/dev/null
+call POST /v1/c/posts/delete '{"post_id":"p2"}' >/dev/null
 expect 200 "$(cat "$tmp/status")"
 
 call GET /v1/c/posts/stats >/dev/null

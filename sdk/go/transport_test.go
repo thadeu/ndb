@@ -144,7 +144,7 @@ func TestErrorsAreTyped(t *testing.T) {
 	rawPut(t, db, name, `{"id":"id"}`)
 	mustInsert(t, db, name, `[{"id":"a","n":1}]`)
 
-	body := []byte(`{"update":{"id":"a","set":{"n":2},"if_version":9}}`)
+	body := []byte(`{"id":"a","$bogus":{"n":2}}`)
 
 	_, err := db.do(context.Background(), http.MethodPost, collPath(name)+"/update", body)
 
@@ -154,16 +154,16 @@ func TestErrorsAreTyped(t *testing.T) {
 		t.Fatalf("want *Error, got %T: %v", err, err)
 	}
 
-	if apiErr.Code != "version_conflict" || apiErr.Status != http.StatusConflict {
-		t.Fatalf("got code %q status %d, want version_conflict 409", apiErr.Code, apiErr.Status)
+	if apiErr.Code != "unknown_operator" || apiErr.Status != http.StatusBadRequest {
+		t.Fatalf("got code %q status %d, want unknown_operator 400", apiErr.Code, apiErr.Status)
 	}
 
-	if !errors.Is(err, ErrVersionConflict) {
-		t.Fatal("errors.Is(err, ErrVersionConflict) = false")
+	if !errors.Is(err, ErrUnknownOperator) {
+		t.Fatal("errors.Is(err, ErrUnknownOperator) = false")
 	}
 
 	if errors.Is(err, ErrNotFound) {
-		t.Fatal("a version conflict must not match ErrNotFound")
+		t.Fatal("an unknown operator must not match ErrNotFound")
 	}
 }
 

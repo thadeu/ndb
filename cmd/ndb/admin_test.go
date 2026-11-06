@@ -382,3 +382,66 @@ func TestExpirePersistTTLCommands(t *testing.T) {
 		t.Fatal("expire without a duration must fail")
 	}
 }
+
+func TestUpdateDeleteCommands(t *testing.T) {
+	dir := t.TempDir()
+
+	db, err := engine.Open(config.Config{DataDir: dir, AllowImplicit: true}, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.Ensure(catalog.Def{Name: "stock", ID: "id", Indexes: []string{"g"}, ExpiresField: "exp"}); err != nil {
+		t.Fatal(err)
+	}
+
+	col, err := db.Get("stock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := col.Insert(ctx, []byte(`{"id":"a","g":1,"qty":2}`), []byte(`{"id":"b","g":1,"qty":2}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	sock, _ := startDaemon(t, dir)
+
+	base := []string{"-config", "none.yml", "-url", "unix://" + sock, "-json"}
+
+	raw := runCmd(t, func(a []string, o *strings.Builder) error { return update(a, o) },
+		append([]string{"stock", `{"id":"a","$inc":{"qty":-1}}`, "--expire-in", "60s"}, base...)...)
+
+	var up updateReport
+
+	if err := json.Unmarshal([]byte(raw), &up); err != nil || up.Matched != 1 || up.Modified != 1 || !strings.Contains(string(up.Doc), `"qty": 1`) && !strings.Contains(string(up.Doc), `"qty":1`) {
+		t.Fatalf("update = %s, %v", raw, err)
+	}
+
+	raw = runCmd(t, func(a []string, o *strings.Builder) error { return update(a, o) },
+		append([]string{"stock", `{"g":1,"$set":{"x":1}}`, "--many"}, base...)...)
+
+	var many updateReport
+
+	if err := json.Unmarshal([]byte(raw), &many); err != nil || many.Matched != 2 || many.Doc != nil {
+		t.Fatalf("update many = %s, %v", raw, err)
+	}
+
+	raw = runCmd(t, func(a []string, o *strings.Builder) error { return remove(a, o) },
+		append([]string{"stock", `{"g":1}`, "--many"}, base...)...)
+
+	var del deleteReport
+
+	if err := json.Unmarshal([]byte(raw), &del); err != nil || del.Deleted != 2 {
+		t.Fatalf("delete = %s, %v", raw, err)
+	}
+
+	var out strings.Builder
+
+	if err := update(append([]string{"stock", `{"id":"a"}`}, base...), &out); err == nil || !strings.Contains(err.Error(), "no_update") {
+		t.Fatalf("update without operators = %v", err)
+	}
+}

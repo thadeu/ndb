@@ -1,10 +1,13 @@
 # frozen_string_literal: true
 
 module Ndb
-  # ActiveRecord-like names for two daemon errors. They are the same classes,
-  # so a rescue of either name catches the same error.
-  StaleObjectError = VersionConflict
+  # ActiveRecord-like name for a daemon error. It is the same class, so a
+  # rescue of either name catches the same error.
   RecordNotUnique = UniqueViolation
+
+  # A save or destroy matched nothing: the record changed or was deleted
+  # since it was loaded (its "_v" guard did not match).
+  class StaleObjectError < Error; end
 
   # Raised by save!/create!/update! when validations fail.
   class RecordInvalid < Error

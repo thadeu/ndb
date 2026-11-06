@@ -89,23 +89,37 @@ results, err := calls.Insert(ctx,
 // Get by id. A missing id returns ErrNotFound.
 call, err := calls.Get(ctx, "c1")
 
-// Update with optimistic locking.
-v, err := calls.Update(ctx, "c1", map[string]any{"status": "done"}, ndb.IfVersion(call.Version))
+// Atomic update by filter. The daemon matches the filter and writes the
+// operators in one step. A _v in the filter is an optimistic lock.
+res, err := calls.Update(ctx,
+	ndb.And(ndb.Eq("call_id", "c1"), ndb.Eq("_v", call.Version)),
+	ndb.Ops{"$set": {"status": "done"}, "$unset": {"duration": true}},
+)
+// res.Matched, res.Modified, res.Doc (the new document, nil for Many).
 
-if errors.Is(err, ndb.ErrVersionConflict) {
-	// Someone else wrote first. Read again and retry.
+if err == nil && res.Matched == 0 {
+	// Someone else wrote first, or the document is gone. Read again and retry.
 }
 
-// Remove a field.
-_, err = calls.Update(ctx, "c1", nil, ndb.Unset("duration"))
+// A guarded decrement: exactly one of two racing calls wins.
+res, err = calls.Update(ctx,
+	ndb.And(ndb.Eq("sku", "a"), ndb.Gte("qty", 1)),
+	ndb.Ops{"$inc": {"qty": -1}},
+)
 
-// Delete. IfVersion is optional here too.
-err = calls.Delete(ctx, "c1", ndb.IfVersion(v))
+// Every match (the filter needs the id or an indexed field), or create it.
+_, err = calls.Update(ctx, ndb.Eq("status", "failed"), ndb.Ops{"$set": {"status": "retry"}}, ndb.Many())
+_, err = calls.Update(ctx, ndb.Eq("call_id", "c9"), ndb.Ops{"$inc": {"duration": 1}}, ndb.Upsert())
+
+// Delete by filter. It returns how many it removed.
+deleted, err := calls.Delete(ctx, ndb.Eq("call_id", "c2"))
 ```
 
-- `Update` returns the new version. Without `IfVersion` there is no check.
+- Operators: `$set`, `$unset`, `$inc`, `$push` (with `{"$each": [...]}`), `$pull`, `$min`, `$max`. Field names can be dot paths, as they are in the document (the tag names). A key of `Ops` without `$` is an error before anything is sent.
+- Nothing matched is not an error: `Matched` is 0. `Modified` is 0 when the operators leave the document as it is.
+- `Many()` needs the id or an indexed field in the filter (`ErrUnindexedMany`). `Upsert()` creates the document from the equality fields of the filter.
+- `Filter` is one condition; join several with `ndb.And`. `ndb.Eq("_v", n)` matches the version.
 - `Insert` fails with `ErrDuplicateID` when the id exists.
-- `Update` takes field names as they are in the document (the tag names).
 
 ### Expiry (TTL like Redis)
 
@@ -119,7 +133,7 @@ type Session struct {
 
 // Insert takes no options (it is variadic); InsertWith does.
 _, err = sessions.InsertWith(ctx, []Session{{ID: "s1"}}, ndb.ExpireIn(time.Hour))
-_, err = sessions.Update(ctx, "s1", map[string]any{"x": 1}, ndb.ExpireIn(30*time.Minute))
+_, err = sessions.Update(ctx, ndb.Eq("id", "s1"), ndb.Ops{"$set": {"x": 1}}, ndb.ExpireIn(30*time.Minute))
 
 _, err = sessions.Expire(ctx, "s1", 30*time.Minute)         // EXPIRE
 _, err = sessions.ExpireAt(ctx, "s1", time.Now().Add(time.Hour))
@@ -127,7 +141,7 @@ left, expires, err := sessions.TTL(ctx, "s1")               // expires is false 
 _, err = sessions.Persist(ctx, "s1")                        // PERSIST
 ```
 
-- `Expire`, `ExpireAt` and `Persist` return the new version. `IfVersion` works on `Expire` and `ExpireAt`.
+- `Expire`, `ExpireAt` and `Persist` return the new version.
 - `TTL` rounds up to whole seconds. A missing or expired document is `ErrNotFound`.
 - `ErrTTLNotEnabled`: no `expires` field. `ErrTTLDerived`: the expiry comes from `ttl` + `time`.
 - `ExpireIn` wins over the value of the `expires` field in the document.
@@ -269,7 +283,7 @@ Large values live in the blob store. The document keeps only a reference. The sa
 ```go
 blob, err := db.PutBlob(ctx, file, "audio/wav") // file is an io.Reader
 
-_, err = calls.Update(ctx, "c1", map[string]any{"recording": blob})
+_, err = calls.Update(ctx, ndb.Eq("call_id", "c1"), ndb.Ops{"$set": {"recording": blob}})
 
 call, err := calls.Get(ctx, "c1") // call.Recording is *ndb.Blob
 
@@ -303,7 +317,6 @@ if errors.As(err, &apiErr) {
 | Sentinel | Code |
 |---|---|
 | `ErrNotFound` | `not_found` |
-| `ErrVersionConflict` | `version_conflict` |
 | `ErrDuplicateID` | `duplicate_id` |
 | `ErrUniqueViolation` | `unique_violation` |
 | `ErrCatalogConflict` | `catalog_conflict` |
@@ -316,6 +329,7 @@ if errors.As(err, &apiErr) {
 | `ErrCursorInvalid`, `ErrCursorMismatch`, `ErrCursorExpired` | `cursor_invalid`, `cursor_mismatch`, `cursor_expired` |
 | `ErrRequestTooLarge`, `ErrLineTooLarge` | `request_too_large`, `line_too_large` |
 | `ErrUnauthorized` | `unauthorized` |
+| `ErrUnknownOperator`, `ErrNoUpdate`, `ErrConflictingUpdate`, `ErrInvalidField`, `ErrUnindexedMany`, `ErrEmptyFilter` | `unknown_operator`, `no_update`, `conflicting_update`, `invalid_field`, `unindexed_many`, `empty_filter` |
 | `ErrNotReady` | `not_ready` |
 | `ErrClosed` | `closed` |
 | `ErrWatchLagged` | `watch_lagged` |

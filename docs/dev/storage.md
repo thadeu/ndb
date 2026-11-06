@@ -20,7 +20,7 @@ Look at it with `ls`; do not edit it by hand while the daemon runs.
 
 ## Write modes
 
-**Engine mode.** Only ndb writes, through the [WAL](wal.md). One writer per collection gives serializable writes; `if_version` gives optimistic concurrency.
+**Engine mode.** Only ndb writes, through the [WAL](wal.md). One writer per collection gives serializable writes; an update by filter with `_v` gives optimistic concurrency.
 
 **Direct mode.** The apps append to their own files, ndb only reads them. Rules for the apps:
 

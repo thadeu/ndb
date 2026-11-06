@@ -75,8 +75,8 @@ class PersistenceTest < Minitest::Test
 
     sent = capture_update { post.update!(status: "b") }
 
-    assert_equal({ "status" => "b" }, sent[:set])
-    assert_empty sent[:unset]
+    assert_equal({ "$set" => { "status" => "b" } }, sent[:ops])
+    assert_equal({ "call_id" => "c1", "_v" => 1 }, sent[:filter])
     assert_equal "b", @post.find("c1").status
     assert_equal 1, @post.find("c1").duration
   end
@@ -86,7 +86,7 @@ class PersistenceTest < Minitest::Test
 
     sent = capture_update { post.update!(duration: nil) }
 
-    assert_equal ["duration"], sent[:unset]
+    assert_equal({ "$unset" => { "duration" => true } }, sent[:ops])
     assert_nil @post.find("c1").duration
   end
 
@@ -192,6 +192,48 @@ class PersistenceTest < Minitest::Test
     assert_equal 0, klass.count
   end
 
+  def test_increment_and_decrement_are_atomic_writes
+    post = @post.create!(call_id: "c1", status: "a", duration: 10)
+
+    assert_same post, post.increment!(:duration, 5)
+    assert_equal 15, post.duration
+    assert_equal 2, post.version
+
+    post.decrement!(:duration)
+
+    assert_equal 14, post.duration
+    assert_equal 14, @post.find("c1").duration
+    refute_predicate post, :changed?
+  end
+
+  def test_concurrent_increments_do_not_lose_updates
+    @post.create!(call_id: "c1", status: "a", duration: 0)
+
+    20.times.map { Thread.new { @post.find("c1").increment!(:duration) } }.each(&:join)
+
+    assert_equal 20, @post.find("c1").duration
+  end
+
+  def test_increment_needs_a_saved_record_and_a_known_attribute
+    assert_raises(Ndb::RecordNotSaved) { @post.new(call_id: "x").increment!(:duration) }
+
+    post = @post.create!(call_id: "c1", status: "a")
+
+    assert_raises(ArgumentError) { post.increment!(:nope) }
+  end
+
+  def test_relation_update_and_delete
+    @post.create!(call_id: "c1", status: "a", duration: 1)
+    @post.create!(call_id: "c2", status: "a", duration: 1)
+    @post.create!(call_id: "c3", status: "b", duration: 1)
+
+    assert_equal 2, @post.where(status: "a").update({ "$inc" => { "duration" => 4 } })
+    assert_equal 5, @post.find("c1").duration
+    assert_equal 1, @post.find("c3").duration
+    assert_equal 2, @post.where(status: "a").delete
+    assert_equal 1, @post.count
+  end
+
   private
 
   # Records the arguments of the next ndb_update call (nil when none).
@@ -199,10 +241,10 @@ class PersistenceTest < Minitest::Test
     sent = nil
     original = @post.method(:ndb_update)
 
-    @post.define_singleton_method(:ndb_update) do |id, **change|
-      sent = change
+    @post.define_singleton_method(:ndb_update) do |filter, ops, **options|
+      sent = { filter: filter, ops: ops }
 
-      original.call(id, **change)
+      original.call(filter, ops, **options)
     end
 
     yield

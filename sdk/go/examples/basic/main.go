@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -58,18 +57,27 @@ func run(ctx context.Context, addr string) error {
 
 	fmt.Printf("answered calls: %d\n", len(answered))
 
-	version, err := calls.Update(ctx, id, map[string]any{"status": "done"}, ndb.IfVersion(1))
+	byID := ndb.Eq("call_id", id)
+
+	res, err := calls.Update(ctx, byID, ndb.Ops{"$set": {"status": "done"}})
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("updated %s to version %d\n", id, version)
+	fmt.Printf("updated %s: matched %d, modified %d\n", id, res.Matched, res.Modified)
 
-	_, err = calls.Update(ctx, id, map[string]any{"status": "stale"}, ndb.IfVersion(1))
+	stale := ndb.And(byID, ndb.Eq("_v", 1))
 
-	if errors.Is(err, ndb.ErrVersionConflict) {
-		fmt.Println("stale update refused, as expected")
+	res, err = calls.Update(ctx, stale, ndb.Ops{"$set": {"status": "stale"}})
+	if err != nil {
+		return err
 	}
 
-	return calls.Delete(ctx, id)
+	if res.Matched == 0 {
+		fmt.Println("stale update matched nothing, as expected")
+	}
+
+	_, err = calls.Delete(ctx, byID)
+
+	return err
 }

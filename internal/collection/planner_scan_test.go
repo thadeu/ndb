@@ -336,13 +336,13 @@ func TestLastVersionAndTombstonesAcrossSegments(t *testing.T) {
 		for i := 0; i < 300; i += 3 {
 			ch := collection.Change{Set: map[string]any{"status": "s1", "n": i * 10}}
 
-			if _, err := c.Update(ctx, fmt.Sprintf("d%04d", i), ch, 0); err != nil {
+			if _, err := c.UpdateID(ctx, fmt.Sprintf("d%04d", i), ch, 0); err != nil {
 				t.Fatal(err)
 			}
 		}
 
 		for i := 1; i < 300; i += 11 {
-			if err := c.Delete(ctx, fmt.Sprintf("d%04d", i), 0); err != nil {
+			if err := c.DeleteID(ctx, fmt.Sprintf("d%04d", i)); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -418,7 +418,7 @@ func TestIDCacheCountsHits(t *testing.T) {
 		t.Fatalf("cache hits first %d second %d", first.CacheHits, second.CacheHits)
 	}
 
-	if _, err := c.Update(ctx, "d1", collection.Change{Set: map[string]any{"n": 5}}, 0); err != nil {
+	if _, err := c.UpdateID(ctx, "d1", collection.Change{Set: map[string]any{"n": 5}}, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -547,7 +547,7 @@ func TestVersionsFlagReturnsSnapshotVersion(t *testing.T) {
 	sealBatch(t, c, []string{`{"id":"sealed"}`})
 	bulk(t, c, []string{`{"id":"mem"}`})
 
-	if _, err := c.Update(ctx, "sealed", collection.Change{Set: map[string]any{"n": 1}}, 0); err != nil {
+	if _, err := c.UpdateID(ctx, "sealed", collection.Change{Set: map[string]any{"n": 1}}, 0); err != nil {
 		t.Fatal(err)
 	}
 

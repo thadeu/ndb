@@ -67,13 +67,13 @@ func fillAgg(t *testing.T, c *collection.Collection, seal bool) {
 	for i := 0; i < 500; i += 17 {
 		set := map[string]any{"status": "z", "dur": 1000 + i}
 
-		if _, err := c.Update(ctx, fmt.Sprintf("d%04d", i), collection.Change{Set: set}, 0); err != nil {
+		if _, err := c.UpdateID(ctx, fmt.Sprintf("d%04d", i), collection.Change{Set: set}, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	for i := 3; i < 500; i += 29 {
-		if err := c.Delete(ctx, fmt.Sprintf("d%04d", i), 0); err != nil {
+		if err := c.DeleteID(ctx, fmt.Sprintf("d%04d", i)); err != nil {
 			t.Fatal(err)
 		}
 	}

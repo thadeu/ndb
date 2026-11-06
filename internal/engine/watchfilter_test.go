@@ -68,7 +68,7 @@ func TestWatchWhereDeleteFollowsTheLastKnownDoc(t *testing.T) {
 	insertN(t, db, 1, 3)
 
 	for _, id := range []string{"p1", "p3"} {
-		if err := col.Delete(ctx, id, 0); err != nil {
+		if _, err := col.Delete(ctx, []byte(`{"_id":"`+id+`"}`), false); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -102,7 +102,7 @@ func TestWatchWhereDropsDeleteOfUnknownDoc(t *testing.T) {
 	s, _ := db.WatchWhere("posts", "relay", "now", []byte(`{"n":1}`))
 	defer s.Close()
 
-	if err := col.Delete(ctx, "p1", 0); err != nil {
+	if _, err := col.Delete(ctx, []byte(`{"_id":"p1"}`), false); err != nil {
 		t.Fatal(err)
 	}
 

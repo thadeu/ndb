@@ -4,7 +4,7 @@ Five small programs that run for real. Each one does the same work in Go, Ruby, 
 
 | Example | Shows | Languages |
 |---|---|---|
-| [CRUD](/examples/crud) | insert, get, update with `if_version`, delete, count | Go, Ruby, Rails, TypeScript, curl |
+| [CRUD](/examples/crud) | insert, get, atomic update by filter, delete, count | Go, Ruby, Rails, TypeScript, curl |
 | [Logs (direct mode)](/examples/logs) | files written by other processes: filters, `$regex`, cursor pages | Go, Ruby, TypeScript, curl |
 | [Reports (aggregate)](/examples/reports) | `$match`, `$group`, `$dateTrunc` by hour, `$sum`, `$avg`, `$sort` | Go, Ruby, TypeScript, curl |
 | [Outbox (watch and ack)](/examples/outbox) | a consumer with a `where` filter that resumes after a restart | Go, Ruby, TypeScript, curl |
@@ -42,7 +42,7 @@ The examples do not hide a missing feature. Where an SDK lacks one, the page say
 
 | Feature | Go | Ruby | Rails | TypeScript | curl |
 |---|---|---|---|---|---|
-| insert, update, delete, `if_version` | yes | yes | yes | yes | yes |
+| insert, update, delete, `_v` guard | yes | yes | yes | yes | yes |
 | find, sort, cursor pages, count | yes | yes | yes | yes | yes |
 | `$regex` | yes | yes (also `Regexp`) | yes | yes | yes |
 | aggregate | yes | yes | yes (and `group`/`sum`) | yes | yes |

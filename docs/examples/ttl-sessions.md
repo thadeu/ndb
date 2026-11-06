@@ -118,7 +118,7 @@ The four programs print the same text.
 
 - Every SDK supports every step: `expire_in`, `ttl`, `expire`, `persist` and declaring `expires_field` from code (Go tag `expires`, Ruby `ensure_collection(expires_field:)`, TypeScript `expires` in the schema, curl `PUT`).
 - `ttl: 24h` with a `time` field is a derived expiry: every document ends a fixed time after its `time` field. `expire` and `persist` fail on it with `ttl_derived`.
-- Each `expire` or `persist` is a normal write: new version, `watch` event, and `if_version` works.
+- Each `expire` or `persist` is a normal write: new version, `watch` event, and a `_v` filter works.
 - More: [TTL like Redis](/configuration#ttl-like-redis) and [Compaction, retention and TTL](/operations#compaction-retention-and-ttl).
 
 ## Run it

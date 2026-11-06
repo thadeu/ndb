@@ -14,10 +14,9 @@ import (
 )
 
 type expireReq struct {
-	ID        string          `json:"id"`
-	In        json.RawMessage `json:"in"`
-	At        string          `json:"at"`
-	IfVersion uint64          `json:"if_version"`
+	ID string          `json:"id"`
+	In json.RawMessage `json:"in"`
+	At string          `json:"at"`
 }
 
 type persistReq struct {
@@ -56,7 +55,7 @@ func parseExpireIn(raw json.RawMessage) (time.Duration, error) {
 	return time.Duration(secs * float64(time.Second)), nil
 }
 
-// expire is POST /v1/c/{coll}/expire: {"id", "in" | "at", "if_version"}.
+// expire is POST /v1/c/{coll}/expire: {"id", "in" | "at"}.
 func (s *Server) expire(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
 
@@ -89,7 +88,7 @@ func (s *Server) expire(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
-	v, at, err := col.Expire(r.Context(), req.ID, e, req.IfVersion)
+	v, at, err := col.Expire(r.Context(), req.ID, e)
 	if err != nil {
 		writeError(w, err)
 

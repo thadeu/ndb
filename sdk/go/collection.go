@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"reflect"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -82,42 +85,143 @@ func (c *Coll[T]) Get(ctx context.Context, id string) (T, error) {
 	return c.Where(Eq(c.schema.idField(), id)).First(ctx)
 }
 
-// Update sets fields of the document with the id and returns its new
-// version. Use IfVersion to fail with ErrVersionConflict on a stale write.
-func (c *Coll[T]) Update(ctx context.Context, id string, set map[string]any, opts ...Option) (uint64, error) {
-	o := newOptions(opts)
-	args := updateArgs{ID: id, Set: set, Unset: o.unset, IfVersion: o.ifVersion, ExpireIn: o.expireIn.seconds()}
+// Ops are the write operators of an Update: $set, $unset, $inc, $push,
+// $pull, $min and $max, each with a map of fields (dot paths allowed).
+//
+//	ndb.Ops{"$inc": {"qty": -1}, "$set": {"status": "done"}}
+type Ops map[string]map[string]any
 
-	resp, err := c.post(ctx, "update", updateBody{Update: args})
+// UpdateResult is the answer of Update. Doc is the new document, with its
+// version in the field tagged `version`. It is nil when nothing matched and
+// for an Update with Many.
+type UpdateResult[T any] struct {
+	Matched  int
+	Modified int
+	Doc      *T
+}
+
+// Update is the atomic update by filter: the daemon matches the filter and
+// writes the operators in one step, against the newest state, so concurrent
+// updates never interleave. Nothing matched is not an error: Matched is 0.
+//
+// A filter with the id field finds one document by id; without it the
+// update takes the first match. Many updates every match, and needs the id
+// or an indexed field in the filter (ErrUnindexedMany). Upsert creates the
+// document from the equality fields of the filter when nothing matches.
+// A guard in the filter, such as Eq("_v", 7) or Gte("qty", 1), makes a
+// conditional write: Matched is 0 when the guard fails.
+func (c *Coll[T]) Update(ctx context.Context, filter Filter, ops Ops, opts ...Option) (UpdateResult[T], error) {
+	o := newOptions(opts)
+
+	body, err := updateBody(filter, ops)
+	if err != nil {
+		return UpdateResult[T]{}, err
+	}
+
+	q := url.Values{}
+
+	o.addTo(q, "many", o.many)
+	o.addTo(q, "upsert", o.upsert)
+
+	if secs := o.expireIn.seconds(); secs != nil {
+		q.Set("expire_in", strconv.FormatFloat(*secs, 'f', -1, 64))
+	}
+
+	resp, err := c.postQuery(ctx, "update", q, body)
+	if err != nil {
+		return UpdateResult[T]{}, err
+	}
+
+	defer resp.Body.Close()
+
+	var out struct {
+		Matched  int             `json:"matched"`
+		Modified int             `json:"modified"`
+		Doc      json.RawMessage `json:"doc"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return UpdateResult[T]{}, fmt.Errorf("ndb: update response: %w", err)
+	}
+
+	res := UpdateResult[T]{Matched: out.Matched, Modified: out.Modified}
+
+	if len(out.Doc) == 0 {
+		return res, nil
+	}
+
+	doc, err := c.decode(out.Doc)
+	if err != nil {
+		return UpdateResult[T]{}, err
+	}
+
+	res.Doc = &doc
+
+	return res, nil
+}
+
+// Delete removes the document that the filter matches, or every match with
+// Many (same rule as Update), and returns how many it removed.
+func (c *Coll[T]) Delete(ctx context.Context, filter Filter, opts ...Option) (int, error) {
+	o := newOptions(opts)
+
+	body, err := json.Marshal(filter.doc)
+	if err != nil {
+		return 0, err
+	}
+
+	q := url.Values{}
+
+	o.addTo(q, "many", o.many)
+
+	resp, err := c.postQuery(ctx, "delete", q, body)
 	if err != nil {
 		return 0, err
 	}
 
 	defer resp.Body.Close()
 
-	var res writeResult
-
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return 0, err
+	var out struct {
+		Deleted int `json:"deleted"`
 	}
 
-	return res.V, nil
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return 0, fmt.Errorf("ndb: delete response: %w", err)
+	}
+
+	return out.Deleted, nil
 }
 
-// Delete removes the document with the id. Only IfVersion applies.
-func (c *Coll[T]) Delete(ctx context.Context, id string, opts ...Option) error {
-	o := newOptions(opts)
+// updateBody merges the filter and the operators into the one body of the
+// update call. An operator key without "$" is a mistake that the daemon would
+// read as a filter key, so it is refused before anything is sent.
+func updateBody(filter Filter, ops Ops) ([]byte, error) {
+	body := make(map[string]any, len(filter.doc)+len(ops))
 
-	args := deleteArgs{ID: id, IfVersion: o.ifVersion}
-
-	resp, err := c.post(ctx, "delete", deleteBody{Delete: args})
-	if err != nil {
-		return err
+	for k, v := range filter.doc {
+		body[k] = v
 	}
 
-	discard(resp)
+	for k, v := range ops {
+		if !strings.HasPrefix(k, "$") {
+			return nil, fmt.Errorf("ndb: update operator %q must start with $ (for example \"$set\")", k)
+		}
 
-	return nil
+		body[k] = v
+	}
+
+	return json.Marshal(body)
+}
+
+// postQuery is post with a query string (the options of an update).
+func (c *Coll[T]) postQuery(ctx context.Context, op string, q url.Values, body []byte) (*http.Response, error) {
+	path := collPath(c.name) + "/" + op
+
+	if len(q) > 0 {
+		path += "?" + q.Encode()
+	}
+
+	return c.db.do(ctx, http.MethodPost, path, body)
 }
 
 // post sends one write op of the collection, with v as the JSON body.
@@ -138,13 +242,20 @@ func (c *Coll[T]) decode(raw json.RawMessage) (T, error) {
 	return v, err
 }
 
-// Option changes a write: IfVersion, Unset and ExpireIn.
+// Option changes a write: Many, Upsert and ExpireIn.
 type Option func(*options)
 
 type options struct {
-	ifVersion uint64
-	unset     []string
-	expireIn  ttlSecs
+	many     bool
+	upsert   bool
+	expireIn ttlSecs
+}
+
+// addTo sets name=true in q when on.
+func (o options) addTo(q url.Values, name string, on bool) {
+	if on {
+		q.Set(name, "true")
+	}
 }
 
 // ttlSecs is a duration in seconds for the wire. Zero is omitted.
@@ -160,28 +271,28 @@ func (d ttlSecs) seconds() *float64 {
 	return &f
 }
 
-// IfVersion makes the write fail with ErrVersionConflict unless the document
-// is at version v. Zero means no check, the same as the daemon.
-func IfVersion(v uint64) Option {
+// Many makes Update or Delete work on every match. The filter needs the id
+// or an indexed field, or the call fails with ErrUnindexedMany.
+func Many() Option {
 	return func(o *options) {
-		o.ifVersion = v
+		o.many = true
+	}
+}
+
+// Upsert makes Update create the document when nothing matches.
+func Upsert() Option {
+	return func(o *options) {
+		o.upsert = true
 	}
 }
 
 // ExpireIn makes the daemon set the expires field of the written documents
 // to now + d, in the same transaction (Insert and Update). It wins over a
-// value of the field in the document. The collection needs a field tagged
+// value of the field in the document or in the operators. The collection needs a field tagged
 // `expires`, or the call fails with ErrTTLNotEnabled.
 func ExpireIn(d time.Duration) Option {
 	return func(o *options) {
 		o.expireIn = ttlSecs(d.Seconds())
-	}
-}
-
-// Unset removes fields in an Update.
-func Unset(fields ...string) Option {
-	return func(o *options) {
-		o.unset = append(o.unset, fields...)
 	}
 }
 
@@ -242,27 +353,6 @@ type ensureBody struct {
 type insertBody struct {
 	Insert   []json.RawMessage `json:"insert"`
 	ExpireIn *float64          `json:"expire_in,omitempty"`
-}
-
-type updateBody struct {
-	Update updateArgs `json:"update"`
-}
-
-type updateArgs struct {
-	ID        string         `json:"id"`
-	Set       map[string]any `json:"set,omitempty"`
-	Unset     []string       `json:"unset,omitempty"`
-	IfVersion uint64         `json:"if_version,omitempty"`
-	ExpireIn  *float64       `json:"expire_in,omitempty"`
-}
-
-type deleteBody struct {
-	Delete deleteArgs `json:"delete"`
-}
-
-type deleteArgs struct {
-	ID        string `json:"id"`
-	IfVersion uint64 `json:"if_version,omitempty"`
 }
 
 type writeResult struct {

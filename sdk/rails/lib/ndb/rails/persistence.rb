@@ -3,7 +3,8 @@
 module Ndb
   class RecordNotSaved < Error; end
 
-  # Writes: dirty attributes -> set/unset, the loaded version -> if_version.
+  # Writes: dirty attributes -> $set/$unset, filtered by the id and the loaded
+  # version ("_v"). A write that matches nothing is a stale record.
   module Persistence
     extend ActiveSupport::Concern
 
@@ -130,11 +131,22 @@ module Ndb
 
     def destroy
       result = run_callbacks(:destroy) do
-        self.class.ndb_delete(id, if_version: version) if persisted?
+        delete_record if persisted?
         @destroyed = true
       end
 
       result ? self : false
+    end
+
+    # Adds by (default 1) to a number attribute in one atomic write on the
+    # daemon, and refreshes the attribute and the version. Other unsaved
+    # changes stay unsaved.
+    def increment!(attribute, by = 1)
+      add_to!(attribute, by)
+    end
+
+    def decrement!(attribute, by = 1)
+      add_to!(attribute, -by)
     end
 
     def ==(other)
@@ -156,6 +168,38 @@ module Ndb
 
       public_send("#{field}=", expires_at)
       clear_attribute_changes([field])
+
+      self
+    end
+
+    def record_filter
+      filter = { self.class.primary_key => id }
+
+      filter["_v"] = version if version
+
+      filter
+    end
+
+    def delete_record
+      deleted = self.class.ndb_delete(record_filter)["deleted"]
+
+      raise StaleObjectError.new("#{self.class.name} #{id} changed or was deleted", code: "stale_object") if deleted.zero?
+    end
+
+    def add_to!(attribute, by)
+      name = attribute.to_s
+
+      raise RecordNotSaved, "Cannot update a record that is not saved" unless persisted?
+      raise ArgumentError, "#{name} is not an attribute of #{self.class.name}" unless self.class.attribute_names.include?(name)
+
+      result = self.class.ndb_update({ self.class.primary_key => id }, { "$inc" => { name => by } })
+
+      raise NotFound.new("#{self.class.name} #{id} was deleted", code: "not_found") if result["matched"].zero?
+
+      @version = result["doc"]["_v"]
+
+      public_send("#{name}=", result["doc"][name])
+      clear_attribute_changes([name])
 
       self
     end
@@ -183,15 +227,26 @@ module Ndb
         set, unset = changed_fields
 
         unless set.empty? && unset.empty? && @expire_in.nil?
-          result = self.class.ndb_update(id, set: set, unset: unset, if_version: version, expire_in: @expire_in)
+          result = self.class.ndb_update(record_filter, update_ops(set, unset), expire_in: @expire_in)
 
-          @version = result["v"]
+          raise StaleObjectError.new("#{self.class.name} #{id} changed or was deleted", code: "stale_object") if result["matched"].zero?
+
+          @version = result["doc"]["_v"]
         end
 
         changes_applied
 
         true
       end
+    end
+
+    def update_ops(set, unset)
+      ops = {}
+
+      ops["$set"] = set unless set.empty?
+      ops["$unset"] = unset.to_h { |name| [name, true] } unless unset.empty?
+
+      ops.empty? ? { "$set" => {} } : ops
     end
 
     def insert_document

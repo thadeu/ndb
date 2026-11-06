@@ -15,7 +15,7 @@ describe('watch', () => {
       { call_id: 'a', status: 's', ts: new Date() },
       { call_id: 'b', status: 's', ts: new Date() },
     ])
-    await calls.delete('b')
+    await calls.delete({ call_id: 'b' })
 
     const ctl = new AbortController()
     const seen: string[] = []

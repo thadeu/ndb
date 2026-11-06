@@ -87,7 +87,7 @@ func statusOf(code string) int {
 	switch code {
 	case "not_found", "unknown_collection":
 		return http.StatusNotFound
-	case "version_conflict", "duplicate_id", "unique_violation", "catalog_conflict", "direct_collection":
+	case "duplicate_id", "unique_violation", "catalog_conflict", "direct_collection":
 		return http.StatusConflict
 	case "request_too_large", "line_too_large":
 		return http.StatusRequestEntityTooLarge

@@ -86,6 +86,12 @@ func Regex(field, pattern string, opts ...RegexOption) Filter {
 	return Filter{doc: map[string]any{field: cond}}
 }
 
+// And matches when every filter matches. A Filter argument of Update or
+// Delete is one filter; use And to give it several conditions.
+func And(filters ...Filter) Filter {
+	return Filter{doc: whereOf(filters)}
+}
+
 // Or matches when at least one of the filters matches.
 func Or(filters ...Filter) Filter {
 	return Filter{doc: map[string]any{"$or": docsOf(filters)}}

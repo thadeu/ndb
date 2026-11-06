@@ -50,19 +50,30 @@ module Ndb
       json(post(coll, "insert", body)).fetch("results")
     end
 
-    def update(coll, id, set: {}, unset: [], if_version: nil, expire_in: nil)
-      change = { id: id, set: set, unset: unset }
-      change[:if_version] = if_version if if_version
-      change[:expire_in] = expire_in if expire_in
+    # Atomic update by filter. The filter and the write operators go in one
+    # body; the daemon matches and writes in one step on the newest state, so
+    # concurrent updates never interleave.
+    #
+    #   client.update("stock", { sku: "a", qty: { "$gte" => 1 } }, { "$inc" => { qty: -1 } })
+    #   # => {"matched" => 1, "modified" => 1, "doc" => {...with "_v"}}
+    #
+    # Operators: $set, $unset, $inc, $push, $pull, $min, $max (dot paths work).
+    # Nothing matched is not an error: {"matched" => 0, "modified" => 0}. A
+    # version guard is a filter: { id: "x", _v: 7 }. many: true updates every
+    # match (no "doc" in the answer) and needs the id or an indexed field in
+    # the filter. upsert: true creates the document from the equality fields
+    # of the filter when nothing matches. expire_in (seconds, or "30m") sets
+    # the expires_field.
+    def update(coll, filter, ops, many: false, upsert: false, expire_in: nil)
+      query = write_query(many: many, upsert: upsert, expire_in: expire_in)
 
-      json(post(coll, "update", update: change))
+      json(post(coll, "update#{query}", merge_update(filter, ops)))
     end
 
-    def delete(coll, id, if_version: nil)
-      change = { id: id }
-      change[:if_version] = if_version if if_version
-
-      json(post(coll, "delete", delete: change))
+    # Deletes the documents that the filter matches (one, or every match with
+    # many: true, which needs the id or an indexed field). {"deleted" => n}
+    def delete(coll, filter, many: false)
+      json(post(coll, "delete#{write_query(many: many)}", filter))
     end
 
     # Makes a document expire, like EXPIRE in Redis: in: seconds or "30m", or
@@ -70,11 +81,10 @@ module Ndb
     # Raises NotFound for a missing or expired document, TtlNotEnabled when
     # the collection has no expires_field, TtlDerived when the expiry comes
     # from ttl + time.
-    def expire(coll, id, if_version: nil, **time)
+    def expire(coll, id, **time)
       body = { id: id }
       body[:in] = time[:in] if time[:in]
       body[:at] = time[:at].respond_to?(:utc) ? time[:at].utc.iso8601(9) : time[:at] if time[:at]
-      body[:if_version] = if_version if if_version
 
       json(post(coll, "expire", body))
     end
@@ -141,6 +151,28 @@ module Ndb
 
     def presence(value)
       value.to_s.strip.empty? ? nil : value
+    end
+
+    def write_query(many: false, upsert: false, expire_in: nil)
+      params = {}
+
+      params["many"] = "true" if many
+      params["upsert"] = "true" if upsert
+      params["expire_in"] = expire_in.to_s if expire_in
+
+      params.empty? ? "" : "?#{URI.encode_www_form(params)}"
+    end
+
+    # The filter and the operators in one body. An operator key without "$"
+    # would be read as a filter key by the daemon, so it is refused here.
+    def merge_update(filter, ops)
+      ops.each_key do |key|
+        next if key.to_s.start_with?("$")
+
+        raise ArgumentError, "update operator #{key.to_s.inspect} must start with $ (for example \"$set\")"
+      end
+
+      filter.to_h.transform_keys(&:to_s).merge(ops.to_h.transform_keys(&:to_s))
     end
 
     def post(coll, verb, body)

@@ -25,7 +25,7 @@ describe('expiry like Redis', () => {
     expect(await s.ttl('b')).toBeLessThanOrEqual(3600)
     expect(await s.ttl('c')).toBeLessThanOrEqual(90)
 
-    await s.update('a', { user: 'u' }, { expireIn: '30m' })
+    await s.update({ sid: 'a' }, { $set: { user: 'u' } }, { expireIn: '30m' })
 
     expect(await s.ttl('a')).toBeLessThanOrEqual(1800)
 
@@ -47,8 +47,6 @@ describe('expiry like Redis', () => {
     expect(res.v).toBe(2)
     expect(res.expiresAt.getTime()).toBeGreaterThan(Date.now())
     expect(await s.ttl('s1')).toBeLessThanOrEqual(1800)
-
-    await expect(s.expire('s1', 60, { ifVersion: 1 })).rejects.toMatchObject({ code: 'version_conflict' })
 
     expect((await s.expireAt('s1', new Date(Date.now() + 7_200_000))).v).toBe(3)
     expect(await s.ttl('s1')).toBeGreaterThan(7190)

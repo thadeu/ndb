@@ -124,7 +124,7 @@ module Ndb
         end
       end
 
-      # Every load asks for "_v", so a loaded record can send if_version.
+      # Every load asks for "_v", so a loaded record can guard its write with it.
       def ndb_find(body)
         ensure_collection!
 
@@ -143,16 +143,17 @@ module Ndb
         Rails.client.insert(collection_name, [doc], expire_in: expire_in).first
       end
 
-      def ndb_update(id, **change)
+      # Atomic update by filter, see Ndb::Client#update.
+      def ndb_update(filter, ops, **options)
         ensure_collection!
 
-        Rails.client.update(collection_name, id, **change)
+        Rails.client.update(collection_name, filter, ops, **options)
       end
 
-      def ndb_delete(id, if_version: nil)
+      def ndb_delete(filter, **options)
         ensure_collection!
 
-        Rails.client.delete(collection_name, id, if_version: if_version)
+        Rails.client.delete(collection_name, filter, **options)
       end
 
       private

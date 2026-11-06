@@ -93,7 +93,7 @@ The socket is `/run/ndb/ndb.sock`. Share the `/run/ndb` volume with your app con
 
 - NoSQL `find` with `$eq $ne $gt $gte $lt $lte $in $nin $exists $and $or $not`, sort, offset and cursor pagination.
 - `aggregate` with `$match $group $sort $limit $skip $project`, `$dateTrunc` for time buckets.
-- Two write modes: direct (apps append NDJSON files, ndb follows them) and engine (`insert`, `update`, `delete` with a WAL, optimistic `if_version`).
+- Two write modes: direct (apps append NDJSON files, ndb follows them) and engine (`insert`, atomic `update` and `delete` by filter with a WAL).
 - `watch` and `ack` for outbox-style consumers, with an optional `where` filter and `wal_retention` to trim the WAL.
 - Optional bearer token on the TCP listener (`-token-file`); the unix socket needs none.
 - Secondary and unique indexes, built in the background.

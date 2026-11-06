@@ -64,7 +64,7 @@ func TestWatchDeleteHasNoDoc(t *testing.T) {
 
 	addPosts(t, c, 1, 1)
 
-	if err := c.Delete(ctx, "p1", 0); err != nil {
+	if err := c.DeleteID(ctx, "p1"); err != nil {
 		t.Fatal(err)
 	}
 

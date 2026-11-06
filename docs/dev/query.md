@@ -31,7 +31,7 @@ All keys are optional. An unknown key is `invalid_query`.
 | `limit`, `skip` | non-negative integers. |
 | `after` | cursor from the previous page. See [Pagination](#pagination). |
 | `count` | add the total number of matches in header `X-Ndb-Total`. |
-| `versions` | add `_v`, the document version, to each row. Send it back as `if_version`. |
+| `versions` | add `_v`, the document version, to each row. Use it as `_v` in the filter of an [update](http-api.md#atomic-update-by-filter). |
 | `snapshot` | keep the first snapshot for 60 s, so all pages see the same data. |
 | `explain` | add header `X-Ndb-Explain` with the plan counters. |
 
@@ -57,7 +57,7 @@ A field with a plain value means equality: `{"status": "answered"}`. Several fie
 | `$exists` | `true` or `false`. Missing is not `null`. |
 | `$not` (in a field) | negate an operator object: `{"duration": {"$not": {"$gt": 10}}}`. |
 | `$regex`, `$options` | string match, see [Regular expressions](#regular-expressions). |
-| `$and`, `$or` | non-empty array of where objects. |
+| `$and`, `$or`, `$nor` | non-empty array of where objects. `$nor` matches when none of them does. |
 | `$not` (top level) | negate a where object: `{"$not": {"status": "failed"}}`. |
 
 Rules:
@@ -65,7 +65,7 @@ Rules:
 - `{"a": null}` matches an explicit `null` only. Use `{"a": {"$exists": false}}` for a missing field.
 - Arrays: a field matches when any element matches. Dot paths walk into arrays of objects (`items.sku`).
 - Mixing operators and plain keys in one field object is an error: `{"a": {"$gt": 1, "b": 2}}`.
-- Unknown operators are `invalid_query`: `$nor` and `$elemMatch` do not exist yet.
+- Unknown operators are `invalid_query`: `$elemMatch` does not exist yet.
 - Time: for the collection `time` field, RFC 3339 strings are compared as instants, so offsets do not matter.
 - Cross-type order (sort, cursors, indexes): `missing < null < number < string < time < object < array < bool`.
 
@@ -164,7 +164,7 @@ The body is `{"error":{"code":"...","message":"..."}}`.
 | `group_limit_exceeded` | 422 | The group table is over its memory limit. |
 | `not_found` | 404 | No document (or blob) with this id. |
 | `unknown_collection` | 404 | The collection does not exist. |
-| `version_conflict` | 409 | `if_version` does not match the current version. |
+| `unknown_operator`, `no_update`, `conflicting_update`, `invalid_field`, `unindexed_many`, `empty_filter` | 400 | The body of an update or delete breaks the [contract](http-api.md#atomic-update-by-filter). |
 | `duplicate_id` | 409 | A document with this id exists. |
 | `unique_violation` | 409 | A `unique` field value exists. |
 | `catalog_conflict` | 409 | Two declarations of the collection disagree (`id`, `write`, `path`, `time`). |

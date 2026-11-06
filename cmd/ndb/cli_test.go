@@ -115,7 +115,7 @@ func TestVersionAndHelp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, cmd := range []string{"restore", "stats", "size", "version", "serve", "backup", "collections", "compact", "expire", "persist", "ttl", "quarantine", "query"} {
+	for _, cmd := range []string{"restore", "stats", "size", "version", "serve", "backup", "collections", "compact", "update", "delete", "expire", "persist", "ttl", "quarantine", "query"} {
 		if !strings.Contains(helpText, "ndb "+cmd) {
 			t.Errorf("help does not list %q", cmd)
 		}

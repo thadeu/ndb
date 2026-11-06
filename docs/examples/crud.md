@@ -1,10 +1,10 @@
 # CRUD
 
-Insert a document, read it, change it, delete it, count the rest. It shows `if_version`, the optimistic lock of ndb.
+Insert a document, read it, change it, delete it, count the rest. It shows the atomic update by filter and the `_v` guard, the optimistic lock of ndb.
 
 ## When to use
 
-Your app owns the data and writes it through ndb (engine mode). Use `if_version` when two writers can change the same document.
+Your app owns the data and writes it through ndb (engine mode). Put `_v` in the filter of an update when two writers can change the same document.
 
 ## Collection
 
@@ -76,9 +76,9 @@ Ask for the version (`versions: true` in the query) so you can send it back.
 
 :::
 
-## Update with if_version
+## Update with a _v guard
 
-The write succeeds only if the stored version is the one you read.
+The filter holds the id and the version you read. The write matches only if the stored version is still that one.
 
 ::: code-group
 
@@ -96,7 +96,7 @@ The write succeeds only if the stored version is the one you read.
 
 ## Handle a version conflict
 
-A second writer that still holds version 1 gets `version_conflict` (HTTP 409). Reload and try again. In Rails the error is `Ndb::StaleObjectError`, as in ActiveRecord.
+A second writer that still holds version 1 gets `matched: 0` (HTTP 200). Reload and try again. In Rails the error is `Ndb::StaleObjectError`, as in ActiveRecord.
 
 ::: code-group
 
@@ -114,7 +114,7 @@ A second writer that still holds version 1 gets `version_conflict` (HTTP 409). R
 
 ## Delete
 
-Deleting a missing id is `not_found`. The programs ignore it at the start, so a second run works.
+Deleting a missing id answers `deleted: 0`.
 
 ::: code-group
 

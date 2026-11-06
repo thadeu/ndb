@@ -47,7 +47,7 @@ func TestTTLEndpoints(t *testing.T) {
 		t.Fatalf("ttl s3 = %v", got)
 	}
 
-	rec = call(h, "POST", "/v1/c/sessions/update", `{"update":{"id":"s1","set":{"n":1},"expire_in":"30m"}}`)
+	rec = call(h, "POST", "/v1/c/sessions/update?expire_in=30m", `{"id":"s1","$set":{"n":1}}`)
 	expectStatus(t, rec, http.StatusOK)
 
 	if got := ttlOf(t, call(h, "GET", "/v1/c/sessions/ttl/s1", "")); got < 1799 || got > 1800 {
@@ -63,11 +63,8 @@ func TestTTLEndpoints(t *testing.T) {
 		t.Fatalf("expire body = %v", body)
 	}
 
-	rec = call(h, "POST", "/v1/c/sessions/expire", `{"id":"s2","at":"2999-01-01T00:00:00Z","if_version":2}`)
+	rec = call(h, "POST", "/v1/c/sessions/expire", `{"id":"s2","at":"2999-01-01T00:00:00Z"}`)
 	expectStatus(t, rec, http.StatusOK)
-
-	rec = call(h, "POST", "/v1/c/sessions/expire", `{"id":"s2","in":"1h","if_version":1}`)
-	expectStatus(t, rec, http.StatusConflict)
 
 	rec = call(h, "POST", "/v1/c/sessions/persist", `{"id":"s2"}`)
 	expectStatus(t, rec, http.StatusOK)
@@ -109,7 +106,8 @@ func TestTTLErrors(t *testing.T) {
 		path, body, code string
 	}{
 		{"/v1/c/plain/insert", `{"insert":[{"id":"b"}],"expire_in":"1h"}`, "ttl_not_enabled"},
-		{"/v1/c/plain/update", `{"update":{"id":"a","expire_in":"1h"}}`, "ttl_not_enabled"},
+		{"/v1/c/plain/update?expire_in=1h", `{"id":"a","$set":{"n":1}}`, "ttl_not_enabled"},
+		{"/v1/c/ex/update?expire_in=soon", `{"id":"a","$set":{"n":1}}`, "invalid_request"},
 		{"/v1/c/plain/expire", `{"id":"a","in":"1h"}`, "ttl_not_enabled"},
 		{"/v1/c/plain/persist", `{"id":"a"}`, "ttl_not_enabled"},
 		{"/v1/c/derived/expire", `{"id":"a","in":"1h"}`, "ttl_derived"},

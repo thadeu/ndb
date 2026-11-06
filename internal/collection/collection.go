@@ -150,7 +150,7 @@ type Result struct {
 	V  uint64
 }
 
-// Change is an update: $set and $unset, with dot paths.
+// Change is an internal $set and $unset, with dot paths: the expiry stamp.
 type Change struct {
 	Set   map[string]any
 	Unset []string
@@ -349,46 +349,9 @@ func (c *Collection) insert(ctx context.Context, req insertReq) ([]Result, error
 	return out, nil
 }
 
-// Update applies ch to the doc. ifVersion 0 means any version.
-func (c *Collection) Update(ctx context.Context, id string, ch Change, ifVersion uint64) (uint64, error) {
-	if ch.ExpireIn > 0 {
-		if _, err := c.expiryField(); err != nil {
-			return 0, err
-		}
-
-		ch = c.stampChange(ch, c.clock().Add(ch.ExpireIn))
-		ch.ExpireIn = 0
-	}
-
-	_, ops, err := c.w.Commit(ctx, updateReq{id: id, change: ch, ifVersion: ifVersion})
-	if err != nil {
-		return 0, err
-	}
-
-	return ops[0].V, nil
-}
-
-// Delete removes the doc. ifVersion 0 means any version.
-func (c *Collection) Delete(ctx context.Context, id string, ifVersion uint64) error {
-	_, _, err := c.w.Commit(ctx, deleteReq{id: id, ifVersion: ifVersion})
-
-	return err
-}
-
 type insertReq struct {
 	docs     [][]byte
 	expireIn time.Duration
-}
-
-type updateReq struct {
-	id        string
-	change    Change
-	ifVersion uint64
-}
-
-type deleteReq struct {
-	id        string
-	ifVersion uint64
 }
 
 // prepare runs in the writer goroutine.
@@ -472,51 +435,10 @@ func (c *Collection) prepareInsert(v *view, r insertReq) ([]wal.Op, error) {
 	return ops, nil
 }
 
-func (c *Collection) prepareUpdate(v *view, r updateReq) ([]wal.Op, error) {
-	cur, err := current(v, r.id, r.ifVersion)
-	if err != nil {
-		return nil, err
-	}
-
-	raw, err := cur.raw()
-	if err != nil {
-		return nil, err
-	}
-
-	doc, err := applyChange(raw, r.change, c.def.ID)
-	if err != nil {
-		return nil, err
-	}
-
-	doc, err = c.externalize(doc)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := v.checkUnique(r.id, doc); err != nil {
-		return nil, err
-	}
-
-	return []wal.Op{{Kind: wal.Put, ID: r.id, V: cur.v + 1, Doc: doc}}, nil
-}
-
-func (c *Collection) prepareDelete(v *view, r deleteReq) ([]wal.Op, error) {
-	cur, err := current(v, r.id, r.ifVersion)
-	if err != nil {
-		return nil, err
-	}
-
-	return []wal.Op{{Kind: wal.Del, ID: r.id, V: cur.v + 1}}, nil
-}
-
-func current(v *view, id string, ifVersion uint64) (*entry, error) {
+func current(v *view, id string) (*entry, error) {
 	cur, ok := v.get(id)
 	if !ok {
 		return nil, errf("not_found", "%s", id)
-	}
-
-	if ifVersion != 0 && cur.v != ifVersion {
-		return nil, errf("version_conflict", "%s is at version %d, not %d", id, cur.v, ifVersion)
 	}
 
 	return cur, nil

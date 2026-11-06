@@ -109,7 +109,7 @@ collections:
 
 - `expire_in` wins over a value of `expires_field` that the same call carries.
 - `ttl: 24h` + `time` (every document expires a fixed time after its `time` field) is a derived expiry: `expire` and `persist` fail with `ttl_derived`.
-- Each call is a normal write: new version, WAL record, `watch` event, and `if_version` works.
+- Each call is a normal write: new version, WAL record, `watch` event, and a `_v` filter works.
 - CLI: `ndb expire sessions s1 30m`, `ndb persist sessions s1`, `ndb ttl sessions s1`.
 
 ```bash

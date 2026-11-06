@@ -134,7 +134,7 @@ func TestUpdateSetUnset(t *testing.T) {
 
 	c.Insert(ctx, doc(`{"post_id":"p1","status":"draft","tmp":1,"meta":{"a":1}}`))
 
-	v, err := c.Update(ctx, "p1", collection.Change{
+	v, err := c.UpdateID(ctx, "p1", collection.Change{
 		Set:   map[string]any{"status": "published", "meta.b": 2},
 		Unset: []string{"tmp"},
 	}, 0)
@@ -160,20 +160,20 @@ func TestUpdateErrors(t *testing.T) {
 
 	c.Insert(ctx, doc(`{"post_id":"p1"}`))
 
-	if _, err := c.Update(ctx, "nope", collection.Change{Set: map[string]any{"a": 1}}, 0); code(err) != "not_found" {
+	if _, err := c.UpdateID(ctx, "nope", collection.Change{Set: map[string]any{"a": 1}}, 0); code(err) != "not_found" {
 		t.Fatalf("got %v", err)
 	}
 
-	if _, err := c.Update(ctx, "p1", collection.Change{Set: map[string]any{"a": 1}}, 9); code(err) != "version_conflict" {
+	if _, err := c.UpdateID(ctx, "p1", collection.Change{Set: map[string]any{"a": 1}}, 9); code(err) != "not_found" {
 		t.Fatalf("got %v", err)
 	}
 
-	if _, err := c.Update(ctx, "p1", collection.Change{Set: map[string]any{"post_id": "p2"}}, 0); code(err) != "immutable_id" {
+	if _, err := c.UpdateID(ctx, "p1", collection.Change{Set: map[string]any{"post_id": "p2"}}, 0); code(err) != "immutable_id" {
 		t.Fatalf("got %v", err)
 	}
 }
 
-func TestIfVersionUnderConcurrency(t *testing.T) {
+func TestVersionFilterUnderConcurrency(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
 	c.Insert(ctx, doc(`{"post_id":"p1","n":0}`))
@@ -187,7 +187,7 @@ func TestIfVersionUnderConcurrency(t *testing.T) {
 
 	for i := range workers {
 		wg.Go(func() {
-			_, err := c.Update(ctx, "p1", collection.Change{Set: map[string]any{"n": i}}, 1)
+			_, err := c.UpdateID(ctx, "p1", collection.Change{Set: map[string]any{"n": i + 1}}, 1)
 
 			if err == nil {
 				mu.Lock()
@@ -202,7 +202,7 @@ func TestIfVersionUnderConcurrency(t *testing.T) {
 	got, _ := c.Find("p1")
 
 	if wins != 1 || got.V != 2 {
-		t.Fatalf("%d updates won with if_version=1, final v=%d", wins, got.V)
+		t.Fatalf("%d updates won with _v=1, final v=%d", wins, got.V)
 	}
 }
 
@@ -217,7 +217,7 @@ func TestUpdatesInOneBatchSeeEachOther(t *testing.T) {
 
 	for i := range n {
 		wg.Go(func() {
-			if _, err := c.Update(ctx, "p1", collection.Change{Set: map[string]any{fmt.Sprint("f", i): i}}, 0); err != nil {
+			if _, err := c.UpdateID(ctx, "p1", collection.Change{Set: map[string]any{fmt.Sprint("f", i): i}}, 0); err != nil {
 				t.Error(err)
 			}
 		})
@@ -241,19 +241,19 @@ func TestDelete(t *testing.T) {
 
 	c.Insert(ctx, doc(`{"post_id":"p1"}`))
 
-	if err := c.Delete(ctx, "p1", 5); code(err) != "version_conflict" {
-		t.Fatalf("got %v", err)
+	if n, err := c.Delete(ctx, []byte(`{"post_id":"p1","_v":5}`), false); err != nil || n != 0 {
+		t.Fatalf("stale version: n=%d err=%v", n, err)
 	}
 
-	if err := c.Delete(ctx, "p1", 1); err != nil {
-		t.Fatal(err)
+	if n, err := c.Delete(ctx, []byte(`{"post_id":"p1","_v":1}`), false); err != nil || n != 1 {
+		t.Fatalf("n=%d err=%v", n, err)
 	}
 
 	if _, ok := c.Find("p1"); ok {
 		t.Fatal("found after delete")
 	}
 
-	if err := c.Delete(ctx, "p1", 0); code(err) != "not_found" {
+	if err := c.DeleteID(ctx, "p1"); code(err) != "not_found" {
 		t.Fatalf("got %v", err)
 	}
 
@@ -273,13 +273,13 @@ func TestUnique(t *testing.T) {
 
 	c.Insert(ctx, doc(`{"post_id":"p2","slug":"other"}`))
 
-	if _, err := c.Update(ctx, "p2", collection.Change{Set: map[string]any{"slug": "hello"}}, 0); code(err) != "unique_violation" {
+	if _, err := c.UpdateID(ctx, "p2", collection.Change{Set: map[string]any{"slug": "hello"}}, 0); code(err) != "unique_violation" {
 		t.Fatalf("update: got %v", err)
 	}
 
-	c.Delete(ctx, "p1", 0)
+	c.DeleteID(ctx, "p1")
 
-	if _, err := c.Update(ctx, "p2", collection.Change{Set: map[string]any{"slug": "hello"}}, 0); err != nil {
+	if _, err := c.UpdateID(ctx, "p2", collection.Change{Set: map[string]any{"slug": "hello"}}, 0); err != nil {
 		t.Fatalf("slug free after delete: %v", err)
 	}
 
@@ -308,8 +308,8 @@ func TestReopenRestoresState(t *testing.T) {
 	}
 
 	c.Insert(ctx, doc(`{"post_id":"p1","slug":"a"}`), doc(`{"post_id":"p2","slug":"b"}`))
-	c.Update(ctx, "p1", collection.Change{Set: map[string]any{"x": 1}}, 0)
-	c.Delete(ctx, "p2", 0)
+	c.UpdateID(ctx, "p1", collection.Change{Set: map[string]any{"x": 1}}, 0)
+	c.DeleteID(ctx, "p2")
 	c.Close()
 
 	again := open(t, dir, def)

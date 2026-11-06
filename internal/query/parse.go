@@ -32,7 +32,7 @@ type Query struct {
 	Explain  bool
 
 	// Versions adds "_v" (the document version) to each output row, so a
-	// client can send it back as if_version.
+	// client can send it back in the filter of an update.
 	Versions bool
 
 	opts  Options
@@ -80,6 +80,21 @@ func Parse(body []byte, opts Options) (*Query, error) {
 	}
 
 	return q, q.parseScalars(top)
+}
+
+// ParseWhere compiles a where map that is already decoded (numbers as
+// json.Number). The update and delete filters use it.
+func ParseWhere(where map[string]any, opts Options) (*Query, error) {
+	q := &Query{opts: opts}
+
+	n, err := q.compileWhere(where)
+	if err != nil {
+		return nil, err
+	}
+
+	q.where = n
+
+	return q, nil
 }
 
 func (q *Query) parseScalars(top map[string]json.RawMessage) error {
@@ -209,7 +224,7 @@ func (q *Query) compileWhere(m map[string]any) (Node, error) {
 		)
 
 		switch {
-		case k == "$and" || k == "$or":
+		case k == "$and" || k == "$or" || k == "$nor":
 			n, err = q.compileList(k, m[k])
 		case k == "$not":
 			n, err = q.compileNot(m[k])
@@ -251,8 +266,11 @@ func (q *Query) compileList(name string, v any) (Node, error) {
 		nodes = append(nodes, n)
 	}
 
-	if name == "$or" {
+	switch name {
+	case "$or":
 		return orNode(nodes), nil
+	case "$nor":
+		return notNode{orNode(nodes)}, nil
 	}
 
 	return andNode(nodes), nil

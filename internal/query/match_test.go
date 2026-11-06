@@ -57,6 +57,8 @@ func TestOperators(t *testing.T) {
 		{"$gt string", `{"a":{"$gt":"b"}}`, `{"a":"c"}`, true},
 		{"$gt brackets number vs string", `{"a":{"$gt":1}}`, `{"a":"z"}`, false},
 		{"$lt brackets string vs number", `{"a":{"$lt":"z"}}`, `{"a":1}`, false},
+		{"$nor hit", `{"$nor":[{"a":1},{"a":2}]}`, `{"a":3}`, true},
+		{"$nor miss", `{"$nor":[{"a":1},{"a":2}]}`, `{"a":2}`, false},
 		{"$gt bool", `{"a":{"$gt":false}}`, `{"a":true}`, true},
 		{"$in", `{"a":{"$in":[1,2,3]}}`, `{"a":2}`, true},
 		{"$in miss", `{"a":{"$in":[1,2,3]}}`, `{"a":9}`, false},

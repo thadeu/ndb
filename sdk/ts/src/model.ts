@@ -1,21 +1,25 @@
-import { NotFoundError } from './errors.js'
+import { InvalidUpdateError, NotFoundError } from './errors.js'
 import type { Ndb } from './ndb.js'
 import { Query } from './query.js'
 import type {
   AggregateOptions,
   AggregateResult,
+  DeleteOptions,
+  DeleteResult,
   Duration,
   ExpireResult,
   Fields,
+  Filter,
   Input,
   InsertOptions,
   Row,
   Schema,
   SortSpec,
+  UpdateOps,
   UpdateOptions,
+  UpdateResult,
   WatchEvent,
   WatchOptions,
-  WriteOptions,
   WriteResult,
   Where,
 } from './types.js'
@@ -67,28 +71,41 @@ export class Model<F extends Fields> {
     return this.insert(docs, opts)
   }
 
-  async update(id: string, set: Input<F>, opts: UpdateOptions = {}): Promise<WriteResult> {
+  // Atomic update by filter. The filter and the operators are sent as one
+  // body; the daemon matches and writes in one step on the newest state, so
+  // concurrent updates never interleave. A version guard is a filter:
+  // { call_id: 'c1', _v: 7 }. Matching nothing is not an error: matched is 0.
+  async update(filter: Filter<F>, ops: UpdateOps<F>, opts: UpdateOptions = {}): Promise<UpdateResult<F>> {
     await this.ready()
 
-    const update = { id, set, unset: opts.unset, if_version: opts.ifVersion, expire_in: opts.expireIn }
+    const body = mergeUpdate(filter, ops)
+    const query = writeQuery({ many: opts.many, upsert: opts.upsert, expire_in: opts.expireIn })
+    const out = await this.db.transport.request<{ matched: number; modified: number; doc?: Record<string, unknown> }>(
+      'POST',
+      this.path('update') + query,
+      body,
+    )
 
-    return this.db.transport.request<WriteResult>('POST', this.path('update'), { update })
+    return { matched: out.matched, modified: out.modified, doc: out.doc && (this.decode(out.doc) as Row<F>) }
   }
 
-  async delete(id: string, opts: WriteOptions = {}): Promise<void> {
+  // Deletes the documents that the filter matches: one, or every match with
+  // many (same rule as update).
+  async delete(filter: Filter<F>, opts: DeleteOptions = {}): Promise<DeleteResult> {
     await this.ready()
-    await this.db.transport.request('POST', this.path('delete'), { delete: { id, if_version: opts.ifVersion } })
+
+    return this.db.transport.request<DeleteResult>('POST', this.path('delete') + writeQuery({ many: opts.many }), toWhere(filter))
   }
 
   // Makes a document expire, like EXPIRE in Redis: seconds or "30m". It throws
   // NotFoundError for a missing or expired document, and TtlError when the
   // schema has no expires field.
-  expire(id: string, duration: Duration, opts: WriteOptions = {}): Promise<ExpireResult> {
-    return this.setExpiry({ id, in: duration, if_version: opts.ifVersion })
+  expire(id: string, duration: Duration): Promise<ExpireResult> {
+    return this.setExpiry({ id, in: duration })
   }
 
-  expireAt(id: string, at: Date, opts: WriteOptions = {}): Promise<ExpireResult> {
-    return this.setExpiry({ id, at: at.toISOString(), if_version: opts.ifVersion })
+  expireAt(id: string, at: Date): Promise<ExpireResult> {
+    return this.setExpiry({ id, at: at.toISOString() })
   }
 
   // Removes the expiry of a document (PERSIST in Redis).
@@ -242,4 +259,31 @@ export class Model<F extends Fields> {
       unique: entries.filter(([, d]) => d.unique).map(([n]) => n),
     }
   }
+}
+
+function writeQuery(params: Record<string, boolean | number | string | undefined>): string {
+  const q = new URLSearchParams()
+
+  for (const [name, value] of Object.entries(params)) {
+    if (value !== undefined && value !== false) {
+      q.set(name, String(value))
+    }
+  }
+
+  const text = q.toString()
+
+  return text === '' ? '' : `?${text}`
+}
+
+// mergeUpdate puts the filter and the operators in the one body of the update
+// call. An operator key without "$" would be read as a filter key by the
+// daemon, so it is refused before anything is sent.
+function mergeUpdate(filter: object, ops: object): Record<string, unknown> {
+  for (const key of Object.keys(ops)) {
+    if (!key.startsWith('$')) {
+      throw new InvalidUpdateError('invalid_update', `update operator "${key}" must start with $ (for example "$set")`)
+    }
+  }
+
+  return { ...(toWhere(filter) as Record<string, unknown>), ...ops }
 }

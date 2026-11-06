@@ -28,23 +28,6 @@ type insertReq struct {
 	ExpireIn json.RawMessage   `json:"expire_in"`
 }
 
-type updateReq struct {
-	Update struct {
-		ID        string          `json:"id"`
-		Set       map[string]any  `json:"set"`
-		Unset     []string        `json:"unset"`
-		IfVersion uint64          `json:"if_version"`
-		ExpireIn  json.RawMessage `json:"expire_in"`
-	} `json:"update"`
-}
-
-type deleteReq struct {
-	Delete struct {
-		ID        string `json:"id"`
-		IfVersion uint64 `json:"if_version"`
-	} `json:"delete"`
-}
-
 // find streams the rows as NDJSON. The page metadata goes in headers, which
 // are sent before the first row: X-Ndb-Next (absent on the last page),
 // X-Ndb-Plan, X-Ndb-Examined and, with count: true, X-Ndb-Total. With
@@ -188,11 +171,11 @@ func (s *Server) insert(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	writeJSON(w, http.StatusOK, map[string]any{"results": out})
 }
 
+// update is the atomic update by filter: the body mixes the filter and the
+// write operators, the options are in the query string.
 func (s *Server) update(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
 
-	var req updateReq
-
 	body, err := readBody(w, r, db.MaxLine(name))
 	if err != nil {
 		writeError(w, err)
@@ -200,7 +183,8 @@ func (s *Server) update(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
-	if err := decode(body, &req); err != nil {
+	opts, err := updateOpts(r)
+	if err != nil {
 		writeError(w, err)
 
 		return
@@ -213,34 +197,79 @@ func (s *Server) update(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
-	u := req.Update
-
-	expireIn, err := parseExpireIn(u.ExpireIn)
+	res, err := col.Update(r.Context(), body, opts)
 	if err != nil {
 		writeError(w, err)
 
 		return
 	}
 
-	ch := collection.Change{Set: u.Set, Unset: u.Unset, ExpireIn: expireIn}
+	s.metrics.writes.Add(int64(res.Modified))
 
-	v, err := col.Update(r.Context(), u.ID, ch, u.IfVersion)
-	if err != nil {
-		writeError(w, err)
+	out := map[string]any{"matched": res.Matched, "modified": res.Modified}
 
-		return
+	if res.Doc != nil && !opts.Many {
+		out["doc"] = res.Doc
 	}
 
-	s.metrics.writes.Add(1)
-
-	writeJSON(w, http.StatusOK, writeResult{ID: u.ID, V: v})
+	writeJSON(w, http.StatusOK, out)
 }
 
+func updateOpts(r *http.Request) (collection.UpdateOpts, error) {
+	var opts collection.UpdateOpts
+
+	many, err := boolParam(r, "many")
+	if err != nil {
+		return opts, err
+	}
+
+	upsert, err := boolParam(r, "upsert")
+	if err != nil {
+		return opts, err
+	}
+
+	expireIn, err := parseExpireParam(r.URL.Query().Get("expire_in"))
+	if err != nil {
+		return opts, err
+	}
+
+	return collection.UpdateOpts{Many: many, Upsert: upsert, ExpireIn: expireIn}, nil
+}
+
+// boolParam reads an optional true/false query parameter.
+func boolParam(r *http.Request, name string) (bool, error) {
+	raw := r.URL.Query().Get(name)
+
+	if raw == "" {
+		return false, nil
+	}
+
+	b, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, badRequest("%s must be true or false", name)
+	}
+
+	return b, nil
+}
+
+// parseExpireParam reads expire_in from the query string: a duration
+// string or a number of seconds, like the field of the insert body.
+func parseExpireParam(raw string) (time.Duration, error) {
+	if raw == "" {
+		return 0, nil
+	}
+
+	if _, err := strconv.ParseFloat(raw, 64); err != nil {
+		raw = strconv.Quote(raw)
+	}
+
+	return parseExpireIn(json.RawMessage(raw))
+}
+
+// remove is delete by filter: the body is the filter.
 func (s *Server) remove(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
 
-	var req deleteReq
-
 	body, err := readBody(w, r, db.MaxLine(name))
 	if err != nil {
 		writeError(w, err)
@@ -248,7 +277,8 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
-	if err := decode(body, &req); err != nil {
+	many, err := boolParam(r, "many")
+	if err != nil {
 		writeError(w, err)
 
 		return
@@ -261,17 +291,16 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
-	d := req.Delete
-
-	if err := col.Delete(r.Context(), d.ID, d.IfVersion); err != nil {
+	n, err := col.Delete(r.Context(), body, many)
+	if err != nil {
 		writeError(w, err)
 
 		return
 	}
 
-	s.metrics.writes.Add(1)
+	s.metrics.writes.Add(int64(n))
 
-	writeJSON(w, http.StatusOK, map[string]string{"id": d.ID})
+	writeJSON(w, http.StatusOK, map[string]int{"deleted": n})
 }
 
 // ensure is ensure_collection (PUT /v1/c/{coll}). The answer has the final

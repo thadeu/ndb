@@ -25,13 +25,21 @@ module Ndb
   class Unauthorized < Error; end
   class NotFound < Error; end
   class UnknownCollection < Error; end
-  class VersionConflict < Error; end
   class UniqueViolation < Error; end
   class CatalogConflict < Error; end
   class CatalogInvalid < Error; end
   class ReadOnlyCollection < Error; end
   class InvalidQuery < Error; end
   class InvalidCursor < Error; end
+
+  # The update or delete body breaks the contract (see Client#update).
+  class InvalidUpdate < Error; end
+  class UnknownOperator < InvalidUpdate; end
+  class NoUpdate < InvalidUpdate; end
+  class ConflictingUpdate < InvalidUpdate; end
+  class InvalidField < InvalidUpdate; end
+  class UnindexedMany < InvalidUpdate; end
+  class EmptyFilter < InvalidUpdate; end
 
   # The collection has no expires_field, or its expiry comes from ttl + time.
   class TtlNotEnabled < Error; end
@@ -50,7 +58,6 @@ module Ndb
     "not_ready" => NotReady,
     "not_found" => NotFound,
     "unknown_collection" => UnknownCollection,
-    "version_conflict" => VersionConflict,
     "unique_violation" => UniqueViolation,
     "duplicate_id" => UniqueViolation,
     "catalog_conflict" => CatalogConflict,
@@ -64,7 +71,13 @@ module Ndb
     "watch_lagged" => WatchLagged,
     "history_truncated" => HistoryTruncated,
     "ttl_not_enabled" => TtlNotEnabled,
-    "ttl_derived" => TtlDerived
+    "ttl_derived" => TtlDerived,
+    "unknown_operator" => UnknownOperator,
+    "no_update" => NoUpdate,
+    "conflicting_update" => ConflictingUpdate,
+    "invalid_field" => InvalidField,
+    "unindexed_many" => UnindexedMany,
+    "empty_filter" => EmptyFilter
   }.freeze
 
   def self.error_for(code, message, status)

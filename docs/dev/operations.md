@@ -24,6 +24,8 @@ The `ndb` binary is the daemon and the CLI. `ndb` with only flags still runs the
 | `ndb compact <collection>` | Seal and merge the segments now. |
 | `ndb quarantine <collection>` | The bad lines of a direct collection. |
 | `ndb query <collection> ['<where>']` | Find rows (`-aggregate` for a pipeline). |
+| `ndb update <collection> '<json>'` | [Atomic update by filter](http-api.md#atomic-update-by-filter): the JSON mixes the filter and the write operators. `--many`, `--upsert`, `--expire-in 60s`. |
+| `ndb delete <collection> '<json>'` | Delete the documents that the JSON filter matches. `--many`. |
 | `ndb version` | Print the version. `ndb -version` still works. |
 | `ndb help` | List the commands. |
 

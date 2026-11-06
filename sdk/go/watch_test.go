@@ -106,7 +106,7 @@ func TestWatchDeleteEventHasZeroDocAndFromNow(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 
-	if err := c.Delete(ctx, "j1"); err != nil {
+	if _, err := c.Delete(ctx, Eq("job_id", "j1")); err != nil {
 		t.Fatal(err)
 	}
 

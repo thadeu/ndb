@@ -33,7 +33,7 @@ ndb = Ndb::Client.new(url: "tcp://ndb.internal:7070", token: ENV["NDB_TOKEN"])  
 
 ndb.ensure_collection("calls", id: "call_id", indexes: ["status"])
 ndb.insert("calls", [{ call_id: "c1", status: "answered" }])
-ndb.update("calls", "c1", set: { status: "done" }, if_version: 1)   # a stale write raises Ndb::VersionConflict
+ndb.update("calls", { call_id: "c1", _v: 1 }, { "$set" => { status: "done" } })   # => {"matched" => 1, "modified" => 1, "doc" => {...}}; a stale _v gives matched 0
 
 page = ndb.find("calls", where: { status: "done" }, sort: { call_id: 1 }, limit: 50, count: true)
 page.rows; page.total; page.next_cursor
@@ -45,7 +45,7 @@ ndb.watch("calls", "sweeper", where: { status: "failed" }) do |ev|
 end
 ```
 
-Errors are `Ndb::Error` subclasses with `code` and `status`: `NotFound`, `VersionConflict`, `UniqueViolation`, `CatalogConflict`, `ReadOnlyCollection`, `InvalidQuery`, `InvalidCursor`, `ConnectionError`, `NotReady`, `Unauthorized`, `WatchLagged`, `HistoryTruncated`.
+Errors are `Ndb::Error` subclasses with `code` and `status`: `NotFound`, `UniqueViolation`, `CatalogConflict`, `ReadOnlyCollection`, `InvalidQuery`, `InvalidCursor`, `InvalidUpdate` (`UnknownOperator`, `NoUpdate`, `ConflictingUpdate`, `InvalidField`, `UnindexedMany`, `EmptyFilter`), `ConnectionError`, `NotReady`, `Unauthorized`, `WatchLagged`, `HistoryTruncated`.
 
 ## Rails (gem `ndb-rails`)
 
@@ -95,8 +95,12 @@ The collection name follows Rails naming (`Call` becomes `calls`); `self.collect
 Call.create!(call_id: "c1", status: "answered", duration: 42, ts: Time.current)
 
 call = Call.find("c1")
-call.update!(status: "done")          # sends if_version; a stale write raises Ndb::StaleObjectError
+call.update!(status: "done")          # $set of the changed attributes, guarded by id and _v; a stale write raises Ndb::StaleObjectError
+call.increment!(:duration)           # atomic $inc on the daemon
 call.destroy
+
+Call.where(status: "failed").update({ "$set" => { "status" => "retry" } })   # atomic, every match (needs an indexed field)
+Call.where(status: "retry").delete
 
 Call.where(status: "answered", ts: 1.day.ago..).order(ts: :desc).limit(50).to_a
 Call.where(dnis: %w[1133 1144]).count
@@ -109,7 +113,7 @@ Call.where(status: "answered").limit(100).find_each { |c| puts c.call_id }   # c
 
 Regular expressions: a Ruby `Regexp` works in `where` values (`Call.where(caller: /^55/i)`, `where.not`, `or`, `watch where:`). It is sent as `{"$regex": source, "$options": "m" + i/s/x}`: `m` is always set (Ruby `^`/`$` are line anchors), `/i` is `i`, `/m` is `s`, `/x` is `x`. Look-around, backreferences, `(?>`, possessive quantifiers, `\h`, `\G`, `\R` and `\X` raise `Ndb::InvalidQuery` before any request (RE2 has none of them). A String pattern, `{"$regex" => "^abc"}`, is sent unchanged, and a literal `^prefix` without `i`/`m` uses the index. A `Regexp` always carries `m`, so it is a scan filter. See [query.md](query.md#regular-expressions).
 
-Errors are the classes of the gem `ndb` (`Ndb::Error` and its subclasses). The gem `ndb-rails` adds the ActiveRecord-like aliases `Ndb::StaleObjectError` (is `Ndb::VersionConflict`) and `Ndb::RecordNotUnique` (is `Ndb::UniqueViolation`). They have `code` and `status`: `NotFound`, `VersionConflict`, `UniqueViolation`, `CatalogConflict`, `ReadOnlyCollection`, `InvalidQuery`, `InvalidCursor`, `ConnectionError`, `Unauthorized`, `WatchLagged`, `HistoryTruncated`. `RecordInvalid` and `RecordNotSaved` belong to `ndb-rails`.
+Errors are the classes of the gem `ndb` (`Ndb::Error` and its subclasses). The gem `ndb-rails` adds the ActiveRecord-like names `Ndb::StaleObjectError` (a save or destroy that matched nothing) and `Ndb::RecordNotUnique` (is `Ndb::UniqueViolation`). They have `code` and `status`: `NotFound`, `UniqueViolation`, `CatalogConflict`, `ReadOnlyCollection`, `InvalidQuery`, `InvalidCursor`, `ConnectionError`, `Unauthorized`, `WatchLagged`, `HistoryTruncated`. `RecordInvalid` and `RecordNotSaved` belong to `ndb-rails`.
 
 The Ruby SDK has no model-level `watch`. Use the client, which streams events for a named consumer:
 
@@ -153,15 +157,15 @@ rows, err := calls.Where(ndb.Eq("status", "answered")).Sort(ndb.Desc("ts")).Limi
 
 n, err := calls.Where(ndb.In("dnis", "1133", "1144")).Count(ctx)
 
-v, err := calls.Update(ctx, "c1", map[string]any{"status": "done"}, ndb.IfVersion(1))
-if errors.Is(err, ndb.ErrVersionConflict) {
-	// reload and retry
+res, err := calls.Update(ctx, ndb.And(ndb.Eq("call_id", "c1"), ndb.Eq("_v", 1)), ndb.Ops{"$set": {"status": "done"}})
+if err == nil && res.Matched == 0 {
+	// a stale _v or a missing document: reload and retry
 }
 
-err = calls.Delete(ctx, "c1")
+deleted, err := calls.Delete(ctx, ndb.Eq("call_id", "c1"))
 ```
 
-Filters: `Eq Ne Gt Gte Lt Lte In Exists Or Not`. Query methods: `Where Sort Limit Skip Page Fields After All First Count Iter NextCursor`. Aggregate with `calls.Aggregate(ctx, ndb.Pipeline{...})` or `ndb.AggregateAs[R](...)` for typed rows.
+Filters: `Eq Ne Gt Gte Lt Lte In Exists And Or Not`. `Update` and `Delete` take one filter (use `And` for several conditions); options are `Many()`, `Upsert()` and `ExpireIn(d)`. Query methods: `Where Sort Limit Skip Page Fields After All First Count Iter NextCursor`. Aggregate with `calls.Aggregate(ctx, ndb.Pipeline{...})` or `ndb.AggregateAs[R](...)` for typed rows.
 
 Outbox consumer. `ndb.WatchWhere(...)` delivers only the events whose document matches:
 
@@ -206,7 +210,7 @@ await calls.insert({ call_id: 'c1', status: 'answered', duration: 42, ts: new Da
 const rows = await calls.where({ status: 'answered' }).sort({ ts: -1 }).limit(10)
 
 const row = await calls.find('c1')
-await calls.update('c1', { status: 'done' }, { ifVersion: row?._v })
+await calls.update({ call_id: 'c1', _v: row?._v }, { $set: { status: 'done' } })   // { matched, modified, doc }
 
 const byStatus = await calls.aggregate([{ $group: { _id: '$status', n: { $count: {} } } }])
 
@@ -218,7 +222,7 @@ for await (const ev of calls.watch('sweeper', { where: { status: 'failed' } })) 
 await ndb.close()
 ```
 
-Errors are `NdbError` subclasses with `code` and `status` (`NotFoundError`, `VersionConflictError`, `DuplicateIdError`, `UniqueViolationError`, `InvalidQueryError`, `CursorError`, `WatchLaggedError`, `HistoryTruncatedError`, `UnauthorizedError`). A runnable example is `sdk/ts/examples/basic.mjs`.
+Errors are `NdbError` subclasses with `code` and `status` (`NotFoundError`, `InvalidUpdateError`, `DuplicateIdError`, `UniqueViolationError`, `InvalidQueryError`, `CursorError`, `WatchLaggedError`, `HistoryTruncatedError`, `UnauthorizedError`). A runnable example is `sdk/ts/examples/basic.mjs`.
 
 ## Retry while the daemon starts
 

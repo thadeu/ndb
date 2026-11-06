@@ -31,7 +31,7 @@ func TestExpireInInsertAndUpdate(t *testing.T) {
 		t.Fatalf("ttl a = %v %v %v", left, expires, err)
 	}
 
-	if _, err := sessions.Update(ctx, "a", map[string]any{"user": "u2"}, ExpireIn(30*time.Minute)); err != nil {
+	if _, err := sessions.Update(ctx, Eq("id", "a"), Ops{"$set": {"user": "u2"}}, ExpireIn(30*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -56,13 +56,9 @@ func TestExpirePersistTTL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	v, err := sessions.Expire(ctx, "s1", 10*time.Minute, IfVersion(1))
+	v, err := sessions.Expire(ctx, "s1", 10*time.Minute)
 	if err != nil || v != 2 {
 		t.Fatalf("expire = %d, %v", v, err)
-	}
-
-	if _, err := sessions.Expire(ctx, "s1", time.Hour, IfVersion(1)); !errors.Is(err, ErrVersionConflict) {
-		t.Fatalf("stale expire = %v", err)
 	}
 
 	if _, err := sessions.ExpireAt(ctx, "s1", time.Now().Add(2*time.Hour)); err != nil {

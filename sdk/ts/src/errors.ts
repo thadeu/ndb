@@ -1,7 +1,6 @@
 export type ErrorCode =
   | 'unauthorized'
   | 'not_found'
-  | 'version_conflict'
   | 'duplicate_id'
   | 'unique_violation'
   | 'catalog_conflict'
@@ -24,6 +23,13 @@ export type ErrorCode =
   | 'history_truncated'
   | 'ttl_not_enabled'
   | 'ttl_derived'
+  | 'unknown_operator'
+  | 'no_update'
+  | 'conflicting_update'
+  | 'invalid_field'
+  | 'unindexed_many'
+  | 'empty_filter'
+  | 'invalid_update'
   | 'http_status'
   | (string & {})
 
@@ -41,13 +47,18 @@ export class NdbError extends Error {
 
 export class UnauthorizedError extends NdbError {}
 export class NotFoundError extends NdbError {}
-export class VersionConflictError extends NdbError {}
 export class DuplicateIdError extends NdbError {}
 export class UniqueViolationError extends NdbError {}
 export class InvalidQueryError extends NdbError {}
 export class CursorError extends NdbError {}
 export class WatchLaggedError extends NdbError {}
 export class HistoryTruncatedError extends NdbError {}
+
+// The update or delete body breaks the contract: an unknown operator, no write
+// operator, two operators on one field, a field that starts with "$", many
+// without an index, or an empty filter. The SDK also throws it, with the code
+// invalid_update, when a key of the operators does not start with "$".
+export class InvalidUpdateError extends NdbError {}
 
 // The collection has no expires field (ttl_not_enabled), or its expiry comes
 // from ttl + time (ttl_derived).
@@ -57,7 +68,6 @@ const subclasses: Record<string, typeof NdbError> = {
   unauthorized: UnauthorizedError,
   not_found: NotFoundError,
   unknown_collection: NotFoundError,
-  version_conflict: VersionConflictError,
   duplicate_id: DuplicateIdError,
   unique_violation: UniqueViolationError,
   invalid_query: InvalidQueryError,
@@ -69,6 +79,12 @@ const subclasses: Record<string, typeof NdbError> = {
   history_truncated: HistoryTruncatedError,
   ttl_not_enabled: TtlError,
   ttl_derived: TtlError,
+  unknown_operator: InvalidUpdateError,
+  no_update: InvalidUpdateError,
+  conflicting_update: InvalidUpdateError,
+  invalid_field: InvalidUpdateError,
+  unindexed_many: InvalidUpdateError,
+  empty_filter: InvalidUpdateError,
 }
 
 export function makeError(code: ErrorCode, message: string, status = 0): NdbError {

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -181,22 +182,21 @@ func TestInsertGetUpdateDelete(t *testing.T) {
 		t.Fatalf("get: got %+v", got)
 	}
 
-	v, err := calls.Update(ctx, "c1", map[string]any{"status": "done"}, IfVersion(1))
+	res, err := calls.Update(ctx, And(Eq("call_id", "c1"), Eq("_v", 1)), Ops{"$set": {"status": "done"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if v != 2 {
-		t.Fatalf("version after update: got %d, want 2", v)
+	if res.Matched != 1 || res.Modified != 1 || res.Doc == nil || res.Doc.Status != "done" {
+		t.Fatalf("update: got %+v", res)
 	}
 
-	_, err = calls.Update(ctx, "c1", map[string]any{"status": "stale"}, IfVersion(1))
-
-	if !errors.Is(err, ErrVersionConflict) {
-		t.Fatalf("stale update: want ErrVersionConflict, got %v", err)
+	res, err = calls.Update(ctx, And(Eq("call_id", "c1"), Eq("_v", 1)), Ops{"$set": {"status": "stale"}})
+	if err != nil || res.Matched != 0 || res.Doc != nil {
+		t.Fatalf("stale update: want matched 0, got %+v, %v", res, err)
 	}
 
-	if _, err := calls.Update(ctx, "c1", nil, Unset("duration")); err != nil {
+	if _, err := calls.Update(ctx, Eq("call_id", "c1"), Ops{"$unset": {"duration": true}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -209,8 +209,8 @@ func TestInsertGetUpdateDelete(t *testing.T) {
 		t.Fatalf("after update: got %+v, want status done and duration unset", got)
 	}
 
-	if err := calls.Delete(ctx, "c1"); err != nil {
-		t.Fatal(err)
+	if n, err := calls.Delete(ctx, Eq("call_id", "c1")); err != nil || n != 1 {
+		t.Fatalf("delete: n=%d err=%v", n, err)
 	}
 
 	if _, err := calls.Get(ctx, "c1"); !errors.Is(err, ErrNotFound) {
@@ -297,5 +297,78 @@ func TestSchemaExpiresOption(t *testing.T) {
 	body, err := json.Marshal(ensureBody{ID: s.id, ExpiresField: s.expires})
 	if err != nil || string(body) != `{"id":"id","expires_field":"expires_at"}` {
 		t.Fatalf("ensure body %s err %v", body, err)
+	}
+}
+
+type Stock struct {
+	SKU   string `ndb:"sku,id"`
+	Group string `ndb:"grp,index"`
+	Qty   int    `ndb:"qty"`
+	Tags  []string
+}
+
+func TestUpdateManyUpsertAndGuards(t *testing.T) {
+	ctx := context.Background()
+	db := openTest(t, daemon.unix)
+
+	stock, err := Collection[Stock](ctx, db, newColl())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := stock.Insert(ctx, Stock{SKU: "a", Group: "g1", Qty: 1}, Stock{SKU: "b", Group: "g1", Qty: 1}, Stock{SKU: "c", Group: "g2", Qty: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := stock.Update(ctx, Eq("grp", "g1"), Ops{"$inc": {"qty": 4}}, Many())
+	if err != nil || res.Matched != 2 || res.Modified != 2 || res.Doc != nil {
+		t.Fatalf("many: %+v, %v", res, err)
+	}
+
+	guard := And(Eq("sku", "c"), Gte("qty", 1))
+
+	if res, err := stock.Update(ctx, guard, Ops{"$inc": {"qty": -1}}); err != nil || res.Modified != 1 || res.Doc.Qty != 0 {
+		t.Fatalf("first decrement: %+v, %v", res, err)
+	}
+
+	if res, err := stock.Update(ctx, guard, Ops{"$inc": {"qty": -1}}); err != nil || res.Matched != 0 {
+		t.Fatalf("second decrement: %+v, %v", res, err)
+	}
+
+	res, err = stock.Update(ctx, Eq("sku", "new"), Ops{"$inc": {"qty": 2}, "$push": {"Tags": "x"}}, Upsert())
+	if err != nil || res.Matched != 0 || res.Modified != 1 || res.Doc.Qty != 2 || len(res.Doc.Tags) != 1 {
+		t.Fatalf("upsert: %+v, %v", res, err)
+	}
+
+	_, err = stock.Update(ctx, Eq("qty", 5), Ops{"$set": {"qty": 6}}, Many())
+
+	if !errors.Is(err, ErrUnindexedMany) {
+		t.Fatalf("unindexed many: %v", err)
+	}
+
+	_, err = stock.Update(ctx, Eq("sku", "a"), Ops{"$set": {"qty": 1}, "$inc": {"qty": 1}})
+
+	if !errors.Is(err, ErrConflictingUpdate) {
+		t.Fatalf("conflict: %v", err)
+	}
+
+	if n, err := stock.Delete(ctx, Eq("grp", "g1"), Many()); err != nil || n != 2 {
+		t.Fatalf("delete many: n=%d err=%v", n, err)
+	}
+}
+
+func TestUpdateRejectsPlainOperatorKeysBeforeSending(t *testing.T) {
+	ctx := context.Background()
+	db := openTest(t, daemon.unix)
+
+	stock, err := Collection[Stock](ctx, db, newColl())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = stock.Update(ctx, Eq("sku", "a"), Ops{"set": {"qty": 1}})
+
+	if err == nil || !strings.Contains(err.Error(), "must start with $") {
+		t.Fatalf("got %v", err)
 	}
 }

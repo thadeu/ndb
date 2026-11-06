@@ -40,7 +40,7 @@ func TestGCBlobsKeepsLiveDocumentsBlobs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := col.Delete(ctx, "drop", 0); err != nil {
+	if _, err := col.Delete(ctx, []byte(`{"call_id":"drop"}`), false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -109,7 +109,7 @@ func TestGCBlobsKeepsBlobsOfKeptWALRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := col.Delete(ctx, "gone", 0); err != nil {
+	if _, err := col.Delete(ctx, []byte(`{"call_id":"gone"}`), false); err != nil {
 		t.Fatal(err)
 	}
 

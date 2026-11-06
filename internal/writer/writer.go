@@ -48,7 +48,7 @@ type Config struct {
 	StartTx uint64
 
 	// Prepare turns a request into ops inside the writer goroutine, so
-	// checks (unique, IfVersion) see every earlier commit, even ones in the
+	// checks (unique, the update filter) see every earlier commit, even ones in the
 	// same batch that are not durable yet. An error rejects only that
 	// request. Without Prepare, the request must be []wal.Op.
 	Prepare func(req any) (Prepared, error)

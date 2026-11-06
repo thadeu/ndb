@@ -98,12 +98,13 @@ func (c *Collection) Insert(ctx context.Context, docs ...[]byte) ([]collection.R
 	return c.eng.Insert(ctx, docs...)
 }
 
-func (c *Collection) Update(ctx context.Context, id string, ch collection.Change, ifVersion uint64) (uint64, error) {
+// Update is the atomic update by filter, see collection.Update.
+func (c *Collection) Update(ctx context.Context, body []byte, opts collection.UpdateOpts) (collection.UpdateResult, error) {
 	if c.eng == nil {
-		return 0, ErrDirect
+		return collection.UpdateResult{}, ErrDirect
 	}
 
-	return c.eng.Update(ctx, id, ch, ifVersion)
+	return c.eng.Update(ctx, body, opts)
 }
 
 // InsertIn is Insert with every document expiring in d from now.
@@ -116,12 +117,12 @@ func (c *Collection) InsertIn(ctx context.Context, d time.Duration, docs ...[]by
 }
 
 // Expire sets the expiry of a document (EXPIRE).
-func (c *Collection) Expire(ctx context.Context, id string, e collection.Expiry, ifVersion uint64) (uint64, time.Time, error) {
+func (c *Collection) Expire(ctx context.Context, id string, e collection.Expiry) (uint64, time.Time, error) {
 	if c.eng == nil {
 		return 0, time.Time{}, ErrDirect
 	}
 
-	return c.eng.Expire(ctx, id, e, ifVersion)
+	return c.eng.Expire(ctx, id, e)
 }
 
 // Persist removes the expiry of a document (PERSIST).
@@ -142,12 +143,13 @@ func (c *Collection) TTL(id string) (collection.TTLInfo, error) {
 	return c.eng.TTL(id)
 }
 
-func (c *Collection) Delete(ctx context.Context, id string, ifVersion uint64) error {
+// Delete removes the documents that the filter matches, and returns how many.
+func (c *Collection) Delete(ctx context.Context, body []byte, many bool) (int, error) {
 	if c.eng == nil {
-		return ErrDirect
+		return 0, ErrDirect
 	}
 
-	return c.eng.Delete(ctx, id, ifVersion)
+	return c.eng.Delete(ctx, body, many)
 }
 
 // Seal writes the memtable of an engine-mode collection to a segment now.

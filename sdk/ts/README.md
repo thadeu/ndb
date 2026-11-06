@@ -86,29 +86,27 @@ const results = await calls.insert([
 // Find by id. Returns null when missing.
 const row = await calls.find('c1')
 
-// Update with optimistic locking.
-await calls.update('c1', { status: 'done' }, { ifVersion: row!._v })
+// Atomic update by filter: filter first, then the write operators.
+// _v in the filter is an optimistic lock.
+const res = await calls.update({ call_id: 'c1', _v: row!._v }, { $set: { status: 'done' }, $unset: { duration: true } })
+// res: { matched, modified, doc } (doc is the new row with _v; absent for many)
 
-// Remove a field.
-await calls.update('c1', {}, { unset: ['duration'] })
+// A guarded decrement: exactly one of two racing calls wins.
+await stock.update({ sku: 'a', qty: { $gte: 1 } }, { $inc: { qty: -1 } })
 
-// Delete. ifVersion is optional here too.
-await calls.delete('c1', { ifVersion: 3 })
+// Every match (the filter needs the id or an indexed field), or create it.
+await calls.update({ status: 'failed' }, { $set: { status: 'retry' } }, { many: true })
+await calls.update({ call_id: 'c9' }, { $inc: { duration: 1 } }, { upsert: true })
+
+// Delete by filter: { deleted }.
+await calls.delete({ call_id: 'c2' })
+await calls.delete({ status: 'failed' }, { many: true })
 ```
 
-`update` returns `{ id, v }` with the new version. A stale `ifVersion` throws `VersionConflictError`:
-
-```ts
-import { VersionConflictError } from '@thadeu/ndb'
-
-try {
-  await calls.update('c1', { status: 'x' }, { ifVersion: row!._v })
-} catch (err) {
-  if (err instanceof VersionConflictError) {
-    // Someone else wrote first. Read again and retry.
-  }
-}
-```
+- Operators: `$set`, `$unset`, `$inc`, `$push` (with `{ $each: [...] }`), `$pull`, `$min`, `$max`. Field names can be dot paths.
+- Nothing matched is not an error: `matched` is 0 (for example when `_v` is stale, so read again and retry). `modified` is 0 when the operators leave the document as it is.
+- `many` needs the id or an indexed field in the filter. `upsert` creates the document from the equality fields of the filter.
+- A key of the operators without `$` throws `InvalidUpdateError` before anything is sent. The daemon contract errors (`unknown_operator`, `no_update`, `conflicting_update`, `invalid_field`, `unindexed_many`, `empty_filter`) are `InvalidUpdateError` too.
 
 An insert with a duplicate id throws `DuplicateIdError`. A duplicate `unique` value throws `UniqueViolationError`. An insert without the id when the schema names one fails with code `missing_id`.
 
@@ -122,7 +120,7 @@ const sessions = db.model('sessions', {
 })
 
 await sessions.insert({ sid: 's1' }, { expireIn: '1h' }) // or 3600; all docs of the call
-await sessions.update('s1', { user: 'u' }, { expireIn: '30m' })
+await sessions.update({ sid: 's1' }, { $set: { user: 'u' } }, { expireIn: '30m' })
 
 const { v, expiresAt } = await sessions.expire('s1', '30m') // EXPIRE
 await sessions.expireAt('s1', new Date(Date.now() + 3_600_000))
@@ -268,7 +266,6 @@ Daemon errors are `NdbError` or a subclass. They have `code` (the daemon code) a
 |---|---|
 | `UnauthorizedError` | `unauthorized` |
 | `NotFoundError` | `not_found`, `unknown_collection` |
-| `VersionConflictError` | `version_conflict` |
 | `DuplicateIdError` | `duplicate_id` |
 | `UniqueViolationError` | `unique_violation` |
 | `InvalidQueryError` | `invalid_query`, `invalid_pipeline` |
@@ -276,6 +273,7 @@ Daemon errors are `NdbError` or a subclass. They have `code` (the daemon code) a
 | `WatchLaggedError` | `watch_lagged` |
 | `HistoryTruncatedError` | `history_truncated` |
 | `TtlError` | `ttl_not_enabled`, `ttl_derived` |
+| `InvalidUpdateError` | `unknown_operator`, `no_update`, `conflicting_update`, `invalid_field`, `unindexed_many`, `empty_filter`, `invalid_update` |
 | `NdbError` | every other code: `not_ready`, `catalog_conflict`, `catalog_invalid`, `direct_collection`, `invalid_request`, `group_limit_exceeded`, `request_too_large`, `line_too_large`, `closed`, `invalid_position`, `http_status`, ... |
 
 ```ts

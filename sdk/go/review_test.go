@@ -2,7 +2,6 @@ package ndb
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -100,7 +99,7 @@ type Versioned struct {
 	V      uint64 `ndb:"_v,version"`
 }
 
-func TestVersionFieldEnablesIfVersion(t *testing.T) {
+func TestVersionFieldGuardsAnUpdate(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, daemon.unix)
 
@@ -118,12 +117,14 @@ func TestVersionFieldEnablesIfVersion(t *testing.T) {
 		t.Fatalf("loaded V = %d err=%v, want 1", mine.V, err)
 	}
 
-	if _, err := col.Update(ctx, "a", map[string]any{"status": "theirs"}, IfVersion(mine.V)); err != nil {
-		t.Fatal(err)
+	guard := And(Eq("_id", "a"), Eq("_v", mine.V))
+
+	if res, err := col.Update(ctx, guard, Ops{"$set": {"status": "theirs"}}); err != nil || res.Matched != 1 {
+		t.Fatalf("first update: %+v, %v", res, err)
 	}
 
-	if _, err := col.Update(ctx, "a", map[string]any{"status": "mine"}, IfVersion(mine.V)); !errors.Is(err, ErrVersionConflict) {
-		t.Fatalf("stale update: want ErrVersionConflict, got %v", err)
+	if res, err := col.Update(ctx, guard, Ops{"$set": {"status": "mine"}}); err != nil || res.Matched != 0 {
+		t.Fatalf("stale update: want matched 0, got %+v, %v", res, err)
 	}
 
 	raw, _ := mustSchema[Versioned](t).encode(Versioned{ID: "a", V: 9})

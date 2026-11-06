@@ -41,7 +41,6 @@ class RailtieTest < Minitest::Test
   end
 
   def test_activerecord_like_names_are_aliases
-    assert_same Ndb::VersionConflict, Ndb::StaleObjectError
     assert_same Ndb::UniqueViolation, Ndb::RecordNotUnique
     assert_kind_of Ndb::Client, Ndb::Rails.client
   end

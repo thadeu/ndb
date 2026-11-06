@@ -35,10 +35,9 @@ type TTLInfo struct {
 }
 
 type setExpiryReq struct {
-	id        string
-	at        time.Time
-	persist   bool
-	ifVersion uint64
+	id      string
+	at      time.Time
+	persist bool
 }
 
 func formatExpiry(t time.Time) string {
@@ -96,7 +95,7 @@ func (c *Collection) stampChange(ch Change, at time.Time) Change {
 
 // Expire sets the expiry of a visible document. It returns the new version
 // and the expiry time. A missing or expired document is not_found.
-func (c *Collection) Expire(ctx context.Context, id string, e Expiry, ifVersion uint64) (uint64, time.Time, error) {
+func (c *Collection) Expire(ctx context.Context, id string, e Expiry) (uint64, time.Time, error) {
 	if _, err := c.expiryField(); err != nil {
 		return 0, time.Time{}, err
 	}
@@ -111,7 +110,7 @@ func (c *Collection) Expire(ctx context.Context, id string, e Expiry, ifVersion 
 		return 0, time.Time{}, errf("invalid_request", "expire needs a positive duration or a time")
 	}
 
-	_, ops, err := c.w.Commit(ctx, setExpiryReq{id: id, at: at, ifVersion: ifVersion})
+	_, ops, err := c.w.Commit(ctx, setExpiryReq{id: id, at: at})
 	if err != nil {
 		return 0, time.Time{}, err
 	}
@@ -134,7 +133,7 @@ func (c *Collection) Persist(ctx context.Context, id string) (uint64, error) {
 }
 
 func (c *Collection) prepareSetExpiry(v *view, r setExpiryReq) ([]wal.Op, error) {
-	cur, err := current(v, r.id, r.ifVersion)
+	cur, err := current(v, r.id)
 	if err != nil {
 		return nil, err
 	}

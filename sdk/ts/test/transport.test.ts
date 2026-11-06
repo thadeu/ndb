@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest'
-import { NdbError, NotFoundError, VersionConflictError, connect } from '../src/index.js'
+import { InvalidUpdateError, NdbError, NotFoundError, connect } from '../src/index.js'
 import { collName, tcpDb, unixDb } from './helpers.js'
 
 const dbs = [unixDb(), tcpDb()]
@@ -42,11 +42,11 @@ describe.each([
     await db.request('POST', `/v1/c/${name}/insert`, { insert: [{ k: 'a' }] })
 
     const err = await db
-      .request('POST', `/v1/c/${name}/update`, { update: { id: 'a', set: { x: 1 }, if_version: 99 } })
+      .request('POST', `/v1/c/${name}/update`, { k: 'a', $rename: { x: 'y' } })
       .catch((e: unknown) => e)
 
-    expect(err).toBeInstanceOf(VersionConflictError)
-    expect((err as VersionConflictError).code).toBe('version_conflict')
+    expect(err).toBeInstanceOf(InvalidUpdateError)
+    expect((err as InvalidUpdateError).code).toBe('unknown_operator')
   })
 })
 

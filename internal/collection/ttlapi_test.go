@@ -55,17 +55,17 @@ func TestExpiryNeedsExpiresField(t *testing.T) {
 
 	derived := openTTL(t, catalog.Def{TTL: "1h", Time: "at"}, clk, false)
 
-	_, _, err = derived.Expire(ctx, "a", collection.Expiry{In: time.Hour}, 0)
+	_, _, err = derived.Expire(ctx, "a", collection.Expiry{In: time.Hour})
 	codeIs(t, err, "ttl_derived")
 
 	_, err = derived.Persist(ctx, "a")
 	codeIs(t, err, "ttl_derived")
 
-	_, err = derived.Update(ctx, "a", collection.Change{ExpireIn: time.Hour}, 0)
+	_, err = derived.Update(ctx, []byte(`{"id":"a","$set":{"x":1}}`), collection.UpdateOpts{ExpireIn: time.Hour})
 	codeIs(t, err, "ttl_derived")
 }
 
-func TestUpdateExpireInWinsOverSetAndUnset(t *testing.T) {
+func TestUpdateExpireInWinsOverSet(t *testing.T) {
 	clk := newClock()
 	c := openTTL(t, catalog.Def{ExpiresField: "exp"}, clk, false)
 
@@ -73,9 +73,9 @@ func TestUpdateExpireInWinsOverSetAndUnset(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ch := collection.Change{Set: map[string]any{"n": 2, "exp": "2999-01-01T00:00:00Z"}, Unset: []string{"exp"}, ExpireIn: 30 * time.Minute}
+	ch := collection.Change{Set: map[string]any{"n": 2, "exp": "2999-01-01T00:00:00Z"}, ExpireIn: 30 * time.Minute}
 
-	v, err := c.Update(ctx, "a", ch, 0)
+	v, err := c.UpdateID(ctx, "a", ch, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestExpireAndPersist(t *testing.T) {
 			t.Fatalf("ttl = %+v, %v; want never", info, err)
 		}
 
-		v, at, err := c.Expire(ctx, "s1", collection.Expiry{In: 30 * time.Minute}, 0)
+		v, at, err := c.Expire(ctx, "s1", collection.Expiry{In: 30 * time.Minute})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -116,9 +116,6 @@ func TestExpireAndPersist(t *testing.T) {
 		if v != 2 || !at.Equal(clk.now().Add(30*time.Minute)) {
 			t.Fatalf("v = %d, at = %v", v, at)
 		}
-
-		_, _, err = c.Expire(ctx, "s1", collection.Expiry{In: time.Hour}, 1)
-		codeIs(t, err, "version_conflict")
 
 		clk.advance(10 * time.Minute)
 
@@ -139,7 +136,7 @@ func TestExpireAndPersist(t *testing.T) {
 			t.Fatalf("after persist: %+v, %v", info, err)
 		}
 
-		if _, _, err := c.Expire(ctx, "s1", collection.Expiry{At: clk.now().Add(time.Minute)}, 0); err != nil {
+		if _, _, err := c.Expire(ctx, "s1", collection.Expiry{At: clk.now().Add(time.Minute)}); err != nil {
 			t.Fatal(err)
 		}
 
@@ -148,13 +145,13 @@ func TestExpireAndPersist(t *testing.T) {
 		_, err = c.TTL("s1")
 		codeIs(t, err, "not_found")
 
-		_, _, err = c.Expire(ctx, "s1", collection.Expiry{In: time.Hour}, 0)
+		_, _, err = c.Expire(ctx, "s1", collection.Expiry{In: time.Hour})
 		codeIs(t, err, "not_found")
 
 		_, err = c.Persist(ctx, "s1")
 		codeIs(t, err, "not_found")
 
-		_, _, err = c.Expire(ctx, "missing", collection.Expiry{In: time.Hour}, 0)
+		_, _, err = c.Expire(ctx, "missing", collection.Expiry{In: time.Hour})
 		codeIs(t, err, "not_found")
 	}
 }
@@ -166,7 +163,7 @@ func TestExpireNeedsATime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, err := c.Expire(ctx, "a", collection.Expiry{}, 0)
+	_, _, err := c.Expire(ctx, "a", collection.Expiry{})
 	codeIs(t, err, "invalid_request")
 }
 

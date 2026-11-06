@@ -238,15 +238,17 @@ func TestUpdateThatMovesExpiryForwardKeepsTheDoc(t *testing.T) {
 	clk := newClock()
 	c := openTTL(t, catalog.Def{ExpiresField: "exp"}, clk, false)
 
-	if _, err := c.Insert(ctx, doc(`{"id":"s1","exp":"2020-01-01T00:00:00Z"}`)); err != nil {
+	if _, err := c.Insert(ctx, doc(`{"id":"s1","exp":"`+clk.now().Add(time.Minute).UTC().Format(time.RFC3339)+`"}`)); err != nil {
 		t.Fatal(err)
 	}
 
 	ch := collection.Change{Set: map[string]any{"exp": "2999-01-01T00:00:00Z"}}
 
-	if _, err := c.Update(ctx, "s1", ch, 0); err != nil {
+	if _, err := c.UpdateID(ctx, "s1", ch, 0); err != nil {
 		t.Fatal(err)
 	}
+
+	clk.advance(time.Hour)
 
 	if n, err := c.Sweep(); err != nil || n != 0 {
 		t.Fatalf("sweep = %d, %v", n, err)

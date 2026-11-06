@@ -106,18 +106,91 @@ func TestErrorBodyHasCodeAndMessage(t *testing.T) {
 	}
 }
 
-func TestVersionConflictIs409(t *testing.T) {
+func TestStaleVersionMatchesNothing(t *testing.T) {
 	_, h := newHandler(t)
 
 	call(h, "PUT", "/v1/c/posts", `{"id":"post_id"}`)
 	call(h, "POST", "/v1/c/posts/insert", `{"insert":[{"post_id":"p1","n":1}]}`)
 
-	rec := call(h, "POST", "/v1/c/posts/update", `{"update":{"id":"p1","set":{"n":2},"if_version":9}}`)
+	rec := call(h, "POST", "/v1/c/posts/update", `{"post_id":"p1","_v":9,"$set":{"n":2}}`)
 
-	expectStatus(t, rec, http.StatusConflict)
+	expectStatus(t, rec, http.StatusOK)
 
-	if got := errorCode(t, rec); got != "version_conflict" {
-		t.Fatalf("code = %q, want version_conflict", got)
+	if got := jsonBody(t, rec); got["matched"] != 0.0 || got["modified"] != 0.0 || got["doc"] != nil {
+		t.Fatalf("body = %v", got)
+	}
+
+	rec = call(h, "POST", "/v1/c/posts/update", `{"post_id":"p1","_v":1,"$set":{"n":2}}`)
+
+	got := jsonBody(t, rec)
+	doc, _ := got["doc"].(map[string]any)
+
+	if got["matched"] != 1.0 || got["modified"] != 1.0 || doc["_v"] != 2.0 || doc["n"] != 2.0 {
+		t.Fatalf("body = %v", got)
+	}
+}
+
+func TestUpdateContractErrorsAre400(t *testing.T) {
+	_, h := newHandler(t)
+
+	call(h, "PUT", "/v1/c/posts", `{"id":"post_id"}`)
+	call(h, "POST", "/v1/c/posts/insert", `{"insert":[{"post_id":"p1","n":1}]}`)
+
+	cases := map[string]string{
+		`{"post_id":"p1","$rename":{"a":"b"}}`:           "unknown_operator",
+		`{"post_id":"p1","n":1}`:                         "no_update",
+		`{"post_id":"p1","$set":{"n":1},"$inc":{"n":1}}`: "conflicting_update",
+		`{"post_id":"p1","$set":{"$n":1}}`:               "invalid_field",
+		`{"n":1,"$set":{"a":1}}`:                         "unindexed_many",
+	}
+
+	for body, want := range cases {
+		path := "/v1/c/posts/update"
+
+		if want == "unindexed_many" {
+			path += "?many=true"
+		}
+
+		rec := call(h, "POST", path, body)
+
+		expectStatus(t, rec, http.StatusBadRequest)
+
+		if got := errorCode(t, rec); got != want {
+			t.Fatalf("%s: code = %q, want %s", body, got, want)
+		}
+	}
+}
+
+func TestUpdateManyUpsertAndDeleteOptions(t *testing.T) {
+	_, h := newHandler(t)
+
+	call(h, "PUT", "/v1/c/posts", `{"id":"post_id","indexes":["g"]}`)
+	call(h, "POST", "/v1/c/posts/insert", `{"insert":[{"post_id":"a","g":1},{"post_id":"b","g":1},{"post_id":"c","g":2}]}`)
+
+	rec := call(h, "POST", "/v1/c/posts/update?many=true", `{"g":1,"$set":{"done":true}}`)
+
+	if got := jsonBody(t, rec); got["matched"] != 2.0 || got["modified"] != 2.0 || got["doc"] != nil {
+		t.Fatalf("many body = %v", got)
+	}
+
+	rec = call(h, "POST", "/v1/c/posts/update?upsert=true", `{"post_id":"z","$inc":{"n":1}}`)
+
+	if got := jsonBody(t, rec); got["matched"] != 0.0 || got["modified"] != 1.0 || got["doc"] == nil {
+		t.Fatalf("upsert body = %v", got)
+	}
+
+	expectStatus(t, call(h, "POST", "/v1/c/posts/update?many=maybe", `{"g":1,"$set":{"a":1}}`), http.StatusBadRequest)
+
+	rec = call(h, "POST", "/v1/c/posts/delete?many=true", `{"g":1}`)
+
+	if got := jsonBody(t, rec); got["deleted"] != 2.0 {
+		t.Fatalf("delete body = %v", got)
+	}
+
+	rec = call(h, "POST", "/v1/c/posts/delete", `{"post_id":"nope"}`)
+
+	if got := jsonBody(t, rec); got["deleted"] != 0.0 {
+		t.Fatalf("delete none body = %v", got)
 	}
 }
 
@@ -226,7 +299,7 @@ func TestInsertUpdateDeleteRoundTrip(t *testing.T) {
 
 	expectStatus(t, rec, http.StatusOK)
 
-	rec = call(h, "POST", "/v1/c/posts/update", `{"update":{"id":"p1","set":{"status":"live"},"if_version":1}}`)
+	rec = call(h, "POST", "/v1/c/posts/update", `{"post_id":"p1","_v":1,"$set":{"status":"live"}}`)
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -236,7 +309,7 @@ func TestInsertUpdateDeleteRoundTrip(t *testing.T) {
 		t.Fatalf("updated row not found: %s", rec.Body.String())
 	}
 
-	rec = call(h, "POST", "/v1/c/posts/delete", `{"delete":{"id":"p1"}}`)
+	rec = call(h, "POST", "/v1/c/posts/delete", `{"post_id":"p1"}`)
 
 	expectStatus(t, rec, http.StatusOK)
 

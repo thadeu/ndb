@@ -66,15 +66,10 @@ class SharedCasesTest < Minitest::Test
 
     case step["op"]
     when "insert" then client.insert(coll, body["insert"])
-    when "update" then update(coll, body["update"])
-    when "delete" then client.delete(coll, body["delete"]["id"], if_version: body["delete"]["if_version"])
+    when "update" then client.update(coll, body.reject { |k, _| k.start_with?("$") }, body.select { |k, _| k.start_with?("$") })
+    when "delete" then client.delete(coll, body)
     else flunk "#{path}: setup op #{step['op'].inspect} is not supported"
     end
-  end
-
-  def update(coll, change)
-    client.update(coll, change["id"], set: change["set"] || {}, unset: change["unset"] || [],
-                                      if_version: change["if_version"])
   end
 
   def assert_relation_builds(coll, spec, body)

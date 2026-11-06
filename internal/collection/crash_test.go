@@ -35,7 +35,7 @@ func counterChild() {
 	}
 
 	for {
-		v, err := c.Update(ctx, "c", collection.Change{Set: map[string]any{"t": time.Now().UnixNano()}}, 0)
+		v, err := c.UpdateID(ctx, "c", collection.Change{Set: map[string]any{"t": time.Now().UnixNano()}}, 0)
 		if err != nil {
 			panic(err)
 		}

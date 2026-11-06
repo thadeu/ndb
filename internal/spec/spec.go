@@ -44,7 +44,7 @@ type Expect struct {
 	Error   string            `json:"error"`
 }
 
-// CodeError is an engine error with a stable code, such as "version_conflict".
+// CodeError is an engine error with a stable code, such as "duplicate_id".
 type CodeError struct {
 	Code string
 }

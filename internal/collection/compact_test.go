@@ -540,7 +540,7 @@ func TestCompactWhileReadingAndWriting(t *testing.T) {
 
 			ch := collection.Change{Set: map[string]any{"status": fmt.Sprintf("w%d", i)}}
 
-			if _, err := c.Update(ctx, fmt.Sprintf("c%04d", i%60), ch, 0); err != nil {
+			if _, err := c.UpdateID(ctx, fmt.Sprintf("c%04d", i%60), ch, 0); err != nil {
 				done <- err
 
 				return

@@ -57,8 +57,10 @@ class TransportTest < Minitest::Test
 
     assert_raises(Ndb::UniqueViolation) { client.insert(@coll, [{ cid: "1" }]) }
     assert_raises(Ndb::UniqueViolation) { client.insert(@coll, [{ cid: "2", u: "a" }]) }
-    assert_raises(Ndb::NotFound) { client.update(@coll, "nope", set: { a: 1 }) }
-    assert_raises(Ndb::VersionConflict) { client.update(@coll, "1", set: { a: 1 }, if_version: 99) }
+    assert_raises(Ndb::UnknownOperator) { client.update(@coll, { cid: "1" }, { "$rename" => { a: "b" } }) }
+    assert_raises(Ndb::NoUpdate) { client.update(@coll, { cid: "1", a: 1 }, {}) }
+    assert_raises(Ndb::ConflictingUpdate) { client.update(@coll, { cid: "1" }, { "$set" => { a: 1 }, "$inc" => { a: 1 } }) }
+    assert_raises(Ndb::UnindexedMany) { client.update(@coll, { a: 1 }, { "$set" => { b: 1 } }, many: true) }
     assert_raises(Ndb::UnknownCollection) { client.find("missing_coll", {}) }
     assert_raises(Ndb::InvalidQuery) { client.find(@coll, where: { a: { "$bogus" => 1 } }) }
     assert_raises(Ndb::CatalogConflict) { client.ensure_collection(@coll, id: "other") }
@@ -67,10 +69,10 @@ class TransportTest < Minitest::Test
   def test_error_carries_code_and_status
     client.ensure_collection(@coll, id: "cid")
 
-    error = assert_raises(Ndb::NotFound) { client.update(@coll, "x", set: { a: 1 }) }
+    error = assert_raises(Ndb::NoUpdate) { client.update(@coll, { cid: "x" }, {}) }
 
-    assert_equal "not_found", error.code
-    assert_equal 404, error.status
+    assert_equal "no_update", error.code
+    assert_equal 400, error.status
   end
 
   def test_threads_share_the_pool

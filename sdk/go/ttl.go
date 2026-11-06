@@ -12,21 +12,14 @@ import (
 // Expire makes the document expire d from now, like EXPIRE in Redis, and
 // returns the new version. A missing or expired document is ErrNotFound.
 // The collection needs a field tagged `expires` (ErrTTLNotEnabled), and an
-// expiry that comes from ttl + time cannot be set (ErrTTLDerived). IfVersion
-// applies.
-func (c *Coll[T]) Expire(ctx context.Context, id string, d time.Duration, opts ...Option) (uint64, error) {
-	return c.expire(ctx, expireBody{ID: id, In: ttlSecs(d.Seconds()).seconds()}, opts)
+// expiry that comes from ttl + time cannot be set (ErrTTLDerived).
+func (c *Coll[T]) Expire(ctx context.Context, id string, d time.Duration) (uint64, error) {
+	return c.writeVersion(ctx, "expire", expireBody{ID: id, In: ttlSecs(d.Seconds()).seconds()})
 }
 
 // ExpireAt makes the document expire at t.
-func (c *Coll[T]) ExpireAt(ctx context.Context, id string, t time.Time, opts ...Option) (uint64, error) {
-	return c.expire(ctx, expireBody{ID: id, At: t.UTC().Format(time.RFC3339Nano)}, opts)
-}
-
-func (c *Coll[T]) expire(ctx context.Context, b expireBody, opts []Option) (uint64, error) {
-	b.IfVersion = newOptions(opts).ifVersion
-
-	return c.writeVersion(ctx, "expire", b)
+func (c *Coll[T]) ExpireAt(ctx context.Context, id string, t time.Time) (uint64, error) {
+	return c.writeVersion(ctx, "expire", expireBody{ID: id, At: t.UTC().Format(time.RFC3339Nano)})
 }
 
 // Persist removes the expiry of the document, like PERSIST in Redis, and
@@ -79,8 +72,7 @@ func (c *Coll[T]) TTL(ctx context.Context, id string) (time.Duration, bool, erro
 }
 
 type expireBody struct {
-	ID        string   `json:"id"`
-	In        *float64 `json:"in,omitempty"`
-	At        string   `json:"at,omitempty"`
-	IfVersion uint64   `json:"if_version,omitempty"`
+	ID string   `json:"id"`
+	In *float64 `json:"in,omitempty"`
+	At string   `json:"at,omitempty"`
 }

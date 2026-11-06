@@ -78,6 +78,20 @@ module Ndb
       query
     end
 
+    # Atomic writes. The daemon matches the where and writes in one step on
+    # every match, so the where needs the id or an indexed field
+    # (Ndb::UnindexedMany otherwise). ops is the operator Hash of
+    # Ndb::Client#update ({ "$inc" => { "n" => 1 } }); returns the number of
+    # modified documents.
+    def update(ops, expire_in: nil)
+      klass.ndb_update(Conditions.combine(values[:where]), ops, many: true, expire_in: expire_in).fetch("modified")
+    end
+
+    # Deletes every match (same rule as update) and returns how many.
+    def delete
+      klass.ndb_delete(Conditions.combine(values[:where]), many: true).fetch("deleted")
+    end
+
     # Loaders
 
     def load

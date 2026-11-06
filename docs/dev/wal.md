@@ -28,7 +28,7 @@ Read the files; do not edit them while the daemon runs. A hand edit breaks the C
 
 ## Group commit and fsync
 
-Each collection has one writer. It takes every request that waits, checks them (unique keys, `if_version`), appends all lines with one `write()` and calls one `fdatasync`. Many clients share one fsync, so throughput does not fall to one disk flush per request.
+Each collection has one writer. It takes every request that waits, checks them (unique keys, the filter of an update), appends all lines with one `write()` and calls one `fdatasync`. Many clients share one fsync, so throughput does not fall to one disk flush per request.
 
 When the client gets its answer depends on `durability`:
 

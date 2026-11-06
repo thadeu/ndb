@@ -117,11 +117,11 @@ func TestQueryNoSortIsInsertionOrder(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
 	seed(t, c, `{"post_id":"z"}`, `{"post_id":"a"}`, `{"post_id":"m"}`)
-	c.Update(ctx, "z", collection.Change{Set: map[string]any{"x": 1}}, 0)
+	c.UpdateID(ctx, "z", collection.Change{Set: map[string]any{"x": 1}}, 0)
 
 	eq(t, ids(t, rq(t, c, `{}`)), []string{"z", "a", "m"})
 
-	c.Delete(ctx, "a", 0)
+	c.DeleteID(ctx, "a")
 	seed(t, c, `{"post_id":"a"}`)
 
 	eq(t, ids(t, rq(t, c, `{}`)), []string{"z", "m", "a"})
@@ -256,7 +256,7 @@ func TestCursorNoSortUsesInsertionPosition(t *testing.T) {
 
 	pages := pageAll(t, c, `{"limit":2}`, func(page int) {
 		if page == 0 {
-			c.Update(ctx, "c", collection.Change{Set: map[string]any{"x": 1}}, 0)
+			c.UpdateID(ctx, "c", collection.Change{Set: map[string]any{"x": 1}}, 0)
 			seed(t, c, `{"post_id":"e"}`)
 		}
 	})
@@ -297,8 +297,8 @@ func TestSnapshotCursorIgnoresLaterWrites(t *testing.T) {
 	pages := pageAll(t, c, `{"sort":{"n":1},"limit":2,"snapshot":true,"count":true}`, func(page int) {
 		if page == 0 {
 			seed(t, c, `{"post_id":"new","n":2}`)
-			c.Delete(ctx, "p3", 0)
-			c.Update(ctx, "p4", collection.Change{Set: map[string]any{"n": -1}}, 0)
+			c.DeleteID(ctx, "p3")
+			c.UpdateID(ctx, "p4", collection.Change{Set: map[string]any{"n": -1}}, 0)
 		}
 	})
 
@@ -347,7 +347,7 @@ func TestQueryDoesNotSeeWritesAfterItStarts(t *testing.T) {
 			}
 
 			c.Insert(ctx, doc(fmt.Sprintf(`{"post_id":"w%d","n":-1}`, i)))
-			c.Update(ctx, "p0000", collection.Change{Set: map[string]any{"n": i}}, 0)
+			c.UpdateID(ctx, "p0000", collection.Change{Set: map[string]any{"n": i}}, 0)
 		}
 	}()
 
@@ -426,9 +426,9 @@ func TestIndexFollowsUpdatesDeletesAndArrays(t *testing.T) {
 	seed(t, c, `{"post_id":"a","tags":["x","y"],"status":"new"}`, `{"post_id":"b","tags":["y"],"status":"new"}`, `{"post_id":"c","status":"old"}`)
 	waitReady(t, c)
 
-	c.Update(ctx, "a", collection.Change{Set: map[string]any{"tags": []any{"z"}}}, 0)
-	c.Update(ctx, "c", collection.Change{Set: map[string]any{"status": "new"}}, 0)
-	c.Delete(ctx, "b", 0)
+	c.UpdateID(ctx, "a", collection.Change{Set: map[string]any{"tags": []any{"z"}}}, 0)
+	c.UpdateID(ctx, "c", collection.Change{Set: map[string]any{"status": "new"}}, 0)
+	c.DeleteID(ctx, "b")
 
 	eq(t, ids(t, rq(t, c, `{"where":{"tags":"y"}}`)), nil)
 	eq(t, ids(t, rq(t, c, `{"where":{"tags":"z"}}`)), []string{"a"})
@@ -493,8 +493,8 @@ func TestIndexBuildIsCorrectWhileBuilding(t *testing.T) {
 		t.Fatalf("while building: plan %s rows %d", p.Plan, len(p.Rows))
 	}
 
-	c.Update(ctx, "p0003", collection.Change{Set: map[string]any{"g": 4}}, 0)
-	c.Delete(ctx, "p0013", 0)
+	c.UpdateID(ctx, "p0003", collection.Change{Set: map[string]any{"g": 4}}, 0)
+	c.DeleteID(ctx, "p0013")
 	seed(t, c, `{"post_id":"late","g":3}`)
 
 	close(gate)
