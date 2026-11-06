@@ -12,6 +12,19 @@
 
 It is one binary with the styles and scripts inside. It uses the same HTTP API as the SDKs, so it needs nothing from the daemon.
 
+## Self-hosted
+
+The console is **self-hosted only**. You run it on your machine or next to your daemons, and it talks to them directly. There is no account, no login, and nothing leaves your network. It is free, in the same repository and under the same license as ndb.
+
+A **hosted console** (one place for all your daemons, with sign-in and teams) is planned for later. It does not exist yet, and the self-hosted console stays: the hosted version will be built on top of it, not instead of it.
+
+| | Self-hosted (now) | Hosted (planned) |
+|---|---|---|
+| Where it runs | your machine, a VM, or a container | managed for you |
+| Login | none; keep it on localhost or behind your own proxy | accounts and teams |
+| Daemons | any socket or TCP address it can reach | daemons that you register |
+| Tokens | `~/.config/ndb/console.json` on the console host | stored by the service |
+
 ## Run
 
 ::: code-group
@@ -22,13 +35,13 @@ ndb-ui                         # http://127.0.0.1:4321
 ```
 
 ```bash [Docker]
-docker run -p 4321:4321 \
+docker run -p 127.0.0.1:4321:4321 \
   -e NDB_URL=tcp://10.10.0.1:7070 -e NDB_TOKEN=... \
   ghcr.io/thadeu/ndb-ui
 ```
 
 ```bash [Docker, unix socket]
-docker run -p 4321:4321 -v /run/ndb:/run/ndb \
+docker run -p 127.0.0.1:4321:4321 -v /run/ndb:/run/ndb \
   -e NDB_URL=unix:///run/ndb/ndb.sock \
   ghcr.io/thadeu/ndb-ui
 ```
