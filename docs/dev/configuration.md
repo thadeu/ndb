@@ -1,21 +1,23 @@
 # Configuration
 
-`ndb.yml` is optional. Without it, the defaults apply: data dir `/var/lib/ndb`, unix socket `/run/ndb.sock`, no TCP. A flag overrides the file, even when empty (`-unix ""` turns the unix listener off).
+`ndb.yml` is optional. Without it, the defaults apply: data dir `/var/lib/ndb`, unix socket `/run/ndb/ndb.sock` with mode `0660`, no TCP.
+
+Without `-config`, the daemon and the CLI look for the file in this order: `NDB_CONFIG`, `./ndb.yml`, `/etc/ndb/ndb.yml`. So in Docker, mounting the file at `/etc/ndb/ndb.yml` is enough: no `command:` is needed. A flag overrides the file, even when empty (`-unix ""` turns the unix listener off).
 
 ## Flags
 
 ```
 ndb [-config ndb.yml] [-data-dir DIR] [-unix PATH] [-tcp ADDR] [-unix-mode 0660] [-token-file FILE] [-version]
-ndb backup [-config f] [-data-dir d] [-unix sock] <dest>
+ndb backup [-config f] [-data-dir d] [-url unix://sock] <dest> [-gzip]
 ```
 
 | Flag | Meaning |
 |---|---|
-| `-config` | config file. Default `ndb.yml` in the working dir. A missing file is fine. |
+| `-config` | config file. Default: `NDB_CONFIG`, then `./ndb.yml`, then `/etc/ndb/ndb.yml`. A missing file is fine. |
 | `-data-dir` | overrides `data_dir`. |
 | `-unix` | overrides `listen.unix`. |
 | `-tcp` | overrides `listen.tcp`, for example `10.10.0.1:7070`. |
-| `-unix-mode` | permission of the socket file, octal (`0660`). Default: the process umask. |
+| `-unix-mode` | overrides `listen.unix_mode`: permission of the socket file, octal. Default `0660` (owner and group). |
 | `-token-file` | file with the bearer token that the TCP listener requires. See [Authentication](#authentication). |
 | `-version` | print the version and exit. |
 
@@ -27,6 +29,7 @@ The daemon stops cleanly on SIGTERM and SIGINT: it stops new requests, waits up 
 data_dir: /var/lib/ndb
 listen:
   unix: /run/ndb/ndb.sock
+  unix_mode: "0660"        # default; owner and group can connect
   tcp: 10.10.0.1:7070
 memory_limit: 1GiB
 group_limit: 256MiB
@@ -171,7 +174,7 @@ A WAL file is never deleted while a stored `watch` position still needs it. See 
 
 `-token-file /etc/ndb/token` makes the TCP listener require `Authorization: Bearer <token>` on every request, `/health` and `/metrics` included. A missing or wrong token is `401 unauthorized`. The file holds one token; ndb trims the spaces around it, and an empty file stops the start. The token is compared in constant time.
 
-The unix socket never asks for a token: file permissions guard it (`-unix-mode`). `POST /v1/backup` stays unix-only.
+The unix socket never asks for a token: file permissions guard it (`listen.unix_mode`, default `0660`). `POST /v1/backup` stays unix-only.
 
 The token is defense in depth. Keep the listener on a private address (for example WireGuard) as well. SDKs take a `token` option or `NDB_TOKEN`; see [clients.md](clients.md).
 

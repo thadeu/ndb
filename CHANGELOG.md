@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-06
+
+### Changed
+
+- Defaults that make the image need no `command:`: without `-config`, the daemon and the CLI read `NDB_CONFIG`, then `./ndb.yml`, then `/etc/ndb/ndb.yml`. The default unix socket is `/run/ndb/ndb.sock` (was `/run/ndb.sock`), with mode `0660` (was the umask). `listen.unix_mode` sets the mode in `ndb.yml`. The image has no `CMD`; mount `ndb.yml` at `/etc/ndb/ndb.yml`.
+
 ## [0.2.1] - 2026-11-06
 
 ### Added
@@ -97,7 +103,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/thadeu/ndb/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/thadeu/ndb/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/thadeu/ndb/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/thadeu/ndb/compare/v0.1.1...v0.1.2

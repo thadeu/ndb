@@ -32,7 +32,7 @@ The unit is [`deploy/systemd/ndb.service`](https://github.com/thadeu/ndb/blob/ma
 [Service]
 User=ndb
 Group=ndb
-ExecStart=/usr/local/bin/ndb -config /etc/ndb/ndb.yml -unix-mode 0660
+ExecStart=/usr/local/bin/ndb
 Restart=on-failure
 TimeoutStopSec=40
 StateDirectory=ndb
@@ -43,7 +43,7 @@ ReadWritePaths=/var/lib/ndb /run/ndb
 ```
 
 - `StateDirectory` and `RuntimeDirectory` create `/var/lib/ndb` and `/run/ndb`, owned by `ndb`.
-- `-unix-mode 0660`: apps in the `ndb` group can open the socket. Add the app user to the group: `usermod -aG ndb <app-user>`.
+- No flags: the daemon reads `/etc/ndb/ndb.yml` and makes the socket `/run/ndb/ndb.sock` with mode `0660`, so apps in the `ndb` group can open it. Add the app user to the group: `usermod -aG ndb <app-user>`.
 - `TimeoutStopSec=40`: the daemon waits up to 30 s for running requests on SIGTERM.
 
 The config is [`deploy/systemd/ndb.yml`](https://github.com/thadeu/ndb/blob/main/deploy/systemd/ndb.yml). `data_dir` must be `/var/lib/ndb` and `listen.unix` must be `/run/ndb/ndb.sock`, to match the unit:

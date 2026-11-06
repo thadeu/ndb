@@ -21,7 +21,7 @@ The files are in [`deploy/examples/single-vm/voodu`](https://github.com/thadeu/n
 
 <<< @/deploy/examples/single-vm/voodu/app.voodu{hcl}
 
-- `user = "1000:65532"`: group 65532 is the group of the socket, so the app can open it (`-unix-mode 0660`).
+- `user = "1000:65532"`: group 65532 is the group of the socket, so the app can open it (the socket is `0660` by default).
 - `NDB_URL` is the only setting the SDKs need.
 - Add one block like this for each app.
 

@@ -40,14 +40,14 @@ type dataDirFlags struct {
 
 func addDataDirFlags(fl *flag.FlagSet) dataDirFlags {
 	return dataDirFlags{
-		cfgPath: fl.String("config", "ndb.yml", "optional config file (absent = defaults)"),
+		cfgPath: fl.String("config", "", "config file (default: NDB_CONFIG, then ./ndb.yml, then /etc/ndb/ndb.yml; absent = defaults)"),
 		dataDir: fl.String("data-dir", "", "data dir (overrides ndb.yml)"),
 	}
 }
 
 // load reads ndb.yml and applies -data-dir when it was set.
 func (d dataDirFlags) load(fl *flag.FlagSet) (config.Config, error) {
-	cfg, err := config.Load(*d.cfgPath)
+	cfg, err := config.Load(config.FindPath(*d.cfgPath, config.EtcPath))
 	if err != nil {
 		return cfg, err
 	}
@@ -132,7 +132,7 @@ Usage:
   ndb help                      print this text
 
 Common flags:
-  -config FILE      ndb.yml (default ndb.yml; absent = defaults)
+  -config FILE      ndb.yml (default NDB_CONFIG, ./ndb.yml, then /etc/ndb/ndb.yml)
   -data-dir DIR     data dir (overrides ndb.yml)
 
 Talking to the daemon (backup, stats, size, collections, compact, health, get, update, delete, expire, persist, ttl, quarantine, query):

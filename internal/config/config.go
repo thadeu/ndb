@@ -21,9 +21,45 @@ type Listen struct {
 	Unix string `yaml:"unix"`
 	TCP  string `yaml:"tcp"`
 
-	// UnixMode is the permission of the unix socket file. 0 keeps the
-	// default (the process umask). Set by the -unix-mode flag.
+	// UnixModeText is listen.unix_mode, an octal text such as "0660".
+	UnixModeText string `yaml:"unix_mode"`
+
+	// UnixMode is the permission of the unix socket file: 0660 by default
+	// (owner and group), so app containers in the group can connect.
+	// listen.unix_mode or the -unix-mode flag change it.
 	UnixMode os.FileMode `yaml:"-"`
+}
+
+// EtcPath is where the daemon and the CLI look for ndb.yml when there is
+// no -config flag, no NDB_CONFIG and no ndb.yml in the current directory.
+const EtcPath = "/etc/ndb/ndb.yml"
+
+// FindPath picks the config file: the -config flag, then NDB_CONFIG, then
+// ./ndb.yml when it exists, then etc. A missing file still gives the defaults.
+func FindPath(flagValue, etc string) string {
+	if flagValue != "" {
+		return flagValue
+	}
+
+	if env := os.Getenv("NDB_CONFIG"); env != "" {
+		return env
+	}
+
+	if _, err := os.Stat("ndb.yml"); err == nil {
+		return "ndb.yml"
+	}
+
+	return etc
+}
+
+// ParseUnixMode reads an octal permission such as "0660".
+func ParseUnixMode(s string) (os.FileMode, error) {
+	n, err := strconv.ParseUint(s, 8, 32)
+	if err != nil || n > 0o777 {
+		return 0, fmt.Errorf("unix mode %q: want an octal permission such as 0660", s)
+	}
+
+	return os.FileMode(n), nil
 }
 
 type Config struct {
@@ -57,7 +93,7 @@ type collection struct {
 func defaults() Config {
 	return Config{
 		DataDir:       "/var/lib/ndb",
-		Listen:        Listen{Unix: "/run/ndb.sock"},
+		Listen:        Listen{Unix: "/run/ndb/ndb.sock", UnixMode: 0o660},
 		AllowImplicit: true,
 		Collections:   map[string]catalog.Def{},
 	}
@@ -86,6 +122,12 @@ func Load(path string) (Config, error) {
 
 	cfg := f.Config
 	cfg.Collections = map[string]catalog.Def{}
+
+	if cfg.Listen.UnixModeText != "" {
+		if cfg.Listen.UnixMode, err = ParseUnixMode(cfg.Listen.UnixModeText); err != nil {
+			return Config{}, fmt.Errorf("%w: listen.%v", ErrInvalid, err)
+		}
+	}
 
 	if cfg.MemoryLimit, err = parseSize(f.MemoryLimit); err != nil {
 		return Config{}, fmt.Errorf("%w: memory_limit: %v", ErrInvalid, err)

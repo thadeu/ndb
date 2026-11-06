@@ -6,7 +6,8 @@ After=network.target
 Type=simple
 User=ndb
 Group=ndb
-ExecStart=/usr/local/bin/ndb -config /etc/ndb/ndb.yml -unix-mode 0660
+# No flags: /etc/ndb/ndb.yml, socket /run/ndb/ndb.sock, mode 0660.
+ExecStart=/usr/local/bin/ndb
 Restart=on-failure
 RestartSec=2
 

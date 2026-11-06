@@ -29,4 +29,3 @@ VOLUME /var/lib/ndb /run/ndb
 EXPOSE 7070
 
 ENTRYPOINT ["/usr/local/bin/ndb"]
-CMD ["-data-dir", "/var/lib/ndb", "-unix", "/run/ndb/ndb.sock"]

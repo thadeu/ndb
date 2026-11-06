@@ -49,11 +49,11 @@ func run(args []string) error {
 
 	fl := flag.NewFlagSet("ndb", flag.ContinueOnError)
 
-	cfgPath := fl.String("config", "ndb.yml", "optional config file (absent = defaults)")
+	cfgPath := fl.String("config", "", "config file (default: NDB_CONFIG, then ./ndb.yml, then /etc/ndb/ndb.yml; absent = defaults)")
 	dataDir := fl.String("data-dir", "", "data dir (overrides ndb.yml)")
 	unix := fl.String("unix", "", "unix socket path (overrides ndb.yml)")
 	tcp := fl.String("tcp", "", "TCP listen address, e.g. 127.0.0.1:7070 (overrides ndb.yml)")
-	unixMode := fl.String("unix-mode", "", "permission of the unix socket, octal, e.g. 0660 (default: process umask)")
+	unixMode := fl.String("unix-mode", "", "permission of the unix socket, octal (default 0660, or listen.unix_mode)")
 	showVersion := fl.Bool("version", false, "print the version and exit")
 
 	tokenFile := fl.String("token-file", "", "file with the bearer token the TCP listener requires (unix socket stays open)")
@@ -68,7 +68,7 @@ func run(args []string) error {
 		return nil
 	}
 
-	cfg, err := config.Load(*cfgPath)
+	cfg, err := config.Load(config.FindPath(*cfgPath, config.EtcPath))
 	if err != nil {
 		return err
 	}

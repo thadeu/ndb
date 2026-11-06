@@ -13,8 +13,8 @@ services:
       context: ../../..
       dockerfile: Dockerfile
     image: ndb:example
-    # 0660 + group 65532: the apps below run with this gid to open the socket.
-    command: ["-data-dir", "/var/lib/ndb", "-unix", "/run/ndb/ndb.sock", "-unix-mode", "0660"]
+    # No command: the defaults are data dir /var/lib/ndb and socket
+    # /run/ndb/ndb.sock with mode 0660. The apps below run with gid 65532.
     stop_grace_period: 35s
     restart: unless-stopped
     volumes:

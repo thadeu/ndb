@@ -59,7 +59,7 @@ Stop: `docker compose down` (keeps the data). `docker compose down -v` also dele
 
 - **Data**: `ndb-data` is a named local volume that only the `ndb` service mounts, at `/var/lib/ndb`.
 - **Socket**: `ndb-run` is mounted at `/run/ndb` in ndb and in every app. All apps use `unix:///run/ndb/ndb.sock` (`NDB_URL`). On a Linux host you can use a host path (`/run/ndb:/run/ndb`) instead of a named volume; the dir must be writable by uid 65532.
-- **Socket permissions**: ndb runs with `-unix-mode 0660` and as uid/gid 65532. The apps run with group 65532 (`user: "1000:65532"`), so they can open the socket and nobody else can. Set both together: the mode alone is not enough, and the group alone does nothing with the default umask.
+- **Socket permissions**: the socket is `0660` by default and ndb runs as uid/gid 65532. The apps run with group 65532 (`user: "1000:65532"`), so they can open the socket and nobody else can. The group is what lets the apps in.
 - **Startup order**: the apps may start before ndb. They retry until the daemon answers.
 
 ## Direct mode (optional)

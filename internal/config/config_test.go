@@ -72,7 +72,7 @@ func TestDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if cfg.DataDir != "/var/lib/ndb" || cfg.Listen.Unix != "/run/ndb.sock" {
+	if cfg.DataDir != "/var/lib/ndb" || cfg.Listen.Unix != "/run/ndb/ndb.sock" {
 		t.Fatalf("got %+v", cfg)
 	}
 }
@@ -187,5 +187,60 @@ collections:
 
 	if got := cfg.Collections["other"].Path; got != "/abs/*.ndjson" {
 		t.Fatalf("absolute path changed: %q", got)
+	}
+}
+
+func TestDefaultsMatchTheImageAndTheUnit(t *testing.T) {
+	cfg, err := config.Load(filepath.Join(t.TempDir(), "missing.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Listen.Unix != "/run/ndb/ndb.sock" || cfg.Listen.UnixMode != 0o660 {
+		t.Fatalf("got unix %q mode %o", cfg.Listen.Unix, cfg.Listen.UnixMode)
+	}
+}
+
+func TestUnixModeFromTheFile(t *testing.T) {
+	cfg, err := config.Load(write(t, "listen:\n  unix_mode: \"0600\"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Listen.UnixMode != 0o600 {
+		t.Fatalf("mode %o", cfg.Listen.UnixMode)
+	}
+
+	if _, err := config.Load(write(t, "listen:\n  unix_mode: \"rw\"\n")); err == nil {
+		t.Fatal("a bad unix_mode must fail")
+	}
+}
+
+func TestFindPath(t *testing.T) {
+	dir := t.TempDir()
+	etc := filepath.Join(dir, "etc.yml")
+
+	t.Chdir(dir)
+
+	if got := config.FindPath("", etc); got != etc {
+		t.Fatalf("no file anywhere: got %q, want the etc path %q", got, etc)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "ndb.yml"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := config.FindPath("", etc); got != "ndb.yml" {
+		t.Fatalf("local file: got %q", got)
+	}
+
+	t.Setenv("NDB_CONFIG", "/x/from-env.yml")
+
+	if got := config.FindPath("", etc); got != "/x/from-env.yml" {
+		t.Fatalf("env: got %q", got)
+	}
+
+	if got := config.FindPath("flag.yml", etc); got != "flag.yml" {
+		t.Fatalf("flag: got %q", got)
 	}
 }

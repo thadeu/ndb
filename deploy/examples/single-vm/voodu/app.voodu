@@ -6,7 +6,7 @@
 app "visits-go" {
   image    = "registry.example.com/visits-go:latest"
   replicas = 1
-  user     = "1000:65532"           # gid 65532 = the group of the socket (-unix-mode 0660)
+  user     = "1000:65532"           # gid 65532 = the group of the socket (mode 0660 by default)
 
   env = {
     NDB_URL = "unix:///run/ndb/ndb.sock"

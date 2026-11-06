@@ -9,7 +9,6 @@
 # In production, give the volume the right owner instead.
 services:
   ndb:
-    command: ["-config", "/etc/ndb/ndb.yml", "-unix-mode", "0660"]
     volumes:
       - ./ndb.direct.yml:/etc/ndb/ndb.yml:ro
       - logs:/data/logs:ro
