@@ -7,16 +7,15 @@ require "test_helper"
 class AggregateTest < Minitest::Test
   def setup
     @post = model do
-      primary_key :post_id
 
       attribute :status, :string
       attribute :duration, :integer
     end
 
     @post.create!([
-                    { post_id: "a", status: "answered", duration: 10 },
-                    { post_id: "b", status: "answered", duration: 30 },
-                    { post_id: "c", status: "failed", duration: 5 }
+                    { _id: "a", status: "answered", duration: 10 },
+                    { _id: "b", status: "answered", duration: 30 },
+                    { _id: "c", status: "failed", duration: 5 }
                   ])
 
     skip "daemon has no /aggregate endpoint yet (M06): #{probe}" if probe

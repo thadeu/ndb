@@ -9,8 +9,10 @@ package collection
 
 import (
 	"context"
+	"encoding/json"
 	"iter"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -211,6 +213,7 @@ func Open(cfg Config) (*Collection, error) {
 		}
 
 		from = pos
+		c.feed.base = pos.Tx
 	}
 
 	res, err := recovery.Replay(recovery.Config{FS: cfg.FS, Dir: cfg.Dir, MaxLine: maxLine, From: from}, func(rec wal.Record) {
@@ -329,6 +332,28 @@ func (c *Collection) Find(id string) (Doc, bool) {
 	return Doc{ID: id, V: e.v, Doc: raw}, true
 }
 
+// Get is Find for the _id routes. A document answers only when its own _id
+// is the key. A direct-mode line without _id is stored under a fallback
+// key, has no _id field, and is therefore never returned here.
+func (c *Collection) Get(id string) (Doc, bool) {
+	d, ok := c.Find(id)
+	if !ok {
+		return Doc{}, false
+	}
+
+	var own struct {
+		ID string `json:"_id"`
+	}
+
+	if json.Unmarshal(d.Doc, &own) != nil || own.ID != id {
+		return Doc{}, false
+	}
+
+	d.Doc = withVersion(d.Doc, d.V)
+
+	return d, true
+}
+
 // Insert writes all docs in one transaction: all or nothing.
 func (c *Collection) Insert(ctx context.Context, docs ...[]byte) ([]Result, error) {
 	return c.insert(ctx, insertReq{docs: docs})
@@ -413,8 +438,9 @@ func (c *Collection) prepareInsert(v *view, r insertReq) ([]wal.Op, error) {
 			}
 		}
 
-		if _, exists := v.get(id); exists {
-			return nil, errf("duplicate_id", "%s already exists", id)
+		prior, err := c.priorVersion(v, id)
+		if err != nil {
+			return nil, err
 		}
 
 		doc, err = c.externalize(doc)
@@ -426,13 +452,35 @@ func (c *Collection) prepareInsert(v *view, r insertReq) ([]wal.Op, error) {
 			return nil, err
 		}
 
-		op := wal.Op{Kind: wal.Put, ID: id, V: 1, Doc: doc}
+		op := wal.Op{Kind: wal.Put, ID: id, V: prior + 1, Doc: doc}
 
 		v.apply(op)
 		ops = append(ops, op)
 	}
 
 	return ops, nil
+}
+
+// priorVersion is the version that a new document with this id continues
+// from. It is 0 when the id is free. A document that is expired (or past the
+// retention) but not swept yet counts as absent: the new document replaces it
+// and continues its version. A visible document is duplicate_id.
+func (c *Collection) priorVersion(v *view, id string) (uint64, error) {
+	cur, exists := v.get(id)
+	if !exists {
+		return 0, nil
+	}
+
+	raw, err := cur.raw()
+	if err != nil {
+		return 0, err
+	}
+
+	if c.visible(raw) {
+		return 0, errf("duplicate_id", "%s already exists", id)
+	}
+
+	return cur.v, nil
 }
 
 func current(v *view, id string) (*entry, error) {
@@ -516,4 +564,46 @@ func (c *Collection) WALMark() (WALMark, error) {
 	})
 
 	return m, err
+}
+
+// SnapshotDoc is one live document at the tx of a snapshot.
+type SnapshotDoc struct {
+	ID  string
+	V   uint64
+	Tx  uint64
+	Seq uint64
+
+	e *entry
+}
+
+// Raw is the document as stored.
+func (d SnapshotDoc) Raw() ([]byte, error) {
+	return d.e.raw()
+}
+
+// WALMarkSnapshot is WALMark plus the live documents at exactly that mark,
+// in insertion order. Both are taken in the writer goroutine between two
+// commits, so the documents are the state after the mark's tx. A backup uses
+// it when the WAL no longer starts at tx 1 and cannot rebuild the state.
+func (c *Collection) WALMarkSnapshot() (WALMark, []SnapshotDoc, error) {
+	var (
+		m    WALMark
+		docs []SnapshotDoc
+	)
+
+	err := c.w.Run(func(end writer.Pos) {
+		m = WALMark{Seq: end.Seq, Offset: end.Offset, Tx: end.Tx}
+
+		c.mu.RLock()
+
+		defer c.mu.RUnlock()
+
+		for id, e := range c.durable.docs {
+			docs = append(docs, SnapshotDoc{ID: id, V: e.v, Tx: e.tx, Seq: e.seq, e: e})
+		}
+	})
+
+	sort.Slice(docs, func(a, b int) bool { return docs[a].Seq < docs[b].Seq })
+
+	return m, docs, err
 }

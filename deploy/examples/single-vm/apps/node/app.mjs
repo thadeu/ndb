@@ -13,10 +13,8 @@ const POD = hostname()
 const db = connect(process.env.NDB_URL ?? 'unix:///run/ndb/ndb.sock')
 
 const visits = db.model('visits', {
-  id: 'id',
   time: 'ts',
   fields: {
-    id: { type: 'string' },
     app: { type: 'string', index: true },
     pod: { type: 'string' },
     ts: { type: 'date' },
@@ -24,7 +22,7 @@ const visits = db.model('visits', {
 })
 
 async function record() {
-  const visit = { id: `${APP}-${POD}-${randomUUID()}`, app: APP, pod: POD, ts: new Date() }
+  const visit = { _id: `${APP}-${POD}-${randomUUID()}`, app: APP, pod: POD, ts: new Date() }
   const dir = process.env.NDB_DIRECT_DIR
 
   if (!dir) {

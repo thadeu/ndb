@@ -34,12 +34,10 @@ allow_implicit: true
 collections:
   calls:
     path: /data/fsw-esl/calls/**/*.ndjson
-    id: call_id
     time: ts
     indexes: [status, dnis]
   outbox:
     write: engine
-    id: event_id
     durability: strict
     max_line_size: 2MiB
 `)
@@ -59,7 +57,7 @@ collections:
 
 	calls := cfg.Collections["calls"]
 
-	if calls.Name != "calls" || calls.ID != "call_id" || len(calls.Indexes) != 2 {
+	if calls.Name != "calls" || len(calls.Indexes) != 2 {
 		t.Fatalf("calls = %+v", calls)
 	}
 

@@ -109,3 +109,27 @@ func (s *Store) List(coll string) ([]string, error) {
 
 	return out, err
 }
+
+// Entry is one stored position.
+type Entry struct {
+	Collection string
+	Consumer   string
+	Pos        string
+}
+
+// All returns every stored position, ordered by collection and consumer.
+func (s *Store) All() ([]Entry, error) {
+	var out []Entry
+
+	err := s.db.View(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucket).ForEach(func(k, v []byte) error {
+			coll, consumer, _ := bytes.Cut(k, []byte{0})
+
+			out = append(out, Entry{Collection: string(coll), Consumer: string(consumer), Pos: string(v)})
+
+			return nil
+		})
+	})
+
+	return out, err
+}

@@ -6,14 +6,13 @@ require "test_helper"
 class ConcurrencyTest < Minitest::Test
   def test_threads_create_and_query_without_losing_writes
     post = model do
-      primary_key :post_id
 
       attribute :n, :integer
     end
 
     threads = 8.times.map do |t|
       Thread.new do
-        20.times { |i| post.create!(post_id: "t#{t}-#{i}", n: i) }
+        20.times { |i| post.create!(_id: "t#{t}-#{i}", n: i) }
         post.where(n: 0..5).count
       end
     end

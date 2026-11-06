@@ -52,12 +52,13 @@ module Ndb
 
     attr_reader :version
 
+    # id is an alias of _id.
     def id
-      public_send(self.class.primary_key)
+      _id
     end
 
     def id=(value)
-      public_send("#{self.class.primary_key}=", value)
+      self._id = value
     end
 
     def persisted?
@@ -138,6 +139,45 @@ module Ndb
       result ? self : false
     end
 
+    def destroy!
+      destroy || raise(RecordNotDestroyed.new("Failed to destroy the record", self))
+    end
+
+    # Deletes by _id: no callbacks and no _v guard, like ActiveRecord.
+    def delete
+      self.class.ndb_delete({ self.class.primary_key => id }) if persisted?
+
+      @destroyed = true
+
+      self
+    end
+
+    # The save of find_or_create_by: validations, then the save and create
+    # callbacks around one daemon upsert. The filter is attrs; the other
+    # attributes are written only if the upsert creates the document
+    # ($setOnInsert), so a writer that got there first is never overwritten.
+    # Returns the new record, or the one that won the race, or this record
+    # unsaved when it is invalid.
+    def create_unless_exists(attrs)
+      return self unless valid?(:create)
+
+      saved = run_callbacks(:save) { run_callbacks(:create) { upsert_record(attrs) } }
+
+      saved ? @upsert_winner || self : self
+    ensure
+      @upsert_winner = nil
+    end
+
+    def create_unless_exists!(attrs)
+      raise RecordInvalid, self unless valid?(:create)
+
+      record = create_unless_exists(attrs)
+
+      raise RecordNotSaved, "Failed to save the record" unless record.persisted?
+
+      record
+    end
+
     # Adds by (default 1) to a number attribute in one atomic write on the
     # daemon, and refreshes the attribute and the version. Other unsaved
     # changes stay unsaved.
@@ -211,11 +251,31 @@ module Ndb
       changes_applied
     end
 
+    def upsert_record(attrs)
+      filter = attrs.keys.to_h do |key|
+        name = key.to_s == "id" ? self.class.primary_key : key.to_s
+
+        [name, json_attribute(name)]
+      end
+
+      on_insert = insert_document.except(*filter.keys)
+      result = self.class.ndb_update(filter, { "$setOnInsert" => on_insert }, upsert: true)
+
+      if result["matched"].zero?
+        self.id = result["doc"]["_id"] if id.nil?
+        loaded!(result["doc"]["_v"])
+      else
+        @upsert_winner = self.class.instantiate(result["doc"])
+      end
+
+      true
+    end
+
     def create_record
       run_callbacks(:create) do
         result = self.class.ndb_insert(insert_document, expire_in: @expire_in)
 
-        self.id = result["id"] if id.nil?
+        self.id = result["_id"] if id.nil?
         loaded!(result["v"])
 
         true

@@ -14,10 +14,10 @@ import (
 
 func TestCompactMergesSegmentsAndReportsBeforeAndAfter(t *testing.T) {
 	db := open(t, cfg(t.TempDir(), nil))
-	col := ensure(t, db, catalog.Def{Name: "posts", ID: "post_id"})
+	col := ensure(t, db, catalog.Def{Name: "posts"})
 
 	for i := 0; i < 3; i++ {
-		doc := fmt.Sprintf(`{"post_id":"p%d"}`, i)
+		doc := fmt.Sprintf(`{"_id":"p%d"}`, i)
 
 		if _, err := col.Insert(ctx, []byte(doc)); err != nil {
 			t.Fatal(err)
@@ -48,9 +48,9 @@ func TestCompactMergesSegmentsAndReportsBeforeAndAfter(t *testing.T) {
 
 func TestCompactSealsTheMemtableFirst(t *testing.T) {
 	db := open(t, cfg(t.TempDir(), nil))
-	col := ensure(t, db, catalog.Def{Name: "posts", ID: "post_id"})
+	col := ensure(t, db, catalog.Def{Name: "posts"})
 
-	if _, err := col.Insert(ctx, []byte(`{"post_id":"p1"}`)); err != nil {
+	if _, err := col.Insert(ctx, []byte(`{"_id":"p1"}`)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -72,7 +72,7 @@ func TestCompactOnDirectCollectionIsNotSupported(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	def := catalog.Def{Name: "calls", Write: catalog.Direct, Path: filepath.Join(files, "*.ndjson"), ID: "call_id"}
+	def := catalog.Def{Name: "calls", Write: catalog.Direct, Path: filepath.Join(files, "*.ndjson")}
 	db := open(t, cfg(filepath.Join(root, "data"), map[string]catalog.Def{"calls": def}))
 
 	col, err := db.Get("calls")
@@ -93,13 +93,13 @@ func TestQuarantineListsBadLinesOfADirectCollection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	data := `{"call_id":"c1"}` + "\n" + "{not json\n" + `{"call_id":"c2"}` + "\n"
+	data := `{"_id":"c1"}` + "\n" + "{not json\n" + `{"_id":"c2"}` + "\n"
 
 	if err := os.WriteFile(filepath.Join(files, "a.ndjson"), []byte(data), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	def := catalog.Def{Name: "calls", Write: catalog.Direct, Path: filepath.Join(files, "*.ndjson"), ID: "call_id"}
+	def := catalog.Def{Name: "calls", Write: catalog.Direct, Path: filepath.Join(files, "*.ndjson")}
 	db := open(t, cfg(filepath.Join(root, "data"), map[string]catalog.Def{"calls": def}))
 
 	col, err := db.Get("calls")
@@ -119,7 +119,7 @@ func TestQuarantineListsBadLinesOfADirectCollection(t *testing.T) {
 
 func TestQuarantineOfAnEngineCollectionIsEmpty(t *testing.T) {
 	db := open(t, cfg(t.TempDir(), nil))
-	col := ensure(t, db, catalog.Def{Name: "posts", ID: "post_id"})
+	col := ensure(t, db, catalog.Def{Name: "posts"})
 
 	rows, total, err := col.Quarantine(10)
 	if err != nil || total != 0 || len(rows) != 0 {

@@ -31,7 +31,7 @@ func seedDataDir(t *testing.T, dir string) {
 	}
 
 	for _, name := range []string{"orders", "events"} {
-		def := catalog.Def{Name: name, ID: "id"}
+		def := catalog.Def{Name: name}
 
 		if name == "orders" {
 			def.Indexes = []string{"customer"}
@@ -47,7 +47,7 @@ func seedDataDir(t *testing.T, dir string) {
 		}
 
 		for i := 0; i < 3; i++ {
-			doc := fmt.Sprintf(`{"id":"%s-%d","customer":"c%d"}`, name, i, i)
+			doc := fmt.Sprintf(`{"_id":"%s-%d","customer":"c%d"}`, name, i, i)
 
 			if _, err := col.Insert(ctx, []byte(doc)); err != nil {
 				t.Fatal(err)

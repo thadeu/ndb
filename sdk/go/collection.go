@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -20,8 +21,8 @@ type Coll[T any] struct {
 }
 
 // Collection declares the collection name for T and returns it. The first
-// call for a name sends ensure_collection, with the id, time and index tags
-// of T. Later calls for the same name on the same DB send nothing.
+// call for a name sends ensure_collection, with the time, unique and index
+// tags of T. Later calls for the same name on the same DB send nothing.
 func Collection[T any](ctx context.Context, db *DB, name string) (*Coll[T], error) {
 	s, err := schemaOf(reflect.TypeFor[T]())
 	if err != nil {
@@ -35,11 +36,11 @@ func Collection[T any](ctx context.Context, db *DB, name string) (*Coll[T], erro
 	return &Coll[T]{db: db, name: name, schema: s}, nil
 }
 
-// Insert adds documents. It fails with ErrDuplicateID when an id exists.
-// Result is the id and version of an inserted document. An empty id field
-// is not sent, so the daemon generates the id and Result carries it.
+// Result is the _id and version of a written document. An empty _id field is
+// not sent, so the daemon generates the id and Result carries it. Insert
+// fails with ErrDuplicateID when an _id exists.
 type Result struct {
-	ID string `json:"id"`
+	ID string `json:"_id"`
 	V  uint64 `json:"v"`
 }
 
@@ -80,12 +81,33 @@ func (c *Coll[T]) InsertWith(ctx context.Context, docs []T, opts ...Option) ([]R
 	return out.Results, nil
 }
 
-// Get returns the document with the id, or ErrNotFound.
+// Get returns the document with this _id, or ErrNotFound.
 func (c *Coll[T]) Get(ctx context.Context, id string) (T, error) {
-	return c.Where(Eq(c.schema.idField(), id)).First(ctx)
+	resp, err := c.db.do(ctx, http.MethodGet, c.idPath(id), nil)
+	if err != nil {
+		var zero T
+
+		return zero, err
+	}
+
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		var zero T
+
+		return zero, fmt.Errorf("ndb: get response: %w", err)
+	}
+
+	return c.decode(raw)
 }
 
-// Ops are the write operators of an Update: $set, $unset, $inc, $push,
+// idPath is the path of the routes of one document.
+func (c *Coll[T]) idPath(id string) string {
+	return collPath(c.name) + "/" + url.PathEscape(id)
+}
+
+// Ops are the write operators of an Update: $set, $setOnInsert, $unset, $inc, $push,
 // $pull, $min and $max, each with a map of fields (dot paths allowed).
 //
 //	ndb.Ops{"$inc": {"qty": -1}, "$set": {"status": "done"}}
@@ -104,8 +126,8 @@ type UpdateResult[T any] struct {
 // writes the operators in one step, against the newest state, so concurrent
 // updates never interleave. Nothing matched is not an error: Matched is 0.
 //
-// A filter with the id field finds one document by id; without it the
-// update takes the first match. Many updates every match, and needs the id
+// A filter with _id finds one document by id; without it the update takes
+// the first match. UpdateID is the shorter form for one _id. Many updates every match, and needs the id
 // or an indexed field in the filter (ErrUnindexedMany). Upsert creates the
 // document from the equality fields of the filter when nothing matches.
 // A guard in the filter, such as Eq("_v", 7) or Gte("qty", 1), makes a
@@ -113,6 +135,20 @@ type UpdateResult[T any] struct {
 func (c *Coll[T]) Update(ctx context.Context, filter Filter, ops Ops, opts ...Option) (UpdateResult[T], error) {
 	o := newOptions(opts)
 
+	return c.runUpdate(ctx, "update", filter, ops, o)
+}
+
+// UpdateID is Update on the document with this _id (many does not apply).
+// Extra guards go in the Guard option, such as Guard(Eq("_v", 7)): Matched is
+// 0 when a guard fails. Upsert creates the document with this _id.
+func (c *Coll[T]) UpdateID(ctx context.Context, id string, ops Ops, opts ...Option) (UpdateResult[T], error) {
+	o := newOptions(opts)
+	o.many = false
+
+	return c.runUpdate(ctx, url.PathEscape(id)+"/update", Filter{doc: o.guard}, ops, o)
+}
+
+func (c *Coll[T]) runUpdate(ctx context.Context, op string, filter Filter, ops Ops, o options) (UpdateResult[T], error) {
 	body, err := updateBody(filter, ops)
 	if err != nil {
 		return UpdateResult[T]{}, err
@@ -127,7 +163,7 @@ func (c *Coll[T]) Update(ctx context.Context, filter Filter, ops Ops, opts ...Op
 		q.Set("expire_in", strconv.FormatFloat(*secs, 'f', -1, 64))
 	}
 
-	resp, err := c.postQuery(ctx, "update", q, body)
+	resp, err := c.postQuery(ctx, op, q, body)
 	if err != nil {
 		return UpdateResult[T]{}, err
 	}
@@ -158,6 +194,27 @@ func (c *Coll[T]) Update(ctx context.Context, filter Filter, ops Ops, opts ...Op
 	res.Doc = &doc
 
 	return res, nil
+}
+
+// DeleteID removes the document with this _id and returns how many it
+// removed (0 or 1).
+func (c *Coll[T]) DeleteID(ctx context.Context, id string) (int, error) {
+	resp, err := c.db.do(ctx, http.MethodDelete, c.idPath(id), nil)
+	if err != nil {
+		return 0, err
+	}
+
+	defer resp.Body.Close()
+
+	var out struct {
+		Deleted int `json:"deleted"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return 0, fmt.Errorf("ndb: delete response: %w", err)
+	}
+
+	return out.Deleted, nil
 }
 
 // Delete removes the document that the filter matches, or every match with
@@ -249,6 +306,7 @@ type options struct {
 	many     bool
 	upsert   bool
 	expireIn ttlSecs
+	guard    map[string]any
 }
 
 // addTo sets name=true in q when on.
@@ -276,6 +334,14 @@ func (d ttlSecs) seconds() *float64 {
 func Many() Option {
 	return func(o *options) {
 		o.many = true
+	}
+}
+
+// Guard adds filter keys to UpdateID: the update matches only when the
+// document also satisfies the filter.
+func Guard(f Filter) Option {
+	return func(o *options) {
+		o.guard = f.doc
 	}
 }
 
@@ -316,7 +382,7 @@ func (db *DB) ensure(ctx context.Context, name string, s *schema) error {
 		return nil
 	}
 
-	body, err := json.Marshal(ensureBody{ID: s.id, Time: s.time, ExpiresField: s.expires, Indexes: s.indexes, Unique: s.unique})
+	body, err := json.Marshal(ensureBody{Time: s.time, ExpiresField: s.expires, Indexes: s.indexes, Unique: s.unique})
 	if err != nil {
 		return err
 	}
@@ -343,7 +409,6 @@ func (db *DB) putCollection(ctx context.Context, name string, catalog []byte) er
 }
 
 type ensureBody struct {
-	ID           string   `json:"id,omitempty"`
 	Time         string   `json:"time,omitempty"`
 	ExpiresField string   `json:"expires_field,omitempty"`
 	Indexes      []string `json:"indexes,omitempty"`
@@ -356,6 +421,6 @@ type insertBody struct {
 }
 
 type writeResult struct {
-	ID string `json:"id"`
+	ID string `json:"_id"`
 	V  uint64 `json:"v"`
 }

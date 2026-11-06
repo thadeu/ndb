@@ -7,20 +7,16 @@ require "time"
 ndb = Ndb::Client.new(url: ENV.fetch("NDB_URL", "unix:///tmp/ndb-examples.sock"))
 
 # region declare
-ndb.ensure_collection("sessions", id: "sid", time: "created_at", expires_field: "expires_at")
+ndb.ensure_collection("sessions", time: "created_at", expires_field: "expires_at")
 # endregion declare
 
-%w[s-short s-long s-keep].each do |id|
-  ndb.delete("sessions", id)
-rescue Ndb::NotFound
-  nil
-end
+%w[s-short s-long s-keep].each { |id| ndb.delete("sessions", id) }
 
 # region insert
 now = Time.now.utc.iso8601(3)
 
-ndb.insert("sessions", [{ sid: "s-short", created_at: now }], expire_in: 2)
-ndb.insert("sessions", [{ sid: "s-long", created_at: now }, { sid: "s-keep", created_at: now }], expire_in: "1h")
+ndb.insert("sessions", [{ _id: "s-short", created_at: now }], expire_in: 2)
+ndb.insert("sessions", [{ _id: "s-long", created_at: now }, { _id: "s-keep", created_at: now }], expire_in: "1h")
 
 puts "insert s-short (expire_in 2s), s-long and s-keep (expire_in 1h)"
 # endregion insert
@@ -47,7 +43,7 @@ sleep 3
 # region after
 alive = ndb.find("sessions", {}).rows
 
-puts "live sessions: #{alive.size} (#{alive.map { |s| s['sid'] }.join(', ')})"
+puts "live sessions: #{alive.size} (#{alive.map { |s| s['_id'] }.join(', ')})"
 
 puts "ttl s-short: gone" if ndb.ttl("sessions", "s-short").nil?
 # endregion after

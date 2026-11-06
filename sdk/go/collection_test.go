@@ -13,7 +13,7 @@ import (
 )
 
 type Call struct {
-	CallID   string    `ndb:"call_id,id"`
+	CallID   string    `ndb:"_id"`
 	Status   string    `ndb:"status,index"`
 	DNIS     string    `ndb:"dnis,index"`
 	Duration int       `ndb:"duration"`
@@ -22,7 +22,7 @@ type Call struct {
 
 func TestSchemaTags(t *testing.T) {
 	type withUnique struct {
-		ID    string `ndb:"_id,id"`
+		ID    string `ndb:"_id"`
 		Email string `ndb:"email,unique"`
 		Note  string `ndb:"note"`
 		Skip  string `ndb:"-"`
@@ -34,8 +34,8 @@ func TestSchemaTags(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if s.id != "call_id" || s.time != "ts" {
-		t.Fatalf("id %q time %q, want call_id and ts", s.id, s.time)
+	if s.time != "ts" {
+		t.Fatalf("time %q, want ts", s.time)
 	}
 
 	if !reflect.DeepEqual(s.indexes, []string{"status", "dnis"}) {
@@ -57,9 +57,8 @@ func TestSchemaTags(t *testing.T) {
 }
 
 func TestSchemaTagErrors(t *testing.T) {
-	type twoIDs struct {
+	type idOption struct {
 		A string `ndb:"a,id"`
-		B string `ndb:"b,id"`
 	}
 
 	type twoTimes struct {
@@ -80,7 +79,7 @@ func TestSchemaTagErrors(t *testing.T) {
 	}
 
 	cases := map[string]reflect.Type{
-		"two id tags":      reflect.TypeFor[twoIDs](),
+		"id option":        reflect.TypeFor[idOption](),
 		"two time tags":    reflect.TypeFor[twoTimes](),
 		"unknown option":   reflect.TypeFor[unknownOption](),
 		"empty name":       reflect.TypeFor[noName](),
@@ -116,7 +115,7 @@ func TestEncodeDecodeUsesTagNames(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, key := range []string{"call_id", "status", "dnis", "duration", "ts"} {
+	for _, key := range []string{"_id", "status", "dnis", "duration", "ts"} {
 		if _, ok := doc[key]; !ok {
 			t.Errorf("document has no key %q: %s", key, raw)
 		}
@@ -147,8 +146,8 @@ func TestCollectionEnsuresOnFirstUse(t *testing.T) {
 
 	def := catalogDef(t, db, name)
 
-	if def.ID != "call_id" || def.Time != "ts" {
-		t.Fatalf("definition id %q time %q, want call_id and ts", def.ID, def.Time)
+	if def.Time != "ts" {
+		t.Fatalf("definition time %q, want ts", def.Time)
 	}
 
 	slices.Sort(def.Indexes)
@@ -182,7 +181,7 @@ func TestInsertGetUpdateDelete(t *testing.T) {
 		t.Fatalf("get: got %+v", got)
 	}
 
-	res, err := calls.Update(ctx, And(Eq("call_id", "c1"), Eq("_v", 1)), Ops{"$set": {"status": "done"}})
+	res, err := calls.Update(ctx, And(Eq("_id", "c1"), Eq("_v", 1)), Ops{"$set": {"status": "done"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,12 +190,12 @@ func TestInsertGetUpdateDelete(t *testing.T) {
 		t.Fatalf("update: got %+v", res)
 	}
 
-	res, err = calls.Update(ctx, And(Eq("call_id", "c1"), Eq("_v", 1)), Ops{"$set": {"status": "stale"}})
+	res, err = calls.Update(ctx, And(Eq("_id", "c1"), Eq("_v", 1)), Ops{"$set": {"status": "stale"}})
 	if err != nil || res.Matched != 0 || res.Doc != nil {
 		t.Fatalf("stale update: want matched 0, got %+v, %v", res, err)
 	}
 
-	if _, err := calls.Update(ctx, Eq("call_id", "c1"), Ops{"$unset": {"duration": true}}); err != nil {
+	if _, err := calls.Update(ctx, Eq("_id", "c1"), Ops{"$unset": {"duration": true}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -209,7 +208,7 @@ func TestInsertGetUpdateDelete(t *testing.T) {
 		t.Fatalf("after update: got %+v, want status done and duration unset", got)
 	}
 
-	if n, err := calls.Delete(ctx, Eq("call_id", "c1")); err != nil || n != 1 {
+	if n, err := calls.Delete(ctx, Eq("_id", "c1")); err != nil || n != 1 {
 		t.Fatalf("delete: n=%d err=%v", n, err)
 	}
 
@@ -276,7 +275,7 @@ func catalogDef(t *testing.T, db *DB, name string) catalogEntry {
 
 func TestSchemaExpiresOption(t *testing.T) {
 	type session struct {
-		ID        string    `ndb:"id,id"`
+		ID        string    `ndb:"_id"`
 		ExpiresAt time.Time `ndb:"expires_at,expires"`
 	}
 
@@ -294,14 +293,14 @@ func TestSchemaExpiresOption(t *testing.T) {
 		t.Fatal("two expires fields must fail")
 	}
 
-	body, err := json.Marshal(ensureBody{ID: s.id, ExpiresField: s.expires})
-	if err != nil || string(body) != `{"id":"id","expires_field":"expires_at"}` {
+	body, err := json.Marshal(ensureBody{ExpiresField: s.expires})
+	if err != nil || string(body) != `{"expires_field":"expires_at"}` {
 		t.Fatalf("ensure body %s err %v", body, err)
 	}
 }
 
 type Stock struct {
-	SKU   string `ndb:"sku,id"`
+	SKU   string `ndb:"_id"`
 	Group string `ndb:"grp,index"`
 	Qty   int    `ndb:"qty"`
 	Tags  []string
@@ -325,7 +324,7 @@ func TestUpdateManyUpsertAndGuards(t *testing.T) {
 		t.Fatalf("many: %+v, %v", res, err)
 	}
 
-	guard := And(Eq("sku", "c"), Gte("qty", 1))
+	guard := And(Eq("_id", "c"), Gte("qty", 1))
 
 	if res, err := stock.Update(ctx, guard, Ops{"$inc": {"qty": -1}}); err != nil || res.Modified != 1 || res.Doc.Qty != 0 {
 		t.Fatalf("first decrement: %+v, %v", res, err)
@@ -335,7 +334,7 @@ func TestUpdateManyUpsertAndGuards(t *testing.T) {
 		t.Fatalf("second decrement: %+v, %v", res, err)
 	}
 
-	res, err = stock.Update(ctx, Eq("sku", "new"), Ops{"$inc": {"qty": 2}, "$push": {"Tags": "x"}}, Upsert())
+	res, err = stock.Update(ctx, Eq("_id", "new"), Ops{"$inc": {"qty": 2}, "$push": {"Tags": "x"}}, Upsert())
 	if err != nil || res.Matched != 0 || res.Modified != 1 || res.Doc.Qty != 2 || len(res.Doc.Tags) != 1 {
 		t.Fatalf("upsert: %+v, %v", res, err)
 	}
@@ -346,7 +345,7 @@ func TestUpdateManyUpsertAndGuards(t *testing.T) {
 		t.Fatalf("unindexed many: %v", err)
 	}
 
-	_, err = stock.Update(ctx, Eq("sku", "a"), Ops{"$set": {"qty": 1}, "$inc": {"qty": 1}})
+	_, err = stock.Update(ctx, Eq("_id", "a"), Ops{"$set": {"qty": 1}, "$inc": {"qty": 1}})
 
 	if !errors.Is(err, ErrConflictingUpdate) {
 		t.Fatalf("conflict: %v", err)
@@ -366,7 +365,7 @@ func TestUpdateRejectsPlainOperatorKeysBeforeSending(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = stock.Update(ctx, Eq("sku", "a"), Ops{"set": {"qty": 1}})
+	_, err = stock.Update(ctx, Eq("_id", "a"), Ops{"set": {"qty": 1}})
 
 	if err == nil || !strings.Contains(err.Error(), "must start with $") {
 		t.Fatalf("got %v", err)

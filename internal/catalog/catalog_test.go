@@ -4,6 +4,7 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,7 +34,7 @@ func TestEnsureCreatesWithDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if def.ID != "_id" || def.Write != catalog.Engine || def.Durability != catalog.Strict {
+	if def.Write != catalog.Engine || def.Durability != catalog.Strict {
 		t.Fatalf("defaults not applied: %+v", def)
 	}
 }
@@ -49,7 +50,7 @@ func TestPathWithoutWriteMeansDirect(t *testing.T) {
 
 func TestEnsureIsIdempotent(t *testing.T) {
 	c, _ := open(t, catalog.Options{})
-	d := catalog.Def{Name: "posts", ID: "post_id", Indexes: []string{"status"}}
+	d := catalog.Def{Name: "posts", Indexes: []string{"status"}}
 
 	a, err := c.Ensure(d, catalog.FromCode)
 	if err != nil {
@@ -61,7 +62,7 @@ func TestEnsureIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !slices.Equal(a.Indexes, b.Indexes) || a.ID != b.ID {
+	if !slices.Equal(a.Indexes, b.Indexes) {
 		t.Fatalf("%+v != %+v", a, b)
 	}
 }
@@ -82,10 +83,9 @@ func TestIndexesAreMerged(t *testing.T) {
 }
 
 func TestConflicts(t *testing.T) {
-	base := catalog.Def{Name: "calls", ID: "call_id", Time: "ts", Write: catalog.Direct, Path: "/data/*.ndjson"}
+	base := catalog.Def{Name: "calls", Time: "ts", Write: catalog.Direct, Path: "/data/*.ndjson"}
 
 	changes := map[string]catalog.Def{
-		"id":    {Name: "calls", ID: "other"},
 		"time":  {Name: "calls", Time: "created_at"},
 		"write": {Name: "calls", Write: catalog.Engine},
 		"path":  {Name: "calls", Path: "/other/*.ndjson"},
@@ -109,14 +109,14 @@ func TestConflicts(t *testing.T) {
 func TestEmptyFieldMeansNotSpecified(t *testing.T) {
 	c, _ := open(t, catalog.Options{})
 
-	c.Ensure(catalog.Def{Name: "calls", ID: "call_id", Time: "ts"}, catalog.FromYAML)
+	c.Ensure(catalog.Def{Name: "calls", Time: "ts"}, catalog.FromYAML)
 
 	def, err := c.Ensure(catalog.Def{Name: "calls", Indexes: []string{"x"}}, catalog.FromCode)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if def.ID != "call_id" || def.Time != "ts" {
+	if def.Time != "ts" {
 		t.Fatalf("existing fields lost: %+v", def)
 	}
 }
@@ -187,15 +187,15 @@ func TestImplicit(t *testing.T) {
 	on, _ := open(t, catalog.Options{AllowImplicit: true})
 
 	def, err := on.EnsureImplicit("posts")
-	if err != nil || def.ID != "_id" {
+	if err != nil {
 		t.Fatalf("def=%+v err=%v", def, err)
 	}
 
-	on.Ensure(catalog.Def{Name: "calls", ID: "call_id"}, catalog.FromCode)
+	on.Ensure(catalog.Def{Name: "calls"}, catalog.FromCode)
 
 	def, _ = on.EnsureImplicit("calls")
 
-	if def.ID != "call_id" {
+	if def.Write != catalog.Engine {
 		t.Fatalf("implicit changed an existing collection: %+v", def)
 	}
 }
@@ -218,7 +218,7 @@ func TestDropIndex(t *testing.T) {
 func TestPersistsAcrossReopen(t *testing.T) {
 	c, path := open(t, catalog.Options{})
 
-	c.Ensure(catalog.Def{Name: "posts", ID: "post_id", Indexes: []string{"status"}}, catalog.FromCode)
+	c.Ensure(catalog.Def{Name: "posts", Indexes: []string{"status"}}, catalog.FromCode)
 	c.Close()
 
 	again, err := catalog.Open(path, catalog.Options{})
@@ -230,7 +230,7 @@ func TestPersistsAcrossReopen(t *testing.T) {
 
 	def, ok := again.Get("posts")
 
-	if !ok || def.ID != "post_id" || !slices.Equal(def.Indexes, []string{"status"}) {
+	if !ok || !slices.Equal(def.Indexes, []string{"status"}) {
 		t.Fatalf("def=%+v ok=%v", def, ok)
 	}
 
@@ -352,5 +352,14 @@ func TestWALRetentionIsAnOperatorSetting(t *testing.T) {
 
 	if def.WALRetention != "" {
 		t.Fatalf("default must keep the WAL forever: %+v", def)
+	}
+}
+
+func TestIDSettingIsInvalid(t *testing.T) {
+	c, _ := open(t, catalog.Options{})
+
+	_, err := c.Ensure(catalog.Def{Name: "calls", LegacyID: "call_id"}, catalog.FromCode)
+	if !errors.Is(err, catalog.ErrInvalid) || !strings.Contains(err.Error(), "unique") {
+		t.Fatalf("err = %v, want catalog_invalid that points to unique", err)
 	}
 }

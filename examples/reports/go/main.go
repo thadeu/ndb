@@ -12,7 +12,7 @@ import (
 )
 
 type Order struct {
-	OrderID   string    `ndb:"order_id,id"`
+	ID        string    `ndb:"_id"`
 	CreatedAt time.Time `ndb:"created_at,time"`
 	Status    string    `ndb:"status,index"`
 	Amount    int       `ndb:"amount"`
@@ -126,18 +126,18 @@ func seed(ctx context.Context, orders *ndb.Coll[Order]) error {
 	}
 
 	_, err = orders.Insert(ctx,
-		Order{OrderID: "o01", CreatedAt: at("09:05:00"), Status: "paid", Amount: 50},
-		Order{OrderID: "o02", CreatedAt: at("09:20:00"), Status: "paid", Amount: 70},
-		Order{OrderID: "o03", CreatedAt: at("09:45:00"), Status: "refunded", Amount: 30},
-		Order{OrderID: "o04", CreatedAt: at("10:02:00"), Status: "paid", Amount: 120},
-		Order{OrderID: "o05", CreatedAt: at("10:15:00"), Status: "paid", Amount: 80},
-		Order{OrderID: "o06", CreatedAt: at("10:30:00"), Status: "pending", Amount: 60},
-		Order{OrderID: "o07", CreatedAt: at("10:55:00"), Status: "paid", Amount: 160},
-		Order{OrderID: "o08", CreatedAt: at("11:05:00"), Status: "paid", Amount: 40},
-		Order{OrderID: "o09", CreatedAt: at("11:25:00"), Status: "refunded", Amount: 90},
-		Order{OrderID: "o10", CreatedAt: at("11:40:00"), Status: "paid", Amount: 60},
-		Order{OrderID: "o11", CreatedAt: at("11:50:00"), Status: "pending", Amount: 20},
-		Order{OrderID: "o12", CreatedAt: at("11:59:00"), Status: "paid", Amount: 110},
+		Order{ID: "o01", CreatedAt: at("09:05:00"), Status: "paid", Amount: 50},
+		Order{ID: "o02", CreatedAt: at("09:20:00"), Status: "paid", Amount: 70},
+		Order{ID: "o03", CreatedAt: at("09:45:00"), Status: "refunded", Amount: 30},
+		Order{ID: "o04", CreatedAt: at("10:02:00"), Status: "paid", Amount: 120},
+		Order{ID: "o05", CreatedAt: at("10:15:00"), Status: "paid", Amount: 80},
+		Order{ID: "o06", CreatedAt: at("10:30:00"), Status: "pending", Amount: 60},
+		Order{ID: "o07", CreatedAt: at("10:55:00"), Status: "paid", Amount: 160},
+		Order{ID: "o08", CreatedAt: at("11:05:00"), Status: "paid", Amount: 40},
+		Order{ID: "o09", CreatedAt: at("11:25:00"), Status: "refunded", Amount: 90},
+		Order{ID: "o10", CreatedAt: at("11:40:00"), Status: "paid", Amount: 60},
+		Order{ID: "o11", CreatedAt: at("11:50:00"), Status: "pending", Amount: 20},
+		Order{ID: "o12", CreatedAt: at("11:59:00"), Status: "paid", Amount: 110},
 	)
 
 	return err

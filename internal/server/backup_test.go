@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,32 +14,31 @@ import (
 	"github.com/thadeu/ndb/internal/server"
 )
 
-func TestBackupEndpointOnUnixSocket(t *testing.T) {
+func TestBackupEndpointStreamsTheFileOnUnixSocket(t *testing.T) {
 	c := unixServer(t)
-	dest := filepath.Join(t.TempDir(), "bk")
 
-	do(t, c, "POST", "/v1/c/b/insert", `{"insert":[{"id":"1"}]}`, nil)
+	do(t, c, "POST", "/v1/c/b/insert", `{"insert":[{"_id":"1"}]}`, nil)
 
-	resp, body := do(t, c, "POST", "/v1/backup", `{"dest":"`+dest+`"}`, nil)
+	resp, body := do(t, c, "POST", "/v1/backup", `{}`, nil)
 
-	if resp.StatusCode != 200 || !strings.Contains(body, `"b":1`) {
+	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "application/x-ndjson" {
 		t.Fatalf("backup: %d %s", resp.StatusCode, body)
 	}
 
-	if _, err := os.Stat(filepath.Join(dest, "catalog.bolt")); err != nil {
-		t.Fatal(err)
+	lines := strings.Split(strings.TrimSpace(body), "\n")
+
+	if !strings.HasPrefix(lines[0], `{"ndb_backup":1`) || !strings.HasPrefix(lines[len(lines)-1], `{"_section":"end"`) {
+		t.Fatalf("not a backup file:\n%s", body)
 	}
 
-	resp, body = do(t, c, "POST", "/v1/backup", `{"dest":"`+dest+`"}`, nil)
-
-	if resp.StatusCode != 400 {
-		t.Fatalf("second backup into the same dir: %d %s", resp.StatusCode, body)
+	if !strings.Contains(body, `{"_section":"wal","collection":"b"}`) || !strings.Contains(body, `"_id":"1"`) {
+		t.Fatalf("the document is not in the file:\n%s", body)
 	}
 
-	resp, _ = do(t, c, "POST", "/v1/backup", `{}`, nil)
+	resp, _ = do(t, c, "POST", "/v1/backup", `{"nope":1}`, nil)
 
 	if resp.StatusCode != 400 {
-		t.Fatalf("missing dest: %d", resp.StatusCode)
+		t.Fatalf("unknown field: %d", resp.StatusCode)
 	}
 }
 

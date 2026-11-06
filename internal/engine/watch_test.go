@@ -177,7 +177,7 @@ func TestWatchDirectCollectionOverFiles(t *testing.T) {
 	dir := t.TempDir()
 	db := open(t, cfg(dir, nil))
 
-	ensure(t, db, catalog.Def{Name: "calls", ID: "event_id", Write: catalog.Direct, Path: dir + "/collections/calls/in/*.ndjson"})
+	ensure(t, db, catalog.Def{Name: "calls", Write: catalog.Direct, Path: dir + "/collections/calls/in/*.ndjson"})
 
 	if _, err := db.Watch("calls", "c", ""); err != nil {
 		t.Fatal(err)

@@ -185,7 +185,7 @@ func TestWatchStreamsHistoryThenLiveAndAckResumes(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		third = r.next()
 
-		if third["id"] != fmt.Sprintf("p%d", i) || third["op"] != "put" || third["v"] != float64(1) {
+		if third["_id"] != fmt.Sprintf("p%d", i) || third["op"] != "put" || third["v"] != float64(1) {
 			t.Fatalf("event %d = %v", i, third)
 		}
 
@@ -196,7 +196,7 @@ func TestWatchStreamsHistoryThenLiveAndAckResumes(t *testing.T) {
 
 	env.insert("posts", 4, 4)
 
-	if ev := r.next(); ev["id"] != "p4" {
+	if ev := r.next(); ev["_id"] != "p4" {
 		t.Fatalf("live event = %v", ev)
 	}
 
@@ -214,7 +214,7 @@ func TestWatchStreamsHistoryThenLiveAndAckResumes(t *testing.T) {
 
 	defer resp.Body.Close()
 
-	if ev := r.next(); ev["id"] != "p4" {
+	if ev := r.next(); ev["_id"] != "p4" {
 		t.Fatalf("after restart got %v, want p4", ev)
 	}
 }
@@ -231,7 +231,7 @@ func TestWatchFromNowAndLimit(t *testing.T) {
 	env.insert("posts", 3, 5)
 
 	for _, id := range []string{"p3", "p4"} {
-		if ev := r.next(); ev["id"] != id {
+		if ev := r.next(); ev["_id"] != id {
 			t.Fatalf("got %v, want %s", ev, id)
 		}
 	}
@@ -328,7 +328,7 @@ func TestWatchTwoConsumersAreIndependent(t *testing.T) {
 
 	defer rb.Body.Close()
 
-	if ev := b.next(); ev["id"] != "p1" {
+	if ev := b.next(); ev["_id"] != "p1" {
 		t.Fatalf("b = %v, want p1", ev)
 	}
 
@@ -336,7 +336,7 @@ func TestWatchTwoConsumersAreIndependent(t *testing.T) {
 
 	defer ra2.Body.Close()
 
-	if ev := a2.next(); ev["id"] != "p2" {
+	if ev := a2.next(); ev["_id"] != "p2" {
 		t.Fatalf("a = %v, want p2", ev)
 	}
 }
@@ -383,11 +383,11 @@ func TestWatchDirectModeOverHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	os.WriteFile(filepath.Join(in, "a.ndjson"), []byte("{\"event_id\":\"e1\"}\n{\"event_id\":\"e2\"}\n"), 0o644)
+	os.WriteFile(filepath.Join(in, "a.ndjson"), []byte("{\"_id\":\"e1\"}\n{\"_id\":\"e2\"}\n"), 0o644)
 
 	env := newWatchEnv(t, dir, time.Hour)
 
-	def := fmt.Sprintf(`{"id":"event_id","write":"direct","path":%q}`, in+"/*.ndjson")
+	def := fmt.Sprintf(`{"write":"direct","path":%q}`, in+"/*.ndjson")
 
 	req, _ := http.NewRequest("PUT", "http://ndb/v1/c/calls", strings.NewReader(def))
 
@@ -404,7 +404,7 @@ func TestWatchDirectModeOverHTTP(t *testing.T) {
 
 	first := r.next()
 
-	if first["id"] != "e1" || first["op"] != "put" {
+	if first["_id"] != "e1" || first["op"] != "put" {
 		t.Fatalf("first = %v", first)
 	}
 
@@ -412,15 +412,15 @@ func TestWatchDirectModeOverHTTP(t *testing.T) {
 		t.Fatalf("ack = %d", code)
 	}
 
-	if second := r.next(); second["id"] != "e2" {
+	if second := r.next(); second["_id"] != "e2" {
 		t.Fatalf("second = %v", second)
 	}
 
 	f, _ := os.OpenFile(filepath.Join(in, "a.ndjson"), os.O_APPEND|os.O_WRONLY, 0o644)
-	f.WriteString("{\"event_id\":\"e3\"}\n")
+	f.WriteString("{\"_id\":\"e3\"}\n")
 	f.Close()
 
-	if third := r.next(); third["id"] != "e3" {
+	if third := r.next(); third["_id"] != "e3" {
 		t.Fatalf("third = %v (live line from the tailer)", third)
 	}
 }
@@ -435,7 +435,7 @@ func TestWatchWhereFiltersEventsAndMovesTheCursor(t *testing.T) {
 	r, resp := env.watch(ctx, "posts", `{"consumer":"relay","where":{"n":{"$gte":4}}}`)
 
 	for _, id := range []string{"p4", "p5"} {
-		if ev := r.next(); ev["id"] != id {
+		if ev := r.next(); ev["_id"] != id {
 			t.Fatalf("got %v, want %s", ev, id)
 		}
 	}

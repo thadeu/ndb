@@ -65,14 +65,18 @@ puts "pages (limit 5): #{pages.join(", ")}"
 # endregion cursor
 
 # region append
-id = "ruby-#{(Time.now.to_f * 1000).to_i}"
-line = { id: id, ts: Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"), app: "cli", level: "info", msg: "hello from ruby" }
+msg = "hello from ruby #{(Time.now.to_f * 1000).to_i}"
+line = { ts: Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"), app: "cli", level: "info", msg: msg }
 
 system(File.expand_path("../append.sh", __dir__), "cli", "3003", JSON.generate(line), exception: true)
 
 puts "append: cli wrote one line"
 
-wait_for { count(ndb, { id: id }) == 1 }
+wait_for { count(ndb, { msg: msg }) == 1 }
 
 puts "the new line is in the collection"
+
+added = ndb.find("app_logs", where: { msg: msg }).rows.first
+
+puts "it has no _id, so it has no /{_id} routes: _id is #{added['_id'].to_s.inspect}"
 # endregion append

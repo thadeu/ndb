@@ -20,7 +20,7 @@ const benchDocs = 1000
 func seedBench(tb testing.TB, db *engine.DB) {
 	tb.Helper()
 
-	if _, err := db.Ensure(catalog.Def{Name: "bench", ID: "k"}); err != nil {
+	if _, err := db.Ensure(catalog.Def{Name: "bench"}); err != nil {
 		tb.Fatal(err)
 	}
 
@@ -93,7 +93,7 @@ func BenchmarkFindByIDUnixSocket(b *testing.B) {
 func seedViaHTTP(b *testing.B, client *http.Client) {
 	b.Helper()
 
-	req, _ := http.NewRequest("PUT", "http://ndb/v1/c/bench", bytes.NewReader([]byte(`{"id":"k"}`)))
+	req, _ := http.NewRequest("PUT", "http://ndb/v1/c/bench", bytes.NewReader([]byte(`{}`)))
 
 	if _, err := client.Do(req); err != nil {
 		b.Fatal(err)

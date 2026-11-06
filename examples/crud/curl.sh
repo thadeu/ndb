@@ -1,50 +1,50 @@
 #!/usr/bin/env bash
-# CRUD on the users collection: insert, get, update with if_version, delete, count.
+# CRUD on the users collection: insert, get by _id, update with a _v guard, delete, count.
 set -euo pipefail
 
 . "$(dirname "$0")/../lib/ndb.sh"
 
 for id in u1 u2; do
-	ndb POST /v1/c/users/delete "{\"delete\":{\"id\":\"$id\"}}" >/dev/null
+	ndb DELETE "/v1/c/users/$id" >/dev/null
 done
 
 # region insert
 results=$(ndb POST /v1/c/users/insert '{"insert":[
-  {"user_id":"u1","email":"ada@example.com","plan":"free"},
-  {"user_id":"u2","email":"grace@example.com","plan":"free"}
+  {"_id":"u1","email":"ada@example.com","plan":"free"},
+  {"_id":"u2","email":"grace@example.com","plan":"free"}
 ]}')
 
 echo "insert u1, u2 -> $(jq -r '"v\(.results[0].v), v\(.results[1].v)"' <<<"$results")"
 # endregion insert
 
 # region get
-ada=$(ndb POST /v1/c/users/find '{"where":{"user_id":"u1"},"versions":true}')
+ada=$(ndb GET /v1/c/users/u1)
 version=$(jq -r '._v' <<<"$ada")
 
 echo "get u1: $(jq -r '"\(.email) plan=\(.plan) v\(._v)"' <<<"$ada")"
 # endregion get
 
 # region update
-saved=$(ndb POST /v1/c/users/update "{\"update\":{\"id\":\"u1\",\"set\":{\"plan\":\"pro\"},\"if_version\":$version}}")
+saved=$(ndb POST /v1/c/users/u1/update "{\"_v\":$version,\"\$set\":{\"plan\":\"pro\"}}")
 
-echo "update u1 plan=pro (if_version $version) -> v$(jq -r '.v' <<<"$saved")"
+echo "update u1 plan=pro (_v $version) -> v$(jq -r '.doc._v' <<<"$saved")"
 # endregion update
 
 # region conflict
-status=$(ndb_status POST /v1/c/users/update "{\"update\":{\"id\":\"u1\",\"set\":{\"plan\":\"team\"},\"if_version\":$version}}")
+stale=$(ndb POST /v1/c/users/u1/update "{\"_v\":$version,\"\$set\":{\"plan\":\"team\"}}")
 
-if [[ "$status" == "409" ]]; then
-	echo "update u1 plan=team (if_version $version) -> $(jq -r '.error.code' "$NDB_BODY")"
+if [[ "$(jq -r '.matched' <<<"$stale")" == "0" ]]; then
+	echo "update u1 plan=team (_v $version) -> matched 0"
 
-	fresh=$(ndb POST /v1/c/users/find '{"where":{"user_id":"u1"},"versions":true}' | jq -r '._v')
-	retried=$(ndb POST /v1/c/users/update "{\"update\":{\"id\":\"u1\",\"set\":{\"plan\":\"team\"},\"if_version\":$fresh}}")
+	fresh=$(ndb GET /v1/c/users/u1 | jq -r '._v')
+	retried=$(ndb POST /v1/c/users/u1/update "{\"_v\":$fresh,\"\$set\":{\"plan\":\"team\"}}")
 
-	echo "reload u1: v$fresh, retry with if_version $fresh -> v$(jq -r '.v' <<<"$retried")"
+	echo "reload u1: v$fresh, retry with _v $fresh -> v$(jq -r '.doc._v' <<<"$retried")"
 fi
 # endregion conflict
 
 # region delete
-ndb POST /v1/c/users/delete '{"delete":{"id":"u2"}}' >/dev/null
+ndb DELETE /v1/c/users/u2 >/dev/null
 
 echo "delete u2"
 # endregion delete

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"time"
 )
 
@@ -25,7 +24,7 @@ func (c *Coll[T]) ExpireAt(ctx context.Context, id string, t time.Time) (uint64,
 // Persist removes the expiry of the document, like PERSIST in Redis, and
 // returns the new version.
 func (c *Coll[T]) Persist(ctx context.Context, id string) (uint64, error) {
-	return c.writeVersion(ctx, "persist", map[string]string{"id": id})
+	return c.writeVersion(ctx, "persist", map[string]string{"_id": id})
 }
 
 func (c *Coll[T]) writeVersion(ctx context.Context, op string, body any) (uint64, error) {
@@ -49,7 +48,7 @@ func (c *Coll[T]) writeVersion(ctx context.Context, op string, body any) (uint64
 // never expires. A missing or expired document is ErrNotFound. The time is
 // rounded up to whole seconds.
 func (c *Coll[T]) TTL(ctx context.Context, id string) (time.Duration, bool, error) {
-	resp, err := c.db.do(ctx, http.MethodGet, collPath(c.name)+"/ttl/"+url.PathEscape(id), nil)
+	resp, err := c.db.do(ctx, http.MethodGet, c.idPath(id)+"/ttl", nil)
 	if err != nil {
 		return 0, false, err
 	}
@@ -72,7 +71,7 @@ func (c *Coll[T]) TTL(ctx context.Context, id string) (time.Duration, bool, erro
 }
 
 type expireBody struct {
-	ID string   `json:"id"`
+	ID string   `json:"_id"`
 	In *float64 `json:"in,omitempty"`
 	At string   `json:"at,omitempty"`
 }

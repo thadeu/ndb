@@ -30,7 +30,7 @@ func addPosts(t *testing.T, c *collection.Collection, from, to int) {
 	t.Helper()
 
 	for i := from; i <= to; i++ {
-		if _, err := c.Insert(ctx, doc(fmt.Sprintf(`{"post_id":"p%d","n":%d}`, i, i))); err != nil {
+		if _, err := c.Insert(ctx, doc(fmt.Sprintf(`{"_id":"p%d","n":%d}`, i, i))); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -64,7 +64,7 @@ func TestWatchDeleteHasNoDoc(t *testing.T) {
 
 	addPosts(t, c, 1, 1)
 
-	if err := c.DeleteID(ctx, "p1"); err != nil {
+	if err := c.DeleteByID(ctx, "p1"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -83,7 +83,7 @@ func TestWatchDeleteHasNoDoc(t *testing.T) {
 func TestWatchResumesAfterPositionAcrossRestart(t *testing.T) {
 	dir := t.TempDir()
 
-	c, err := collection.Open(collection.Config{Dir: dir, FS: fs.OS{}, Def: catalog.Def{Name: "posts", ID: "post_id"}})
+	c, err := collection.Open(collection.Config{Dir: dir, FS: fs.OS{}, Def: catalog.Def{Name: "posts"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestWatchResumesAfterPositionAcrossRestart(t *testing.T) {
 func TestWatchResumesInsideABatchTransaction(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	if _, err := c.Insert(ctx, doc(`{"post_id":"a"}`), doc(`{"post_id":"b"}`), doc(`{"post_id":"c"}`)); err != nil {
+	if _, err := c.Insert(ctx, doc(`{"_id":"a"}`), doc(`{"_id":"b"}`), doc(`{"_id":"c"}`)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -164,7 +164,7 @@ func TestWatchNowSkipsHistory(t *testing.T) {
 func TestWatchReadsAcrossSegments(t *testing.T) {
 	dir := t.TempDir()
 
-	c, err := collection.Open(collection.Config{Dir: dir, FS: fs.OS{}, Def: catalog.Def{Name: "posts", ID: "post_id"}, WALSegmentSize: 300})
+	c, err := collection.Open(collection.Config{Dir: dir, FS: fs.OS{}, Def: catalog.Def{Name: "posts"}, WALSegmentSize: 300})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestAckMergeIsMonotonic(t *testing.T) {
 }
 
 func TestSlowWatcherNeverBlocksWritersAndLags(t *testing.T) {
-	c, err := collection.Open(collection.Config{Dir: t.TempDir(), FS: fs.OS{}, Def: catalog.Def{Name: "posts", ID: "post_id"}, WatchBuffer: 4})
+	c, err := collection.Open(collection.Config{Dir: t.TempDir(), FS: fs.OS{}, Def: catalog.Def{Name: "posts"}, WatchBuffer: 4})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +259,7 @@ func TestSlowWatcherNeverBlocksWritersAndLags(t *testing.T) {
 }
 
 func TestWatchLaggedStreamResumesFromLastEvent(t *testing.T) {
-	c, err := collection.Open(collection.Config{Dir: t.TempDir(), FS: fs.OS{}, Def: catalog.Def{Name: "posts", ID: "post_id"}, WatchBuffer: 2})
+	c, err := collection.Open(collection.Config{Dir: t.TempDir(), FS: fs.OS{}, Def: catalog.Def{Name: "posts"}, WatchBuffer: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +296,7 @@ func TestRelaxedWatchDeliversOnlyAfterFsync(t *testing.T) {
 		Data:       dir,
 		FS:         fs.OS{},
 		FlushEvery: time.Hour,
-		Def:        catalog.Def{Name: "posts", ID: "post_id", Durability: catalog.Relaxed},
+		Def:        catalog.Def{Name: "posts", Durability: catalog.Relaxed},
 	})
 	if err != nil {
 		t.Fatal(err)

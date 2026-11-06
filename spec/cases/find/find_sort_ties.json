@@ -3,7 +3,6 @@
   "collection": "posts",
   "setup": {
     "catalog": {
-      "id": "post_id",
       "write": "engine"
     },
     "writes": [
@@ -12,15 +11,15 @@
         "body": {
           "insert": [
             {
-              "post_id": "c",
+              "_id": "c",
               "g": 1
             },
             {
-              "post_id": "a",
+              "_id": "a",
               "g": 1
             },
             {
-              "post_id": "b",
+              "_id": "b",
               "g": 0
             }
           ]
@@ -40,15 +39,15 @@
     "ordered": true,
     "rows": [
       {
-        "post_id": "b",
+        "_id": "b",
         "g": 0
       },
       {
-        "post_id": "a",
+        "_id": "a",
         "g": 1
       },
       {
-        "post_id": "c",
+        "_id": "c",
         "g": 1
       }
     ]

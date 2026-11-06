@@ -48,7 +48,6 @@ class RailtieTest < Minitest::Test
   # One Rails app per process: this test boots it and checks both effects.
   def test_boot_reads_ndb_yml_and_ensures_collections_when_eager_loading
     klass = model do
-      primary_key :cid
       attribute :a, :string, index: true
     end
 

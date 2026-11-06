@@ -18,14 +18,16 @@ import (
 
 const stageDir = ".restore-stage"
 
-// runRestore is "ndb restore <backup-dir>". The backup is copied to a stage
-// dir inside the data dir and opened there, so recovery proves it is
-// readable. Only then does it replace the data dir contents.
+// runRestore is "ndb restore <file|-> [flags]". The backup file is read in
+// one pass into a stage dir inside the data dir, with its header, every WAL
+// line CRC and its end line checked. The stage is then opened like a daemon
+// would, to prove it recovers. Only then does it replace the data dir
+// contents; any earlier failure leaves the data dir as it was.
 func runRestore(args []string) error {
-	return restore(args, os.Stderr)
+	return restore(args, os.Stdin, os.Stderr)
 }
 
-func restore(args []string, out io.Writer) error {
+func restore(args []string, stdin io.Reader, out io.Writer) error {
 	fl := flag.NewFlagSet("ndb restore", flag.ContinueOnError)
 
 	common := addDataDirFlags(fl)
@@ -37,15 +39,10 @@ func restore(args []string, out io.Writer) error {
 	}
 
 	if len(pos) != 1 {
-		return errors.New("usage: ndb restore <backup-dir> [-config f] [-data-dir d] [-force]")
+		return errors.New("usage: ndb restore <file|-> [-config f] [-data-dir d] [-force]")
 	}
 
 	cfg, err := common.load(fl)
-	if err != nil {
-		return err
-	}
-
-	src, err := filepath.Abs(pos[0])
 	if err != nil {
 		return err
 	}
@@ -55,83 +52,113 @@ func restore(args []string, out io.Writer) error {
 		return err
 	}
 
-	if err := checkBackupDir(src, dataDir); err != nil {
+	in, name, closeIn, err := openBackup(pos[0], dataDir, stdin)
+	if err != nil {
 		return err
 	}
+
+	defer closeIn()
+
+	summary, err := restoreInto(dataDir, in, *force)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(out, "restore: %s restored to %s (%s)\n", name, dataDir, summary)
+
+	return nil
+}
+
+// openBackup opens the file, or stdin for "-", and refuses a file that lies
+// inside the target.
+func openBackup(arg, dataDir string, stdin io.Reader) (io.Reader, string, func(), error) {
+	if arg == "-" {
+		return stdin, "stdin", func() {}, nil
+	}
+
+	src, err := filepath.Abs(arg)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	if strings.HasPrefix(src, dataDir+string(filepath.Separator)) {
+		return nil, "", nil, fmt.Errorf("restore: the backup %s is inside the target %s", src, dataDir)
+	}
+
+	f, err := os.Open(src)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("restore: %w", err)
+	}
+
+	if info, err := f.Stat(); err != nil || info.IsDir() {
+		f.Close()
+
+		return nil, "", nil, fmt.Errorf("restore: %s is not a backup file", src)
+	}
+
+	return f, src, func() { f.Close() }, nil
+}
+
+func restoreInto(dataDir string, in io.Reader, force bool) (string, error) {
+	_, statErr := os.Stat(dataDir)
+	created := os.IsNotExist(statErr)
 
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		return err
+		return "", err
 	}
 
+	summary, err := restoreLocked(dataDir, in, force)
+
+	if err != nil && created {
+		os.RemoveAll(dataDir)
+	}
+
+	return summary, err
+}
+
+func restoreLocked(dataDir string, in io.Reader, force bool) (string, error) {
 	lk, err := lock.Acquire(dataDir)
 	if errors.Is(err, lock.ErrLocked) {
-		return fmt.Errorf("restore: %s is used by a running daemon; stop it first", dataDir)
+		return "", fmt.Errorf("restore: %s is used by a running daemon; stop it first", dataDir)
 	}
 
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	defer lk.Release()
 
 	old, err := dataEntries(dataDir)
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	if len(old) > 0 && !*force {
-		return fmt.Errorf("restore: %s is not empty; use -force to replace it", dataDir)
+	if len(old) > 0 && !force {
+		return "", fmt.Errorf("restore: %s is not empty; use -force to replace it", dataDir)
 	}
 
 	stage := filepath.Join(dataDir, stageDir)
 
 	if err := os.RemoveAll(stage); err != nil {
-		return err
+		return "", err
 	}
 
 	defer os.RemoveAll(stage)
 
-	if err := stageBackup(src, stage); err != nil {
-		return fmt.Errorf("restore: copy: %w", err)
+	if err := backup.Extract(in, stage); err != nil {
+		return "", fmt.Errorf("restore: %w; %s is untouched", err, dataDir)
 	}
 
 	summary, err := verifyStage(stage)
 	if err != nil {
-		return fmt.Errorf("restore: the backup does not recover, %s is untouched: %w", dataDir, err)
+		return "", fmt.Errorf("restore: the backup does not recover, %s is untouched: %w", dataDir, err)
 	}
 
 	if err := swapIn(dataDir, stage, old); err != nil {
-		return fmt.Errorf("restore: %w", err)
+		return "", fmt.Errorf("restore: %w", err)
 	}
 
-	fmt.Fprintf(out, "restore: %s restored to %s (%s)\n", src, dataDir, summary)
-
-	return nil
-}
-
-// checkBackupDir refuses a source that is not a data dir copy, or that
-// overlaps the target.
-func checkBackupDir(src, dataDir string) error {
-	info, err := os.Stat(src)
-	if err != nil {
-		return fmt.Errorf("restore: %w", err)
-	}
-
-	if !info.IsDir() {
-		return fmt.Errorf("restore: %s is not a directory", src)
-	}
-
-	if src == dataDir || strings.HasPrefix(src, dataDir+string(filepath.Separator)) {
-		return fmt.Errorf("restore: the backup %s is inside the target %s", src, dataDir)
-	}
-
-	for _, name := range []string{"catalog.bolt", "collections"} {
-		if _, err := os.Stat(filepath.Join(src, name)); err == nil {
-			return nil
-		}
-	}
-
-	return fmt.Errorf("restore: %s does not look like an ndb backup (no catalog.bolt or collections/)", src)
+	return summary, nil
 }
 
 // dataEntries lists what is in the data dir, ignoring the LOCK file we hold.
@@ -150,12 +177,6 @@ func dataEntries(dataDir string) ([]string, error) {
 	}
 
 	return names, nil
-}
-
-func stageBackup(src, stage string) error {
-	return backup.CopyTree(src, stage, func(rel string) bool {
-		return rel == "LOCK" || strings.HasSuffix(rel, ".tmp")
-	})
 }
 
 // verifyStage opens the staged copy as a daemon would: recovery replays the

@@ -45,7 +45,7 @@ func sealerChild() {
 	}
 
 	for ; ; n++ {
-		if _, err := c.Insert(context.Background(), doc(fmt.Sprintf(`{"id":"s%06d","n":%d}`, n, n))); err != nil {
+		if _, err := c.Insert(context.Background(), doc(fmt.Sprintf(`{"_id":"s%06d","n":%d}`, n, n))); err != nil {
 			panic(err)
 		}
 
@@ -116,7 +116,7 @@ func checkPrefix(t *testing.T, c *collection.Collection, acked int64) {
 
 	for _, r := range page.Rows {
 		var m struct {
-			ID string `json:"id"`
+			ID string `json:"_id"`
 		}
 
 		if err := json.Unmarshal(r, &m); err != nil {

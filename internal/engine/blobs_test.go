@@ -31,16 +31,16 @@ func ageAll(t *testing.T, dir string) {
 func TestGCBlobsKeepsLiveDocumentsBlobs(t *testing.T) {
 	dir := t.TempDir()
 	db := open(t, cfg(dir, nil))
-	col := ensure(t, db, catalog.Def{Name: "calls", ID: "call_id", BlobThreshold: 64})
+	col := ensure(t, db, catalog.Def{Name: "calls", BlobThreshold: 64})
 
 	keep := strings.Repeat("k", 200)
 	drop := strings.Repeat("d", 200)
 
-	if _, err := col.Insert(ctx, []byte(`{"call_id":"keep","audio":"`+keep+`"}`), []byte(`{"call_id":"drop","audio":"`+drop+`"}`)); err != nil {
+	if _, err := col.Insert(ctx, []byte(`{"_id":"keep","audio":"`+keep+`"}`), []byte(`{"_id":"drop","audio":"`+drop+`"}`)); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := col.Delete(ctx, []byte(`{"call_id":"drop"}`), false); err != nil {
+	if _, err := col.Delete(ctx, []byte(`{"_id":"drop"}`), false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -69,7 +69,7 @@ func TestGCBlobsKeepsLiveDocumentsBlobs(t *testing.T) {
 		t.Fatalf("result = %+v", res)
 	}
 
-	page, err := col.Find(ctx, []byte(`{"where":{"call_id":"keep"}}`))
+	page, err := col.Find(ctx, []byte(`{"where":{"_id":"keep"}}`))
 	if err != nil || len(page.Rows) != 1 {
 		t.Fatalf("find: %v %v", page.Rows, err)
 	}
@@ -83,9 +83,9 @@ func TestGCBlobsKeepsLiveDocumentsBlobs(t *testing.T) {
 
 func TestStatsCarryMetricsFields(t *testing.T) {
 	db := open(t, cfg(t.TempDir(), nil))
-	col := ensure(t, db, catalog.Def{Name: "posts", ID: "post_id"})
+	col := ensure(t, db, catalog.Def{Name: "posts"})
 
-	if _, err := col.Insert(ctx, []byte(`{"post_id":"p1"}`)); err != nil {
+	if _, err := col.Insert(ctx, []byte(`{"_id":"p1"}`)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -103,13 +103,13 @@ func TestStatsCarryMetricsFields(t *testing.T) {
 func TestGCBlobsKeepsBlobsOfKeptWALRecords(t *testing.T) {
 	dir := t.TempDir()
 	db := open(t, cfg(dir, nil))
-	col := ensure(t, db, catalog.Def{Name: "calls", ID: "call_id", BlobThreshold: 64, WALRetention: "7d"})
+	col := ensure(t, db, catalog.Def{Name: "calls", BlobThreshold: 64, WALRetention: "7d"})
 
-	if _, err := col.Insert(ctx, []byte(`{"call_id":"gone","audio":"`+strings.Repeat("g", 200)+`"}`)); err != nil {
+	if _, err := col.Insert(ctx, []byte(`{"_id":"gone","audio":"`+strings.Repeat("g", 200)+`"}`)); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := col.Delete(ctx, []byte(`{"call_id":"gone"}`), false); err != nil {
+	if _, err := col.Delete(ctx, []byte(`{"_id":"gone"}`), false); err != nil {
 		t.Fatal(err)
 	}
 

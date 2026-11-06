@@ -8,9 +8,8 @@ afterAll(() => db.close())
 
 function sessions() {
   return db.model(collName(), {
-    id: 'sid',
     expires: 'exp',
-    fields: { sid: { type: 'string' }, user: { type: 'string', optional: true }, exp: { type: 'date', optional: true } },
+    fields: { user: { type: 'string', optional: true }, exp: { type: 'date', optional: true } },
   })
 }
 
@@ -18,18 +17,18 @@ describe('expiry like Redis', () => {
   it('insert and update take expireIn', async () => {
     const s = sessions()
 
-    await s.insert([{ sid: 'a' }, { sid: 'b' }], { expireIn: '1h' })
-    await s.create({ sid: 'c' }, { expireIn: 90 })
+    await s.insert([{ _id: 'a' }, { _id: 'b' }], { expireIn: '1h' })
+    await s.create({ _id: 'c' }, { expireIn: 90 })
 
     expect(await s.ttl('a')).toBeGreaterThan(3590)
     expect(await s.ttl('b')).toBeLessThanOrEqual(3600)
     expect(await s.ttl('c')).toBeLessThanOrEqual(90)
 
-    await s.update({ sid: 'a' }, { $set: { user: 'u' } }, { expireIn: '30m' })
+    await s.update({ _id: 'a' }, { $set: { user: 'u' } }, { expireIn: '30m' })
 
     expect(await s.ttl('a')).toBeLessThanOrEqual(1800)
 
-    const row = await s.find('a')
+    const row = await s.get('a')
 
     expect(row?.exp).toBeInstanceOf(Date)
     expect(row?.user).toBe('u')
@@ -38,7 +37,7 @@ describe('expiry like Redis', () => {
   it('expire, expireAt, persist and ttl', async () => {
     const s = sessions()
 
-    await s.insert({ sid: 's1' })
+    await s.insert({ _id: 's1' })
 
     expect(await s.ttl('s1')).toBe(-1)
 
@@ -58,7 +57,7 @@ describe('expiry like Redis', () => {
   it('a missing or expired document is null or NotFoundError', async () => {
     const s = sessions()
 
-    await s.insert({ sid: 's1' })
+    await s.insert({ _id: 's1' })
     await s.expireAt('s1', new Date(Date.now() - 60_000))
 
     expect(await s.ttl('s1')).toBeNull()

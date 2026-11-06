@@ -6,10 +6,8 @@ import { connect } from '@thadeu/ndb'
 const ndb = connect(process.env.NDB_URL ?? 'unix:///tmp/ndb-examples.sock')
 
 const logs = ndb.model('app_logs', {
-  id: 'id',
   time: 'ts',
   fields: {
-    id: { type: 'string' },
     ts: { type: 'date' },
     app: { type: 'string', index: true },
     level: { type: 'string', index: true },
@@ -78,16 +76,20 @@ console.log(`pages (limit 5): ${pages.join(', ')}`)
 // #endregion cursor
 
 // #region append
-const id = `ts-${Date.now()}`
-const line = JSON.stringify({ id, ts: new Date().toISOString().slice(0, 19) + 'Z', app: 'cli', level: 'info', msg: 'hello from ts' })
+const msg = `hello from ts ${Date.now()}`
+const line = JSON.stringify({ ts: new Date().toISOString().slice(0, 19) + 'Z', app: 'cli', level: 'info', msg })
 
 execFileSync(new URL('../append.sh', import.meta.url).pathname, ['cli', '3003', line])
 
 console.log('append: cli wrote one line')
 
-await waitFor(async () => (await logs.where({ id }).count()) === 1)
+await waitFor(async () => (await logs.where({ msg }).count()) === 1)
 
 console.log('the new line is in the collection')
+
+const added = await logs.where({ msg }).first()
+
+console.log(`it has no _id, so it has no /{_id} routes: _id is "${added?._id ?? ''}"`)
 // #endregion append
 
 await ndb.close()

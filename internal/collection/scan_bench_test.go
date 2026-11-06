@@ -36,7 +36,7 @@ func benchScanCollection(b *testing.B) (*collection.Collection, time.Time) {
 		Dir:  filepath.Join(root, "wal"),
 		Data: root,
 		FS:   fs.OS{},
-		Def:  catalog.Def{Name: "calls", ID: "id", Durability: catalog.Relaxed},
+		Def:  catalog.Def{Name: "calls", Durability: catalog.Relaxed},
 	})
 	if err != nil {
 		b.Fatal(err)
@@ -85,7 +85,7 @@ func BenchmarkScanPruned(b *testing.B) {
 // does not prune, so every row group is read.
 func BenchmarkScanUnpruned(b *testing.B) {
 	c, cut := benchScanCollection(b)
-	body := fmt.Sprintf(`{"where":{"$or":[{"ts":{"$gte":%q}},{"id":"none"}]}}`, cut.Format(time.RFC3339))
+	body := fmt.Sprintf(`{"where":{"$or":[{"ts":{"$gte":%q}},{"_id":"none"}]}}`, cut.Format(time.RFC3339))
 
 	benchFind(b, c, body)
 }

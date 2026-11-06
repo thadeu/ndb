@@ -12,21 +12,19 @@ end
 
 # region model
 class User < Ndb::Record
-  primary_key :user_id
-
-  attribute :email, :string
+  attribute :email, :string, unique: true
   attribute :plan, :string, index: true
 
   validates :email, presence: true
 end
 # endregion model
 
-User.where(user_id: %w[u1 u2]).each(&:destroy)
+User.where(_id: %w[u1 u2]).each(&:destroy)
 
 # region insert
 User.create!([
-  { user_id: "u1", email: "ada@example.com", plan: "free" },
-  { user_id: "u2", email: "grace@example.com", plan: "free" }
+  { _id: "u1", email: "ada@example.com", plan: "free" },
+  { _id: "u2", email: "grace@example.com", plan: "free" }
 ])
 
 puts "insert u1, u2 -> v#{User.find('u1').version}, v#{User.find('u2').version}"
@@ -43,21 +41,21 @@ copy = User.find("u1")
 
 ada.update!(plan: "pro")
 
-puts "update u1 plan=pro (if_version 1) -> v#{ada.version}"
+puts "update u1 plan=pro (_v 1) -> v#{ada.version}"
 # endregion update
 
 # region conflict
 begin
   copy.update!(plan: "team")
 rescue Ndb::StaleObjectError
-  puts "update u1 plan=team (if_version 1) -> version_conflict"
+  puts "update u1 plan=team (_v 1) -> matched 0"
 
   fresh = User.find("u1")
   stale_version = fresh.version
 
   fresh.update!(plan: "team")
 
-  puts "reload u1: v#{stale_version}, retry with if_version #{stale_version} -> v#{fresh.version}"
+  puts "reload u1: v#{stale_version}, retry with _v #{stale_version} -> v#{fresh.version}"
 end
 # endregion conflict
 

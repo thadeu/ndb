@@ -28,6 +28,48 @@ func Refs(doc []byte) []string {
 	return out
 }
 
+// RefInfos is Refs with the size and type that the reference carries. The
+// Blob field of each result is the full "sha256:<hex>" form.
+func RefInfos(doc []byte) []Ref {
+	if !bytes.Contains(doc, marker) {
+		return nil
+	}
+
+	var v any
+
+	if err := json.Unmarshal(doc, &v); err != nil {
+		return nil
+	}
+
+	var out []Ref
+
+	collectInfos(v, &out)
+
+	return out
+}
+
+func collectInfos(v any, out *[]Ref) {
+	switch x := v.(type) {
+	case map[string]any:
+		if s, ok := x["$blob"].(string); ok {
+			if _, err := ParseHash(s); err == nil && strings.HasPrefix(s, prefix) {
+				size, _ := x["size"].(float64)
+				typ, _ := x["type"].(string)
+
+				*out = append(*out, Ref{Blob: s, Size: int64(size), Type: typ})
+			}
+		}
+
+		for _, child := range x {
+			collectInfos(child, out)
+		}
+	case []any:
+		for _, child := range x {
+			collectInfos(child, out)
+		}
+	}
+}
+
 func collect(v any, out *[]string) {
 	switch x := v.(type) {
 	case map[string]any:

@@ -8,7 +8,7 @@ import (
 )
 
 type Session struct {
-	ID        string    `ndb:"id,id"`
+	ID        string    `ndb:"_id"`
 	User      string    `ndb:"user"`
 	ExpiresAt time.Time `ndb:"expires_at,expires"`
 }
@@ -31,7 +31,7 @@ func TestExpireInInsertAndUpdate(t *testing.T) {
 		t.Fatalf("ttl a = %v %v %v", left, expires, err)
 	}
 
-	if _, err := sessions.Update(ctx, Eq("id", "a"), Ops{"$set": {"user": "u2"}}, ExpireIn(30*time.Minute)); err != nil {
+	if _, err := sessions.Update(ctx, Eq("_id", "a"), Ops{"$set": {"user": "u2"}}, ExpireIn(30*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 

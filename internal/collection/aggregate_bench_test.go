@@ -40,7 +40,7 @@ func BenchmarkAggregateRowEngine(b *testing.B) {
 	c, err := collection.Open(collection.Config{
 		Dir: b.TempDir(),
 		FS:  fs.OS{},
-		Def: catalog.Def{Name: "calls", ID: "id", Durability: catalog.Relaxed},
+		Def: catalog.Def{Name: "calls", Durability: catalog.Relaxed},
 	})
 	if err != nil {
 		b.Fatal(err)

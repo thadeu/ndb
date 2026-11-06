@@ -3,7 +3,6 @@
   "collection": "sessions",
   "setup": {
     "catalog": {
-      "id": "id",
       "write": "engine",
       "time": "at",
       "ttl": "1d"
@@ -14,15 +13,15 @@
         "body": {
           "insert": [
             {
-              "id": "old",
+              "_id": "old",
               "at": "2020-01-01T00:00:00Z"
             },
             {
-              "id": "fresh",
+              "_id": "fresh",
               "at": "2999-01-01T00:00:00Z"
             },
             {
-              "id": "no_time"
+              "_id": "no_time"
             }
           ]
         }
@@ -39,11 +38,11 @@
     "ordered": false,
     "rows": [
       {
-        "id": "fresh",
+        "_id": "fresh",
         "at": "2999-01-01T00:00:00Z"
       },
       {
-        "id": "no_time"
+        "_id": "no_time"
       }
     ]
   }

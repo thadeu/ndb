@@ -1,114 +1,91 @@
 package backup_test
 
 import (
-	"errors"
+	"bytes"
+	"compress/gzip"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/thadeu/ndb/internal/backup"
-	"github.com/thadeu/ndb/internal/lock"
+	"github.com/thadeu/ndb/internal/catalog"
 )
 
-func write(t *testing.T, path, content string) {
+// fixture writes a one-collection backup with no WAL line.
+func fixture(t *testing.T, opts backup.Options) []byte {
 	t.Helper()
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	var buf bytes.Buffer
+
+	src := backup.Source{
+		Defs: []catalog.Def{{Name: "log", Write: catalog.Engine}},
+		WAL:  func(string, func([]byte) error) error { return nil },
+	}
+
+	if err := backup.Write(&buf, src, opts); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	return buf.Bytes()
+}
+
+func TestWriteThenExtract(t *testing.T) {
+	buf := bytes.NewBuffer(fixture(t, backup.Options{Version: "test"}))
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+
+	if !strings.HasPrefix(lines[0], `{"ndb_backup":1,"version":"test"`) {
+		t.Fatalf("header = %s", lines[0])
+	}
+
+	if !strings.HasPrefix(lines[len(lines)-1], `{"_section":"end","lines":`) {
+		t.Fatalf("last line = %s", lines[len(lines)-1])
+	}
+
+	stage := filepath.Join(t.TempDir(), "stage")
+
+	if err := backup.Extract(buf, stage); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(filepath.Join(stage, "catalog.bolt")); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func read(t *testing.T, path string) string {
-	t.Helper()
+func TestExtractReadsGzipByMagicBytes(t *testing.T) {
+	plain := bytes.NewBuffer(fixture(t, backup.Options{}))
 
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	var gz bytes.Buffer
 
-	return string(b)
-}
+	zw := gzip.NewWriter(&gz)
+	zw.Write(plain.Bytes())
+	zw.Close()
 
-func TestCopyFilePrefix(t *testing.T) {
-	dir := t.TempDir()
-
-	write(t, filepath.Join(dir, "a"), "0123456789")
-
-	if err := backup.CopyFile(filepath.Join(dir, "a"), filepath.Join(dir, "sub", "b"), 4); err != nil {
-		t.Fatal(err)
-	}
-
-	if got := read(t, filepath.Join(dir, "sub", "b")); got != "0123" {
-		t.Fatalf("got %q", got)
-	}
-
-	if err := backup.CopyFile(filepath.Join(dir, "a"), filepath.Join(dir, "c"), -1); err != nil {
-		t.Fatal(err)
-	}
-
-	if got := read(t, filepath.Join(dir, "c")); got != "0123456789" {
-		t.Fatalf("got %q", got)
-	}
-}
-
-func TestPrepareDestRefusesAFullDir(t *testing.T) {
-	dir := t.TempDir()
-
-	write(t, filepath.Join(dir, "x"), "1")
-
-	if err := backup.PrepareDest(dir); err == nil {
-		t.Fatal("a dest with files must be refused")
-	}
-
-	if err := backup.PrepareDest(filepath.Join(dir, "new")); err != nil {
+	if err := backup.Extract(&gz, filepath.Join(t.TempDir(), "stage")); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestOfflineCopiesTreeButNotLockOrTmp(t *testing.T) {
-	data := t.TempDir()
-	dest := filepath.Join(t.TempDir(), "bk")
+func TestExtractRejectsBadInput(t *testing.T) {
+	whole := string(fixture(t, backup.Options{}))
+	lines := strings.Split(strings.TrimSpace(whole), "\n")
 
-	write(t, filepath.Join(data, "catalog.bolt"), "cat")
-	write(t, filepath.Join(data, "collections", "c", "000001.ndjson"), "wal")
-	write(t, filepath.Join(data, "collections", "c", "segments", "000001.parquet"), "seg")
-	write(t, filepath.Join(data, "blobs", "sha256", "ab", "cd", "abcd"), "blob")
-	write(t, filepath.Join(data, "blobs", "tmp", "half"), "partial")
-
-	if err := backup.Offline(data, dest); err != nil {
-		t.Fatal(err)
+	cases := map[string]string{
+		"not ndb":      "hello\nworld\n",
+		"empty":        "",
+		"no end line":  strings.Join(lines[:len(lines)-1], "\n") + "\n",
+		"cut mid line": whole[:len(whole)-10],
+		"bad crc":      strings.Replace(whole, `"collections":["log"]`, `"collections":["log" ]`, 1),
+		"after end":    whole + "{}\n",
 	}
 
-	for _, rel := range []string{"catalog.bolt", "collections/c/000001.ndjson", "collections/c/segments/000001.parquet", "blobs/sha256/ab/cd/abcd"} {
-		if _, err := os.Stat(filepath.Join(dest, rel)); err != nil {
-			t.Errorf("missing %s: %v", rel, err)
+	for name, in := range cases {
+		stage := filepath.Join(t.TempDir(), "stage")
+
+		if err := backup.Extract(strings.NewReader(in), stage); err == nil {
+			t.Errorf("%s: want an error", name)
 		}
-	}
-
-	for _, rel := range []string{"LOCK", "blobs/tmp/half"} {
-		if _, err := os.Stat(filepath.Join(dest, rel)); err == nil {
-			t.Errorf("%s must not be copied", rel)
-		}
-	}
-}
-
-func TestOfflineFailsWhileADaemonHoldsTheLock(t *testing.T) {
-	data := t.TempDir()
-
-	lk, err := lock.Acquire(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	defer lk.Release()
-
-	err = backup.Offline(data, filepath.Join(t.TempDir(), "bk"))
-
-	if !errors.Is(err, lock.ErrLocked) {
-		t.Fatalf("err = %v, want ErrLocked", err)
 	}
 }

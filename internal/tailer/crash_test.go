@@ -19,7 +19,7 @@ var iterations = flag.Int("crash.iterations", 200, "kills per crash test")
 
 const (
 	crashLines = 30000
-	crashLine  = len(`{"id":"000000"}`) + 1
+	crashLine  = len(`{"_id":"000000"}`) + 1
 )
 
 func TestMain(m *testing.M) {
@@ -28,7 +28,7 @@ func TestMain(m *testing.M) {
 }
 
 func crashDef(data string) catalog.Def {
-	return catalog.Def{Name: "calls", ID: "id", Write: catalog.Direct, Path: filepath.Join(data, "*.ndjson")}
+	return catalog.Def{Name: "calls", Write: catalog.Direct, Path: filepath.Join(data, "*.ndjson")}
 }
 
 // outSink stands in for a durable store: one write() per applied line.

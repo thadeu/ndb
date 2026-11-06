@@ -70,7 +70,7 @@ type ackBody struct {
 type watchLine struct {
 	Pos       string          `json:"pos"`
 	Op        Op              `json:"op"`
-	ID        string          `json:"id"`
+	ID        string          `json:"_id"`
 	V         uint64          `json:"v"`
 	Doc       json.RawMessage `json:"doc"`
 	Heartbeat bool            `json:"heartbeat"`

@@ -4,10 +4,8 @@ import { connect } from '../src/index.js'
 const db = connect('tcp://127.0.0.1:1')
 
 const calls = db.model('calls', {
-  id: 'call_id',
   time: 'ts',
   fields: {
-    call_id: { type: 'string' },
     status: { type: 'string', index: true },
     dur: { type: 'number', optional: true },
     ts: { type: 'date' },
@@ -16,10 +14,10 @@ const calls = db.model('calls', {
 })
 
 it('infers row types from the schema', async () => {
-  const row = await calls.find('x')
+  const row = await calls.get('x')
 
   expectTypeOf(row).toEqualTypeOf<
-    | (({ call_id: string; status: string; ts: Date } & { dur?: number; meta?: unknown }) & { _v: number })
+    | (({ status: string; ts: Date } & { dur?: number; meta?: unknown }) & { _id: string; _v: number })
     | null
   >()
 })
@@ -37,8 +35,8 @@ it('rejects wrong field names and wrong value types', () => {
   // @ts-expect-error unknown field in insert
   void calls.insert({ nope: 1 })
 
-  // @ts-expect-error id must be a field
-  db.model('bad', { id: 'missing', fields: { a: { type: 'string' } } })
+  // @ts-expect-error the id option is gone, the key is _id
+  db.model('bad', { id: 'a', fields: { a: { type: 'string' } } })
 
   // @ts-expect-error unknown field type
   db.model('bad', { fields: { a: { type: 'text' } } })

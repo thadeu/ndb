@@ -79,9 +79,9 @@ func TestPlannerChoosesIDIndexOrScan(t *testing.T) {
 	c := openMem(t)
 
 	seed(t, c,
-		`{"id":"d1","status":"open","n":1}`,
-		`{"id":"d2","status":"closed","n":2}`,
-		`{"id":"d3","status":"open","n":3}`,
+		`{"_id":"d1","status":"open","n":1}`,
+		`{"_id":"d2","status":"closed","n":2}`,
+		`{"_id":"d3","status":"open","n":3}`,
 	)
 	waitReady(t, c)
 
@@ -89,8 +89,8 @@ func TestPlannerChoosesIDIndexOrScan(t *testing.T) {
 		body string
 		plan string
 	}{
-		{`{"where":{"id":"d1"}}`, "id"},
-		{`{"where":{"id":{"$in":["d1","d2"]}}}`, "id"},
+		{`{"where":{"_id":"d1"}}`, "id"},
+		{`{"where":{"_id":{"$in":["d1","d2"]}}}`, "id"},
 		{`{"where":{"status":"open"}}`, "index:status"},
 		{`{"where":{"status":{"$gt":"a"}}}`, "index:status"},
 		{`{"where":{"$or":[{"status":"open"},{"status":"closed"}]}}`, "scan"},
@@ -111,7 +111,7 @@ func TestPlannerChoosesIDIndexOrScan(t *testing.T) {
 		}
 	}
 
-	if p := rq(t, c, `{"where":{"id":"d1"}}`); p.Explain != nil {
+	if p := rq(t, c, `{"where":{"_id":"d1"}}`); p.Explain != nil {
 		t.Fatal("explain must be nil unless requested")
 	}
 }
@@ -123,13 +123,13 @@ func TestPruningSkipsSegmentsAndRowGroups(t *testing.T) {
 	c := openSealed(t, t.TempDir(), collection.Config{})
 
 	sealBatch(t, c, rangeDocs(0, 2000, func(i int) string {
-		return fmt.Sprintf(`{"id":"a%d","status":"a","n":%d}`, i, i)
+		return fmt.Sprintf(`{"_id":"a%d","status":"a","n":%d}`, i, i)
 	}))
 	sealBatch(t, c, rangeDocs(0, 2000, func(i int) string {
-		return fmt.Sprintf(`{"id":"b%d","status":"a","n":%d}`, i, 2000+i)
+		return fmt.Sprintf(`{"_id":"b%d","status":"a","n":%d}`, i, 2000+i)
 	}))
 	sealBatch(t, c, rangeDocs(0, 2000, func(i int) string {
-		return fmt.Sprintf(`{"id":"c%d","status":"a","n":%d}`, i, 4000+i)
+		return fmt.Sprintf(`{"_id":"c%d","status":"a","n":%d}`, i, 4000+i)
 	}))
 
 	e := explainOf(t, c, `{"where":{"n":{"$gte":5500}}}`)
@@ -155,13 +155,13 @@ func TestBloomSkipsOnEquality(t *testing.T) {
 	c := openSealed(t, t.TempDir(), collection.Config{})
 
 	sealBatch(t, c, rangeDocs(0, 1500, func(i int) string {
-		return fmt.Sprintf(`{"id":"a%d","status":%q}`, i, []string{"a", "z"}[i%2])
+		return fmt.Sprintf(`{"_id":"a%d","status":%q}`, i, []string{"a", "z"}[i%2])
 	}))
 	sealBatch(t, c, rangeDocs(0, 1500, func(i int) string {
-		return fmt.Sprintf(`{"id":"b%d","status":"a"}`, i)
+		return fmt.Sprintf(`{"_id":"b%d","status":"a"}`, i)
 	}))
 	sealBatch(t, c, rangeDocs(0, 1500, func(i int) string {
-		return fmt.Sprintf(`{"id":"c%d","status":%q}`, i, []string{"a", "m"}[i%2])
+		return fmt.Sprintf(`{"_id":"c%d","status":%q}`, i, []string{"a", "m"}[i%2])
 	}))
 
 	c.DropIndex("status")
@@ -192,7 +192,7 @@ func refAndSealed(t *testing.T, cfg collection.Config) (*collection.Collection, 
 }
 
 func mixedDoc(i int) string {
-	parts := []string{fmt.Sprintf(`"id":"d%04d"`, i), fmt.Sprintf(`"status":"s%d"`, i%4)}
+	parts := []string{fmt.Sprintf(`"_id":"d%04d"`, i), fmt.Sprintf(`"status":"s%d"`, i%4)}
 
 	switch i % 5 {
 	case 0:
@@ -336,13 +336,13 @@ func TestLastVersionAndTombstonesAcrossSegments(t *testing.T) {
 		for i := 0; i < 300; i += 3 {
 			ch := collection.Change{Set: map[string]any{"status": "s1", "n": i * 10}}
 
-			if _, err := c.UpdateID(ctx, fmt.Sprintf("d%04d", i), ch, 0); err != nil {
+			if _, err := c.UpdateByID(ctx, fmt.Sprintf("d%04d", i), ch, 0); err != nil {
 				t.Fatal(err)
 			}
 		}
 
 		for i := 1; i < 300; i += 11 {
-			if err := c.DeleteID(ctx, fmt.Sprintf("d%04d", i)); err != nil {
+			if err := c.DeleteByID(ctx, fmt.Sprintf("d%04d", i)); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -390,7 +390,7 @@ func TestColumnScanFetchesRawOnlyForMatches(t *testing.T) {
 	c := openSealed(t, t.TempDir(), collection.Config{})
 
 	sealBatch(t, c, rangeDocs(0, 1200, func(i int) string {
-		return fmt.Sprintf(`{"id":"d%d","status":"s%d","n":%d}`, i, i%3, i)
+		return fmt.Sprintf(`{"_id":"d%d","status":"s%d","n":%d}`, i, i%3, i)
 	}))
 
 	c.DropIndex("status")
@@ -409,20 +409,20 @@ func TestColumnScanFetchesRawOnlyForMatches(t *testing.T) {
 func TestIDCacheCountsHits(t *testing.T) {
 	c := openMem(t)
 
-	seed(t, c, `{"id":"d1","n":1}`, `{"id":"d2","n":2}`)
+	seed(t, c, `{"_id":"d1","n":1}`, `{"_id":"d2","n":2}`)
 
-	first := explainOf(t, c, `{"where":{"id":"d1"}}`)
-	second := explainOf(t, c, `{"where":{"id":"d1"}}`)
+	first := explainOf(t, c, `{"where":{"_id":"d1"}}`)
+	second := explainOf(t, c, `{"where":{"_id":"d1"}}`)
 
 	if first.CacheHits != 0 || second.CacheHits != 1 {
 		t.Fatalf("cache hits first %d second %d", first.CacheHits, second.CacheHits)
 	}
 
-	if _, err := c.UpdateID(ctx, "d1", collection.Change{Set: map[string]any{"n": 5}}, 0); err != nil {
+	if _, err := c.UpdateByID(ctx, "d1", collection.Change{Set: map[string]any{"n": 5}}, 0); err != nil {
 		t.Fatal(err)
 	}
 
-	after := explainOf(t, c, `{"where":{"id":"d1"}}`)
+	after := explainOf(t, c, `{"where":{"_id":"d1"}}`)
 
 	if after.CacheHits != 0 {
 		t.Fatalf("an updated document must not hit the cache: %d", after.CacheHits)
@@ -502,7 +502,7 @@ func TestCursorWalkOverSegmentsEqualsMemtable(t *testing.T) {
 func TestScanFindsExplicitNullInAllNullGroup(t *testing.T) {
 	c := openSealed(t, t.TempDir(), collection.Config{})
 
-	sealBatch(t, c, []string{`{"id":"a","x":null}`, `{"id":"b","x":null}`})
+	sealBatch(t, c, []string{`{"_id":"a","x":null}`, `{"_id":"b","x":null}`})
 
 	if got := rq(t, c, `{"where":{"x":null}}`).Rows; len(got) != 2 {
 		t.Fatalf("x:null over a sealed all-null group: %d rows, want 2", len(got))
@@ -512,8 +512,8 @@ func TestScanFindsExplicitNullInAllNullGroup(t *testing.T) {
 func TestScanFindsExplicitNullInNullRowGroupOfNumberColumn(t *testing.T) {
 	c := openSealed(t, t.TempDir(), collection.Config{})
 
-	docs := rangeDocs(0, 1024, func(i int) string { return fmt.Sprintf(`{"id":"n%d","x":%d}`, i, i) })
-	docs = append(docs, rangeDocs(0, 1024, func(i int) string { return fmt.Sprintf(`{"id":"z%d","x":null}`, i) })...)
+	docs := rangeDocs(0, 1024, func(i int) string { return fmt.Sprintf(`{"_id":"n%d","x":%d}`, i, i) })
+	docs = append(docs, rangeDocs(0, 1024, func(i int) string { return fmt.Sprintf(`{"_id":"z%d","x":null}`, i) })...)
 
 	sealBatch(t, c, docs)
 
@@ -525,7 +525,7 @@ func TestScanFindsExplicitNullInNullRowGroupOfNumberColumn(t *testing.T) {
 func TestQueryWithZeroScanWorkersDoesNotHang(t *testing.T) {
 	c := openSealed(t, t.TempDir(), collection.Config{ScanWorkers: -1})
 
-	sealBatch(t, c, []string{`{"id":"a"}`})
+	sealBatch(t, c, []string{`{"_id":"a"}`})
 
 	done := make(chan int, 1)
 
@@ -544,10 +544,10 @@ func TestQueryWithZeroScanWorkersDoesNotHang(t *testing.T) {
 func TestVersionsFlagReturnsSnapshotVersion(t *testing.T) {
 	c := openSealed(t, t.TempDir(), collection.Config{})
 
-	sealBatch(t, c, []string{`{"id":"sealed"}`})
-	bulk(t, c, []string{`{"id":"mem"}`})
+	sealBatch(t, c, []string{`{"_id":"sealed"}`})
+	bulk(t, c, []string{`{"_id":"mem"}`})
 
-	if _, err := c.UpdateID(ctx, "sealed", collection.Change{Set: map[string]any{"n": 1}}, 0); err != nil {
+	if _, err := c.UpdateByID(ctx, "sealed", collection.Change{Set: map[string]any{"n": 1}}, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -555,9 +555,9 @@ func TestVersionsFlagReturnsSnapshotVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bulk(t, c, []string{`{"id":"tail"}`})
+	bulk(t, c, []string{`{"_id":"tail"}`})
 
-	rows := rq(t, c, `{"where":{},"sort":{"id":1},"versions":true}`).Rows
+	rows := rq(t, c, `{"where":{},"sort":{"_id":1},"versions":true}`).Rows
 	got := map[string]float64{}
 
 	for _, r := range rows {
@@ -567,7 +567,7 @@ func TestVersionsFlagReturnsSnapshotVersion(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		got[m["id"].(string)], _ = m["_v"].(float64)
+		got[m["_id"].(string)], _ = m["_v"].(float64)
 	}
 
 	want := map[string]float64{"mem": 1, "sealed": 2, "tail": 1}
@@ -576,7 +576,7 @@ func TestVersionsFlagReturnsSnapshotVersion(t *testing.T) {
 		t.Fatalf("versions = %v, want %v", got, want)
 	}
 
-	plain := rq(t, c, `{"where":{"id":"tail"}}`).Rows
+	plain := rq(t, c, `{"where":{"_id":"tail"}}`).Rows
 
 	if strings.Contains(string(plain[0]), `"_v"`) {
 		t.Fatalf("_v without the flag: %s", plain[0])
@@ -591,7 +591,7 @@ func TestRegexPrefixPrunesSegments(t *testing.T) {
 
 	for _, p := range []string{"a", "b", "c"} {
 		sealBatch(t, c, rangeDocs(0, 2000, func(i int) string {
-			return fmt.Sprintf(`{"id":"%s%d","name":"%s-%04d"}`, p, i, p, i)
+			return fmt.Sprintf(`{"_id":"%s%d","name":"%s-%04d"}`, p, i, p, i)
 		}))
 	}
 

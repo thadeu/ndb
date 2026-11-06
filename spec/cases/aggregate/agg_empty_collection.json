@@ -3,7 +3,6 @@
   "collection": "calls",
   "setup": {
     "catalog": {
-      "id": "call_id",
       "time": "ts",
       "write": "engine",
       "indexes": [

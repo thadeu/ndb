@@ -86,6 +86,12 @@ func (d *Direct) Find(id string) (Doc, bool) {
 	return d.c.Find(id)
 }
 
+// Get is Find for the _id routes: a line that had no _id is stored under a
+// fallback key, and that key never answers.
+func (d *Direct) Get(id string) (Doc, bool) {
+	return d.c.Get(id)
+}
+
 func (d *Direct) ParseQuery(body []byte) (*query.Query, error) {
 	return d.c.ParseQuery(body)
 }
@@ -218,18 +224,19 @@ func decodeTop(raw []byte) (map[string]json.RawMessage, error) {
 	return m, nil
 }
 
-// parseItem reads the id (the fallback when the doc has none) and the
-// tombstone flag. The doc keeps its own bytes.
+// parseItem reads the _id (the fallback key when the line has none) and
+// the tombstone flag. The doc keeps its own bytes: a line without _id gets
+// no _id injected, so it is found by queries but not addressable by id.
 func (d *Direct) parseItem(top map[string]json.RawMessage, raw []byte, fallback string) (wal.Op, error) {
 	deleted := bytes.Equal(top["_deleted"], []byte("true"))
 	id := fallback
 
-	if rawID, ok := top[d.c.def.ID]; ok && d.c.def.ID != "" {
+	if rawID, ok := top[idField]; ok {
 		if json.Unmarshal(rawID, &id) != nil || id == "" {
-			return wal.Op{}, errf("invalid_id", "field %q must be a non-empty string", d.c.def.ID)
+			return wal.Op{}, errf("invalid_id", "field %q must be a non-empty string", idField)
 		}
 	} else if deleted {
-		return wal.Op{}, errf("missing_id", "a tombstone needs field %q", d.c.def.ID)
+		return wal.Op{}, errf("missing_id", "a tombstone needs field %q", idField)
 	}
 
 	if deleted {

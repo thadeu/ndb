@@ -61,11 +61,11 @@ func (c *Collection) CompactRange(lo, hi int) error {
 	return c.compactRange(lo, hi)
 }
 
-// UpdateID is the old update by id, on top of the update by filter: the
+// UpdateByID is the old update by id, on top of the update by filter: the
 // change is $set and $unset on the id, and a non-zero ifVersion becomes a
 // "_v" condition. A document that does not match is not_found.
-func (c *Collection) UpdateID(ctx context.Context, id string, ch Change, ifVersion uint64) (uint64, error) {
-	body := map[string]any{c.def.ID: id}
+func (c *Collection) UpdateByID(ctx context.Context, id string, ch Change, ifVersion uint64) (uint64, error) {
+	body := map[string]any{idField: id}
 
 	if len(ch.Set) > 0 {
 		body["$set"] = ch.Set
@@ -106,9 +106,9 @@ func (c *Collection) UpdateID(ctx context.Context, id string, ch Change, ifVersi
 	return doc.V, json.Unmarshal(res.Doc, &doc)
 }
 
-// DeleteID deletes the document with the id. Nothing deleted is not_found.
-func (c *Collection) DeleteID(ctx context.Context, id string) error {
-	raw, _ := json.Marshal(map[string]any{c.def.ID: id})
+// DeleteByID deletes the document with the id. Nothing deleted is not_found.
+func (c *Collection) DeleteByID(ctx context.Context, id string) error {
+	raw, _ := json.Marshal(map[string]any{idField: id})
 
 	n, err := c.Delete(ctx, raw, false)
 	if err != nil {

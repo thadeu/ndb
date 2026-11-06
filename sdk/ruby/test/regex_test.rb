@@ -6,11 +6,11 @@ class RegexTest < Minitest::Test
   def setup
     @coll = collection_name
 
-    client.ensure_collection(@coll, id: "cid", indexes: ["name"])
+    client.ensure_collection(@coll, indexes: ["name"])
     client.insert(@coll, [
-                    { cid: "1", name: "Alpha", note: "first\nbeta line", tags: %w[red Green] },
-                    { cid: "2", name: "alphabet", note: "one line", tags: %w[blue] },
-                    { cid: "3", name: "Beta", note: "a\nb", tags: [] }
+                    { _id: "1", name: "Alpha", note: "first\nbeta line", tags: %w[red Green] },
+                    { _id: "2", name: "alphabet", note: "one line", tags: %w[blue] },
+                    { _id: "3", name: "Beta", note: "a\nb", tags: [] }
                   ])
   end
 
@@ -47,7 +47,7 @@ class RegexTest < Minitest::Test
   def test_string_pattern_is_sent_unchanged_and_uses_the_index
     page = client.find(@coll, where: { name: { "$regex" => "^alpha" } })
 
-    assert_equal ["2"], page.rows.map { |r| r["cid"] }
+    assert_equal ["2"], page.rows.map { |r| r["_id"] }
     assert_equal "index:name", page.plan
   end
 
@@ -60,7 +60,7 @@ class RegexTest < Minitest::Test
   def test_watch_where_accepts_a_regexp
     seen = []
 
-    client.watch(@coll, "rx", where: { name: /^beta$/i }, limit: 1) { |ev| seen << ev["id"] }
+    client.watch(@coll, "rx", where: { name: /^beta$/i }, limit: 1) { |ev| seen << ev["_id"] }
 
     assert_equal ["3"], seen
   end
@@ -86,6 +86,6 @@ class RegexTest < Minitest::Test
   private
 
   def ids(where)
-    client.find(@coll, where: where, sort: { cid: 1 }).rows.map { |r| r["cid"] }
+    client.find(@coll, where: where, sort: { _id: 1 }).rows.map { |r| r["_id"] }
   end
 end

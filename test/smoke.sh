@@ -55,30 +55,47 @@ done
 call GET /health >/dev/null
 expect 200 "$(cat "$tmp/status")"
 
-call PUT /v1/c/posts '{"id":"post_id","indexes":["status"]}' >/dev/null
+call PUT /v1/c/old '{"id":"post_id"}' >/dev/null
+expect 400 "$(cat "$tmp/status")"
+[[ "$(cat "$tmp/body")" == *'catalog_invalid'* ]] || fail "the id setting must be catalog_invalid: $(cat "$tmp/body")"
+
+call PUT /v1/c/posts '{"indexes":["status"]}' >/dev/null
 expect 200 "$(cat "$tmp/status")"
 
-call POST /v1/c/posts/insert '{"insert":[{"post_id":"p1","status":"draft"},{"post_id":"p2","status":"live"}]}' >/dev/null
+call POST /v1/c/posts/insert '{"insert":[{"_id":"p1","status":"draft"},{"_id":"p2","status":"live"},{"status":"auto"}]}' >/dev/null
 expect 200 "$(cat "$tmp/status")"
+[[ "$(cat "$tmp/body")" == *'"_id":"p1"'* ]] || fail "insert did not return p1: $(cat "$tmp/body")"
 
 call POST /v1/c/posts/find '{"where":{"status":"live"}}' >/dev/null
 expect 200 "$(cat "$tmp/status")"
 [[ "$(cat "$tmp/body")" == *'"p2"'* ]] || fail "find did not return p2"
 
-call POST /v1/c/posts/update '{"post_id":"p1","_v":1,"$set":{"status":"live"}}' >/dev/null
+call GET /v1/c/posts/p1 >/dev/null
+expect 200 "$(cat "$tmp/status")"
+[[ "$(cat "$tmp/body")" == *'"_id":"p1"'* && "$(cat "$tmp/body")" == *'"_v":1'* ]] || fail "get p1: $(cat "$tmp/body")"
+
+call GET /v1/c/posts/nope >/dev/null
+expect 404 "$(cat "$tmp/status")"
+
+call POST /v1/c/posts/update '{"_id":"p1","_v":1,"$set":{"status":"live"}}' >/dev/null
 expect 200 "$(cat "$tmp/status")"
 [[ "$(cat "$tmp/body")" == *'"matched":1'* ]] || fail "update did not match: $(cat "$tmp/body")"
 
-call POST /v1/c/posts/update '{"post_id":"p1","_v":1,"$set":{"status":"gone"}}' >/dev/null
+call POST /v1/c/posts/update '{"_id":"p1","_v":1,"$set":{"status":"gone"}}' >/dev/null
 expect 200 "$(cat "$tmp/status")"
 [[ "$(cat "$tmp/body")" == *'"matched":0'* ]] || fail "stale update matched: $(cat "$tmp/body")"
 
-call POST /v1/c/posts/delete '{"post_id":"p2"}' >/dev/null
+call POST /v1/c/posts/p1/update '{"_v":2,"$set":{"status":"by-id"}}' >/dev/null
 expect 200 "$(cat "$tmp/status")"
+[[ "$(cat "$tmp/body")" == *'"matched":1'* ]] || fail "update by id did not match: $(cat "$tmp/body")"
+
+call DELETE /v1/c/posts/p2 >/dev/null
+expect 200 "$(cat "$tmp/status")"
+[[ "$(cat "$tmp/body")" == *'"deleted":1'* ]] || fail "delete by id: $(cat "$tmp/body")"
 
 call GET /v1/c/posts/stats >/dev/null
 expect 200 "$(cat "$tmp/status")"
-[[ "$(cat "$tmp/body")" == *'"rows":1'* ]] || fail "stats: want 1 row after delete: $(cat "$tmp/body")"
+[[ "$(cat "$tmp/body")" == *'"rows":2'* ]] || fail "stats: want 2 rows after delete: $(cat "$tmp/body")"
 
 call DELETE /v1/c/posts/indexes/status >/dev/null
 expect 200 "$(cat "$tmp/status")"

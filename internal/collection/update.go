@@ -73,7 +73,29 @@ func (c *Collection) Update(ctx context.Context, body []byte, opts UpdateOpts) (
 		return UpdateResult{}, err
 	}
 
-	filterMap, ops, err := splitBody(top, c.def.ID)
+	return c.update(ctx, top, opts)
+}
+
+// UpdateID is Update on one document: the filter is the _id plus the guard
+// keys of the body. The body must not name _id, the key comes from the path.
+func (c *Collection) UpdateID(ctx context.Context, id string, body []byte, opts UpdateOpts) (UpdateResult, error) {
+	top, err := decodeBody(body)
+	if err != nil {
+		return UpdateResult{}, err
+	}
+
+	if _, ok := top[idField]; ok {
+		return UpdateResult{}, errf("invalid_request", "%s comes from the path, not from the body", idField)
+	}
+
+	top[idField] = id
+	opts.Many = false
+
+	return c.update(ctx, top, opts)
+}
+
+func (c *Collection) update(ctx context.Context, top map[string]any, opts UpdateOpts) (UpdateResult, error) {
+	filterMap, ops, err := splitBody(top)
 	if err != nil {
 		return UpdateResult{}, err
 	}
@@ -112,6 +134,10 @@ func (c *Collection) Delete(ctx context.Context, body []byte, many bool) (int, e
 		return 0, err
 	}
 
+	return c.deleteTop(ctx, top, many)
+}
+
+func (c *Collection) deleteTop(ctx context.Context, top map[string]any, many bool) (int, error) {
 	filterMap, err := splitFilter(top)
 	if err != nil {
 		return 0, err
@@ -130,6 +156,11 @@ func (c *Collection) Delete(ctx context.Context, body []byte, many bool) (int, e
 	}
 
 	return *deleted, nil
+}
+
+// DeleteID removes the document with this _id, and returns how many (0 or 1).
+func (c *Collection) DeleteID(ctx context.Context, id string) (int, error) {
+	return c.deleteTop(ctx, map[string]any{idField: id}, false)
 }
 
 func decodeBody(body []byte) (map[string]any, error) {
@@ -258,6 +289,21 @@ func (c *Collection) finishDoc(v *view, id string, m map[string]any) (json.RawMe
 	return doc, v.checkUnique(id, doc)
 }
 
+// insertOps turns $setOnInsert into $set: the document is being created.
+func insertOps(ops []fieldOp) []fieldOp {
+	out := make([]fieldOp, len(ops))
+
+	for i, o := range ops {
+		if o.op == "$setOnInsert" {
+			o.op = "$set"
+		}
+
+		out[i] = o
+	}
+
+	return out
+}
+
 // prepareUpsert creates the document from the equality fields of the
 // filter, then applies the operators to it.
 func (c *Collection) prepareUpsert(v *view, r updateReq) ([]wal.Op, error) {
@@ -269,7 +315,7 @@ func (c *Collection) prepareUpsert(v *view, r updateReq) ([]wal.Op, error) {
 		}
 	}
 
-	if _, err := applyOps(base, r.ops); err != nil {
+	if _, err := applyOps(base, insertOps(r.ops)); err != nil {
 		return nil, err
 	}
 
@@ -289,8 +335,9 @@ func (c *Collection) prepareUpsert(v *view, r updateReq) ([]wal.Op, error) {
 		return nil, err
 	}
 
-	if _, exists := v.get(id); exists {
-		return nil, errf("duplicate_id", "%s already exists and does not match the filter", id)
+	prior, err := c.priorVersion(v, id)
+	if err != nil {
+		return nil, err
 	}
 
 	doc, err = c.externalize(doc)
@@ -302,12 +349,12 @@ func (c *Collection) prepareUpsert(v *view, r updateReq) ([]wal.Op, error) {
 		return nil, err
 	}
 
-	op := wal.Op{Kind: wal.Put, ID: id, V: 1, Doc: doc}
+	op := wal.Op{Kind: wal.Put, ID: id, V: prior + 1, Doc: doc}
 
 	v.apply(op)
 
 	r.out.Modified = 1
-	r.out.Doc = withVersion(doc, 1)
+	r.out.Doc = withVersion(doc, op.V)
 
 	return []wal.Op{op}, nil
 }
@@ -452,7 +499,7 @@ func (c *Collection) candidates(v *view, q *query.Query, many bool) (iter.Seq[st
 // idValues are the ids named by an eq or in on the id field.
 func (c *Collection) idValues(conds []query.Cond) ([]string, bool) {
 	for _, cd := range conds {
-		if cd.Path != c.def.ID || !isPoint(cd.Op) {
+		if cd.Path != idField || !isPoint(cd.Op) {
 			continue
 		}
 

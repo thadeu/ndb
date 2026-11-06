@@ -26,7 +26,7 @@ Look at it with `ls`; do not edit it by hand while the daemon runs.
 
 1. One writer per file (for example `calls-<host>-<pid>.ndjson`).
 2. One line per `write()`, ending with `\n`.
-3. An update or delete is a new line. With `id` set, the last line for an id wins. `{"<id>": "...", "_deleted": true}` removes a document. `{"_batch":[...]}` is all or nothing.
+3. An update or delete is a new line. The last line for an `_id` wins. `{"_id": "...", "_deleted": true}` removes a document. A line without `_id` is a document that is never updated, and the `/{_id}` routes cannot reach it. `{"_batch":[...]}` is all or nothing.
 4. Rotation is fine. Do not truncate a file that is in use.
 
 ndb finds files by the glob, with fsnotify and a 5 s poll (bind mounts and overlays can miss events). It keeps a cursor per file (inode, offset, fingerprint of the first KiB) and reads only up to the last `\n`.

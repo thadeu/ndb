@@ -73,7 +73,19 @@ func (f *engineFeed) pinHistory(from enginePos) (func(), error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	if first, ok := f.firstKept(); ok && first > 1 && from.tx < first && from.n < nowOps {
+	first, ok := f.firstKept()
+
+	// A WAL that begins right after the checkpoint tx keeps that tx for a
+	// consumer that has read it all.
+	if ok && f.base > 0 && first == f.base+1 {
+		first = f.base
+	}
+
+	if !ok {
+		first = f.base
+	}
+
+	if first > 1 && from.tx < first && from.n < nowOps {
 		return nil, fmt.Errorf("%w: the oldest kept tx is %d", feed.ErrHistoryTruncated, first)
 	}
 

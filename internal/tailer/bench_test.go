@@ -30,7 +30,7 @@ func BenchmarkIngest(b *testing.B) {
 
 	f.Close()
 
-	def := catalog.Def{Name: "calls", ID: "id", Write: catalog.Direct, Path: filepath.Join(data, "*.ndjson")}
+	def := catalog.Def{Name: "calls", Write: catalog.Direct, Path: filepath.Join(data, "*.ndjson")}
 
 	b.SetBytes(size)
 	b.ResetTimer()

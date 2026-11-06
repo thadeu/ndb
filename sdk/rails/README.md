@@ -69,8 +69,6 @@ end
 
 ```ruby
 class Call < Ndb::Record
-  primary_key :call_id
-
   attribute :status, :string, index: true
   attribute :caller, :string, unique: true
   attribute :duration, :integer
@@ -84,7 +82,7 @@ end
 
 | Option or method | Meaning |
 |---|---|
-| `primary_key :call_id` | The id field. Default is `_id` (a string, made by the daemon). |
+| `_id` / `id` | The primary key is always `_id` (a string; the daemon makes a UUIDv7 when it is empty). `id` is an alias of `_id`. For a natural key (email, SKU) keep `_id` and use `unique: true` on that attribute. |
 | `index: true` | Index this field. |
 | `unique: true` | Unique value. A second one raises `RecordNotUnique`. |
 | `time: true` | The collection time field. Used by zone maps, `$dateTrunc` and TTL. |
@@ -101,10 +99,10 @@ end
 ## Insert, find, update, delete
 
 ```ruby
-call = Call.create!(call_id: "c1", status: "answered", caller: "a", at: Time.now.utc)
-Call.create!([{ call_id: "c2", status: "failed", caller: "b" }, { call_id: "c3", status: "answered", caller: "c" }])
+call = Call.create!(_id: "c1", status: "answered", caller: "a", at: Time.now.utc)
+Call.create!([{ _id: "c2", status: "failed", caller: "b" }, { _id: "c3", status: "answered", caller: "c" }])
 
-call = Call.new(call_id: "c4", status: "answered", caller: "d")
+call = Call.new(_id: "c4", status: "answered", caller: "d")
 call.save          # false when invalid
 call.save!         # raises Ndb::RecordInvalid
 
@@ -118,15 +116,32 @@ call.version                   # the document version
 call.increment!(:duration)     # atomic $inc on the daemon, refreshes the attribute and the version
 call.decrement!(:duration, 5)
 
-call.destroy
+call.destroy                   # callbacks, filtered by id and version
+call.destroy!                  # raises Ndb::RecordNotDestroyed when a before_destroy callback aborts
+call.delete                    # by id only: no callbacks, no version guard
+
+Call.destroy("c1")             # find, destroy, return the record (an Array of ids returns an Array)
+Call.delete(["c2", "c3"])      # one delete by id, no callbacks, returns the count
+
+# Dynamic finders, for declared attributes and id. The ! variant raises NotFound.
+Call.find_by_status("failed")
+Call.find_by_status_and_caller("failed", "a")
+Call.where(caller: "a").find_by_status!("failed")
+
+Call.find_or_initialize_by(_id: "c9") { |c| c.status = "new" }   # unsaved when missing
+Call.find_or_create_by(_id: "c9") { |c| c.status = "new" }       # atomic: concurrent callers get one document
+Call.find_or_create_by!(_id: "c9", status: "new")                # raises RecordInvalid
 
 # Atomic writes on every match of a where (it needs the id or an indexed field).
 # update takes the operators of the client and returns the number of modified documents.
 Call.where(status: "failed").update({ "$set" => { "status" => "retry" } })
-Call.where(status: "retry").delete       # returns how many it deleted
+Call.where(status: "retry").delete_all   # one delete, no callbacks, returns how many (delete is an alias)
+Call.where(status: "retry").destroy_all  # loads and destroys each record with its callbacks, returns them
 ```
 
 - Every load asks for the version (`_v`). `save`, `update` and `destroy` put the id and `_v` in the filter of the write. If another writer changed the document first, the filter matches nothing and you get `Ndb::StaleObjectError` (code `stale_object`).
+- `find_or_create_by` is atomic. It checks validations and runs the `save` and `create` callbacks, then sends one upsert: the attributes you pass are the filter, and the other attributes go in `$setOnInsert`, so a writer that created the document first is never overwritten and you get that document. An invalid record is returned unsaved (the `!` form raises `Ndb::RecordInvalid`). Only the attributes you pass must be equality values.
+- `delete_all` and `destroy_all` on a model without a `where` are refused by the daemon (`Ndb::EmptyFilter`); `delete_all` needs the id or an indexed field in the `where`.
 - Setting an attribute to `nil` and saving removes the field from the document.
 - A duplicate id raises `RecordNotUnique` (code `duplicate_id`).
 - `persisted?`, `new_record?`, `destroyed?`, `id` and `version` work as in ActiveRecord.
@@ -146,13 +161,11 @@ Give the model an `expires: true` attribute. The daemon sets it for you.
 
 ```ruby
 class Session < Ndb::Record
-  primary_key :sid
-
   attribute :user, :string
   attribute :expires_at, :datetime, expires: true
 end
 
-Session.create!({ sid: "s1", user: "u" }, expire_in: 1.hour)   # also create, save, update (seconds, a Duration or "30m")
+Session.create!({ _id: "s1", user: "u" }, expire_in: 1.hour)   # also create, save, update (seconds, a Duration or "30m")
 session = Session.find("s1")
 
 session.expire(30.minutes)   # EXPIRE: sets expires_at in the object, other unsaved changes stay
@@ -184,13 +197,13 @@ Call.where(status: "failed").or(Call.where(duration: 60..))
 Call.where("$or" => [{ status: "failed" }, { duration: { "$gt" => 50 } }])
 
 Call.where(status: "answered")
-    .order(at: :desc, call_id: :asc)
+    .order(at: :desc, _id: :asc)
     .limit(50)
     .offset(100)
     .to_a
 
-Call.where(status: "answered").pluck(:call_id)         # one field: an array of values
-Call.where(status: "answered").pluck(:call_id, :status) # several: an array of arrays
+Call.where(status: "answered").pluck(:_id)         # one field: an array of values
+Call.where(status: "answered").pluck(:_id, :status) # several: an array of arrays
 Call.where(status: "answered").first(5)
 Call.where(status: "failed").exists?
 ```
@@ -223,11 +236,11 @@ Call.where(status: "answered").count
 ### Cursor pagination
 
 ```ruby
-relation = Call.where(status: "answered").order(:call_id).limit(100)
+relation = Call.where(status: "answered").order(:_id).limit(100)
 rows = relation.to_a
 token = relation.next_cursor   # nil on the last page
 
-Call.where(status: "answered").order(:call_id).limit(100).after(token).to_a
+Call.where(status: "answered").order(:_id).limit(100).after(token).to_a
 ```
 
 A token works only with the same `where` and `order`. Another query shape raises `InvalidCursor`.
@@ -235,7 +248,7 @@ A token works only with the same `where` and `order`. Another query shape raises
 To walk every row, use `find_each`. It follows the cursor in batches (default 1000):
 
 ```ruby
-Call.where(status: "answered").find_each(batch_size: 500) { |call| puts call.call_id }
+Call.where(status: "answered").find_each(batch_size: 500) { |call| puts call._id }
 
 Call.in_batches(of: 500) { |batch| batch.each { |call| ... } }
 ```
@@ -289,7 +302,7 @@ client = Ndb::Rails.client
 
 begin
   client.watch(Call.collection_name, "relay", where: { status: "answered" }) do |event|
-    # event has "pos", "op" ("put" or "del"), "id", "v" and "doc"
+    # event has "pos", "op" ("put" or "del"), "_id", "v" and "doc"
     handle(event)
 
     client.ack(Call.collection_name, "relay", event["pos"])
@@ -313,7 +326,7 @@ end
 Large values live in the blob store. The document keeps only a reference (`$blob`, `size`, `type`).
 
 ```ruby
-call = Call.new(call_id: "c1", status: "answered", caller: "a",
+call = Call.new(_id: "c1", status: "answered", caller: "a",
                 recording: File.open("call.wav"))   # an IO or a String
 call.save!                                          # uploads the blob, then saves
 

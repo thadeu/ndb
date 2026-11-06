@@ -1,9 +1,9 @@
 package engine_test
 
 import (
+	"bytes"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -48,8 +48,8 @@ func TestOnlineBackupIsAConsistentPrefix(t *testing.T) {
 	src := t.TempDir()
 	db := open(t, cfg(src, nil))
 
-	events := ensure(t, db, catalog.Def{Name: "events", ID: "k", Indexes: []string{"n"}})
-	calls := ensure(t, db, catalog.Def{Name: "calls", ID: "k", BlobThreshold: 64})
+	events := ensure(t, db, catalog.Def{Name: "events", Indexes: []string{"n"}})
+	calls := ensure(t, db, catalog.Def{Name: "calls", BlobThreshold: 64})
 
 	for i := range 100 {
 		if _, err := events.Insert(ctx, []byte(fmt.Sprintf(`{"k":"e%04d","n":%d}`, i, i))); err != nil {
@@ -85,12 +85,18 @@ func TestOnlineBackupIsAConsistentPrefix(t *testing.T) {
 	before := acked.Load()
 	dest := filepath.Join(t.TempDir(), "bk")
 
-	if _, err := db.Backup(ctx, dest); err != nil {
+	var buf bytes.Buffer
+
+	if err := db.Backup(ctx, &buf, backup.Options{}); err != nil {
 		t.Fatal(err)
 	}
 
 	stop.Store(true)
 	wg.Wait()
+
+	if err := backup.Extract(&buf, dest); err != nil {
+		t.Fatal(err)
+	}
 
 	restored := open(t, cfg(dest, nil))
 	got := ids(t, mustGet(t, restored, "events"))
@@ -132,19 +138,6 @@ func mustGet(t *testing.T, db *engine.DB, name string) *engine.Collection {
 	return col
 }
 
-func TestBackupRefusesANonEmptyDest(t *testing.T) {
-	db := open(t, cfg(t.TempDir(), nil))
-	dest := t.TempDir()
-
-	if _, err := db.Backup(ctx, dest); err != nil {
-		t.Fatalf("empty dest: %v", err)
-	}
-
-	if _, err := db.Backup(ctx, dest); err == nil {
-		t.Fatal("a second backup into the same dir must fail")
-	}
-}
-
 // Offline copy of a data dir with sealed segments: the restore answers the
 // same query with the same rows.
 func TestOfflineRestoreGivesSameResults(t *testing.T) {
@@ -154,7 +147,7 @@ func TestOfflineRestoreGivesSameResults(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	col := ensure(t, db, catalog.Def{Name: "events", ID: "k", Indexes: []string{"n"}})
+	col := ensure(t, db, catalog.Def{Name: "events", Indexes: []string{"n"}})
 
 	for i := range 60 {
 		if _, err := col.Insert(ctx, []byte(fmt.Sprintf(`{"k":"e%03d","n":%d}`, i, i%7))); err != nil {
@@ -187,12 +180,14 @@ func TestOfflineRestoreGivesSameResults(t *testing.T) {
 
 	dest := filepath.Join(t.TempDir(), "bk")
 
-	if err := backup.Offline(src, dest); err != nil {
+	var buf bytes.Buffer
+
+	if err := engine.Offline(src, &buf, backup.Options{}); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := os.Stat(filepath.Join(dest, "collections", "events", "segments")); err != nil {
-		t.Fatalf("segments not copied: %v", err)
+	if err := backup.Extract(&buf, dest); err != nil {
+		t.Fatal(err)
 	}
 
 	restored := mustGet(t, open(t, cfg(dest, nil)), "events")

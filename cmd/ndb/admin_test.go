@@ -25,7 +25,7 @@ func seedMixed(t *testing.T, root string) (dataDir string) {
 		t.Fatal(err)
 	}
 
-	lines := `{"call_id":"c1","status":"answered","n":1}` + "\n" + "{broken line\n" + `{"call_id":"c2","status":"busy","n":22,"meta":{"a":1}}` + "\n"
+	lines := `{"_id":"c1","status":"answered","n":1}` + "\n" + "{broken line\n" + `{"_id":"c2","status":"busy","n":22,"meta":{"a":1}}` + "\n"
 
 	if err := os.WriteFile(filepath.Join(files, "a.ndjson"), []byte(lines), 0o644); err != nil {
 		t.Fatal(err)
@@ -33,14 +33,14 @@ func seedMixed(t *testing.T, root string) (dataDir string) {
 
 	dataDir = filepath.Join(root, "data")
 
-	calls := catalog.Def{Name: "calls", Write: catalog.Direct, Path: filepath.Join(files, "*.ndjson"), ID: "call_id", Indexes: []string{"status"}}
+	calls := catalog.Def{Name: "calls", Write: catalog.Direct, Path: filepath.Join(files, "*.ndjson"), Indexes: []string{"status"}}
 
 	db, err := engine.Open(config.Config{DataDir: dataDir, AllowImplicit: true, Collections: map[string]catalog.Def{"calls": calls}}, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	posts, err := db.Ensure(catalog.Def{Name: "posts", ID: "post_id", Indexes: []string{"author"}})
+	posts, err := db.Ensure(catalog.Def{Name: "posts", Indexes: []string{"author"}})
 	if err != nil || posts.Name != "posts" {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func seedMixed(t *testing.T, root string) (dataDir string) {
 	}
 
 	for i := 0; i < 3; i++ {
-		if _, err := col.Insert(ctx, []byte(fmt.Sprintf(`{"post_id":"p%d","author":"a%d","likes":%d}`, i, i, i*10))); err != nil {
+		if _, err := col.Insert(ctx, []byte(fmt.Sprintf(`{"_id":"p%d","author":"a%d","likes":%d}`, i, i, i*10))); err != nil {
 			t.Fatal(err)
 		}
 
@@ -87,7 +87,7 @@ func TestCollectionsListsAndShowsOne(t *testing.T) {
 
 	table := runCmd(t, func(a []string, o *strings.Builder) error { return collections(a, o) }, base...)
 
-	for _, want := range []string{"name", "calls", "direct", "posts", "engine", "post_id", "author"} {
+	for _, want := range []string{"name", "calls", "direct", "posts", "engine", "author"} {
 		if !strings.Contains(table, want) {
 			t.Errorf("table lacks %q:\n%s", want, table)
 		}
@@ -95,7 +95,7 @@ func TestCollectionsListsAndShowsOne(t *testing.T) {
 
 	one := runCmd(t, func(a []string, o *strings.Builder) error { return collections(a, o) }, append([]string{"calls"}, base...)...)
 
-	if !strings.Contains(one, "field") || !strings.Contains(one, "call_id") || !strings.Contains(one, "status (") {
+	if !strings.Contains(one, "field") || !strings.Contains(one, "status (") {
 		t.Errorf("single definition:\n%s", one)
 	}
 
@@ -209,7 +209,7 @@ func TestQueryPrintsATableOrNDJSON(t *testing.T) {
 
 	table := run("calls", `{"status":"busy"}`)
 
-	for _, want := range []string{"call_id", "status", "meta", "c2", `{"a":1}`, "1 rows", "plan"} {
+	for _, want := range []string{"_id", "status", "meta", "c2", `{"a":1}`, "1 rows", "plan"} {
 		if !strings.Contains(table, want) {
 			t.Errorf("table lacks %q:\n%s", want, table)
 		}
@@ -219,7 +219,7 @@ func TestQueryPrintsATableOrNDJSON(t *testing.T) {
 		t.Errorf("where was ignored:\n%s", table)
 	}
 
-	nd := run("posts", `{}`, "-sort", `{"likes":-1}`, "-fields", "post_id,likes", "-limit", "2", "-ndjson")
+	nd := run("posts", `{}`, "-sort", `{"likes":-1}`, "-fields", "_id,likes", "-limit", "2", "-ndjson")
 	lines := strings.Split(strings.TrimSpace(nd), "\n")
 
 	if len(lines) != 2 || !strings.Contains(lines[0], `"p2"`) || strings.Contains(lines[0], "author") {
@@ -315,7 +315,7 @@ func TestExpirePersistTTLCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := db.Ensure(catalog.Def{Name: "sessions", ID: "id", ExpiresField: "exp"}); err != nil {
+	if _, err := db.Ensure(catalog.Def{Name: "sessions", ExpiresField: "exp"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -324,7 +324,7 @@ func TestExpirePersistTTLCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := col.Insert(ctx, []byte(`{"id":"s1"}`)); err != nil {
+	if _, err := col.Insert(ctx, []byte(`{"_id":"s1"}`)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -391,7 +391,7 @@ func TestUpdateDeleteCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := db.Ensure(catalog.Def{Name: "stock", ID: "id", Indexes: []string{"g"}, ExpiresField: "exp"}); err != nil {
+	if _, err := db.Ensure(catalog.Def{Name: "stock", Indexes: []string{"g"}, ExpiresField: "exp"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -400,7 +400,7 @@ func TestUpdateDeleteCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := col.Insert(ctx, []byte(`{"id":"a","g":1,"qty":2}`), []byte(`{"id":"b","g":1,"qty":2}`)); err != nil {
+	if _, err := col.Insert(ctx, []byte(`{"_id":"a","g":1,"qty":2}`), []byte(`{"_id":"b","g":1,"qty":2}`)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -413,7 +413,7 @@ func TestUpdateDeleteCommands(t *testing.T) {
 	base := []string{"-config", "none.yml", "-url", "unix://" + sock, "-json"}
 
 	raw := runCmd(t, func(a []string, o *strings.Builder) error { return update(a, o) },
-		append([]string{"stock", `{"id":"a","$inc":{"qty":-1}}`, "--expire-in", "60s"}, base...)...)
+		append([]string{"stock", `{"_id":"a","$inc":{"qty":-1}}`, "--expire-in", "60s"}, base...)...)
 
 	var up updateReport
 
@@ -441,7 +441,62 @@ func TestUpdateDeleteCommands(t *testing.T) {
 
 	var out strings.Builder
 
-	if err := update(append([]string{"stock", `{"id":"a"}`}, base...), &out); err == nil || !strings.Contains(err.Error(), "no_update") {
+	if err := update(append([]string{"stock", `{"_id":"a"}`}, base...), &out); err == nil || !strings.Contains(err.Error(), "no_update") {
 		t.Fatalf("update without operators = %v", err)
+	}
+}
+
+func TestGetUpdateDeleteByIDCommands(t *testing.T) {
+	dir := t.TempDir()
+
+	db, err := engine.Open(config.Config{DataDir: dir, AllowImplicit: true}, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	col, err := db.GetOrCreate("stock")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := col.Insert(ctx, []byte(`{"_id":"a","qty":2}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	sock, _ := startDaemon(t, dir)
+
+	base := []string{"-config", "none.yml", "-url", "unix://" + sock, "-json"}
+
+	raw := runCmd(t, func(a []string, o *strings.Builder) error { return get(a, o) }, append([]string{"stock", "a"}, base...)...)
+
+	if !strings.Contains(raw, `"_id":"a"`) || !strings.Contains(raw, `"_v":1`) {
+		t.Fatalf("get = %s", raw)
+	}
+
+	raw = runCmd(t, func(a []string, o *strings.Builder) error { return update(a, o) },
+		append([]string{"stock", "a", `{"$inc":{"qty":3}}`}, base...)...)
+
+	var up updateReport
+
+	if err := json.Unmarshal([]byte(raw), &up); err != nil || up.Modified != 1 || !strings.Contains(string(up.Doc), `"qty": 5`) {
+		t.Fatalf("update by id = %s, %v", raw, err)
+	}
+
+	raw = runCmd(t, func(a []string, o *strings.Builder) error { return remove(a, o) }, append([]string{"stock", "a"}, base...)...)
+
+	var del deleteReport
+
+	if err := json.Unmarshal([]byte(raw), &del); err != nil || del.Deleted != 1 {
+		t.Fatalf("delete by id = %s, %v", raw, err)
+	}
+
+	var out strings.Builder
+
+	if err := get(append([]string{"stock", "a"}, base...), &out); err == nil || !strings.Contains(err.Error(), "not_found") {
+		t.Fatalf("get after delete = %v", err)
 	}
 }

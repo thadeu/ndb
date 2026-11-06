@@ -51,10 +51,8 @@ await ndb.close()
 
 ```ts
 const calls = ndb.model('calls', {
-  id: 'call_id',
   time: 'at',
   fields: {
-    call_id: { type: 'string' },
     status: { type: 'string', index: true },
     caller: { type: 'string', unique: true },
     duration: { type: 'number', optional: true },
@@ -66,10 +64,10 @@ const calls = ndb.model('calls', {
 
 - Field types: `string`, `number`, `boolean`, `date` (a `Date`), `json` (any value).
 - Field options: `index`, `unique`, `optional`.
-- `id` is the id field. Without it the id is `_id`, made by the daemon.
+- `_id` is the primary key of every document. It is not a schema field: leave it out on insert and the daemon makes a UUIDv7 (or use `newId()`). For a natural key (email, SKU), keep `_id` and mark that field `unique`.
 - `time` is the collection time field. Used by zone maps and `$dateTrunc`.
 - The model declares its collection on first use (`ensure_collection`). You can call `await calls.ready()` to do it at once.
-- Types come from the schema. Rows have the schema fields and `_v`, the document version. A `date` field is a `Date` in rows. Input takes `Date` values and ISO strings in filters.
+- Types come from the schema. Rows have the schema fields, `_id` and `_v`, the document version. A `date` field is a `Date` in rows. Input takes `Date` values and ISO strings in filters.
 - `expires` is the `date` field that holds when a document expires. It turns on `expireIn`, `expire`, `persist` and `ttl` (below).
 - The client has no `ttl` catalog option and no blob API. Use the HTTP API for those.
 
@@ -78,49 +76,51 @@ const calls = ndb.model('calls', {
 ```ts
 // Insert one or many. All documents go in one transaction.
 const results = await calls.insert([
-  { call_id: 'c1', status: 'answered', caller: 'a', duration: 30, at: new Date() },
-  { call_id: 'c2', status: 'failed', caller: 'b', at: new Date() },
+  { _id: 'c1', status: 'answered', caller: 'a', duration: 30, at: new Date() },
+  { _id: 'c2', status: 'failed', caller: 'b', at: new Date() },
 ])
-// results: [{ id: 'c1', v: 1 }, ...]
+// results: [{ _id: 'c1', v: 1 }, ...]
 
-// Find by id. Returns null when missing.
-const row = await calls.find('c1')
+// Get by _id (GET /v1/c/calls/c1). Returns null when missing.
+const row = await calls.get('c1')
 
 // Atomic update by filter: filter first, then the write operators.
 // _v in the filter is an optimistic lock.
-const res = await calls.update({ call_id: 'c1', _v: row!._v }, { $set: { status: 'done' }, $unset: { duration: true } })
+const res = await calls.update({ _id: 'c1', _v: row!._v }, { $set: { status: 'done' }, $unset: { duration: true } })
 // res: { matched, modified, doc } (doc is the new row with _v; absent for many)
 
+// A string is an _id (POST /{_id}/update). The same guard rules apply.
+await calls.update('c1', { $inc: { duration: 1 } })
+
 // A guarded decrement: exactly one of two racing calls wins.
-await stock.update({ sku: 'a', qty: { $gte: 1 } }, { $inc: { qty: -1 } })
+await stock.update({ _id: 'a', qty: { $gte: 1 } }, { $inc: { qty: -1 } })
 
-// Every match (the filter needs the id or an indexed field), or create it.
+// Every match (the filter needs _id or an indexed field), or create it.
 await calls.update({ status: 'failed' }, { $set: { status: 'retry' } }, { many: true })
-await calls.update({ call_id: 'c9' }, { $inc: { duration: 1 } }, { upsert: true })
+await calls.update('c9', { $inc: { duration: 1 } }, { upsert: true })
 
-// Delete by filter: { deleted }.
-await calls.delete({ call_id: 'c2' })
+// Delete by _id or by filter: { deleted }.
+await calls.delete('c2')
 await calls.delete({ status: 'failed' }, { many: true })
 ```
 
-- Operators: `$set`, `$unset`, `$inc`, `$push` (with `{ $each: [...] }`), `$pull`, `$min`, `$max`. Field names can be dot paths.
+- Operators: `$set`, `$setOnInsert` (like `$set`, but only when an upsert creates the document), `$unset`, `$inc`, `$push` (with `{ $each: [...] }`), `$pull`, `$min`, `$max`. Field names can be dot paths.
 - Nothing matched is not an error: `matched` is 0 (for example when `_v` is stale, so read again and retry). `modified` is 0 when the operators leave the document as it is.
-- `many` needs the id or an indexed field in the filter. `upsert` creates the document from the equality fields of the filter.
+- `many` needs `_id` or an indexed field in the filter, and does not apply to an `_id` string. `upsert` creates the document from the equality fields of the filter (or with that `_id`).
 - A key of the operators without `$` throws `InvalidUpdateError` before anything is sent. The daemon contract errors (`unknown_operator`, `no_update`, `conflicting_update`, `invalid_field`, `unindexed_many`, `empty_filter`) are `InvalidUpdateError` too.
 
-An insert with a duplicate id throws `DuplicateIdError`. A duplicate `unique` value throws `UniqueViolationError`. An insert without the id when the schema names one fails with code `missing_id`.
+An insert with a duplicate `_id` throws `DuplicateIdError`. A duplicate `unique` value throws `UniqueViolationError`. An empty or non-string `_id` fails with code `invalid_id`.
 
 ### Expiry (TTL like Redis)
 
 ```ts
 const sessions = db.model('sessions', {
-  id: 'sid',
   expires: 'exp',
-  fields: { sid: { type: 'string' }, exp: { type: 'date', optional: true } },
+  fields: { exp: { type: 'date', optional: true } },
 })
 
-await sessions.insert({ sid: 's1' }, { expireIn: '1h' }) // or 3600; all docs of the call
-await sessions.update({ sid: 's1' }, { $set: { user: 'u' } }, { expireIn: '30m' })
+await sessions.insert({ _id: 's1' }, { expireIn: '1h' }) // or 3600; all docs of the call
+await sessions.update('s1', { $set: { user: 'u' } }, { expireIn: '30m' })
 
 const { v, expiresAt } = await sessions.expire('s1', '30m') // EXPIRE
 await sessions.expireAt('s1', new Date(Date.now() + 3_600_000))
@@ -142,8 +142,8 @@ const rows = await calls
   .where({ caller: { $in: ['a', 'b'] } })
   .not({ caller: 'zzz' })
   .or({ duration: { $lt: 5 } }, { 'meta.agent.id': 7 })
-  .sort({ at: -1, call_id: 1 })
-  .fields('call_id', 'status')
+  .sort({ at: -1, _id: 1 })
+  .fields('_id', 'status')
   .limit(50)
   .skip(100)
 ```
@@ -168,11 +168,11 @@ const total = await calls.count()
 Offset pages get slower as `skip` grows. Use a cursor for deep pages.
 
 ```ts
-const q = calls.where({ status: 'answered' }).sort({ call_id: 1 }).limit(100)
+const q = calls.where({ status: 'answered' }).sort({ _id: 1 }).limit(100)
 const page = await q
 const token = q.nextCursor // '' on the last page
 
-const next = await calls.where({ status: 'answered' }).sort({ call_id: 1 }).limit(100).after(token)
+const next = await calls.where({ status: 'answered' }).sort({ _id: 1 }).limit(100).after(token)
 ```
 
 A token works only with the same `where` and `sort`. Another query shape throws `CursorError`.
@@ -180,8 +180,8 @@ A token works only with the same `where` and `sort`. Another query shape throws 
 To walk every row, use `iterate()`. It follows the cursor, with `limit` as the batch size:
 
 ```ts
-for await (const row of calls.where({ status: 'answered' }).sort({ call_id: 1 }).limit(500).iterate()) {
-  console.log(row.call_id)
+for await (const row of calls.where({ status: 'answered' }).sort({ _id: 1 }).limit(500).iterate()) {
+  console.log(row._id)
 }
 ```
 
@@ -236,7 +236,7 @@ const controller = new AbortController()
 
 try {
   for await (const ev of calls.watch('relay', { where: { status: 'answered' }, signal: controller.signal })) {
-    // ev: { consumer, pos, op: 'put' | 'del', id, v, doc }
+    // ev: { consumer, pos, op: 'put' | 'del', _id, v, doc }
     await handle(ev)
 
     await calls.ack(ev)
@@ -280,7 +280,7 @@ Daemon errors are `NdbError` or a subclass. They have `code` (the daemon code) a
 import { NdbError } from '@thadeu/ndb'
 
 try {
-  await calls.find('c1')
+  await calls.get('c1')
 } catch (err) {
   if (err instanceof NdbError && err.code === 'not_ready') {
     // The daemon is still recovering, and readyTimeout ran out.

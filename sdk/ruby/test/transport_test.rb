@@ -8,20 +8,20 @@ class TransportTest < Minitest::Test
   end
 
   def test_ensure_insert_find_roundtrip
-    client.ensure_collection(@coll, id: "cid", indexes: ["a"])
+    client.ensure_collection(@coll, indexes: ["a"])
 
-    results = client.insert(@coll, [{ cid: "1", a: "x" }, { cid: "2", a: "y" }])
+    results = client.insert(@coll, [{ _id: "1", a: "x" }, { _id: "2", a: "y" }])
     page = client.find(@coll, where: { a: "x" })
 
-    assert_equal [{ "id" => "1", "v" => 1 }, { "id" => "2", "v" => 1 }], results
-    assert_equal [{ "cid" => "1", "a" => "x" }], page.rows
+    assert_equal [{ "_id" => "1", "v" => 1 }, { "_id" => "2", "v" => 1 }], results
+    assert_equal [{ "_id" => "1", "a" => "x" }], page.rows
     assert_equal "index:a", page.plan
     assert_equal 1, page.examined
   end
 
   def test_page_headers_next_and_total
-    client.ensure_collection(@coll, id: "cid")
-    client.insert(@coll, (1..5).map { |i| { cid: "c#{i}", n: i } })
+    client.ensure_collection(@coll)
+    client.insert(@coll, (1..5).map { |i| { _id: "c#{i}", n: i } })
 
     page = client.find(@coll, sort: { n: 1 }, limit: 2, count: true)
 
@@ -36,8 +36,8 @@ class TransportTest < Minitest::Test
   end
 
   def test_large_chunked_response
-    client.ensure_collection(@coll, id: "cid")
-    client.insert(@coll, (1..200).map { |i| { cid: "c#{i}", pad: "x" * 100 } })
+    client.ensure_collection(@coll)
+    client.insert(@coll, (1..200).map { |i| { _id: "c#{i}", pad: "x" * 100 } })
 
     assert_equal 200, client.find(@coll, {}).rows.size
   end
@@ -45,39 +45,39 @@ class TransportTest < Minitest::Test
   def test_keep_alive_reuses_one_connection
     fresh = Ndb::Client.new(socket: TestDaemon.socket)
 
-    fresh.ensure_collection(@coll, id: "cid")
+    fresh.ensure_collection(@coll)
     20.times { fresh.find(@coll, {}) }
 
     assert_equal 1, fresh.pool.created
   end
 
   def test_error_codes_map_to_classes
-    client.ensure_collection(@coll, id: "cid", unique: ["u"])
-    client.insert(@coll, [{ cid: "1", u: "a" }])
+    client.ensure_collection(@coll, unique: ["u"], time: "ts")
+    client.insert(@coll, [{ _id: "1", u: "a" }])
 
-    assert_raises(Ndb::UniqueViolation) { client.insert(@coll, [{ cid: "1" }]) }
-    assert_raises(Ndb::UniqueViolation) { client.insert(@coll, [{ cid: "2", u: "a" }]) }
-    assert_raises(Ndb::UnknownOperator) { client.update(@coll, { cid: "1" }, { "$rename" => { a: "b" } }) }
-    assert_raises(Ndb::NoUpdate) { client.update(@coll, { cid: "1", a: 1 }, {}) }
-    assert_raises(Ndb::ConflictingUpdate) { client.update(@coll, { cid: "1" }, { "$set" => { a: 1 }, "$inc" => { a: 1 } }) }
+    assert_raises(Ndb::UniqueViolation) { client.insert(@coll, [{ _id: "1" }]) }
+    assert_raises(Ndb::UniqueViolation) { client.insert(@coll, [{ _id: "2", u: "a" }]) }
+    assert_raises(Ndb::UnknownOperator) { client.update(@coll, { _id: "1" }, { "$rename" => { a: "b" } }) }
+    assert_raises(Ndb::NoUpdate) { client.update(@coll, { _id: "1", a: 1 }, {}) }
+    assert_raises(Ndb::ConflictingUpdate) { client.update(@coll, { _id: "1" }, { "$set" => { a: 1 }, "$inc" => { a: 1 } }) }
     assert_raises(Ndb::UnindexedMany) { client.update(@coll, { a: 1 }, { "$set" => { b: 1 } }, many: true) }
     assert_raises(Ndb::UnknownCollection) { client.find("missing_coll", {}) }
     assert_raises(Ndb::InvalidQuery) { client.find(@coll, where: { a: { "$bogus" => 1 } }) }
-    assert_raises(Ndb::CatalogConflict) { client.ensure_collection(@coll, id: "other") }
+    assert_raises(Ndb::CatalogConflict) { client.ensure_collection(@coll, time: "other") }
   end
 
   def test_error_carries_code_and_status
-    client.ensure_collection(@coll, id: "cid")
+    client.ensure_collection(@coll)
 
-    error = assert_raises(Ndb::NoUpdate) { client.update(@coll, { cid: "x" }, {}) }
+    error = assert_raises(Ndb::NoUpdate) { client.update(@coll, { _id: "x" }, {}) }
 
     assert_equal "no_update", error.code
     assert_equal 400, error.status
   end
 
   def test_threads_share_the_pool
-    client.ensure_collection(@coll, id: "cid")
-    client.insert(@coll, [{ cid: "1" }])
+    client.ensure_collection(@coll)
+    client.insert(@coll, [{ _id: "1" }])
 
     fresh = Ndb::Client.new(socket: TestDaemon.socket)
 
@@ -96,7 +96,7 @@ class TransportTest < Minitest::Test
   end
 
   def test_reconnects_after_the_server_closed_an_idle_connection
-    client.ensure_collection(@coll, id: "cid")
+    client.ensure_collection(@coll)
     client.pool.idle_connections.each { |c| c.socket.close }
 
     assert_equal [], client.find(@coll, {}).rows

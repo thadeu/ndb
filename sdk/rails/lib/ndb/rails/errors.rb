@@ -9,6 +9,17 @@ module Ndb
   # since it was loaded (its "_v" guard did not match).
   class StaleObjectError < Error; end
 
+  # Raised by destroy! when a before_destroy callback aborts.
+  class RecordNotDestroyed < Error
+    attr_reader :record
+
+    def initialize(message = "Failed to destroy the record", record = nil)
+      @record = record
+
+      super(message)
+    end
+  end
+
   # Raised by save!/create!/update! when validations fail.
   class RecordInvalid < Error
     attr_reader :record

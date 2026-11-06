@@ -17,7 +17,7 @@ import (
 
 // #region model
 type Line struct {
-	ID    string    `ndb:"id,id"`
+	ID    string    `ndb:"_id"`
 	TS    time.Time `ndb:"ts,time"`
 	App   string    `ndb:"app,index"`
 	Level string    `ndb:"level,index"`
@@ -120,8 +120,8 @@ func run(ctx context.Context) error {
 	// #endregion cursor
 
 	// #region append
-	id := fmt.Sprintf("go-%d", time.Now().UnixMilli())
-	line := fmt.Sprintf(`{"id":%q,"ts":%q,"app":"cli","level":"info","msg":"hello from go"}`, id, time.Now().UTC().Format(time.RFC3339))
+	msg := fmt.Sprintf("hello from go %d", time.Now().UnixMilli())
+	line := fmt.Sprintf(`{"ts":%q,"app":"cli","level":"info","msg":%q}`, time.Now().UTC().Format(time.RFC3339), msg)
 
 	if err := exec.Command("../append.sh", "cli", "3003", line).Run(); err != nil {
 		return err
@@ -130,7 +130,7 @@ func run(ctx context.Context) error {
 	fmt.Println("append: cli wrote one line")
 
 	if err := waitFor(func() (bool, error) {
-		n, err := logs.Where(ndb.Eq("id", id)).Count(ctx)
+		n, err := logs.Where(ndb.Eq("msg", msg)).Count(ctx)
 
 		return n == 1, err
 	}); err != nil {
@@ -138,6 +138,13 @@ func run(ctx context.Context) error {
 	}
 
 	fmt.Println("the new line is in the collection")
+
+	added, err := logs.Where(ndb.Eq("msg", msg)).First(ctx)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("it has no _id, so it has no /{_id} routes: _id is %q\n", added.ID)
 	// #endregion append
 
 	return nil

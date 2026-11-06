@@ -2,7 +2,7 @@
 
 Queries are JSON. The same body works from every SDK and from `curl`. The daemon owns all query meaning. The SDKs only build JSON.
 
-This page has everything about reading and writing by filter: `find`, the filter operators, update and delete by filter with the write operators, and pagination. [Aggregate](aggregate.md) and [Watch](watch.md) have their own pages.
+This page has everything about reading and writing: `find`, the filter operators, the `/{_id}` routes, update and delete by filter with the write operators, and pagination. [Aggregate](aggregate.md) and [Watch](watch.md) have their own pages.
 
 One rule covers every body: **a key that starts with `$` is an operator, any other key is a field.**
 
@@ -146,6 +146,54 @@ Rules:
 - The pattern is compiled once per query, not once per row.
 - Planner: a pattern anchored with `^`, with a literal start (`^abc`, `^abc.*`, `^ab*`), and without `i` or `m`, is turned into the range `[abc, abd)` on that field. A ready index on the field answers it (`X-Ndb-Plan: index:<field>`), and the zone maps of the segments skip row groups outside the range (`row_groups_skipped`). The regex is still run on every candidate. Without such a prefix (no `^`, a group or alternation first, `i`, `m`, or only `$not`/`$or`) the regex is a filter on a scan. `explain: true` shows which one ran.
 
+## By _id
+
+Every document has `_id` (see [Document id](configuration.md#document-id)). These routes reach one document by it, without a filter body:
+
+::: code-group
+
+```bash [curl]
+curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/calls/0192f3a4-7c1e-7b2a-9f3d-1a2b3c4d5e6f
+curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/stock/sku-a/update -d '{"qty":{"$gte":1},"$inc":{"qty":-1}}'
+curl --unix-socket /run/ndb/ndb.sock -X DELETE http://ndb/v1/c/calls/0192f3a4-7c1e-7b2a-9f3d-1a2b3c4d5e6f
+```
+
+```go [Go]
+call, err := calls.Get(ctx, id)
+res, err := stock.UpdateID(ctx, "sku-a", ndb.Ops{"$inc": {"qty": -1}}, ndb.Guard(ndb.Gte("qty", 1)))
+deleted, err := calls.DeleteID(ctx, id)
+```
+
+```ruby [Ruby]
+ndb.get("calls", id)
+ndb.update("stock", "sku-a", { "$inc" => { qty: -1 } })   # a String is the _id
+ndb.delete("calls", id)
+```
+
+```ruby [Rails]
+call = Call.find(id)   # call.id is call._id
+call.destroy
+```
+
+```ts [TypeScript]
+const call = await calls.get(id)
+await stock.update('sku-a', { $inc: { qty: -1 } })   // a string is the _id
+await calls.delete(id)
+```
+
+```bash [CLI]
+ndb get calls 0192f3a4-7c1e-7b2a-9f3d-1a2b3c4d5e6f
+ndb update stock sku-a '{"$inc":{"qty":-1}}'
+ndb delete calls 0192f3a4-7c1e-7b2a-9f3d-1a2b3c4d5e6f
+```
+
+:::
+
+- `GET /v1/c/{coll}/{_id}` answers the document with `_v`, or `404 not_found`.
+- `POST /v1/c/{coll}/{_id}/update` takes write operators and optional guard filters in the body, like [update by filter](#update-by-filter) with `{"_id": ...}` added. `upsert` and `expire_in` work; `many` does not.
+- `DELETE /v1/c/{coll}/{_id}` answers `{"deleted":0}` or `{"deleted":1}`.
+- A fixed route wins: a document whose `_id` is `stats` or `find` is reached with `find`, not with `GET /{_id}`.
+
 ## Update by filter
 
 `POST /v1/c/{coll}/update` takes **one JSON object that mixes a filter and write operators**. The daemon matches the filter and writes the result inside the single writer of the collection, against the newest state. Two updates never interleave, so a guarded decrement or an `$inc` needs no retry.
@@ -195,7 +243,7 @@ The SDKs take the filter and the operators as two arguments and send them as one
 
 | Key | Meaning |
 |---|---|
-| `$set`, `$unset`, `$inc`, `$push`, `$pull`, `$min`, `$max` | write operators, each an object of fields (dot paths allowed) |
+| `$set`, `$setOnInsert`, `$unset`, `$inc`, `$push`, `$pull`, `$min`, `$max` | write operators, each an object of fields (dot paths allowed) |
 | `$and`, `$or`, `$nor` | filter, see [Filters](#filters) |
 | any key without `$` (the id field, `qty`, `_v`, `meta.k`) | filter |
 | any other `$...` key | `400 unknown_operator` |
@@ -207,6 +255,7 @@ Options are in the query string: `many=true`, `upsert=true`, `expire_in=<duratio
 | Operator | Meaning |
 |---|---|
 | `{"$set": {"f": v}}` | set the field |
+| `{"$setOnInsert": {"f": v}}` | set the field only when an [upsert](#upsert) creates the document. On a match it does nothing, so a racing writer is never overwritten. |
 | `{"$unset": {"f": true}}` | remove the field (`true` or `""`) |
 | `{"$inc": {"f": n}}` | add a number. A negative number subtracts. A missing field is 0. A field that is not a number is `invalid_field`. Integers stay exact. |
 | `{"$push": {"f": v}}` | append one value. `{"$push": {"f": {"$each": [a, b]}}}` appends many. A missing field becomes a new array. A field that is not an array is `invalid_field`. |
@@ -217,7 +266,7 @@ Several operators can go in one body, on different fields:
 
 ```json
 {
-  "id": "order-1",
+  "_id": "order-1",
   "$push": { "events": { "at": "2026-11-06T12:00:00Z", "kind": "paid" } },
   "$inc": { "attempts": 1 },
   "$max": { "last_seen": "2026-11-06T12:00:00Z" },
@@ -231,15 +280,15 @@ Several operators can go in one body, on different fields:
 
 ```bash
 # append one event
-curl ... /v1/c/orders/update -d '{"id":"o1","$push":{"events":{"kind":"paid"}}}'
+curl ... /v1/c/orders/update -d '{"_id":"o1","$push":{"events":{"kind":"paid"}}}'
 
 # append many
-curl ... /v1/c/orders/update -d '{"id":"o1","$push":{"tags":{"$each":["vip","eu"]}}}'
+curl ... /v1/c/orders/update -d '{"_id":"o1","$push":{"tags":{"$each":["vip","eu"]}}}'
 
 # remove a value, or the elements that match a condition
-curl ... /v1/c/orders/update -d '{"id":"o1","$pull":{"tags":"eu"}}'
-curl ... /v1/c/orders/update -d '{"id":"o1","$pull":{"events":{"kind":"draft"}}}'
-curl ... /v1/c/orders/update -d '{"id":"o1","$pull":{"scores":{"$lt":10}}}'
+curl ... /v1/c/orders/update -d '{"_id":"o1","$pull":{"tags":"eu"}}'
+curl ... /v1/c/orders/update -d '{"_id":"o1","$pull":{"events":{"kind":"draft"}}}'
+curl ... /v1/c/orders/update -d '{"_id":"o1","$pull":{"scores":{"$lt":10}}}'
 ```
 
 ### Answers
@@ -267,7 +316,7 @@ curl ... '/v1/c/calls/update?many=true' -d '{"status":"failed","$set":{"status":
 `_v` in the filter is the version of the document. Read with `versions: true`, then write with that `_v`. `matched: 0` means somebody else wrote first.
 
 ```json
-{ "id": "c1", "_v": 7, "$set": { "note": "checked" } }
+{ "_id": "c1", "_v": 7, "$set": { "note": "checked" } }
 ```
 
 ### Upsert
@@ -276,10 +325,16 @@ With `upsert=true` and no match, a document is created from the plain equality f
 
 The answer is `matched: 0`, `modified: 1` and the `doc`. If the id exists but the rest of the filter does not match, the call is `409 duplicate_id`.
 
+Create once, never overwrite: the filter finds the document, `$setOnInsert` fills it only when it is new. Two racing calls make one document.
+
+```bash
+curl ... '/v1/c/users/update?upsert=true' -d '{"email":"a@b.c","$setOnInsert":{"name":"Ana","plan":"free"}}'
+```
+
 A counter that expires, as a rate limit:
 
 ```bash
-curl ... '/v1/c/hits/update?upsert=true&expire_in=60s' -d '{"id":"ip:1.2.3.4","$inc":{"n":1}}'
+curl ... '/v1/c/hits/update?upsert=true&expire_in=60s' -d '{"_id":"ip:1.2.3.4","$inc":{"n":1}}'
 ```
 
 ### Contract errors

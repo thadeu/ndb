@@ -9,14 +9,13 @@ require "digest"
 class BlobTest < Minitest::Test
   def call_model
     model do
-      primary_key :call_id
       attribute :recording, :blob
     end
   end
 
   def test_upload_on_save_and_read_back
     calls = call_model
-    call = calls.new(call_id: "c1", recording: StringIO.new("RIFF-fake-wav"))
+    call = calls.new(_id: "c1", recording: StringIO.new("RIFF-fake-wav"))
 
     refute call.recording.uploaded?
 
@@ -34,7 +33,7 @@ class BlobTest < Minitest::Test
 
   def test_read_is_io_like
     calls = call_model
-    calls.create!(call_id: "c1", recording: StringIO.new("0123456789"))
+    calls.create!(_id: "c1", recording: StringIO.new("0123456789"))
 
     blob = calls.find("c1").recording
 
@@ -56,7 +55,7 @@ class BlobTest < Minitest::Test
     file.rewind
 
     calls = call_model
-    calls.create!(call_id: "big", recording: file)
+    calls.create!(_id: "big", recording: file)
 
     digest = Digest::SHA256.new
     chunks = 0
@@ -72,7 +71,7 @@ class BlobTest < Minitest::Test
 
   def test_replacing_the_blob_updates_the_reference
     calls = call_model
-    call = calls.create!(call_id: "c1", recording: StringIO.new("one"))
+    call = calls.create!(_id: "c1", recording: StringIO.new("one"))
     first = call.recording.ref
 
     call.update!(recording: StringIO.new("two"))
@@ -83,15 +82,15 @@ class BlobTest < Minitest::Test
 
   def test_same_content_has_the_same_reference
     calls = call_model
-    a = calls.create!(call_id: "a", recording: StringIO.new("same"))
-    b = calls.create!(call_id: "b", recording: StringIO.new("same"))
+    a = calls.create!(_id: "a", recording: StringIO.new("same"))
+    b = calls.create!(_id: "b", recording: StringIO.new("same"))
 
     assert_equal a.recording.ref, b.recording.ref
   end
 
   def test_nil_blob_stays_out_of_the_document
     calls = call_model
-    calls.create!(call_id: "c1")
+    calls.create!(_id: "c1")
 
     assert_nil calls.find("c1").recording
   end

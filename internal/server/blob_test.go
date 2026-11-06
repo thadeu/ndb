@@ -98,7 +98,7 @@ func TestBlobErrors(t *testing.T) {
 func TestMetricsPage(t *testing.T) {
 	c := unixServer(t)
 
-	do(t, c, "PUT", "/v1/c/m", `{"id":"k","indexes":["a"]}`, nil)
+	do(t, c, "PUT", "/v1/c/m", `{"indexes":["a"]}`, nil)
 	do(t, c, "POST", "/v1/c/m/insert", `{"insert":[{"k":"1","a":1}]}`, nil)
 	do(t, c, "POST", "/v1/c/m/find", `{}`, nil)
 	do(t, c, "POST", "/v1/c/m/aggregate", `{"pipeline":[{"$count":"n"}]}`, nil)

@@ -13,7 +13,7 @@ import (
 
 func newDirectBuf(id string, buf int) *collection.Direct {
 	return collection.NewDirect(collection.DirectConfig{
-		Def:         catalog.Def{Name: "calls", ID: id, Write: catalog.Direct, Path: "/x/*.ndjson"},
+		Def:         catalog.Def{Name: "calls", Write: catalog.Direct, Path: "/x/*.ndjson"},
 		WatchBuffer: buf,
 	})
 }
@@ -48,10 +48,10 @@ func TestDirectWatchReplaysFilesThenFollowsLive(t *testing.T) {
 	dir := t.TempDir()
 	a, b := filepath.Join(dir, "a.ndjson"), filepath.Join(dir, "b.ndjson")
 
-	d := newDirect("event_id", 0)
+	d := newDirect("_id", 0)
 
-	writeLines(t, d, a, `{"event_id":"a1"}`, `{"event_id":"a2"}`)
-	writeLines(t, d, b, `{"event_id":"b1"}`, `{"event_id":"a1","n":2}`)
+	writeLines(t, d, a, `{"_id":"a1"}`, `{"_id":"a2"}`)
+	writeLines(t, d, b, `{"_id":"b1"}`, `{"_id":"a1","n":2}`)
 
 	s, err := d.Feed().Open("")
 	if err != nil {
@@ -60,7 +60,7 @@ func TestDirectWatchReplaysFilesThenFollowsLive(t *testing.T) {
 
 	defer s.Close()
 
-	writeLines(t, d, a, `{"event_id":"a3"}`, `{"event_id":"a2","_deleted":true}`)
+	writeLines(t, d, a, `{"_id":"a3"}`, `{"_id":"a2","_deleted":true}`)
 
 	want := []struct{ op, id string }{
 		{"put", "a1"}, {"put", "a2"}, {"put", "b1"}, {"put", "a1"}, {"put", "a3"}, {"del", "a2"},
@@ -82,9 +82,9 @@ func TestDirectWatchReplaysFilesThenFollowsLive(t *testing.T) {
 func TestDirectWatchResumesAfterRestartRebuild(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "a.ndjson")
-	lines := []string{`{"event_id":"e1"}`, `{"event_id":"e2"}`, `{"event_id":"e3"}`, `{"event_id":"e4"}`}
+	lines := []string{`{"_id":"e1"}`, `{"_id":"e2"}`, `{"_id":"e3"}`, `{"_id":"e4"}`}
 
-	d := newDirect("event_id", 0)
+	d := newDirect("_id", 0)
 
 	writeLines(t, d, path, lines...)
 
@@ -102,7 +102,7 @@ func TestDirectWatchResumesAfterRestartRebuild(t *testing.T) {
 	s.Close()
 
 	// A restart: a new memtable rebuilt from the same file, plus a new line.
-	d2 := newDirect("event_id", 0)
+	d2 := newDirect("_id", 0)
 
 	var off int64
 
@@ -114,7 +114,7 @@ func TestDirectWatchResumesAfterRestartRebuild(t *testing.T) {
 		off += int64(len(l)) + 1
 	}
 
-	writeLines(t, d2, path, `{"event_id":"e5"}`)
+	writeLines(t, d2, path, `{"_id":"e5"}`)
 
 	r, err := d2.Feed().Open(stored)
 	if err != nil {
@@ -132,9 +132,9 @@ func TestDirectWatchResumesAfterRestartRebuild(t *testing.T) {
 
 func TestDirectWatchBatchLineResumesInsideTheBatch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "a.ndjson")
-	d := newDirect("event_id", 0)
+	d := newDirect("_id", 0)
 
-	writeLines(t, d, path, `{"_batch":[{"event_id":"x"},{"event_id":"y"},{"event_id":"z"}]}`)
+	writeLines(t, d, path, `{"_batch":[{"_id":"x"},{"_id":"y"},{"_id":"z"}]}`)
 
 	s, _ := d.Feed().Open("")
 
@@ -154,13 +154,13 @@ func TestDirectWatchBatchLineResumesInsideTheBatch(t *testing.T) {
 
 func TestDirectWatchNowAndMonotonicAck(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "a.ndjson")
-	d := newDirect("event_id", 0)
+	d := newDirect("_id", 0)
 
-	writeLines(t, d, path, `{"event_id":"old"}`, `{"event_id":"old2"}`)
+	writeLines(t, d, path, `{"_id":"old"}`, `{"_id":"old2"}`)
 
 	now := d.Feed().Now()
 
-	writeLines(t, d, path, `{"event_id":"fresh"}`)
+	writeLines(t, d, path, `{"_id":"fresh"}`)
 
 	s, err := d.Feed().Open(now)
 	if err != nil {
@@ -193,13 +193,13 @@ func TestDirectWatchNowAndMonotonicAck(t *testing.T) {
 
 func TestDirectSlowWatcherLags(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "a.ndjson")
-	d := newDirectBuf("event_id", 3)
+	d := newDirectBuf("_id", 3)
 
 	s, _ := d.Feed().Open("")
 	defer s.Close()
 
 	for i := range 20 {
-		writeLines(t, d, path, fmt.Sprintf(`{"event_id":"e%d"}`, i))
+		writeLines(t, d, path, fmt.Sprintf(`{"_id":"e%d"}`, i))
 	}
 
 	for range 3 {

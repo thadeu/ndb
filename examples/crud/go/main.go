@@ -1,9 +1,8 @@
-// CRUD on the users collection: insert, get, update with if_version, delete, count.
+// CRUD on the users collection: insert, get by _id, update with a _v guard, delete, count.
 package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -13,8 +12,8 @@ import (
 
 // #region model
 type User struct {
-	UserID  string `ndb:"user_id,id"`
-	Email   string `ndb:"email"`
+	ID      string `ndb:"_id"`
+	Email   string `ndb:"email,unique"`
 	Plan    string `ndb:"plan,index"`
 	Version uint64 `ndb:"_v,version"`
 }
@@ -50,15 +49,15 @@ func run(ctx context.Context) error {
 	// #endregion connect
 
 	for _, id := range []string{"u1", "u2"} {
-		if err := users.Delete(ctx, id); err != nil && !errors.Is(err, ndb.ErrNotFound) {
+		if _, err := users.DeleteID(ctx, id); err != nil {
 			return err
 		}
 	}
 
 	// #region insert
 	results, err := users.Insert(ctx,
-		User{UserID: "u1", Email: "ada@example.com", Plan: "free"},
-		User{UserID: "u2", Email: "grace@example.com", Plan: "free"},
+		User{ID: "u1", Email: "ada@example.com", Plan: "free"},
+		User{ID: "u2", Email: "grace@example.com", Plan: "free"},
 	)
 	if err != nil {
 		return err
@@ -77,38 +76,39 @@ func run(ctx context.Context) error {
 	// #endregion get
 
 	// #region update
-	v, err := users.Update(ctx, "u1", map[string]any{"plan": "pro"}, ndb.IfVersion(ada.Version))
+	saved, err := users.UpdateID(ctx, "u1", ndb.Ops{"$set": {"plan": "pro"}}, ndb.Guard(ndb.Eq("_v", ada.Version)))
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("update u1 plan=pro (if_version %d) -> v%d\n", ada.Version, v)
+	fmt.Printf("update u1 plan=pro (_v %d) -> v%d\n", ada.Version, saved.Doc.Version)
 	// #endregion update
 
 	// #region conflict
-	_, err = users.Update(ctx, "u1", map[string]any{"plan": "team"}, ndb.IfVersion(ada.Version))
+	stale, err := users.UpdateID(ctx, "u1", ndb.Ops{"$set": {"plan": "team"}}, ndb.Guard(ndb.Eq("_v", ada.Version)))
+	if err != nil {
+		return err
+	}
 
-	if errors.Is(err, ndb.ErrVersionConflict) {
-		fmt.Println("update u1 plan=team (if_version 1) -> version_conflict")
+	if stale.Matched == 0 {
+		fmt.Printf("update u1 plan=team (_v %d) -> matched 0\n", ada.Version)
 
 		fresh, err := users.Get(ctx, "u1")
 		if err != nil {
 			return err
 		}
 
-		v, err = users.Update(ctx, "u1", map[string]any{"plan": "team"}, ndb.IfVersion(fresh.Version))
+		retried, err := users.UpdateID(ctx, "u1", ndb.Ops{"$set": {"plan": "team"}}, ndb.Guard(ndb.Eq("_v", fresh.Version)))
 		if err != nil {
 			return err
 		}
 
-		fmt.Printf("reload u1: v%d, retry with if_version %d -> v%d\n", fresh.Version, fresh.Version, v)
-	} else if err != nil {
-		return err
+		fmt.Printf("reload u1: v%d, retry with _v %d -> v%d\n", fresh.Version, fresh.Version, retried.Doc.Version)
 	}
 	// #endregion conflict
 
 	// #region delete
-	if err := users.Delete(ctx, "u2"); err != nil {
+	if _, err := users.DeleteID(ctx, "u2"); err != nil {
 		return err
 	}
 

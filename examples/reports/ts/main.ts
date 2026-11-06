@@ -4,10 +4,8 @@ import { connect } from '@thadeu/ndb'
 const ndb = connect(process.env.NDB_URL ?? 'unix:///tmp/ndb-examples.sock')
 
 const orders = ndb.model('orders', {
-  id: 'order_id',
   time: 'created_at',
   fields: {
-    order_id: { type: 'string' },
     created_at: { type: 'date' },
     status: { type: 'string', index: true },
     amount: { type: 'number' },
@@ -24,8 +22,8 @@ if ((await orders.count()) === 0) {
   ]
 
   await orders.insert(
-    rows.map(([order_id, clock, status, amount]) => ({
-      order_id,
+    rows.map(([_id, clock, status, amount]) => ({
+      _id,
       created_at: new Date(`2026-11-01T${clock}Z`),
       status,
       amount,

@@ -51,7 +51,7 @@ func history(t *testing.T, c *collection.Collection, seal bool) {
 
 	for i := 0; i < 180; i += 22 {
 		if _, ok := c.Find(fmt.Sprintf("c%04d", i)); !ok {
-			d := fmt.Sprintf(`{"id":"c%04d","status":"back","n":%d}`, i, i+1000)
+			d := fmt.Sprintf(`{"_id":"c%04d","status":"back","n":%d}`, i, i+1000)
 
 			if _, err := c.Insert(ctx, doc(d)); err != nil {
 				t.Fatal(err)
@@ -391,7 +391,7 @@ func TestOnCompactSeesTheLiveDocs(t *testing.T) {
 func TestCompactDropsExpiredAndOutOfWindowRows(t *testing.T) {
 	clk := newClock()
 	root := t.TempDir()
-	def := catalog.Def{Name: "logs", ID: "id", Time: "at", Retention: "7d", Indexes: []string{"status"}}
+	def := catalog.Def{Name: "logs", Time: "at", Retention: "7d", Indexes: []string{"status"}}
 	cfg := collection.Config{Dir: filepath.Join(root, "wal"), Data: root, FS: fs.OS{}, Def: def, Now: clk.now, SealAge: time.Hour}
 
 	c, err := collection.Open(cfg)
@@ -402,7 +402,7 @@ func TestCompactDropsExpiredAndOutOfWindowRows(t *testing.T) {
 	t.Cleanup(func() { closeOnce(c) })
 
 	for i := range 3 {
-		d := fmt.Sprintf(`{"id":"old%d","at":%q}`, i, rfc(clk.now().Add(-10*24*time.Hour)))
+		d := fmt.Sprintf(`{"_id":"old%d","at":%q}`, i, rfc(clk.now().Add(-10*24*time.Hour)))
 
 		if _, err := c.Insert(ctx, doc(d)); err != nil {
 			t.Fatal(err)
@@ -412,7 +412,7 @@ func TestCompactDropsExpiredAndOutOfWindowRows(t *testing.T) {
 	mustSeal(t, c)
 
 	for i := range 2 {
-		d := fmt.Sprintf(`{"id":"new%d","at":%q}`, i, rfc(clk.now().Add(-time.Hour)))
+		d := fmt.Sprintf(`{"_id":"new%d","at":%q}`, i, rfc(clk.now().Add(-time.Hour)))
 
 		if _, err := c.Insert(ctx, doc(d)); err != nil {
 			t.Fatal(err)
@@ -454,7 +454,7 @@ func TestCompactDropsExpiredAndOutOfWindowRows(t *testing.T) {
 func TestSealerDropsAWholeSegmentPastTheRetention(t *testing.T) {
 	clk := newClock()
 	root := t.TempDir()
-	def := catalog.Def{Name: "logs", ID: "id", Time: "at", Retention: "1d"}
+	def := catalog.Def{Name: "logs", Time: "at", Retention: "1d"}
 
 	c, err := collection.Open(collection.Config{
 		Dir: filepath.Join(root, "wal"), Data: root, FS: fs.OS{}, Def: def, Now: clk.now, SealAge: time.Hour, SealTick: 5 * time.Millisecond,
@@ -466,7 +466,7 @@ func TestSealerDropsAWholeSegmentPastTheRetention(t *testing.T) {
 	t.Cleanup(func() { closeOnce(c) })
 
 	for i := range 2 {
-		d := fmt.Sprintf(`{"id":"a%d","at":%q}`, i, rfc(clk.now().Add(-time.Hour)))
+		d := fmt.Sprintf(`{"_id":"a%d","at":%q}`, i, rfc(clk.now().Add(-time.Hour)))
 
 		if _, err := c.Insert(ctx, doc(d)); err != nil {
 			t.Fatal(err)
@@ -498,8 +498,8 @@ func TestExpiredRowsAreDroppedByCompaction(t *testing.T) {
 	exp := rfc(clk.now().Add(time.Minute))
 
 	for _, d := range []string{
-		fmt.Sprintf(`{"id":"soon","exp":%q}`, exp),
-		`{"id":"never"}`,
+		fmt.Sprintf(`{"_id":"soon","exp":%q}`, exp),
+		`{"_id":"never"}`,
 	} {
 		if _, err := c.Insert(ctx, doc(d)); err != nil {
 			t.Fatal(err)
@@ -540,7 +540,7 @@ func TestCompactWhileReadingAndWriting(t *testing.T) {
 
 			ch := collection.Change{Set: map[string]any{"status": fmt.Sprintf("w%d", i)}}
 
-			if _, err := c.UpdateID(ctx, fmt.Sprintf("c%04d", i%60), ch, 0); err != nil {
+			if _, err := c.UpdateByID(ctx, fmt.Sprintf("c%04d", i%60), ch, 0); err != nil {
 				done <- err
 
 				return

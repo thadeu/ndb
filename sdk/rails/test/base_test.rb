@@ -7,8 +7,6 @@ class ApplicationRecord < Ndb::Record
 end
 
 class Post < ApplicationRecord
-  primary_key :call_id
-
   attribute :status, :string, index: true
   attribute :dnis, :string, unique: true
   attribute :duration, :integer
@@ -36,9 +34,9 @@ class BaseTest < Minitest::Test
   end
 
   def test_primary_key
-    assert_equal "call_id", Post.primary_key
+    assert_equal "_id", Post.primary_key
     assert_equal "_id", Comment.primary_key
-    assert_includes Post.attribute_names, "call_id"
+    assert_includes Post.attribute_names, "_id"
   end
 
   def test_expires_option_sets_the_expires_field
@@ -60,7 +58,7 @@ class BaseTest < Minitest::Test
   end
 
   def test_collection_definition
-    assert_equal({ "id" => "call_id", "indexes" => ["status"], "unique" => ["dnis"] }, Post.collection_definition)
+    assert_equal({ "indexes" => ["status"], "unique" => ["dnis"] }, Post.collection_definition)
   end
 
   def test_time_option_sets_the_collection_time_field
@@ -78,7 +76,7 @@ class BaseTest < Minitest::Test
   end
 
   def test_attribute_casting_and_active_model_api
-    post = Post.new(call_id: "c1", duration: "42", created_at: "2026-11-01T10:00:00Z")
+    post = Post.new(_id: "c1", duration: "42", created_at: "2026-11-01T10:00:00Z")
 
     assert_equal 42, post.duration
     assert_kind_of Time, post.created_at
@@ -87,16 +85,29 @@ class BaseTest < Minitest::Test
     assert_equal "c1", post.id
   end
 
-  def test_as_json_hides_the_unused_generated_id
-    json = Post.new(call_id: "c1", status: "x").as_json
+  def test_as_json_has_the_id
+    json = Post.new(_id: "c1", status: "x").as_json
 
-    assert_equal "c1", json["call_id"]
-    refute json.key?("_id")
+    assert_equal "c1", json["_id"]
+  end
+
+  def test_id_is_an_alias_of_the_primary_key
+    post = Post.new(_id: "c1")
+
+    assert_equal "c1", post.id
+
+    post.id = "c2"
+
+    assert_equal "c2", post._id
+  end
+
+  def test_the_primary_key_dsl_is_gone
+    refute_respond_to Post, :primary_key=
+    assert_raises(ArgumentError) { Post.primary_key(:call_id) }
   end
 
   def test_ensure_collection_declares_the_definition
     klass = model do
-      primary_key :cid
       attribute :a, :string, index: true
     end
 
@@ -104,7 +115,6 @@ class BaseTest < Minitest::Test
 
     stored = client.collections.find { |c| c["name"] == klass.collection_name }
 
-    assert_equal "cid", stored["id"]
     assert_equal ["a"], stored["indexes"]
   end
 end

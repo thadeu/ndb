@@ -9,7 +9,7 @@
 ```bash [curl]
 curl -N --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/calls/watch \
   -d '{"consumer":"relay","from":"beginning","where":{"status":"failed"}}'
-# {"pos":"e1.1","op":"put","id":"c1","v":1,"doc":{"call_id":"c1","status":"failed"}}
+# {"pos":"e1.1","op":"put","_id":"c1","v":1,"doc":{"_id":"c1","status":"failed"}}
 
 curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/calls/ack \
   -d '{"consumer":"relay","pos":"e1.1"}'
@@ -36,7 +36,7 @@ for ev, err := range calls.Watch(ctx, "relay", ndb.WatchWhere(ndb.Eq("status", "
 ```ruby [Ruby]
 begin
   ndb.watch("calls", "relay", where: { status: "failed" }) do |event|
-    handle(event)   # "pos", "op", "id", "v", "doc"
+    handle(event)   # "pos", "op", "_id", "v", "doc"
 
     ndb.ack("calls", "relay", event["pos"])
   end
@@ -59,7 +59,7 @@ end
 const controller = new AbortController()
 
 for await (const ev of calls.watch('relay', { where: { status: 'failed' }, signal: controller.signal })) {
-  await handle(ev) // { consumer, pos, op, id, v, doc }
+  await handle(ev) // { consumer, pos, op, _id, v, doc }
 
   await calls.ack(ev)
 }
@@ -85,8 +85,8 @@ In the SDKs: Go `ndb.FromNow()`, `ndb.Limit(n)`, `ndb.WatchWhere(...)`; Ruby `fr
 ## Events
 
 ```json
-{"pos":"e1.1","op":"put","id":"c1","v":1,"doc":{"_id":"c1","status":"answered"}}
-{"pos":"e1.2","op":"del","id":"c2","v":2}
+{"pos":"e1.1","op":"put","_id":"c1","v":1,"doc":{"_id":"c1","status":"answered"}}
+{"pos":"e1.2","op":"del","_id":"c2","v":2}
 {"heartbeat":true}
 {"error":{"code":"watch_lagged","message":"..."}}
 ```

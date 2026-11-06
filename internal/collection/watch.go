@@ -32,6 +32,11 @@ type engineFeed struct {
 
 	hub feed.Hub[wal.Record]
 
+	// base is the tx that the checkpoint covers at open. A WAL that holds no
+	// record is then not "whole history": what came before base is only in
+	// the segments (a restore from a snapshot starts like this).
+	base uint64
+
 	// mu guards pins and serializes WAL deletion with the start of a
 	// stream. pins holds the first tx that each open WAL read still needs.
 	mu      sync.Mutex

@@ -6,8 +6,8 @@ class WatchTest < Minitest::Test
   def setup
     @coll = NdbTestHelpers.next_name
 
-    client.ensure_collection(@coll, id: "cid")
-    client.insert(@coll, (1..6).map { |i| { cid: "c#{i}", n: i } })
+    client.ensure_collection(@coll)
+    client.insert(@coll, (1..6).map { |i| { _id: "c#{i}", n: i } })
   end
 
   def test_watch_yields_events_until_the_limit_and_ack_resumes
@@ -15,7 +15,7 @@ class WatchTest < Minitest::Test
 
     client.watch(@coll, "relay", limit: 2) { |ev| seen << ev }
 
-    assert_equal %w[c1 c2], seen.map { |ev| ev["id"] }
+    assert_equal %w[c1 c2], seen.map { |ev| ev["_id"] }
     assert_equal %w[put put], seen.map { |ev| ev["op"] }
     assert_equal 1, seen.first["doc"]["n"]
 
@@ -25,19 +25,19 @@ class WatchTest < Minitest::Test
 
     client.watch(@coll, "relay", limit: 1) { |ev| resumed << ev }
 
-    assert_equal %w[c3], resumed.map { |ev| ev["id"] }
+    assert_equal %w[c3], resumed.map { |ev| ev["_id"] }
   end
 
   def test_watch_where_delivers_only_matching_events
     seen = []
 
-    client.watch(@coll, "filtered", where: { n: 5.. }, limit: 2) { |ev| seen << ev["id"] }
+    client.watch(@coll, "filtered", where: { n: 5.. }, limit: 2) { |ev| seen << ev["_id"] }
 
     assert_equal %w[c5 c6], seen
   end
 
   def test_watch_without_a_block_returns_an_enumerator
-    ids = client.watch(@coll, "enum", limit: 3).map { |ev| ev["id"] }
+    ids = client.watch(@coll, "enum", limit: 3).map { |ev| ev["_id"] }
 
     assert_equal %w[c1 c2 c3], ids
   end

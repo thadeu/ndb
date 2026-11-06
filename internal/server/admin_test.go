@@ -28,13 +28,13 @@ func adminHandler(t *testing.T) http.Handler {
 		t.Fatal(err)
 	}
 
-	lines := `{"call_id":"c1","status":"answered"}` + "\n" + "{broken\n" + `{"call_id":"c2","status":"busy"}` + "\n"
+	lines := `{"_id":"c1","status":"answered"}` + "\n" + "{broken\n" + `{"_id":"c2","status":"busy"}` + "\n"
 
 	if err := os.WriteFile(filepath.Join(files, "a.ndjson"), []byte(lines), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	calls := catalog.Def{Name: "calls", Write: catalog.Direct, Path: filepath.Join(files, "*.ndjson"), ID: "call_id", Indexes: []string{"status"}}
+	calls := catalog.Def{Name: "calls", Write: catalog.Direct, Path: filepath.Join(files, "*.ndjson"), Indexes: []string{"status"}}
 
 	db, err := engine.Open(config.Config{
 		DataDir:       filepath.Join(root, "data"),
@@ -47,7 +47,7 @@ func adminHandler(t *testing.T) http.Handler {
 
 	t.Cleanup(func() { db.Close() })
 
-	if _, err := db.Ensure(catalog.Def{Name: "posts", ID: "post_id", Indexes: []string{"author"}}); err != nil {
+	if _, err := db.Ensure(catalog.Def{Name: "posts", Indexes: []string{"author"}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -56,7 +56,7 @@ func adminHandler(t *testing.T) http.Handler {
 		t.Fatal(err)
 	}
 
-	for _, doc := range []string{`{"post_id":"p1","author":"a"}`, `{"post_id":"p2","author":"b"}`, `{"post_id":"p3","author":"c"}`} {
+	for _, doc := range []string{`{"_id":"p1","author":"a"}`, `{"_id":"p2","author":"b"}`, `{"_id":"p3","author":"c"}`} {
 		if _, err := posts.Insert(context.Background(), []byte(doc)); err != nil {
 			t.Fatal(err)
 		}
@@ -224,7 +224,7 @@ func TestGetCollectionReturnsTheDefinition(t *testing.T) {
 
 	decodeBody(t, rec.Body.String(), &body)
 
-	if body.Definition.Name != "calls" || body.Definition.Write != catalog.Direct || body.Definition.ID != "call_id" || !strings.HasSuffix(body.Definition.Path, "*.ndjson") {
+	if body.Definition.Name != "calls" || body.Definition.Write != catalog.Direct || !strings.HasSuffix(body.Definition.Path, "*.ndjson") {
 		t.Fatalf("definition = %s", rec.Body.String())
 	}
 
@@ -345,7 +345,7 @@ func TestQuarantineLineIsCutAtTwoKiB(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	calls := catalog.Def{Name: "calls", Write: catalog.Direct, Path: filepath.Join(files, "*.ndjson"), ID: "call_id", MaxLineSize: 1 << 20}
+	calls := catalog.Def{Name: "calls", Write: catalog.Direct, Path: filepath.Join(files, "*.ndjson"), MaxLineSize: 1 << 20}
 
 	db, err := engine.Open(config.Config{
 		DataDir:     filepath.Join(root, "data"),

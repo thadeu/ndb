@@ -12,7 +12,7 @@ import (
 )
 
 type writeResult struct {
-	ID string `json:"id"`
+	ID string `json:"_id"`
 	V  uint64 `json:"v"`
 }
 
@@ -174,6 +174,16 @@ func (s *Server) insert(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 // update is the atomic update by filter: the body mixes the filter and the
 // write operators, the options are in the query string.
 func (s *Server) update(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+	s.runUpdate(w, r, db, "")
+}
+
+// updateID is POST /v1/c/{coll}/{id}/update: the same update, on the
+// document with this _id. The body filter keys are extra guards.
+func (s *Server) updateID(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+	s.runUpdate(w, r, db, r.PathValue("id"))
+}
+
+func (s *Server) runUpdate(w http.ResponseWriter, r *http.Request, db *engine.DB, id string) {
 	name := r.PathValue("coll")
 
 	body, err := readBody(w, r, db.MaxLine(name))
@@ -197,7 +207,16 @@ func (s *Server) update(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
-	res, err := col.Update(r.Context(), body, opts)
+	var res collection.UpdateResult
+
+	if id == "" {
+		res, err = col.Update(r.Context(), body, opts)
+	} else {
+		opts.Many = false
+
+		res, err = col.UpdateID(r.Context(), id, body, opts)
+	}
+
 	if err != nil {
 		writeError(w, err)
 
@@ -213,6 +232,49 @@ func (s *Server) update(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	}
 
 	writeJSON(w, http.StatusOK, out)
+}
+
+// get is GET /v1/c/{coll}/{id}: the document with its "_v".
+func (s *Server) get(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+	col, err := db.Get(r.PathValue("coll"))
+	if err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	doc, ok := col.Get(r.PathValue("id"))
+	if !ok {
+		writeError(w, &apiError{status: http.StatusNotFound, code: "not_found", msg: "no such document"})
+
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	_, _ = w.Write(append(doc.Doc, '\n'))
+}
+
+// removeID is DELETE /v1/c/{coll}/{id}.
+func (s *Server) removeID(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+	col, err := db.Get(r.PathValue("coll"))
+	if err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	n, err := col.DeleteID(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	s.metrics.writes.Add(int64(n))
+
+	writeJSON(w, http.StatusOK, map[string]int{"deleted": n})
 }
 
 func updateOpts(r *http.Request) (collection.UpdateOpts, error) {

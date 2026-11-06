@@ -107,6 +107,34 @@ func (c *Collection) Update(ctx context.Context, body []byte, opts collection.Up
 	return c.eng.Update(ctx, body, opts)
 }
 
+// UpdateID is the atomic update of one document by _id, see
+// collection.UpdateID.
+func (c *Collection) UpdateID(ctx context.Context, id string, body []byte, opts collection.UpdateOpts) (collection.UpdateResult, error) {
+	if c.eng == nil {
+		return collection.UpdateResult{}, ErrDirect
+	}
+
+	return c.eng.UpdateID(ctx, id, body, opts)
+}
+
+// DeleteID removes one document by _id and returns how many (0 or 1).
+func (c *Collection) DeleteID(ctx context.Context, id string) (int, error) {
+	if c.eng == nil {
+		return 0, ErrDirect
+	}
+
+	return c.eng.DeleteID(ctx, id)
+}
+
+// Get returns one document by _id with its "_v", in both write modes.
+func (c *Collection) Get(id string) (collection.Doc, bool) {
+	if c.eng == nil {
+		return c.mem.Get(id)
+	}
+
+	return c.eng.Get(id)
+}
+
 // InsertIn is Insert with every document expiring in d from now.
 func (c *Collection) InsertIn(ctx context.Context, d time.Duration, docs ...[]byte) ([]collection.Result, error) {
 	if c.eng == nil {

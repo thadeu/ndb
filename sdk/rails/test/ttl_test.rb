@@ -5,7 +5,6 @@ require "test_helper"
 class TtlTest < Minitest::Test
   def setup
     @session = model do
-      primary_key :sid
 
       attribute :user, :string
       attribute :expires_at, :datetime, expires: true
@@ -13,14 +12,14 @@ class TtlTest < Minitest::Test
   end
 
   def test_create_with_expire_in
-    @session.create!({ sid: "a", user: "u" }, expire_in: 1.hour)
+    @session.create!({ _id: "a", user: "u" }, expire_in: 1.hour)
 
     assert_in_delta 3600, @session.find("a").ttl, 2
     assert_in_delta 3600, @session.find("a").expires_at - Time.now, 2
   end
 
   def test_create_many_and_update_with_expire_in
-    @session.create!([{ sid: "a" }, { sid: "b" }], expire_in: "10m")
+    @session.create!([{ _id: "a" }, { _id: "b" }], expire_in: "10m")
 
     assert_in_delta 600, @session.find("b").ttl, 2
 
@@ -33,7 +32,7 @@ class TtlTest < Minitest::Test
   end
 
   def test_expire_and_persist_ttl
-    session = @session.create!(sid: "s1", user: "u")
+    session = @session.create!(_id: "s1", user: "u")
 
     assert_equal(-1, session.ttl)
 
@@ -53,7 +52,7 @@ class TtlTest < Minitest::Test
   end
 
   def test_missing_or_expired_document
-    session = @session.create!(sid: "s1")
+    session = @session.create!(_id: "s1")
 
     session.expire(60)
     Ndb::Rails.client.expire(@session.collection_name, "s1", at: Time.now - 60)

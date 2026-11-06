@@ -3,6 +3,7 @@ package collection_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,18 +13,18 @@ import (
 
 func newDirect(id string, max int64) *collection.Direct {
 	return collection.NewDirect(collection.DirectConfig{
-		Def:      catalog.Def{Name: "calls", ID: id, Write: catalog.Direct, Path: "/x/*.ndjson"},
+		Def:      catalog.Def{Name: "calls", Write: catalog.Direct, Path: "/x/*.ndjson"},
 		MaxBytes: max,
 	})
 }
 
 func TestDirectLastVersionWins(t *testing.T) {
-	d := newDirect("event_id", 0)
+	d := newDirect("_id", 0)
 
 	for i, line := range []string{
-		`{"event_id":"a","n":1}`,
-		`{"event_id":"a","n":2}`,
-		`{"event_id":"b","n":1}`,
+		`{"_id":"a","n":1}`,
+		`{"_id":"a","n":2}`,
+		`{"_id":"b","n":1}`,
 	} {
 		if err := d.Apply("f", int64(i*100), []byte(line)); err != nil {
 			t.Fatal(err)
@@ -41,10 +42,10 @@ func TestDirectLastVersionWins(t *testing.T) {
 }
 
 func TestDirectTombstone(t *testing.T) {
-	d := newDirect("event_id", 0)
+	d := newDirect("_id", 0)
 
-	_ = d.Apply("f", 0, []byte(`{"event_id":"a"}`))
-	_ = d.Apply("f", 20, []byte(`{"event_id":"a","_deleted":true}`))
+	_ = d.Apply("f", 0, []byte(`{"_id":"a"}`))
+	_ = d.Apply("f", 20, []byte(`{"_id":"a","_deleted":true}`))
 
 	if _, ok := d.Find("a"); ok || d.Len() != 0 {
 		t.Fatal("tombstone did not remove the doc")
@@ -56,9 +57,9 @@ func TestDirectTombstone(t *testing.T) {
 }
 
 func TestDirectBatchAllOrNothing(t *testing.T) {
-	d := newDirect("event_id", 0)
+	d := newDirect("_id", 0)
 
-	good := `{"_batch":[{"event_id":"a"},{"event_id":"b"},{"event_id":"a","_deleted":true}]}`
+	good := `{"_batch":[{"_id":"a"},{"_id":"b"},{"_id":"a","_deleted":true}]}`
 
 	if err := d.Apply("f", 0, []byte(good)); err != nil {
 		t.Fatal(err)
@@ -68,7 +69,7 @@ func TestDirectBatchAllOrNothing(t *testing.T) {
 		t.Fatalf("len = %d", d.Len())
 	}
 
-	bad := `{"_batch":[{"event_id":"c"},"oops",{"event_id":"d"}]}`
+	bad := `{"_batch":[{"_id":"c"},"oops",{"_id":"d"}]}`
 
 	if err := d.Apply("f", 100, []byte(bad)); err == nil {
 		t.Fatal("bad batch must fail")
@@ -92,9 +93,9 @@ func TestDirectNoIDUsesFileOffset(t *testing.T) {
 }
 
 func TestDirectRejectsBadLines(t *testing.T) {
-	d := newDirect("event_id", 0)
+	d := newDirect("_id", 0)
 
-	for _, line := range []string{`{bad`, `[1,2]`, `"s"`, `{"event_id":7}`, `{"event_id":""}`} {
+	for _, line := range []string{`{bad`, `[1,2]`, `"s"`, `{"_id":7}`, `{"_id":""}`} {
 		if err := d.Apply("f", 0, []byte(line)); err == nil || errors.Is(err, collection.ErrFull) {
 			t.Errorf("%s: err = %v", line, err)
 		}
@@ -106,38 +107,38 @@ func TestDirectRejectsBadLines(t *testing.T) {
 }
 
 func TestDirectFullThenRoom(t *testing.T) {
-	d := newDirect("event_id", 40)
+	d := newDirect("_id", 30)
 
-	if err := d.Apply("f", 0, []byte(`{"event_id":"a","pad":"0123456789012345"}`)); err != nil {
+	if err := d.Apply("f", 0, []byte(`{"_id":"a","pad":"0123456789012345"}`)); err != nil {
 		t.Fatal(err)
 	}
 
-	err := d.Apply("f", 50, []byte(`{"event_id":"b"}`))
+	err := d.Apply("f", 50, []byte(`{"_id":"b"}`))
 	if !errors.Is(err, collection.ErrFull) {
 		t.Fatalf("err = %v", err)
 	}
 
-	if err := d.Apply("f", 80, []byte(`{"event_id":"a","_deleted":true}`)); err != nil {
+	if err := d.Apply("f", 80, []byte(`{"_id":"a","_deleted":true}`)); err != nil {
 		t.Fatalf("a delete must fit when full: %v", err)
 	}
 
-	if err := d.Apply("f", 50, []byte(`{"event_id":"b"}`)); err != nil {
+	if err := d.Apply("f", 50, []byte(`{"_id":"b"}`)); err != nil {
 		t.Fatalf("after delete: %v", err)
 	}
 }
 
 func TestDirectQueryUsesIndexAndSeesTombstones(t *testing.T) {
 	d := collection.NewDirect(collection.DirectConfig{
-		Def: catalog.Def{Name: "calls", ID: "call_id", Write: catalog.Direct, Path: "/x/*.ndjson", Indexes: []string{"status"}},
+		Def: catalog.Def{Name: "calls", Write: catalog.Direct, Path: "/x/*.ndjson", Indexes: []string{"status"}},
 	})
 
 	t.Cleanup(func() { d.Close() })
 
 	lines := []string{
-		`{"call_id":"c1","status":"answered"}`,
-		`{"call_id":"c2","status":"failed"}`,
-		`{"call_id":"c3","status":"answered"}`,
-		`{"call_id":"c3","_deleted":true}`,
+		`{"_id":"c1","status":"answered"}`,
+		`{"_id":"c2","status":"failed"}`,
+		`{"_id":"c3","status":"answered"}`,
+		`{"_id":"c3","_deleted":true}`,
 	}
 
 	for i, l := range lines {
@@ -186,13 +187,13 @@ func waitDirectReady(t *testing.T, d *collection.Direct) {
 }
 
 func TestDirectAggregate(t *testing.T) {
-	d := newDirect("event_id", 0)
+	d := newDirect("_id", 0)
 
 	for i, line := range []string{
-		`{"event_id":"a","k":"x","n":1}`,
-		`{"event_id":"b","k":"x","n":2}`,
-		`{"event_id":"c","k":"y","n":4}`,
-		`{"event_id":"b","k":"y","n":8}`,
+		`{"_id":"a","k":"x","n":1}`,
+		`{"_id":"b","k":"x","n":2}`,
+		`{"_id":"c","k":"y","n":4}`,
+		`{"_id":"b","k":"y","n":8}`,
 	} {
 		if err := d.Apply("f", int64(i*100), []byte(line)); err != nil {
 			t.Fatal(err)
@@ -211,5 +212,54 @@ func TestDirectAggregate(t *testing.T) {
 
 	if len(page.Rows) != 2 || string(page.Rows[0]) != `{"_id":"x","s":1}` || string(page.Rows[1]) != `{"_id":"y","s":12}` {
 		t.Fatalf("rows = %s", page.Rows)
+	}
+}
+
+func TestDirectLineWithIDIsAddressableAndVersioned(t *testing.T) {
+	d := newDirect("", 0)
+
+	_ = d.Apply("a.ndjson", 0, []byte(`{"_id":"k1","n":1}`))
+	_ = d.Apply("a.ndjson", 30, []byte(`{"_id":"k1","n":2}`))
+
+	got, ok := d.Get("k1")
+	if !ok || field(t, got.Doc, "n") != float64(2) || field(t, got.Doc, "_id") != "k1" {
+		t.Fatalf("k1 = %s, %v", got.Doc, ok)
+	}
+
+	if field(t, got.Doc, "_v") == nil || d.Len() != 1 {
+		t.Fatalf("doc has no _v or old version kept: %s, len %d", got.Doc, d.Len())
+	}
+}
+
+func TestDirectLineWithoutIDHasNoIDAndIsNotAddressable(t *testing.T) {
+	d := newDirect("", 0)
+
+	_ = d.Apply("a.ndjson", 0, []byte(`{"n":1}`))
+
+	got, ok := d.Find("a.ndjson:0")
+	if !ok || field(t, got.Doc, "_id") != nil {
+		t.Fatalf("stored doc must have no _id: %s, %v", got.Doc, ok)
+	}
+
+	if _, ok := d.Get("a.ndjson:0"); ok {
+		t.Fatal("the fallback key must not answer Get")
+	}
+
+	q, err := d.ParseQuery([]byte(`{"where":{"n":1}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := d.Query(ctx, q)
+	if err != nil || len(page.Rows) != 1 || strings.Contains(string(page.Rows[0]), `"_id"`) {
+		t.Fatalf("rows = %q, err %v", page.Rows, err)
+	}
+}
+
+func TestDirectTombstoneWithoutIDIsMissingID(t *testing.T) {
+	d := newDirect("", 0)
+
+	if err := d.Apply("a.ndjson", 0, []byte(`{"n":1,"_deleted":true}`)); code(err) != "missing_id" {
+		t.Fatalf("err = %v", err)
 	}
 }

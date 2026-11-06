@@ -20,7 +20,7 @@ const app = "go"
 
 // The json tags matter in direct mode, where the app marshals the line itself.
 type Visit struct {
-	ID  string    `ndb:"id,id" json:"id"`
+	ID  string    `ndb:"_id" json:"_id"`
 	App string    `ndb:"app,index" json:"app"`
 	Pod string    `ndb:"pod" json:"pod"`
 	TS  time.Time `ndb:"ts,time" json:"ts"`

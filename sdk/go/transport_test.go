@@ -71,17 +71,17 @@ func TestFindStreamsRowsOverBothTransports(t *testing.T) {
 			db := openTest(t, tr.addr)
 			name := newColl()
 
-			rawPut(t, db, name, `{"id":"id"}`)
-			mustInsert(t, db, name, `[{"id":"a"},{"id":"b"},{"id":"c"}]`)
+			rawPut(t, db, name, `{}`)
+			mustInsert(t, db, name, `[{"_id":"a"},{"_id":"b"},{"_id":"c"}]`)
 
-			rows := rawFind(t, db, name, `{"sort":{"id":1}}`)
+			rows := rawFind(t, db, name, `{"sort":{"_id":1}}`)
 
 			if len(rows) != 3 {
 				t.Fatalf("rows: got %d, want 3", len(rows))
 			}
 
 			var first struct {
-				ID string `json:"id"`
+				ID string `json:"_id"`
 			}
 
 			if err := json.Unmarshal(rows[0], &first); err != nil || first.ID != "a" {
@@ -141,10 +141,10 @@ func TestErrorsAreTyped(t *testing.T) {
 	db := openTest(t, daemon.unix)
 	name := newColl()
 
-	rawPut(t, db, name, `{"id":"id"}`)
-	mustInsert(t, db, name, `[{"id":"a","n":1}]`)
+	rawPut(t, db, name, `{}`)
+	mustInsert(t, db, name, `[{"_id":"a","n":1}]`)
 
-	body := []byte(`{"id":"a","$bogus":{"n":2}}`)
+	body := []byte(`{"_id":"a","$bogus":{"n":2}}`)
 
 	_, err := db.do(context.Background(), http.MethodPost, collPath(name)+"/update", body)
 

@@ -7,14 +7,20 @@ import (
 	"strings"
 )
 
+// idField is the primary key of every collection.
+const idField = "_id"
+
 // schema is the mapping from a Go struct to a document, read from the
 // `ndb:"name[,option...]"` tags. Options: id, time, expires (the field
 // holds the expiry time of the document), index, unique, and version (the
 // field holds "_v"). A field without an ndb tag uses its json
 // name or its Go name; `ndb:"-"` or `json:"-"` skips it.
+//
+// The primary key is the field named _id (`ndb:"_id"` or `json:"_id"`). An
+// empty _id is not sent, so the daemon generates it. Natural keys use the
+// unique option.
 type schema struct {
 	fields  []schemaField
-	id      string
 	time    string
 	expires string
 	indexes []string
@@ -110,11 +116,7 @@ func (s *schema) add(sf reflect.StructField, i int, tag string) error {
 func (s *schema) option(name, opt string) error {
 	switch opt {
 	case "id":
-		if s.id != "" {
-			return fmt.Errorf("ndb: more than one id field (%s and %s)", s.id, name)
-		}
-
-		s.id = name
+		return fmt.Errorf("ndb: field %s: the id option is gone, the primary key is the field named _id (use unique for a natural key)", name)
 	case "time":
 		if s.time != "" {
 			return fmt.Errorf("ndb: more than one time field (%s and %s)", s.time, name)
@@ -140,15 +142,6 @@ func (s *schema) option(name, opt string) error {
 	return nil
 }
 
-// idField is the document field of the id. The daemon default is _id.
-func (s *schema) idField() string {
-	if s.id == "" {
-		return "_id"
-	}
-
-	return s.id
-}
-
 // encode turns a struct value into a JSON document, with the tag names.
 func (s *schema) encode(v any) (json.RawMessage, error) {
 	rv := reflect.ValueOf(v)
@@ -157,7 +150,7 @@ func (s *schema) encode(v any) (json.RawMessage, error) {
 	for _, f := range s.fields {
 		fv := rv.Field(f.index)
 
-		if f.name == s.id && fv.IsZero() || f.name == s.version {
+		if f.name == idField && fv.IsZero() || f.name == s.version {
 			continue
 		}
 

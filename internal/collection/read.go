@@ -246,7 +246,7 @@ func (c *Collection) EnsureIndex(field string) error {
 		return errf("invalid_index", "empty field")
 	}
 
-	if field == c.def.ID {
+	if field == idField {
 		return nil
 	}
 
@@ -595,7 +595,7 @@ func isRange(op string) bool {
 // byID answers eq and in on the id field with one map lookup per key.
 func (c *Collection) byID(conds []query.Cond) ([]cand, bool) {
 	for _, cd := range conds {
-		if cd.Path != c.def.ID || !isPoint(cd.Op) {
+		if cd.Path != idField || !isPoint(cd.Op) {
 			continue
 		}
 

@@ -23,7 +23,7 @@ func TestInsertInStampsTheExpiry(t *testing.T) {
 	clk := newClock()
 	c := openTTL(t, catalog.Def{ExpiresField: "exp"}, clk, false)
 
-	if _, err := c.InsertIn(ctx, time.Hour, doc(`{"id":"a","exp":"2999-01-01T00:00:00Z"}`), doc(`{"id":"b"}`)); err != nil {
+	if _, err := c.InsertIn(ctx, time.Hour, doc(`{"_id":"a","exp":"2999-01-01T00:00:00Z"}`), doc(`{"_id":"b"}`)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -50,7 +50,7 @@ func TestExpiryNeedsExpiresField(t *testing.T) {
 
 	plain := openTTL(t, catalog.Def{}, clk, false)
 
-	_, err := plain.InsertIn(ctx, time.Hour, doc(`{"id":"a"}`))
+	_, err := plain.InsertIn(ctx, time.Hour, doc(`{"_id":"a"}`))
 	codeIs(t, err, "ttl_not_enabled")
 
 	derived := openTTL(t, catalog.Def{TTL: "1h", Time: "at"}, clk, false)
@@ -61,7 +61,7 @@ func TestExpiryNeedsExpiresField(t *testing.T) {
 	_, err = derived.Persist(ctx, "a")
 	codeIs(t, err, "ttl_derived")
 
-	_, err = derived.Update(ctx, []byte(`{"id":"a","$set":{"x":1}}`), collection.UpdateOpts{ExpireIn: time.Hour})
+	_, err = derived.Update(ctx, []byte(`{"_id":"a","$set":{"x":1}}`), collection.UpdateOpts{ExpireIn: time.Hour})
 	codeIs(t, err, "ttl_derived")
 }
 
@@ -69,13 +69,13 @@ func TestUpdateExpireInWinsOverSet(t *testing.T) {
 	clk := newClock()
 	c := openTTL(t, catalog.Def{ExpiresField: "exp"}, clk, false)
 
-	if _, err := c.Insert(ctx, doc(`{"id":"a","n":1}`)); err != nil {
+	if _, err := c.Insert(ctx, doc(`{"_id":"a","n":1}`)); err != nil {
 		t.Fatal(err)
 	}
 
 	ch := collection.Change{Set: map[string]any{"n": 2, "exp": "2999-01-01T00:00:00Z"}, ExpireIn: 30 * time.Minute}
 
-	v, err := c.UpdateID(ctx, "a", ch, 0)
+	v, err := c.UpdateByID(ctx, "a", ch, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestExpireAndPersist(t *testing.T) {
 		clk := newClock()
 		c := openTTL(t, catalog.Def{ExpiresField: "exp"}, clk, seal)
 
-		if _, err := c.Insert(ctx, doc(`{"id":"s1"}`)); err != nil {
+		if _, err := c.Insert(ctx, doc(`{"_id":"s1"}`)); err != nil {
 			t.Fatal(err)
 		}
 
@@ -159,7 +159,7 @@ func TestExpireAndPersist(t *testing.T) {
 func TestExpireNeedsATime(t *testing.T) {
 	c := openTTL(t, catalog.Def{ExpiresField: "exp"}, newClock(), false)
 
-	if _, err := c.Insert(ctx, doc(`{"id":"a"}`)); err != nil {
+	if _, err := c.Insert(ctx, doc(`{"_id":"a"}`)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -171,7 +171,7 @@ func TestTTLDerivedAndEarliest(t *testing.T) {
 	clk := newClock()
 	c := openTTL(t, catalog.Def{TTL: "1h", Time: "at", ExpiresField: "exp"}, clk, false)
 
-	if _, err := c.Insert(ctx, doc(`{"id":"a","at":"`+rfc(clk.now())+`"}`), doc(`{"id":"b","at":"`+rfc(clk.now())+`","exp":"`+rfc(clk.now().Add(10*time.Minute))+`"}`)); err != nil {
+	if _, err := c.Insert(ctx, doc(`{"_id":"a","at":"`+rfc(clk.now())+`"}`), doc(`{"_id":"b","at":"`+rfc(clk.now())+`","exp":"`+rfc(clk.now().Add(10*time.Minute))+`"}`)); err != nil {
 		t.Fatal(err)
 	}
 

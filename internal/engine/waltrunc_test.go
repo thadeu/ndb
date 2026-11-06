@@ -27,7 +27,7 @@ func TestWALTruncationWaitsForTheSlowestStoredCursor(t *testing.T) {
 
 	dir := t.TempDir()
 	db := open(t, cfg(dir, nil))
-	col := ensure(t, db, catalog.Def{Name: "posts", ID: "_id", WALRetention: "1ms"})
+	col := ensure(t, db, catalog.Def{Name: "posts", WALRetention: "1ms"})
 
 	insertIDs(t, db, 1, 30)
 
@@ -91,7 +91,7 @@ func TestWALTruncationKeepsEverythingWithoutRetention(t *testing.T) {
 
 	dir := t.TempDir()
 	db := open(t, cfg(dir, nil))
-	col := ensure(t, db, catalog.Def{Name: "posts", ID: "_id"})
+	col := ensure(t, db, catalog.Def{Name: "posts"})
 
 	insertIDs(t, db, 1, 30)
 

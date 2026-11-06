@@ -37,20 +37,18 @@ collections:
   calls:
     write: direct
     path: /data/fsw-esl/calls/**/*.ndjson
-    id: call_id
     time: ts
     indexes: [status, dnis]
+    unique: [call_id]
 
   outbox:
     write: engine
-    id: event_id
     time: created_at
     indexes: [status]
     durability: strict
 
   sessions:
     write: engine
-    id: sid
     time: created_at
     ttl: 24h
 ```
@@ -69,13 +67,22 @@ An unknown key is an error at start (the file is read in strict mode). Sizes are
 | `blob_max_size` | largest blob. Default 1 GiB. |
 | `allow_implicit` | `false` forbids creating a collection by the first `insert`. Default `true`. |
 
+### Document id
+
+Every collection has `_id`, the primary key. It is not configurable.
+
+- **Engine mode:** an insert without `_id` gets a generated one: a UUIDv7 such as `0192f3a4-7c1e-7b2a-9f3d-1a2b3c4d5e6f`. Its text order is its creation order, so `sort: {"_id": 1}` is insertion order. An insert with `_id` keeps it: any non-empty string, such as `"user:42"`. `_id` is always in the stored document and cannot change (`immutable_id`).
+- **Direct mode:** a line with `_id` is a document with that id; a later line with the same `_id` is its next version. A line without `_id` is a document without `_id`: `find`, `aggregate` and `watch` see it, but the `/{_id}` routes cannot reach it. It is never updated. To give it a stable id, write `_id` in the line (`ndb.NewID()`, `Ndb.new_id`, `newId()` make the same UUIDv7).
+- A natural key (`email`, `call_id`, `sku`) is a `unique` field, not the id.
+- `id` in a definition is `400 catalog_invalid`: use `unique: [field]`, or name the field `_id`.
+
 ### Collection keys
 
 | Key | Meaning |
 |---|---|
 | `write` | `engine` (default): only ndb writes, through its WAL. `direct`: apps append to the files in `path`; ndb only reads. |
 | `path` | glob of source files. Direct mode only. `**` is allowed. A relative glob such as `./logs/*.ndjson` starts at the folder of `ndb.yml`, not at the folder where you start the daemon. |
-| `id` | field that identifies a document. Default `_id`. Direct mode without `id`: `file:offset`. |
+| `unique` | fields whose value can belong to one live document only (a natural key such as `email` or `call_id`). Dot paths allowed. A duplicate is `409 unique_violation`. |
 | `time` | time field. Used for zone maps, `$dateTrunc`, TTL and retention. |
 | `indexes` | fields with a secondary index (dot paths allowed). |
 | `unique` | fields with a unique constraint (engine mode). |
@@ -96,16 +103,15 @@ A collection with `expires_field` (engine mode) expires documents one by one, li
 ```yaml
 collections:
   sessions:
-    id: sid
     expires_field: exp
 ```
 
 | Redis | ndb | Notes |
 |---|---|---|
 | `SET k v EX 3600` | `insert` with `"expire_in": "1h"` (or `3600`) | also on `update` |
-| `EXPIRE k 1800` | `POST /v1/c/sessions/expire {"id","in":"30m"}` | `"at": "<RFC 3339>"` is `EXPIREAT` |
-| `PERSIST k` | `POST /v1/c/sessions/persist {"id"}` | |
-| `TTL k` | `GET /v1/c/sessions/ttl/{id}` | `-1` = never expires; `404` = missing or expired |
+| `EXPIRE k 1800` | `POST /v1/c/sessions/expire {"_id","in":"30m"}` | `"at": "<RFC 3339>"` is `EXPIREAT` |
+| `PERSIST k` | `POST /v1/c/sessions/persist {"_id"}` | |
+| `TTL k` | `GET /v1/c/sessions/{_id}/ttl` | `-1` = never expires; `404` = missing or expired |
 
 - `expire_in` wins over a value of `expires_field` that the same call carries.
 - `ttl: 24h` + `time` (every document expires a fixed time after its `time` field) is a derived expiry: `expire` and `persist` fail with `ttl_derived`.
@@ -113,8 +119,8 @@ collections:
 - CLI: `ndb expire sessions s1 30m`, `ndb persist sessions s1`, `ndb ttl sessions s1`.
 
 ```bash
-curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/sessions/insert -d '{"insert":[{"sid":"s1"}],"expire_in":"1h"}'
-curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/sessions/ttl/s1
+curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/sessions/insert -d '{"insert":[{"_id":"s1"}],"expire_in":"1h"}'
+curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/sessions/s1/ttl
 ```
 
 ```go
@@ -125,19 +131,19 @@ sessions.Persist(ctx, "s1")
 ```
 
 ```ruby
-client.insert("sessions", [{ sid: "s1" }], expire_in: 3600)
+client.insert("sessions", [{ _id: "s1" }], expire_in: 3600)
 client.expire("sessions", "s1", in: 1800)
 client.ttl("sessions", "s1")   # 1799, -1, or nil when missing
 client.persist("sessions", "s1")
 
-Session.create!({ sid: "s1" }, expire_in: 1.hour)   # ndb-rails
+Session.create!({ id: "s1" }, expire_in: 1.hour)   # ndb-rails
 session.expire(30.minutes)
 session.ttl
 session.persist_ttl!
 ```
 
 ```ts
-await sessions.insert({ sid: 's1' }, { expireIn: '1h' })
+await sessions.insert({ _id: 's1' }, { expireIn: '1h' })
 await sessions.expire('s1', '30m')
 await sessions.ttl('s1') // 1799, -1, or null
 await sessions.persist('s1')
@@ -177,7 +183,7 @@ ndb -config /etc/ndb/ndb.yml -token-file /etc/ndb/token
 
 ## Code and file together
 
-An app can also declare its collection from code (`ensure_collection`: the SDKs do it on boot). Merge rules: `indexes` are united; a different `id`, `write`, `path` or `time` is `catalog_conflict`; for `durability` and `retention`, `ndb.yml` wins.
+An app can also declare its collection from code (`ensure_collection`: the SDKs do it on boot). Merge rules: `indexes` are united; a different `write`, `path` or `time` is `catalog_conflict`; for `durability` and `retention`, `ndb.yml` wins.
 
 ## Durability
 

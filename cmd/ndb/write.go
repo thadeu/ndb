@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/thadeu/ndb/internal/tui"
 )
@@ -23,7 +24,9 @@ type deleteReport struct {
 }
 
 // runUpdate is "ndb update <collection> '<json>'": the JSON mixes the filter
-// and the write operators, like the body of POST /v1/c/{coll}/update.
+// and the write operators, like the body of POST /v1/c/{coll}/update. With an
+// _id as second argument, "ndb update <collection> <_id> '<ops json>'" updates
+// that one document.
 func runUpdate(args []string) error {
 	return update(args, os.Stdout)
 }
@@ -41,8 +44,9 @@ func update(args []string, out io.Writer) error {
 		return err
 	}
 
-	if len(pos) != 2 {
-		return errors.New(`usage: ndb update <collection> '<json>' [--many] [--upsert] [--expire-in 60s] [-url u] [-json]`)
+	path, body, err := updateTarget(pos)
+	if err != nil {
+		return err
 	}
 
 	c, err := ttlClient(cf, fl, "update")
@@ -52,7 +56,7 @@ func update(args []string, out io.Writer) error {
 
 	q := url.Values{}
 
-	setFlag(q, "many", *many)
+	setFlag(q, "many", *many && !byID(pos))
 	setFlag(q, "upsert", *upsert)
 
 	if *expireIn != "" {
@@ -61,7 +65,7 @@ func update(args []string, out io.Writer) error {
 
 	var rep updateReport
 
-	if err := c.post(writePath(pos[0], "update", q), []byte(pos[1]), &rep); err != nil {
+	if err := c.post(path+encodeQuery(q), body, &rep); err != nil {
 		return err
 	}
 
@@ -74,7 +78,35 @@ func update(args []string, out io.Writer) error {
 	return nil
 }
 
-// runDelete is "ndb delete <collection> '<json>'": the JSON is a filter.
+// byID tells the _id form of update and delete: the second argument is not
+// a JSON object.
+func byID(pos []string) bool {
+	return len(pos) >= 2 && !strings.HasPrefix(strings.TrimSpace(pos[1]), "{")
+}
+
+// updateTarget is the path and the body of an update, in the filter form or
+// in the _id form.
+func updateTarget(pos []string) (string, []byte, error) {
+	switch {
+	case len(pos) == 3 && byID(pos):
+		return "/v1/c/" + url.PathEscape(pos[0]) + "/" + url.PathEscape(pos[1]) + "/update", []byte(pos[2]), nil
+	case len(pos) == 2 && !byID(pos):
+		return "/v1/c/" + url.PathEscape(pos[0]) + "/update", []byte(pos[1]), nil
+	}
+
+	return "", nil, errors.New(`usage: ndb update <collection> '<json>' | <_id> '<ops json>' [--many] [--upsert] [--expire-in 60s] [-url u] [-json]`)
+}
+
+func encodeQuery(q url.Values) string {
+	if len(q) == 0 {
+		return ""
+	}
+
+	return "?" + q.Encode()
+}
+
+// runDelete is "ndb delete <collection> '<json>'": the JSON is a filter. A
+// plain _id instead of the JSON deletes that one document.
 func runDelete(args []string) error {
 	return remove(args, os.Stdout)
 }
@@ -91,7 +123,7 @@ func remove(args []string, out io.Writer) error {
 	}
 
 	if len(pos) != 2 {
-		return errors.New(`usage: ndb delete <collection> '<json>' [--many] [-url u] [-json]`)
+		return errors.New(`usage: ndb delete <collection> '<json>' | <_id> [--many] [-url u] [-json]`)
 	}
 
 	c, err := ttlClient(cf, fl, "delete")
@@ -105,7 +137,13 @@ func remove(args []string, out io.Writer) error {
 
 	var rep deleteReport
 
-	if err := c.post(writePath(pos[0], "delete", q), []byte(pos[1]), &rep); err != nil {
+	if byID(pos) {
+		err = c.del("/v1/c/"+url.PathEscape(pos[0])+"/"+url.PathEscape(pos[1]), &rep)
+	} else {
+		err = c.post(writePath(pos[0], "delete", q), []byte(pos[1]), &rep)
+	}
+
+	if err != nil {
 		return err
 	}
 

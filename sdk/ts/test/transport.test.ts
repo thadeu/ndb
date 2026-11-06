@@ -13,8 +13,8 @@ describe.each([
   it('streams NDJSON rows as an async iterator', async () => {
     const name = collName()
 
-    await db.request('PUT', `/v1/c/${name}`, { id: 'k' })
-    await db.request('POST', `/v1/c/${name}/insert`, { insert: [{ k: 'a' }, { k: 'b' }] })
+    await db.request('PUT', `/v1/c/${name}`, {})
+    await db.request('POST', `/v1/c/${name}/insert`, { insert: [{ _id: 'a', k: 'a' }, { _id: 'b', k: 'b' }] })
 
     const res = await db.stream('POST', `/v1/c/${name}/find`, { sort: { k: 1 } })
     const rows: unknown[] = []
@@ -23,7 +23,7 @@ describe.each([
       rows.push(row)
     }
 
-    expect(rows).toEqual([{ k: 'a' }, { k: 'b' }])
+    expect(rows).toEqual([{ _id: 'a', k: 'a' }, { _id: 'b', k: 'b' }])
   })
 
   it('raises a typed error with code and status', async () => {
@@ -38,7 +38,7 @@ describe.each([
   it('maps codes to subclasses', async () => {
     const name = collName()
 
-    await db.request('PUT', `/v1/c/${name}`, { id: 'k' })
+    await db.request('PUT', `/v1/c/${name}`, {})
     await db.request('POST', `/v1/c/${name}/insert`, { insert: [{ k: 'a' }] })
 
     const err = await db

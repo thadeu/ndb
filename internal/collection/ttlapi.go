@@ -68,7 +68,7 @@ func (c *Collection) InsertIn(ctx context.Context, d time.Duration, docs ...[]by
 
 // stampDoc sets the expiry field of a new document.
 func (c *Collection) stampDoc(doc json.RawMessage, at time.Time) (json.RawMessage, error) {
-	return applyChange(doc, Change{Set: map[string]any{c.def.ExpiresField: formatExpiry(at)}}, c.def.ID)
+	return applyChange(doc, Change{Set: map[string]any{c.def.ExpiresField: formatExpiry(at)}})
 }
 
 // stampChange adds the expiry to an update. It wins over the same field in
@@ -153,7 +153,7 @@ func (c *Collection) prepareSetExpiry(v *view, r setExpiryReq) ([]wal.Op, error)
 		ch = c.stampChange(Change{}, r.at)
 	}
 
-	doc, err := applyChange(raw, ch, c.def.ID)
+	doc, err := applyChange(raw, ch)
 	if err != nil {
 		return nil, err
 	}

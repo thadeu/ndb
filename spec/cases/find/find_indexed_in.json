@@ -3,7 +3,6 @@
   "collection": "posts",
   "setup": {
     "catalog": {
-      "id": "post_id",
       "write": "engine",
       "indexes": [
         "ref"
@@ -15,27 +14,27 @@
         "body": {
           "insert": [
             {
-              "post_id": "c0",
+              "_id": "c0",
               "ref": "p0"
             },
             {
-              "post_id": "c1",
+              "_id": "c1",
               "ref": "p1"
             },
             {
-              "post_id": "c2",
+              "_id": "c2",
               "ref": "p2"
             },
             {
-              "post_id": "c3",
+              "_id": "c3",
               "ref": "p0"
             },
             {
-              "post_id": "c4",
+              "_id": "c4",
               "ref": "p1"
             },
             {
-              "post_id": "c5",
+              "_id": "c5",
               "ref": "p2"
             }
           ]
@@ -60,19 +59,19 @@
     "ordered": false,
     "rows": [
       {
-        "post_id": "c1",
+        "_id": "c1",
         "ref": "p1"
       },
       {
-        "post_id": "c2",
+        "_id": "c2",
         "ref": "p2"
       },
       {
-        "post_id": "c4",
+        "_id": "c4",
         "ref": "p1"
       },
       {
-        "post_id": "c5",
+        "_id": "c5",
         "ref": "p2"
       }
     ]

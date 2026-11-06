@@ -8,6 +8,5 @@ collections:
   visits:
     write: direct
     path: /data/logs/*.ndjson
-    id: id
     time: ts
     indexes: [app]

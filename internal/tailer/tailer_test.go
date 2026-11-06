@@ -32,7 +32,6 @@ func newEnv(t *testing.T, glob, id string) *env {
 
 	def := catalog.Def{
 		Name:        "calls",
-		ID:          id,
 		Write:       catalog.Direct,
 		Path:        filepath.Join(data, glob),
 		MaxLineSize: 1024,
@@ -142,7 +141,7 @@ func run(t *testing.T, tl *tailer.Tailer) {
 }
 
 func line(id string) string {
-	return fmt.Sprintf(`{"id":%q}`+"\n", id)
+	return fmt.Sprintf(`{"_id":%q}`+"\n", id)
 }
 
 // countSink counts the lines the sink accepts.
@@ -176,7 +175,7 @@ func (c *countSink) count() int {
 }
 
 func TestDiscoveryAtStartNewFileNewFolder(t *testing.T) {
-	e := newEnv(t, "**/*.ndjson", "id")
+	e := newEnv(t, "**/*.ndjson", "_id")
 
 	e.write("a.ndjson", line("a1"))
 	e.write("sub/deep/b.ndjson", line("b1"))
@@ -199,7 +198,7 @@ func TestDiscoveryAtStartNewFileNewFolder(t *testing.T) {
 }
 
 func TestSingleStarDoesNotDescend(t *testing.T) {
-	e := newEnv(t, "*.ndjson", "id")
+	e := newEnv(t, "*.ndjson", "_id")
 
 	e.write("a.ndjson", line("a1"))
 	e.write("sub/b.ndjson", line("b1"))
@@ -232,7 +231,7 @@ func TestGlobMatch(t *testing.T) {
 }
 
 func TestWatchLatencyUnder100ms(t *testing.T) {
-	e := newEnv(t, "*.ndjson", "id")
+	e := newEnv(t, "*.ndjson", "_id")
 
 	e.write("a.ndjson", line("a0"))
 	run(t, e.open(func(c *tailer.Config) { c.Poll = time.Hour }))
@@ -256,7 +255,7 @@ func TestWatchLatencyUnder100ms(t *testing.T) {
 }
 
 func TestPollFallbackWithoutWatcher(t *testing.T) {
-	e := newEnv(t, "*.ndjson", "id")
+	e := newEnv(t, "*.ndjson", "_id")
 
 	run(t, e.open(func(c *tailer.Config) { c.NoWatch = true }))
 
@@ -268,7 +267,7 @@ func TestPollFallbackWithoutWatcher(t *testing.T) {
 }
 
 func TestRestartResumesFromCursor(t *testing.T) {
-	e := newEnv(t, "*.ndjson", "id")
+	e := newEnv(t, "*.ndjson", "_id")
 	cs := &countSink{inner: e.d}
 
 	e.write("a.ndjson", line("1")+line("2")+line("3"))
@@ -288,7 +287,7 @@ func TestRestartResumesFromCursor(t *testing.T) {
 }
 
 func TestRebuildReadsAgain(t *testing.T) {
-	e := newEnv(t, "*.ndjson", "id")
+	e := newEnv(t, "*.ndjson", "_id")
 	e.write("a.ndjson", line("1")+line("2"))
 
 	tl := e.open(nil)
@@ -305,10 +304,10 @@ func TestRebuildReadsAgain(t *testing.T) {
 }
 
 func TestPartialLineWaitsForNewline(t *testing.T) {
-	e := newEnv(t, "*.ndjson", "id")
+	e := newEnv(t, "*.ndjson", "_id")
 	tl := e.open(nil)
 
-	e.write("a.ndjson", line("1")+`{"id":"2`)
+	e.write("a.ndjson", line("1")+`{"_id":"2`)
 	syncOnce(t, tl)
 
 	if !e.has("1") || e.d.Len() != 1 {
@@ -324,7 +323,7 @@ func TestPartialLineWaitsForNewline(t *testing.T) {
 }
 
 func TestRotationRenameAndNewFile(t *testing.T) {
-	e := newEnv(t, "calls*.ndjson", "id")
+	e := newEnv(t, "calls*.ndjson", "_id")
 	tl := e.open(nil)
 
 	e.write("calls.ndjson", line("1"))
@@ -352,7 +351,7 @@ func TestRotationRenameAndNewFile(t *testing.T) {
 }
 
 func TestRotationOutOfGlobDrainsOldInode(t *testing.T) {
-	e := newEnv(t, "calls.ndjson", "id")
+	e := newEnv(t, "calls.ndjson", "_id")
 	tl := e.open(nil)
 
 	e.write("calls.ndjson", line("1"))
@@ -373,7 +372,7 @@ func TestRotationOutOfGlobDrainsOldInode(t *testing.T) {
 }
 
 func TestTruncateToZero(t *testing.T) {
-	e := newEnv(t, "*.ndjson", "id")
+	e := newEnv(t, "*.ndjson", "_id")
 	tl := e.open(nil)
 
 	e.write("a.ndjson", line("aaaa")+line("bbbb"))
@@ -392,7 +391,7 @@ func TestTruncateToZero(t *testing.T) {
 }
 
 func TestCopyTruncateRegrowsPastOffset(t *testing.T) {
-	e := newEnv(t, "*.ndjson", "id")
+	e := newEnv(t, "*.ndjson", "_id")
 	tl := e.open(nil)
 
 	e.write("a.ndjson", line("a")+line("b"))
@@ -413,7 +412,7 @@ func TestCopyTruncateRegrowsPastOffset(t *testing.T) {
 }
 
 func TestDeletedFileIsDrained(t *testing.T) {
-	e := newEnv(t, "*.ndjson", "id")
+	e := newEnv(t, "*.ndjson", "_id")
 	tl := e.open(nil)
 
 	e.write("a.ndjson", line("1"))
@@ -440,9 +439,9 @@ func TestDeletedFileIsDrained(t *testing.T) {
 }
 
 func TestLineSemanticsThroughTailer(t *testing.T) {
-	e := newEnv(t, "*.ndjson", "id")
+	e := newEnv(t, "*.ndjson", "_id")
 
-	e.write("a.ndjson", `{"id":"a","n":1}`+"\n"+`{"id":"a","n":2}`+"\n"+`{"id":"b"}`+"\n"+`{"id":"b","_deleted":true}`+"\n"+`{"_batch":[{"id":"c"},{"id":"d"}]}`+"\n")
+	e.write("a.ndjson", `{"_id":"a","n":1}`+"\n"+`{"_id":"a","n":2}`+"\n"+`{"_id":"b"}`+"\n"+`{"_id":"b","_deleted":true}`+"\n"+`{"_batch":[{"_id":"c"},{"_id":"d"}]}`+"\n")
 	syncOnce(t, e.open(nil))
 
 	got, _ := e.d.Find("a")
@@ -467,12 +466,12 @@ func TestNoIDCollectionUsesFileOffset(t *testing.T) {
 }
 
 func TestQuarantine(t *testing.T) {
-	e := newEnv(t, "*.ndjson", "id")
+	e := newEnv(t, "*.ndjson", "_id")
 	tl := e.open(nil)
 
-	big := `{"id":"big","pad":"` + strings.Repeat("x", 5000) + `"}`
+	big := `{"_id":"big","pad":"` + strings.Repeat("x", 5000) + `"}`
 
-	e.write("a.ndjson", line("ok1")+"{not json\n"+big+"\n"+`{"id":"w1"}{"id":"w2"}`+"\n"+line("ok2"))
+	e.write("a.ndjson", line("ok1")+"{not json\n"+big+"\n"+`{"_id":"w1"}{"_id":"w2"}`+"\n"+line("ok2"))
 	syncOnce(t, tl)
 
 	if !e.has("ok1") || !e.has("ok2") || e.d.Len() != 2 {
@@ -519,7 +518,7 @@ func TestQuarantine(t *testing.T) {
 }
 
 func TestBackpressureWaitsAndDropsNothing(t *testing.T) {
-	e := newEnv(t, "*.ndjson", "id")
+	e := newEnv(t, "*.ndjson", "_id")
 	e.d.SetMaxBytes(200)
 
 	var b strings.Builder
@@ -556,7 +555,7 @@ func TestBackpressureWaitsAndDropsNothing(t *testing.T) {
 }
 
 func TestCursorsRecorded(t *testing.T) {
-	e := newEnv(t, "*.ndjson", "id")
+	e := newEnv(t, "*.ndjson", "_id")
 	tl := e.open(nil)
 
 	e.write("a.ndjson", line("1")+line("2"))
@@ -605,7 +604,7 @@ func TestLagIsTheUnreadTail(t *testing.T) {
 }
 
 func TestQuarantineRowsReturnsTheLatestWithoutDuplicates(t *testing.T) {
-	e := newEnv(t, "*.ndjson", "id")
+	e := newEnv(t, "*.ndjson", "_id")
 	tl := e.open(nil)
 
 	e.write("a.ndjson", line("ok1")+"{bad one\n"+"{bad two\n"+line("ok2")+"{bad three\n")
@@ -638,7 +637,7 @@ func TestQuarantineRowsReturnsTheLatestWithoutDuplicates(t *testing.T) {
 }
 
 func TestQuarantineRowsWithoutFileIsEmpty(t *testing.T) {
-	e := newEnv(t, "*.ndjson", "id")
+	e := newEnv(t, "*.ndjson", "_id")
 	tl := e.open(nil)
 
 	rows, total, err := tl.QuarantineRows(10)
@@ -648,7 +647,7 @@ func TestQuarantineRowsWithoutFileIsEmpty(t *testing.T) {
 }
 
 func TestQuarantineFileKeepsOneEntryPerBadLineAcrossRebuilds(t *testing.T) {
-	e := newEnv(t, "*.ndjson", "id")
+	e := newEnv(t, "*.ndjson", "_id")
 	e.write("a.ndjson", line("ok1")+"{bad one\n"+line("ok2")+"{bad two\n")
 
 	for run := 0; run < 3; run++ {

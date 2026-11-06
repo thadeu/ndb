@@ -12,6 +12,7 @@ module Ndb
     include Persistence
 
     extend ActiveSupport::DescendantsTracker
+    extend DynamicFinders
 
     ENSURE_LOCK = Mutex.new
 
@@ -20,7 +21,7 @@ module Ndb
     class << self
       QUERY_METHODS = %i[
         where order limit offset page after group find find_by find_by! first count pluck exists?
-        find_each in_batches sum average minimum maximum to_a each
+        find_each in_batches sum average minimum maximum to_a each destroy_all delete_all
       ].freeze
 
       delegate(*QUERY_METHODS, to: :all)
@@ -35,6 +36,38 @@ module Ndb
         Relation.new(self)
       end
 
+      # Finds the record with these attributes, or builds an unsaved one.
+      def find_or_initialize_by(attrs, &block)
+        find_by(attrs) || new(attrs).tap { |record| block&.call(record) }
+      end
+
+      # Atomic through the daemon: two callers with the same attrs get one
+      # document. An invalid record is returned unsaved.
+      def find_or_create_by(attrs, &)
+        find_or_create(attrs, false, &)
+      end
+
+      def find_or_create_by!(attrs, &)
+        find_or_create(attrs, true, &)
+      end
+
+      # Destroys the records with these ids (callbacks run). Returns the
+      # record, or an array for an array of ids.
+      def destroy(id_or_ids)
+        return find(id_or_ids).each(&:destroy) if id_or_ids.is_a?(Array)
+
+        find(id_or_ids).tap(&:destroy)
+      end
+
+      # Deletes by _id in one daemon call, without callbacks. Returns the count.
+      def delete(id_or_ids)
+        ids = Array(id_or_ids)
+
+        return 0 if ids.empty?
+
+        where(primary_key => ids).delete_all
+      end
+
       def collection_name
         @collection_name || model_name.plural
       end
@@ -43,17 +76,10 @@ module Ndb
         @collection_name = name.to_s
       end
 
-      def primary_key(name = nil)
-        if name
-          @primary_key = name.to_s
-          attribute(name, :string) unless attribute_types.key?(@primary_key)
-        end
-
-        @primary_key || (superclass.respond_to?(:primary_key) ? superclass.primary_key : "_id")
-      end
-
-      def primary_key=(name)
-        primary_key(name)
+      # The primary key is always _id. For a natural key (an email, a SKU),
+      # keep _id and mark that attribute `unique: true`.
+      def primary_key
+        "_id"
       end
 
       def source(glob = nil)
@@ -99,7 +125,7 @@ module Ndb
 
       # The ensure_collection body for this model.
       def collection_definition
-        definition = { "id" => primary_key }
+        definition = {}
 
         definition["indexes"] = indexed_fields if indexed_fields.any?
         definition["unique"] = unique_fields if unique_fields.any?
@@ -158,6 +184,21 @@ module Ndb
 
       private
 
+      def dynamic_finder_klass = self
+      def dynamic_finder_scope = all
+
+      def find_or_create(attrs, bang, &block)
+        found = find_by(attrs)
+
+        return found if found
+
+        record = new(attrs)
+
+        block&.call(record)
+
+        bang ? record.create_unless_exists!(attrs) : record.create_unless_exists(attrs)
+      end
+
       def own_indexed
         @own_indexed ||= []
       end
@@ -169,15 +210,6 @@ module Ndb
       def inherited_list(name)
         superclass.respond_to?(name) ? superclass.public_send(name) : []
       end
-    end
-
-    # The generated _id stays out of the JSON when another field is the id.
-    def serializable_hash(options = nil)
-      hash = super
-
-      hash.delete("_id") if self.class.primary_key != "_id" && hash["_id"].nil?
-
-      hash
     end
   end
 end

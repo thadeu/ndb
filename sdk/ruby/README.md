@@ -59,13 +59,14 @@ Ndb::Client.new(
 
 ```ruby
 ndb.ensure_collection("calls",
-                      id: "call_id",
                       indexes: ["status"],
                       unique: ["caller"],
                       time: "at")      # also: expires_field:, ttl:
 
 ndb.collections   # => [{"name" => "calls", ...}]
 ```
+
+Every collection has the primary key `_id`. You can send your own (any non-empty string), or leave it out: the daemon makes a UUIDv7 (`Ndb.new_id` makes the same kind of id on the client). For a natural key such as an email, keep `_id` and declare that field in `unique:`.
 
 `ensure_collection` is idempotent. A different definition for an existing collection raises `Ndb::CatalogConflict`.
 
@@ -75,45 +76,47 @@ Every document has a version. A new document has version 1, and each change adds
 
 ```ruby
 results = ndb.insert("calls", [
-  { call_id: "c1", status: "answered", caller: "a", duration: 42 },
-  { call_id: "c2", status: "failed", caller: "b", duration: 5 }
+  { _id: "c1", status: "answered", caller: "a", duration: 42 },
+  { _id: "c2", status: "failed", caller: "b", duration: 5 }
 ])
-results   # => [{"id" => "c1", "v" => 1}, {"id" => "c2", "v" => 1}]
+results   # => [{"_id" => "c1", "v" => 1}, {"_id" => "c2", "v" => 1}]
 
-# Atomic update by filter: the filter, then the write operators.
-ndb.update("calls", { call_id: "c1" }, { "$set" => { status: "done" }, "$unset" => { caller: true } })
-# => {"matched" => 1, "modified" => 1, "doc" => {"call_id" => "c1", ..., "_v" => 2}}
+ndb.get("calls", "c1")   # => {"_id" => "c1", ..., "_v" => 1}, or nil
 
-ndb.update("calls", { call_id: "c1", _v: 2 }, { "$set" => { duration: 50 } })   # only if the version is still 2
-ndb.update("stock", { sku: "a", qty: { "$gte" => 1 } }, { "$inc" => { qty: -1 } })   # guarded decrement
+# Atomic update by _id (a String) or by filter (a Hash): the target, then the write operators.
+ndb.update("calls", "c1", { "$set" => { status: "done" }, "$unset" => { caller: true } })
+# => {"matched" => 1, "modified" => 1, "doc" => {"_id" => "c1", ..., "_v" => 2}}
+
+ndb.update("calls", { _id: "c1", _v: 2 }, { "$set" => { duration: 50 } })   # only if the version is still 2
+ndb.update("stock", { _id: "a", qty: { "$gte" => 1 } }, { "$inc" => { qty: -1 } })   # guarded decrement
 
 ndb.update("calls", { status: "failed" }, { "$set" => { status: "retry" } }, many: true)   # => {"matched" => 3, "modified" => 3}
 ndb.update("counters", { name: "hits" }, { "$inc" => { n: 1 } }, upsert: true)
 
-ndb.delete("calls", { call_id: "c2" })                  # => {"deleted" => 1}
+ndb.delete("calls", "c2")                                # by _id => {"deleted" => 1}
 ndb.delete("calls", { status: "failed" }, many: true)
 ```
 
-- Operators: `$set`, `$unset`, `$inc`, `$push` (with `{ "$each" => [...] }`), `$pull`, `$min`, `$max`. Field names can be dot paths. A key of the operators without `$` raises `ArgumentError` before anything is sent.
+- Operators: `$set`, `$setOnInsert` (like `$set`, but only when an upsert creates the document), `$unset`, `$inc`, `$push` (with `{ "$each" => [...] }`), `$pull`, `$min`, `$max`. Field names can be dot paths. A key of the operators without `$` raises `ArgumentError` before anything is sent.
 - Nothing matched is not an error: `matched` is 0. A stale `_v` is a filter that matches nothing, so read again and retry. `modified` is 0 when the operators leave the document as it is.
-- `many: true` needs the id or an indexed field in the filter (`Ndb::UnindexedMany`). `upsert: true` creates the document from the equality fields of the filter. The answer has `doc` only for one document.
+- `many: true` needs `_id` or an indexed field in the filter (`Ndb::UnindexedMany`), and does not apply to an `_id` String. `upsert: true` creates the document from the equality fields of the filter. The answer has `doc` only for one document.
 - The contract errors are `Ndb::UnknownOperator`, `NoUpdate`, `ConflictingUpdate`, `InvalidField`, `UnindexedMany` and `EmptyFilter`, all under `Ndb::InvalidUpdate`.
-- A duplicate id raises `Ndb::UniqueViolation` (code `duplicate_id`). A broken unique field raises it too (code `unique_violation`).
+- A duplicate `_id` raises `Ndb::UniqueViolation` (code `duplicate_id`). A broken unique field raises it too (code `unique_violation`).
 
 ## Expiry (TTL like Redis)
 
 The collection needs `expires_field`.
 
 ```ruby
-ndb.ensure_collection("sessions", { id: "sid", expires_field: "exp" })
+ndb.ensure_collection("sessions", { expires_field: "exp" })
 
-ndb.insert("sessions", [{ sid: "s1" }], expire_in: 3600)  # seconds, or "1h" / "30m" / "1d"
-ndb.update("sessions", { sid: "s1" }, { "$set" => { user: "u" } }, expire_in: "30m")
+ndb.insert("sessions", [{ _id: "s1" }], expire_in: 3600)  # seconds, or "1h" / "30m" / "1d"
+ndb.update("sessions", "s1", { "$set" => { user: "u" } }, expire_in: "30m")
 
-ndb.expire("sessions", "s1", in: 1800)                     # => {"id", "v", "expires_at"}
+ndb.expire("sessions", "s1", in: 1800)                     # => {"_id", "v", "expires_at"}
 ndb.expire("sessions", "s1", at: Time.now + 7200)
 ndb.ttl("sessions", "s1")                                  # => 7199, -1 (never expires), or nil (missing or expired)
-ndb.persist("sessions", "s1")                              # => {"id", "v"}
+ndb.persist("sessions", "s1")                              # => {"_id", "v"}
 ```
 
 - `expire_in` wins over a value of `expires_field` in the same call. `ttl` rounds up to whole seconds.
@@ -128,11 +131,11 @@ ndb.persist("sessions", "s1")                              # => {"id", "v"}
 page = ndb.find("calls",
                 where: { status: "answered", duration: { "$gte" => 30, "$lte" => 60 } },
                 sort: { at: -1 },
-                fields: %w[call_id status],
+                fields: %w[_id status],
                 limit: 50,
                 skip: 0)
 
-page.rows          # => [{"call_id" => "c1", "status" => "answered"}, ...]
+page.rows          # => [{"_id" => "c1", "status" => "answered"}, ...]
 page.plan          # "id", "index:status", "scan" or "snapshot"
 page.examined      # rows the daemon looked at
 ```
@@ -148,7 +151,7 @@ ndb.find("calls", where: { "$or" => [{ status: "failed" }, { duration: { "$gt" =
 ndb.find("calls", where: { "agent.id" => 7 })   # dot path
 ```
 
-- `sort: { at: -1, call_id: 1 }`: `1` ascending, `-1` descending. The key order is the sort order. The id is always the last key.
+- `sort: { at: -1, _id: 1 }`: `1` ascending, `-1` descending. The key order is the sort order. The id is always the last key.
 - `versions: true` adds the field `_v` (the document version) to each row.
 
 ### Regular expressions
@@ -187,9 +190,9 @@ page.total   # how many documents match, whatever the limit
 cursor = nil
 
 loop do
-  page = ndb.find("calls", where: { status: "answered" }, sort: { call_id: 1 }, limit: 100, after: cursor)
+  page = ndb.find("calls", where: { status: "answered" }, sort: { _id: 1 }, limit: 100, after: cursor)
 
-  page.rows.each { |row| puts row["call_id"] }
+  page.rows.each { |row| puts row["_id"] }
 
   cursor = page.next_cursor
 
@@ -230,7 +233,7 @@ A watch streams the changes of a collection to a named consumer: first the event
 ```ruby
 begin
   ndb.watch("calls", "relay", where: { status: "failed" }) do |event|
-    # event has "pos", "op" ("put" or "del"), "id", "v" and "doc"
+    # event has "pos", "op" ("put" or "del"), "_id", "v" and "doc"
     handle(event)
 
     ndb.ack("calls", "relay", event["pos"])
@@ -257,7 +260,7 @@ Large values live in the blob store. A document keeps only a reference.
 stored = ndb.put_blob(File.open("call.wav"), "audio/wav")   # an IO, streamed in chunks
 stored   # => {"$blob" => "sha256:...", "size" => 123456, "type" => "audio/wav"}
 
-ndb.insert("calls", [{ call_id: "c9", recording: stored }])
+ndb.insert("calls", [{ _id: "c9", recording: stored }])
 
 ndb.get_blob(stored["$blob"])                    # all the bytes
 ndb.get_blob(stored["$blob"], from: 0, to: 1023) # bytes 0..1023 (inclusive)
@@ -291,7 +294,7 @@ Any other code is a plain `Ndb::Error`. A response that is not a daemon error ha
 
 ```ruby
 begin
-  ndb.insert("calls", [{ call_id: "c1" }])
+  ndb.insert("calls", [{ _id: "c1" }])
 rescue Ndb::UniqueViolation => e
   e.code    # "duplicate_id"
   e.status  # 409

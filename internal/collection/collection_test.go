@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -20,10 +21,6 @@ func open(t *testing.T, dir string, def catalog.Def) *collection.Collection {
 
 	if def.Name == "" {
 		def.Name = "posts"
-	}
-
-	if def.ID == "" {
-		def.ID = "post_id"
 	}
 
 	c, err := collection.Open(collection.Config{Dir: dir, FS: fs.OS{}, Def: def})
@@ -65,7 +62,7 @@ func code(err error) string {
 func TestInsertAndFind(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	res, err := c.Insert(ctx, doc(`{"post_id":"p1","status":"draft"}`))
+	res, err := c.Insert(ctx, doc(`{"_id":"p1","status":"draft"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +81,7 @@ func TestInsertAndFind(t *testing.T) {
 func TestInsertManyIsOneTransaction(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	_, err := c.Insert(ctx, doc(`{"post_id":"a"}`), doc(`{"post_id":"a"}`))
+	_, err := c.Insert(ctx, doc(`{"_id":"a"}`), doc(`{"_id":"a"}`))
 
 	if code(err) != "duplicate_id" {
 		t.Fatalf("want duplicate_id, got %v", err)
@@ -98,12 +95,11 @@ func TestInsertManyIsOneTransaction(t *testing.T) {
 func TestInsertErrors(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	c.Insert(ctx, doc(`{"post_id":"p1"}`))
+	c.Insert(ctx, doc(`{"_id":"p1"}`))
 
 	cases := map[string]json.RawMessage{
-		"duplicate_id": doc(`{"post_id":"p1"}`),
-		"missing_id":   doc(`{"status":"x"}`),
-		"invalid_id":   doc(`{"post_id":5}`),
+		"duplicate_id": doc(`{"_id":"p1"}`),
+		"invalid_id":   doc(`{"_id":5}`),
 		"invalid_doc":  doc(`[1,2]`),
 	}
 
@@ -115,7 +111,7 @@ func TestInsertErrors(t *testing.T) {
 }
 
 func TestGeneratedID(t *testing.T) {
-	c := open(t, t.TempDir(), catalog.Def{ID: "_id"})
+	c := open(t, t.TempDir(), catalog.Def{})
 
 	res, err := c.Insert(ctx, doc(`{"status":"x"}`))
 	if err != nil {
@@ -124,7 +120,7 @@ func TestGeneratedID(t *testing.T) {
 
 	got, _ := c.Find(res[0].ID)
 
-	if len(res[0].ID) != 24 || field(t, got.Doc, "_id") != res[0].ID {
+	if len(res[0].ID) != 36 || field(t, got.Doc, "_id") != res[0].ID {
 		t.Fatalf("id %q, doc %s", res[0].ID, got.Doc)
 	}
 }
@@ -132,9 +128,9 @@ func TestGeneratedID(t *testing.T) {
 func TestUpdateSetUnset(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	c.Insert(ctx, doc(`{"post_id":"p1","status":"draft","tmp":1,"meta":{"a":1}}`))
+	c.Insert(ctx, doc(`{"_id":"p1","status":"draft","tmp":1,"meta":{"a":1}}`))
 
-	v, err := c.UpdateID(ctx, "p1", collection.Change{
+	v, err := c.UpdateByID(ctx, "p1", collection.Change{
 		Set:   map[string]any{"status": "published", "meta.b": 2},
 		Unset: []string{"tmp"},
 	}, 0)
@@ -158,17 +154,17 @@ func TestUpdateSetUnset(t *testing.T) {
 func TestUpdateErrors(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	c.Insert(ctx, doc(`{"post_id":"p1"}`))
+	c.Insert(ctx, doc(`{"_id":"p1"}`))
 
-	if _, err := c.UpdateID(ctx, "nope", collection.Change{Set: map[string]any{"a": 1}}, 0); code(err) != "not_found" {
+	if _, err := c.UpdateByID(ctx, "nope", collection.Change{Set: map[string]any{"a": 1}}, 0); code(err) != "not_found" {
 		t.Fatalf("got %v", err)
 	}
 
-	if _, err := c.UpdateID(ctx, "p1", collection.Change{Set: map[string]any{"a": 1}}, 9); code(err) != "not_found" {
+	if _, err := c.UpdateByID(ctx, "p1", collection.Change{Set: map[string]any{"a": 1}}, 9); code(err) != "not_found" {
 		t.Fatalf("got %v", err)
 	}
 
-	if _, err := c.UpdateID(ctx, "p1", collection.Change{Set: map[string]any{"post_id": "p2"}}, 0); code(err) != "immutable_id" {
+	if _, err := c.UpdateByID(ctx, "p1", collection.Change{Set: map[string]any{"_id": "p2"}}, 0); code(err) != "immutable_id" {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -176,7 +172,7 @@ func TestUpdateErrors(t *testing.T) {
 func TestVersionFilterUnderConcurrency(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	c.Insert(ctx, doc(`{"post_id":"p1","n":0}`))
+	c.Insert(ctx, doc(`{"_id":"p1","n":0}`))
 
 	const workers = 20
 
@@ -187,7 +183,7 @@ func TestVersionFilterUnderConcurrency(t *testing.T) {
 
 	for i := range workers {
 		wg.Go(func() {
-			_, err := c.UpdateID(ctx, "p1", collection.Change{Set: map[string]any{"n": i + 1}}, 1)
+			_, err := c.UpdateByID(ctx, "p1", collection.Change{Set: map[string]any{"n": i + 1}}, 1)
 
 			if err == nil {
 				mu.Lock()
@@ -209,7 +205,7 @@ func TestVersionFilterUnderConcurrency(t *testing.T) {
 func TestUpdatesInOneBatchSeeEachOther(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	c.Insert(ctx, doc(`{"post_id":"p1"}`))
+	c.Insert(ctx, doc(`{"_id":"p1"}`))
 
 	const n = 50
 
@@ -217,7 +213,7 @@ func TestUpdatesInOneBatchSeeEachOther(t *testing.T) {
 
 	for i := range n {
 		wg.Go(func() {
-			if _, err := c.UpdateID(ctx, "p1", collection.Change{Set: map[string]any{fmt.Sprint("f", i): i}}, 0); err != nil {
+			if _, err := c.UpdateByID(ctx, "p1", collection.Change{Set: map[string]any{fmt.Sprint("f", i): i}}, 0); err != nil {
 				t.Error(err)
 			}
 		})
@@ -239,13 +235,13 @@ func TestUpdatesInOneBatchSeeEachOther(t *testing.T) {
 func TestDelete(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	c.Insert(ctx, doc(`{"post_id":"p1"}`))
+	c.Insert(ctx, doc(`{"_id":"p1"}`))
 
-	if n, err := c.Delete(ctx, []byte(`{"post_id":"p1","_v":5}`), false); err != nil || n != 0 {
+	if n, err := c.Delete(ctx, []byte(`{"_id":"p1","_v":5}`), false); err != nil || n != 0 {
 		t.Fatalf("stale version: n=%d err=%v", n, err)
 	}
 
-	if n, err := c.Delete(ctx, []byte(`{"post_id":"p1","_v":1}`), false); err != nil || n != 1 {
+	if n, err := c.Delete(ctx, []byte(`{"_id":"p1","_v":1}`), false); err != nil || n != 1 {
 		t.Fatalf("n=%d err=%v", n, err)
 	}
 
@@ -253,11 +249,11 @@ func TestDelete(t *testing.T) {
 		t.Fatal("found after delete")
 	}
 
-	if err := c.DeleteID(ctx, "p1"); code(err) != "not_found" {
+	if err := c.DeleteByID(ctx, "p1"); code(err) != "not_found" {
 		t.Fatalf("got %v", err)
 	}
 
-	if _, err := c.Insert(ctx, doc(`{"post_id":"p1"}`)); err != nil {
+	if _, err := c.Insert(ctx, doc(`{"_id":"p1"}`)); err != nil {
 		t.Fatalf("insert after delete: %v", err)
 	}
 }
@@ -265,25 +261,25 @@ func TestDelete(t *testing.T) {
 func TestUnique(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{Unique: []string{"slug"}})
 
-	c.Insert(ctx, doc(`{"post_id":"p1","slug":"hello"}`))
+	c.Insert(ctx, doc(`{"_id":"p1","slug":"hello"}`))
 
-	if _, err := c.Insert(ctx, doc(`{"post_id":"p2","slug":"hello"}`)); code(err) != "unique_violation" {
+	if _, err := c.Insert(ctx, doc(`{"_id":"p2","slug":"hello"}`)); code(err) != "unique_violation" {
 		t.Fatalf("insert: got %v", err)
 	}
 
-	c.Insert(ctx, doc(`{"post_id":"p2","slug":"other"}`))
+	c.Insert(ctx, doc(`{"_id":"p2","slug":"other"}`))
 
-	if _, err := c.UpdateID(ctx, "p2", collection.Change{Set: map[string]any{"slug": "hello"}}, 0); code(err) != "unique_violation" {
+	if _, err := c.UpdateByID(ctx, "p2", collection.Change{Set: map[string]any{"slug": "hello"}}, 0); code(err) != "unique_violation" {
 		t.Fatalf("update: got %v", err)
 	}
 
-	c.DeleteID(ctx, "p1")
+	c.DeleteByID(ctx, "p1")
 
-	if _, err := c.UpdateID(ctx, "p2", collection.Change{Set: map[string]any{"slug": "hello"}}, 0); err != nil {
+	if _, err := c.UpdateByID(ctx, "p2", collection.Change{Set: map[string]any{"slug": "hello"}}, 0); err != nil {
 		t.Fatalf("slug free after delete: %v", err)
 	}
 
-	if _, err := c.Insert(ctx, doc(`{"post_id":"p3"}`), doc(`{"post_id":"p4"}`)); err != nil {
+	if _, err := c.Insert(ctx, doc(`{"_id":"p3"}`), doc(`{"_id":"p4"}`)); err != nil {
 		t.Fatalf("missing unique field must not collide: %v", err)
 	}
 }
@@ -291,7 +287,7 @@ func TestUnique(t *testing.T) {
 func TestUniqueInsideOneTransaction(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{Unique: []string{"slug"}})
 
-	_, err := c.Insert(ctx, doc(`{"post_id":"a","slug":"x"}`), doc(`{"post_id":"b","slug":"x"}`))
+	_, err := c.Insert(ctx, doc(`{"_id":"a","slug":"x"}`), doc(`{"_id":"b","slug":"x"}`))
 
 	if code(err) != "unique_violation" {
 		t.Fatalf("got %v", err)
@@ -307,9 +303,9 @@ func TestReopenRestoresState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c.Insert(ctx, doc(`{"post_id":"p1","slug":"a"}`), doc(`{"post_id":"p2","slug":"b"}`))
-	c.UpdateID(ctx, "p1", collection.Change{Set: map[string]any{"x": 1}}, 0)
-	c.DeleteID(ctx, "p2")
+	c.Insert(ctx, doc(`{"_id":"p1","slug":"a"}`), doc(`{"_id":"p2","slug":"b"}`))
+	c.UpdateByID(ctx, "p1", collection.Change{Set: map[string]any{"x": 1}}, 0)
+	c.DeleteByID(ctx, "p2")
 	c.Close()
 
 	again := open(t, dir, def)
@@ -324,18 +320,53 @@ func TestReopenRestoresState(t *testing.T) {
 		t.Fatal("deleted doc came back")
 	}
 
-	if _, err := again.Insert(ctx, doc(`{"post_id":"p3","slug":"a"}`)); code(err) != "unique_violation" {
+	if _, err := again.Insert(ctx, doc(`{"_id":"p3","slug":"a"}`)); code(err) != "unique_violation" {
 		t.Fatalf("unique index not rebuilt: %v", err)
 	}
 
-	if _, err := again.Insert(ctx, doc(`{"post_id":"p4","slug":"b"}`)); err != nil {
+	if _, err := again.Insert(ctx, doc(`{"_id":"p4","slug":"b"}`)); err != nil {
 		t.Fatalf("deleted slug still taken: %v", err)
 	}
 }
 
 func withName(d catalog.Def) catalog.Def {
 	d.Name = "posts"
-	d.ID = "post_id"
 
 	return d
+}
+
+func TestInsertAcceptsAnyNonEmptyStringID(t *testing.T) {
+	c := open(t, t.TempDir(), catalog.Def{})
+
+	for _, id := range []string{"alice@x.com", "a b/c", "42"} {
+		res, err := c.Insert(ctx, doc(`{"_id":`+strconv.Quote(id)+`,"n":1}`))
+		if err != nil || res[0].ID != id {
+			t.Fatalf("%q: %v %v", id, res, err)
+		}
+
+		got, ok := c.Find(id)
+		if !ok || field(t, got.Doc, "_id") != id {
+			t.Fatalf("%q: doc %s", id, got.Doc)
+		}
+	}
+
+	for _, bad := range []string{`{"_id":""}`, `{"_id":null}`, `{"_id":1}`} {
+		if _, err := c.Insert(ctx, doc(bad)); code(err) != "invalid_id" {
+			t.Fatalf("%s: %v", bad, err)
+		}
+	}
+}
+
+func TestInsertWithoutIDKeepsItInTheStoredDoc(t *testing.T) {
+	c := open(t, t.TempDir(), catalog.Def{})
+
+	res, err := c.Insert(ctx, doc(`{"n":1}`), doc(`{"n":2}`))
+	if err != nil || res[0].ID >= res[1].ID {
+		t.Fatalf("ids %v, err %v", res, err)
+	}
+
+	got, ok := c.Get(res[1].ID)
+	if !ok || field(t, got.Doc, "_id") != res[1].ID || field(t, got.Doc, "_v") == nil {
+		t.Fatalf("doc %s", got.Doc)
+	}
 }

@@ -1,110 +1,175 @@
 package main
 
 import (
-	"bytes"
-	"context"
+	"compress/gzip"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"net"
-	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/thadeu/ndb/internal/backup"
-	"github.com/thadeu/ndb/internal/config"
+	"github.com/thadeu/ndb/internal/engine"
 	"github.com/thadeu/ndb/internal/lock"
 )
 
-// runBackup is "ndb backup [flags] <dest>". With the daemon stopped it copies
-// the whole data dir. With the daemon running it asks the daemon, on its unix
-// socket, for a consistent online backup (see engine.DB.Backup).
+// runBackup is "ndb backup <dest|-> [flags]". It writes one .ndb file (or
+// .ndb.gz with -gzip). With the daemon stopped it reads the data dir; with the
+// daemon running it streams a consistent online backup from the unix socket
+// (see engine.DB.Backup).
 func runBackup(args []string) error {
-	fl := flag.NewFlagSet("ndb backup", flag.ContinueOnError)
-
-	cfgPath := fl.String("config", "ndb.yml", "optional config file (absent = defaults)")
-	dataDir := fl.String("data-dir", "", "data dir (overrides ndb.yml)")
-	unix := fl.String("unix", "", "unix socket of the running daemon (overrides ndb.yml)")
-
-	if err := fl.Parse(args); err != nil {
-		return err
-	}
-
-	if fl.NArg() != 1 {
-		return errors.New("usage: ndb backup [-config f] [-data-dir d] [-unix sock] <dest>")
-	}
-
-	cfg, err := config.Load(*cfgPath)
-	if err != nil {
-		return err
-	}
-
-	set := map[string]bool{}
-
-	fl.Visit(func(f *flag.Flag) { set[f.Name] = true })
-
-	if set["data-dir"] {
-		cfg.DataDir = *dataDir
-	}
-
-	if set["unix"] {
-		cfg.Listen.Unix = *unix
-	}
-
-	dest, err := filepath.Abs(fl.Arg(0))
-	if err != nil {
-		return err
-	}
-
-	err = backup.Offline(cfg.DataDir, dest)
-
-	if err == nil {
-		fmt.Fprintf(os.Stderr, "backup: daemon is stopped, copied the whole data dir to %s\n", dest)
-
-		return nil
-	}
-
-	if !errors.Is(err, lock.ErrLocked) {
-		return err
-	}
-
-	return backupOnline(cfg.Listen.Unix, dest)
+	return backupTo(args, os.Stdout, os.Stderr)
 }
 
-func backupOnline(sock, dest string) error {
-	if sock == "" {
-		return errors.New("the daemon is running and has no unix socket; online backup needs it")
-	}
+func backupTo(args []string, stdout, stderr io.Writer) error {
+	fl := flag.NewFlagSet("ndb backup", flag.ContinueOnError)
 
-	body, err := json.Marshal(map[string]string{"dest": dest})
+	conn := addConnFlags(fl)
+	gz := fl.Bool("gzip", false, "compress the file with gzip (.ndb.gz)")
+	force := fl.Bool("force", false, "replace the file if it exists")
+	noBlobs := fl.Bool("no-blobs", false, "leave the blob content out (documents keep their references)")
+
+	pos, err := parseInterspersed(fl, args)
 	if err != nil {
 		return err
 	}
 
-	client := &http.Client{Transport: &http.Transport{
-		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			var d net.Dialer
+	if len(pos) != 1 {
+		return errors.New("usage: ndb backup <dest|-> [-gzip] [-force] [-no-blobs] [-config f] [-data-dir d] [-url u]")
+	}
 
-			return d.DialContext(ctx, "unix", sock)
-		},
-	}}
-
-	resp, err := client.Post("http://ndb/v1/backup", "application/json", bytes.NewReader(body))
+	t, err := conn.resolve(fl)
 	if err != nil {
 		return err
 	}
 
-	defer resp.Body.Close()
-
-	out, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("daemon refused the backup (%d): %s", resp.StatusCode, bytes.TrimSpace(out))
+	produce := func(w io.Writer) error {
+		return produceBackup(t, w, *noBlobs)
 	}
 
-	fmt.Fprintf(os.Stderr, "backup: online, WAL prefix copied to %s: %s\n", dest, bytes.TrimSpace(out))
+	if pos[0] == "-" {
+		return writeStream(stdout, *gz, produce)
+	}
+
+	path := backupPath(pos[0], *gz)
+
+	if err := writeFile(path, *gz, *force, produce); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(stderr, "backup: %s written to %s\n", t.mode(), path)
 
 	return nil
+}
+
+func (t target) mode() string {
+	if t.client != nil {
+		return "online"
+	}
+
+	return "offline"
+}
+
+func produceBackup(t target, w io.Writer, noBlobs bool) error {
+	if t.client != nil {
+		return backupOnline(t.client, w, noBlobs)
+	}
+
+	err := engine.Offline(t.cfg.DataDir, w, backup.Options{Version: version, NoBlobs: noBlobs})
+
+	if errors.Is(err, lock.ErrLocked) {
+		_, need := t.need()
+
+		return fmt.Errorf("the data dir is used by a running daemon; ask it with -url: %w", need)
+	}
+
+	return err
+}
+
+func backupOnline(c *apiClient, w io.Writer, noBlobs bool) error {
+	body, err := json.Marshal(map[string]bool{"no_blobs": noBlobs})
+	if err != nil {
+		return err
+	}
+
+	rc, err := c.stream("POST", "/v1/backup", body)
+	if err != nil {
+		return err
+	}
+
+	defer rc.Close()
+
+	_, err = io.Copy(w, rc)
+
+	return err
+}
+
+// backupPath adds .ndb or .ndb.gz unless dest already ends with it.
+func backupPath(dest string, gz bool) string {
+	ext := ".ndb"
+
+	if gz {
+		ext = ".ndb.gz"
+	}
+
+	if strings.HasSuffix(dest, ".ndb") || strings.HasSuffix(dest, ".ndb.gz") {
+		return dest
+	}
+
+	return dest + ext
+}
+
+func writeStream(out io.Writer, gz bool, produce func(io.Writer) error) error {
+	if !gz {
+		return produce(out)
+	}
+
+	zw := gzip.NewWriter(out)
+
+	if err := produce(zw); err != nil {
+		return err
+	}
+
+	return zw.Close()
+}
+
+// writeFile writes to <path>.part and renames it, so a failed backup never
+// leaves a file that looks complete.
+func writeFile(path string, gz, force bool, produce func(io.Writer) error) error {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+
+	if _, err := os.Stat(abs); err == nil && !force {
+		return fmt.Errorf("backup: %s exists; use -force to replace it", abs)
+	}
+
+	part := abs + ".part"
+
+	f, err := os.OpenFile(part, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+
+	err = writeStream(f, gz, produce)
+
+	if err == nil {
+		err = f.Sync()
+	}
+
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+
+	if err != nil {
+		os.Remove(part)
+
+		return err
+	}
+
+	return os.Rename(part, abs)
 }

@@ -5,6 +5,7 @@ module Ndb
   # request goes to the daemon on each, to_a, first, count, pluck, ...
   class Relation
     include Enumerable
+    include DynamicFinders
 
     DEFAULT_PER_PAGE = 25
     BATCH_SIZE = 1000
@@ -87,9 +88,19 @@ module Ndb
       klass.ndb_update(Conditions.combine(values[:where]), ops, many: true, expire_in: expire_in).fetch("modified")
     end
 
-    # Deletes every match (same rule as update) and returns how many.
-    def delete
+    # One daemon delete on every match, no callbacks (same rule as update).
+    # Returns how many. An unfiltered relation is refused by the daemon
+    # (Ndb::EmptyFilter).
+    def delete_all
       klass.ndb_delete(Conditions.combine(values[:where]), many: true).fetch("deleted")
+    end
+
+    alias delete delete_all
+
+    # Loads the matches and destroys each one, with its callbacks. Returns
+    # the records.
+    def destroy_all
+      to_a.each(&:destroy)
     end
 
     # Loaders
@@ -226,6 +237,9 @@ module Ndb
     end
 
     protected
+
+    def dynamic_finder_klass = klass
+    def dynamic_finder_scope = self
 
     def with(changes)
       self.class.new(klass, values.merge(changes))

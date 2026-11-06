@@ -15,7 +15,7 @@ import (
 	"github.com/thadeu/ndb/internal/fs"
 )
 
-var sealDef = catalog.Def{Name: "calls", ID: "id", Indexes: []string{"status"}}
+var sealDef = catalog.Def{Name: "calls", Indexes: []string{"status"}}
 
 // openSealed opens an engine-mode collection whose data (segments and meta)
 // lives under root. The WAL is root/wal.
@@ -82,7 +82,7 @@ func insertN(t *testing.T, c *collection.Collection, from, to int) {
 	t.Helper()
 
 	for i := from; i < to; i++ {
-		d := fmt.Sprintf(`{"id":"c%04d","status":"s%d","n":%d}`, i, i%4, i)
+		d := fmt.Sprintf(`{"_id":"c%04d","status":"s%d","n":%d}`, i, i%4, i)
 
 		if _, err := c.Insert(context.Background(), doc(d)); err != nil {
 			t.Fatal(err)
@@ -95,7 +95,7 @@ func update(t *testing.T, c *collection.Collection, id string, status string) {
 
 	ch := collection.Change{Set: map[string]any{"status": status}}
 
-	if _, err := c.UpdateID(context.Background(), id, ch, 0); err != nil {
+	if _, err := c.UpdateByID(context.Background(), id, ch, 0); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -103,7 +103,7 @@ func update(t *testing.T, c *collection.Collection, id string, status string) {
 func remove(t *testing.T, c *collection.Collection, id string) {
 	t.Helper()
 
-	if err := c.DeleteID(context.Background(), id); err != nil {
+	if err := c.DeleteByID(context.Background(), id); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -112,8 +112,8 @@ var probes = []string{
 	`{}`,
 	`{"where":{"status":"s1"}}`,
 	`{"where":{"n":{"$gte":10,"$lt":30}},"sort":{"n":-1},"limit":7,"skip":2}`,
-	`{"where":{"id":{"$in":["c0001","c0100","c9999"]}}}`,
-	`{"where":{"status":"s2"},"fields":["id"],"count":true}`,
+	`{"where":{"_id":{"$in":["c0001","c0100","c9999"]}}}`,
+	`{"where":{"status":"s2"},"fields":["_id"],"count":true}`,
 }
 
 // rowsOf returns the rows of every probe query, in order, as JSON text.
@@ -335,7 +335,7 @@ func TestQueriesDuringSealSeeEachRowOnce(t *testing.T) {
 
 		for _, r := range page.Rows {
 			var m struct {
-				ID string `json:"id"`
+				ID string `json:"_id"`
 			}
 
 			if err := json.Unmarshal(r, &m); err != nil {
@@ -540,14 +540,14 @@ func TestIndexAfterSealAndRestartUsesSealedRows(t *testing.T) {
 
 func TestUniqueKeysOfSealedRows(t *testing.T) {
 	root := t.TempDir()
-	def := catalog.Def{Name: "users", ID: "id", Unique: []string{"email"}}
+	def := catalog.Def{Name: "users", Unique: []string{"email"}}
 
 	c, err := collection.Open(collection.Config{Dir: filepath.Join(root, "wal"), Data: root, FS: fs.OS{}, Def: def})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := c.Insert(ctx, doc(`{"id":"u1","email":"a@x"}`)); err != nil {
+	if _, err := c.Insert(ctx, doc(`{"_id":"u1","email":"a@x"}`)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -564,15 +564,15 @@ func TestUniqueKeysOfSealedRows(t *testing.T) {
 
 	defer c.Close()
 
-	if _, err := c.Insert(ctx, doc(`{"id":"u2","email":"a@x"}`)); code(err) != "unique_violation" {
+	if _, err := c.Insert(ctx, doc(`{"_id":"u2","email":"a@x"}`)); code(err) != "unique_violation" {
 		t.Fatalf("duplicate of a sealed unique value: %v", err)
 	}
 
-	if _, err := c.UpdateID(ctx, "u1", collection.Change{Set: map[string]any{"email": "b@x"}}, 0); err != nil {
+	if _, err := c.UpdateByID(ctx, "u1", collection.Change{Set: map[string]any{"email": "b@x"}}, 0); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := c.Insert(ctx, doc(`{"id":"u2","email":"a@x"}`)); err != nil {
+	if _, err := c.Insert(ctx, doc(`{"_id":"u2","email":"a@x"}`)); err != nil {
 		t.Fatalf("value freed by an update of a sealed row: %v", err)
 	}
 }
@@ -593,7 +593,7 @@ func TestReinsertAfterSealedDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := c.Insert(ctx, doc(`{"id":"c0002","status":"new","n":99}`)); err != nil {
+	if _, err := c.Insert(ctx, doc(`{"_id":"c0002","status":"new","n":99}`)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -605,7 +605,7 @@ func TestReinsertAfterSealedDelete(t *testing.T) {
 
 	got, ok := c.Find("c0002")
 
-	if !ok || string(got.Doc) != `{"id":"c0002","status":"new","n":99}` {
+	if !ok || string(got.Doc) != `{"_id":"c0002","status":"new","n":99}` {
 		t.Fatalf("reinserted row = %v %s", ok, got.Doc)
 	}
 

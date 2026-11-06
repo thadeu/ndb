@@ -41,6 +41,14 @@ module Ndb
       page(post(coll, "aggregate", Conditions.regexps(body)))
     end
 
+    # The document with this _id (and its "_v"), or nil.
+    def get(coll, id)
+      json(request("GET", id_path(coll, id), nil))
+    rescue NotFound
+      nil
+    end
+
+    # Each document gets a generated UUIDv7 _id unless it carries one.
     # expire_in (seconds, or "30m" / "1h" / "1d") sets the expires_field of
     # every document to now + expire_in, in the same transaction.
     def insert(coll, docs, expire_in: nil)
@@ -50,39 +58,49 @@ module Ndb
       json(post(coll, "insert", body)).fetch("results")
     end
 
-    # Atomic update by filter. The filter and the write operators go in one
-    # body; the daemon matches and writes in one step on the newest state, so
+    # Atomic update. A String is the _id of one document (POST /{_id}/update);
+    # a Hash is a filter (POST /update). The filter and the write operators go
+    # in one body; the daemon matches and writes in one step on the newest state, so
     # concurrent updates never interleave.
     #
     #   client.update("stock", { sku: "a", qty: { "$gte" => 1 } }, { "$inc" => { qty: -1 } })
     #   # => {"matched" => 1, "modified" => 1, "doc" => {...with "_v"}}
     #
-    # Operators: $set, $unset, $inc, $push, $pull, $min, $max (dot paths work).
+    # Operators: $set, $setOnInsert, $unset, $inc, $push, $pull, $min, $max (dot paths work).
     # Nothing matched is not an error: {"matched" => 0, "modified" => 0}. A
-    # version guard is a filter: { id: "x", _v: 7 }. many: true updates every
-    # match (no "doc" in the answer) and needs the id or an indexed field in
-    # the filter. upsert: true creates the document from the equality fields
+    # version guard is a filter: { _id: "x", _v: 7 }. many: true updates every
+    # match (no "doc" in the answer) and needs _id or an indexed field in the
+    # filter; it does not apply to an _id String. upsert: true creates the document from the equality fields
     # of the filter when nothing matches. expire_in (seconds, or "30m") sets
     # the expires_field.
-    def update(coll, filter, ops, many: false, upsert: false, expire_in: nil)
+    def update(coll, id_or_filter, ops, many: false, upsert: false, expire_in: nil)
+      if id_or_filter.is_a?(String)
+        query = write_query(upsert: upsert, expire_in: expire_in)
+
+        return json(request("POST", "#{id_path(coll, id_or_filter)}/update#{query}", merge_update({}, ops)))
+      end
+
       query = write_query(many: many, upsert: upsert, expire_in: expire_in)
 
-      json(post(coll, "update#{query}", merge_update(filter, ops)))
+      json(post(coll, "update#{query}", merge_update(id_or_filter, ops)))
     end
 
-    # Deletes the documents that the filter matches (one, or every match with
-    # many: true, which needs the id or an indexed field). {"deleted" => n}
-    def delete(coll, filter, many: false)
-      json(post(coll, "delete#{write_query(many: many)}", filter))
+    # Deletes by _id (a String), or the documents that the filter matches (one,
+    # or every match with many: true, which needs _id or an indexed field).
+    # {"deleted" => n}
+    def delete(coll, id_or_filter, many: false)
+      return json(request("DELETE", id_path(coll, id_or_filter), nil)) if id_or_filter.is_a?(String)
+
+      json(post(coll, "delete#{write_query(many: many)}", id_or_filter))
     end
 
     # Makes a document expire, like EXPIRE in Redis: in: seconds or "30m", or
-    # at: a Time or an RFC 3339 String. Returns {"id", "v", "expires_at"}.
+    # at: a Time or an RFC 3339 String. Returns {"_id", "v", "expires_at"}.
     # Raises NotFound for a missing or expired document, TtlNotEnabled when
     # the collection has no expires_field, TtlDerived when the expiry comes
     # from ttl + time.
     def expire(coll, id, **time)
-      body = { id: id }
+      body = { _id: id }
       body[:in] = time[:in] if time[:in]
       body[:at] = time[:at].respond_to?(:utc) ? time[:at].utc.iso8601(9) : time[:at] if time[:at]
 
@@ -91,13 +109,13 @@ module Ndb
 
     # Removes the expiry of a document, like PERSIST in Redis.
     def persist(coll, id)
-      json(post(coll, "persist", id: id))
+      json(post(coll, "persist", _id: id))
     end
 
     # The seconds left of a document (an Integer, rounded up), -1 when it
     # never expires, nil when it is missing or expired.
     def ttl(coll, id)
-      json(request("GET", "#{path(coll)}/ttl/#{URI.encode_www_form_component(id).gsub('+', '%20')}", nil)).fetch("ttl")
+      json(request("GET", "#{id_path(coll, id)}/ttl", nil)).fetch("ttl")
     rescue NotFound
       nil
     end
@@ -127,7 +145,7 @@ module Ndb
       json(post(coll, "ack", consumer: consumer, pos: pos))
     end
 
-    def ensure_collection(coll, definition)
+    def ensure_collection(coll, definition = {})
       json(request("PUT", path(coll), definition))
     end
 
@@ -181,6 +199,10 @@ module Ndb
 
     def path(coll)
       "/v1/c/#{URI.encode_www_form_component(coll).gsub('+', '%20')}"
+    end
+
+    def id_path(coll, id)
+      "#{path(coll)}/#{URI.encode_www_form_component(id).gsub('+', '%20')}"
     end
 
     def request(method, target, body, headers: {})

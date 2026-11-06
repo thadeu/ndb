@@ -15,23 +15,23 @@ mkdir -p "$dir"
 if [[ "${1-}" == "--seed" ]]; then
 	if [[ ! -e "$dir/web-1001.ndjson" ]]; then
 		cat >"$dir/web-1001.ndjson" <<'LINES'
-{"id":"web-1001-1","ts":"2026-11-01T10:00:01Z","app":"web","level":"info","msg":"GET /api/v1/orders","path":"/api/v1/orders","ms":12}
-{"id":"web-1001-2","ts":"2026-11-01T10:00:05Z","app":"web","level":"info","msg":"GET /api/v1/users","path":"/api/v1/users","ms":8}
-{"id":"web-1001-3","ts":"2026-11-01T10:01:10Z","app":"web","level":"error","msg":"payment gateway timeout","path":"/api/v2/payments","ms":3000}
-{"id":"web-1001-4","ts":"2026-11-01T10:02:00Z","app":"web","level":"warn","msg":"slow query","path":"/api/v1/orders","ms":900}
-{"id":"web-1001-5","ts":"2026-11-01T10:03:30Z","app":"web","level":"info","msg":"GET /health","path":"/health","ms":1}
-{"id":"web-1001-6","ts":"2026-11-01T10:04:00Z","app":"web","level":"error","msg":"payment declined","path":"/api/v2/payments","ms":220}
-{"id":"web-1001-7","ts":"2026-11-01T10:05:00Z","app":"web","level":"info","msg":"GET /api/v2/orders","path":"/api/v2/orders","ms":15}
-{"id":"web-1001-8","ts":"2026-11-01T10:06:00Z","app":"web","level":"error","msg":"db connection reset","path":"/api/v1/orders","ms":40}
+{"ts":"2026-11-01T10:00:01Z","app":"web","level":"info","msg":"GET /api/v1/orders","path":"/api/v1/orders","ms":12}
+{"ts":"2026-11-01T10:00:05Z","app":"web","level":"info","msg":"GET /api/v1/users","path":"/api/v1/users","ms":8}
+{"ts":"2026-11-01T10:01:10Z","app":"web","level":"error","msg":"payment gateway timeout","path":"/api/v2/payments","ms":3000}
+{"ts":"2026-11-01T10:02:00Z","app":"web","level":"warn","msg":"slow query","path":"/api/v1/orders","ms":900}
+{"ts":"2026-11-01T10:03:30Z","app":"web","level":"info","msg":"GET /health","path":"/health","ms":1}
+{"ts":"2026-11-01T10:04:00Z","app":"web","level":"error","msg":"payment declined","path":"/api/v2/payments","ms":220}
+{"ts":"2026-11-01T10:05:00Z","app":"web","level":"info","msg":"GET /api/v2/orders","path":"/api/v2/orders","ms":15}
+{"ts":"2026-11-01T10:06:00Z","app":"web","level":"error","msg":"db connection reset","path":"/api/v1/orders","ms":40}
 LINES
 	fi
 
 	if [[ ! -e "$dir/worker-2002.ndjson" ]]; then
 		cat >"$dir/worker-2002.ndjson" <<'LINES'
-{"id":"worker-2002-1","ts":"2026-11-01T10:00:30Z","app":"worker","level":"info","msg":"job started","ms":0}
-{"id":"worker-2002-2","ts":"2026-11-01T10:02:30Z","app":"worker","level":"error","msg":"job failed: smtp timeout","ms":5000}
-{"id":"worker-2002-3","ts":"2026-11-01T10:03:00Z","app":"worker","level":"info","msg":"job started","ms":0}
-{"id":"worker-2002-4","ts":"2026-11-01T10:05:30Z","app":"worker","level":"error","msg":"job failed: smtp refused","ms":150}
+{"ts":"2026-11-01T10:00:30Z","app":"worker","level":"info","msg":"job started","ms":0}
+{"ts":"2026-11-01T10:02:30Z","app":"worker","level":"error","msg":"job failed: smtp timeout","ms":5000}
+{"ts":"2026-11-01T10:03:00Z","app":"worker","level":"info","msg":"job started","ms":0}
+{"ts":"2026-11-01T10:05:30Z","app":"worker","level":"error","msg":"job failed: smtp refused","ms":150}
 LINES
 	fi
 

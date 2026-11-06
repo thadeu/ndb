@@ -6,11 +6,11 @@ class AggregateTest < Minitest::Test
   def setup
     @coll = collection_name
 
-    client.ensure_collection(@coll, id: "cid")
+    client.ensure_collection(@coll)
     client.insert(@coll, [
-                    { cid: "a", status: "answered", duration: 10 },
-                    { cid: "b", status: "answered", duration: 30 },
-                    { cid: "c", status: "failed", duration: 5 }
+                    { _id: "a", status: "answered", duration: 10 },
+                    { _id: "b", status: "answered", duration: 30 },
+                    { _id: "c", status: "failed", duration: 5 }
                   ])
   end
 

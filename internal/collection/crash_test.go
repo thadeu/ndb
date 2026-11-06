@@ -19,7 +19,7 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-var counterDef = catalog.Def{Name: "counters", ID: "k"}
+var counterDef = catalog.Def{Name: "counters"}
 
 // counterChild bumps one doc forever and acks each version it got back.
 func counterChild() {
@@ -29,13 +29,13 @@ func counterChild() {
 	}
 
 	if _, ok := c.Find("c"); !ok {
-		if _, err := c.Insert(ctx, doc(`{"k":"c"}`)); err != nil {
+		if _, err := c.Insert(ctx, doc(`{"_id":"c"}`)); err != nil {
 			panic(err)
 		}
 	}
 
 	for {
-		v, err := c.UpdateID(ctx, "c", collection.Change{Set: map[string]any{"t": time.Now().UnixNano()}}, 0)
+		v, err := c.UpdateByID(ctx, "c", collection.Change{Set: map[string]any{"t": time.Now().UnixNano()}}, 0)
 		if err != nil {
 			panic(err)
 		}

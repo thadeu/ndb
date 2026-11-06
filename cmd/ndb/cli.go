@@ -19,6 +19,7 @@ var subcommands = map[string]func(args []string) error{
 
 	"collections": runCollections,
 	"compact":     runCompact,
+	"get":         runGet,
 	"update":      runUpdate,
 	"delete":      runDelete,
 	"expire":      runExpire,
@@ -106,18 +107,22 @@ ndb: NDJSON query daemon
 Usage:
   ndb [daemon flags]            run the daemon (same as "ndb serve")
   ndb serve [daemon flags]      run the daemon
-  ndb backup <dest>             copy the data dir (daemon stopped or running)
-  ndb restore <backup-dir>      put a backup in an empty data dir, after a check
+  ndb backup <dest|->           one .ndb file (daemon stopped or running); - is stdout
+  ndb restore <file|->          put a backup in an empty data dir, after a check; - is stdin
   ndb stats                     rows, size, segments, WAL files, indexes, quarantine
   ndb size                      disk usage per collection and per part
   ndb collections [name]        the catalog, or the definition of one collection
   ndb compact <collection>      seal and merge the segments now (engine mode)
+  ndb get <coll> <_id>          one document by _id
   ndb update <coll> '<json>'    atomic update by filter: the JSON mixes the filter and the
                                 write operators ($set $unset $inc $push $pull $min $max)
+  ndb update <coll> <_id> '<ops json>'
+                                the same update on one document; extra filter keys are guards
   ndb delete <coll> '<json>'    delete the documents the JSON filter matches
-  ndb expire <coll> <id> <dur>  the document expires <dur> from now (30m, 1h, 3600)
-  ndb persist <coll> <id>       remove the expiry of a document
-  ndb ttl <coll> <id>           time left of a document (-1 = never expires)
+  ndb delete <coll> <_id>       delete one document by _id
+  ndb expire <coll> <_id> <dur> the document expires <dur> from now (30m, 1h, 3600)
+  ndb persist <coll> <_id>      remove the expiry of a document
+  ndb ttl <coll> <_id>          time left of a document (-1 = never expires)
   ndb quarantine <collection>   bad lines of a direct collection (file, offset, reason)
   ndb query <collection> ['<where-json>']
                                 find rows; -aggregate '<pipeline-json>' aggregates
@@ -128,7 +133,7 @@ Common flags:
   -config FILE      ndb.yml (default ndb.yml; absent = defaults)
   -data-dir DIR     data dir (overrides ndb.yml)
 
-Talking to the daemon (stats, size, collections, compact, update, delete, expire, persist, ttl, quarantine, query):
+Talking to the daemon (backup, stats, size, collections, compact, get, update, delete, expire, persist, ttl, quarantine, query):
   -url unix:///sock|tcp://host:port   which daemon (default NDB_URL, then the
                                       unix socket of ndb.yml); NDB_TOKEN is the bearer token
   -json                               machine output (query: NDJSON rows)
@@ -136,7 +141,8 @@ Talking to the daemon (stats, size, collections, compact, update, delete, expire
   The other commands need a daemon.
 
 Per command:
-  restore     -force                  replace a data dir that is not empty
+  backup      -gzip -force -no-blobs  gzip (.ndb.gz), replace the file, leave blob content out
+  restore     -force                  replace a data dir that is not empty (gzip is detected)
   quarantine  -limit N                last N bad lines (default 20, at most 1000)
   update      --many --upsert --expire-in DUR   (many needs the id or an indexed field)
   delete      --many

@@ -12,16 +12,16 @@ describe('watch', () => {
     const calls = callsModel(db)
 
     await calls.insert([
-      { call_id: 'a', status: 's', ts: new Date() },
-      { call_id: 'b', status: 's', ts: new Date() },
+      { _id: 'a', status: 's', ts: new Date() },
+      { _id: 'b', status: 's', ts: new Date() },
     ])
-    await calls.delete({ call_id: 'b' })
+    await calls.delete({ _id: 'b' })
 
     const ctl = new AbortController()
     const seen: string[] = []
 
     for await (const ev of calls.watch('w1', { signal: ctl.signal })) {
-      seen.push(`${ev.op}:${ev.id}`)
+      seen.push(`${ev.op}:${ev._id}`)
 
       await calls.ack(ev)
 
@@ -38,16 +38,16 @@ describe('watch', () => {
   it('delivers live events and stops with the iterator', async () => {
     const calls = callsModel(db)
 
-    await calls.insert({ call_id: 'seed', status: 's', ts: new Date() })
+    await calls.insert({ _id: 'seed', status: 's', ts: new Date() })
 
     const it = calls.watch('w2', { from: 'now' })
     const next = it.next()
 
-    setTimeout(() => void calls.insert({ call_id: 'live', status: 's', ts: new Date() }), 100)
+    setTimeout(() => void calls.insert({ _id: 'live', status: 's', ts: new Date() }), 100)
 
     const ev = await next
 
-    expect(ev.value?.id).toBe('live')
+    expect(ev.value?._id).toBe('live')
     expect(ev.value?.doc?.status).toBe('s')
 
     await it.return(undefined)
@@ -57,15 +57,15 @@ describe('watch', () => {
     const calls = callsModel(db)
 
     await calls.insert([
-      { call_id: 'a', status: 'pending', ts: new Date() },
-      { call_id: 'b', status: 'done', ts: new Date() },
-      { call_id: 'c', status: 'pending', ts: new Date() },
+      { _id: 'a', status: 'pending', ts: new Date() },
+      { _id: 'b', status: 'done', ts: new Date() },
+      { _id: 'c', status: 'pending', ts: new Date() },
     ])
 
     const seen: string[] = []
 
     for await (const ev of calls.watch('w3', { where: { status: 'pending' }, limit: 2 })) {
-      seen.push(ev.id)
+      seen.push(ev._id)
     }
 
     expect(seen).toEqual(['a', 'c'])
@@ -74,7 +74,7 @@ describe('watch', () => {
   it('fails with a typed error on a bad where', async () => {
     const calls = callsModel(db)
 
-    await calls.insert({ call_id: 'a', status: 'pending', ts: new Date() })
+    await calls.insert({ _id: 'a', status: 'pending', ts: new Date() })
 
     const stream = calls.watch('w4', { where: { status: { $bogus: 1 } } as never })
 

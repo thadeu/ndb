@@ -67,7 +67,7 @@ nq -X POST http://ndb/v1/c/calls/aggregate -d '{"pipeline":[
   {"$sort":{"_id":1}}]}'
 
 # 5. Declare an index (optional), then look at the collection.
-nq -X PUT http://ndb/v1/c/calls -d '{"id":"_id","time":"ts","indexes":["status"]}'
+nq -X PUT http://ndb/v1/c/calls -d '{"time":"ts","indexes":["status"]}'
 nq http://ndb/v1/c/calls/stats
 ```
 
@@ -83,11 +83,11 @@ docker run -d --name ndb \
   ghcr.io/thadeu/ndb:latest
 ```
 
-The socket is `/run/ndb/ndb.sock`. Share the `/run/ndb` volume with your app containers. See [docs/dev/docker.md](docs/dev/docker.md).
+The socket is `/run/ndb/ndb.sock`. Share the `/run/ndb` volume with your app containers. See [docs/dev/deploy/docker.md](docs/dev/deploy/docker.md).
 
 ## Download
 
-`curl -fsSL https://ndb.clowk.in/install.sh | bash` installs the latest release (`NDB_VERSION=0.1.0` pins one; `uninstall.sh` removes it). Each `v*` tag publishes static binaries (no CGO) for Linux amd64/arm64 and macOS arm64, with a `checksums.txt`, at [Releases](https://github.com/thadeu/ndb/releases). The binary also has a CLI: `ndb stats`, `ndb size`, `ndb collections`, `ndb query`, `ndb compact`, `ndb quarantine`, `ndb restore`, `ndb backup`, `ndb help` ([docs/dev/operations.md](docs/dev/operations.md#cli)). A systemd unit is in [deploy/systemd/](deploy/systemd/). The image is `ghcr.io/thadeu/ndb`. Client SDKs: Go `github.com/thadeu/ndb/sdk/go`, Ruby gems `ndb` (plain client) and `ndb-rails` (Rails), npm `@thadeu/ndb`. See [CHANGELOG.md](CHANGELOG.md).
+`curl -fsSL https://ndb.clowk.in/install.sh | bash` installs the latest release (`NDB_VERSION=0.1.0` pins one; `uninstall.sh` removes it). Each `v*` tag publishes static binaries (no CGO) for Linux amd64/arm64 and macOS arm64, with a `checksums.txt`, at [Releases](https://github.com/thadeu/ndb/releases). The binary also has a CLI: `ndb stats`, `ndb size`, `ndb collections`, `ndb query`, `ndb compact`, `ndb quarantine`, `ndb restore`, `ndb backup`, `ndb help` ([docs/dev/clients/cli.md](docs/dev/clients/cli.md)). A systemd unit is in [deploy/systemd/](deploy/systemd/). The image is `ghcr.io/thadeu/ndb`. Client SDKs: Go `github.com/thadeu/ndb/sdk/go`, Ruby gems `ndb` (plain client) and `ndb-rails` (Rails), npm `@thadeu/ndb`. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Features
 
@@ -111,10 +111,9 @@ The socket is `/run/ndb/ndb.sock`. Share the `/run/ndb` volume with your app con
 - [docs/dev/configuration.md](docs/dev/configuration.md): `ndb.yml`, flags, durability.
 - [docs/dev/storage.md](docs/dev/storage.md): On-disk layout.
 - [docs/dev/wal.md](docs/dev/wal.md): The NDJSON write-ahead log, fsync, recovery, truncation.
-- [docs/dev/clients.md](docs/dev/clients.md): Go, Rails and TypeScript guides.
+- [docs/dev/clients.md](docs/dev/clients.md): the clients: Go, Ruby, Rails, TypeScript and the CLI, one page each.
 - [docs/dev/operations.md](docs/dev/operations.md): Backup, metrics, quarantine, recovery, compaction.
-- [docs/dev/docker.md](docs/dev/docker.md): Docker image.
-- [docs/dev/deployment.md](docs/dev/deployment.md): Single VM and cross-VM examples.
+- [docs/dev/deployment.md](docs/dev/deployment.md): choose a setup: Linux (systemd), Docker, Single VM, Cross-VM, Voodu.
 - [docs/dev/development.md](docs/dev/development.md): Tests and release.
 - [docs/dev/releasing.md](docs/dev/releasing.md): Release checklist.
 - [.plans/ndb-v1.md](.plans/ndb-v1.md): The design plan.

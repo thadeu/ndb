@@ -14,13 +14,13 @@ import (
 )
 
 type expireReq struct {
-	ID string          `json:"id"`
+	ID string          `json:"_id"`
 	In json.RawMessage `json:"in"`
 	At string          `json:"at"`
 }
 
 type persistReq struct {
-	ID string `json:"id"`
+	ID string `json:"_id"`
 }
 
 // parseExpireIn reads expire_in: a Go duration string ("90m", "1d") or a
@@ -55,7 +55,7 @@ func parseExpireIn(raw json.RawMessage) (time.Duration, error) {
 	return time.Duration(secs * float64(time.Second)), nil
 }
 
-// expire is POST /v1/c/{coll}/expire: {"id", "in" | "at"}.
+// expire is POST /v1/c/{coll}/expire: {"_id", "in" | "at"}.
 func (s *Server) expire(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
 
@@ -97,7 +97,7 @@ func (s *Server) expire(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 
 	s.metrics.writes.Add(1)
 
-	writeJSON(w, http.StatusOK, map[string]any{"id": req.ID, "v": v, "expires_at": at.UTC().Format(time.RFC3339Nano)})
+	writeJSON(w, http.StatusOK, map[string]any{"_id": req.ID, "v": v, "expires_at": at.UTC().Format(time.RFC3339Nano)})
 }
 
 // expiry is the "in" or "at" of the request. Exactly one must be set.
@@ -123,7 +123,7 @@ func (r expireReq) expiry() (collection.Expiry, error) {
 	return collection.Expiry{At: at}, nil
 }
 
-// persist is POST /v1/c/{coll}/persist: {"id"}.
+// persist is POST /v1/c/{coll}/persist: {"_id"}.
 func (s *Server) persist(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
 
@@ -161,7 +161,7 @@ func (s *Server) persist(w http.ResponseWriter, r *http.Request, db *engine.DB) 
 	writeJSON(w, http.StatusOK, writeResult{ID: req.ID, V: v})
 }
 
-// ttl is GET /v1/c/{coll}/ttl/{id}: the whole seconds left (rounded up), or
+// ttl is GET /v1/c/{coll}/{id}/ttl: the whole seconds left (rounded up), or
 // -1 when the document never expires.
 func (s *Server) ttl(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	col, err := db.Get(r.PathValue("coll"))
@@ -181,12 +181,12 @@ func (s *Server) ttl(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	}
 
 	if info.Never {
-		writeJSON(w, http.StatusOK, map[string]any{"id": id, "ttl": -1, "expires_at": nil})
+		writeJSON(w, http.StatusOK, map[string]any{"_id": id, "ttl": -1, "expires_at": nil})
 
 		return
 	}
 
 	secs := int64(math.Ceil(info.Remaining.Seconds()))
 
-	writeJSON(w, http.StatusOK, map[string]any{"id": id, "ttl": secs, "expires_at": info.At.UTC().Format(time.RFC3339Nano)})
+	writeJSON(w, http.StatusOK, map[string]any{"_id": id, "ttl": secs, "expires_at": info.At.UTC().Format(time.RFC3339Nano)})
 }

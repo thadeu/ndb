@@ -15,7 +15,7 @@ import (
 
 // #region model
 type Session struct {
-	SID       string    `ndb:"sid,id"`
+	ID        string    `ndb:"_id"`
 	CreatedAt time.Time `ndb:"created_at,time"`
 	ExpiresAt time.Time `ndb:"expires_at,expires"`
 }
@@ -48,7 +48,7 @@ func run(ctx context.Context) error {
 	}
 
 	for _, id := range []string{"s-short", "s-long", "s-keep"} {
-		if err := sessions.Delete(ctx, id); err != nil && !errors.Is(err, ndb.ErrNotFound) {
+		if _, err := sessions.DeleteID(ctx, id); err != nil {
 			return err
 		}
 	}
@@ -56,12 +56,12 @@ func run(ctx context.Context) error {
 	// #region insert
 	now := time.Now().UTC()
 
-	_, err = sessions.InsertWith(ctx, []Session{{SID: "s-short", CreatedAt: now}}, ndb.ExpireIn(2*time.Second))
+	_, err = sessions.InsertWith(ctx, []Session{{ID: "s-short", CreatedAt: now}}, ndb.ExpireIn(2*time.Second))
 	if err != nil {
 		return err
 	}
 
-	_, err = sessions.InsertWith(ctx, []Session{{SID: "s-long", CreatedAt: now}, {SID: "s-keep", CreatedAt: now}}, ndb.ExpireIn(time.Hour))
+	_, err = sessions.InsertWith(ctx, []Session{{ID: "s-long", CreatedAt: now}, {ID: "s-keep", CreatedAt: now}}, ndb.ExpireIn(time.Hour))
 	if err != nil {
 		return err
 	}
@@ -123,7 +123,7 @@ func run(ctx context.Context) error {
 	ids := make([]string, len(alive))
 
 	for i, s := range alive {
-		ids[i] = s.SID
+		ids[i] = s.ID
 	}
 
 	fmt.Printf("live sessions: %d (%s)\n", len(alive), strings.Join(ids, ", "))

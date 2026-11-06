@@ -3,7 +3,6 @@
   "collection": "sessions",
   "setup": {
     "catalog": {
-      "id": "id",
       "write": "engine",
       "expires_field": "exp"
     },
@@ -13,26 +12,26 @@
         "body": {
           "insert": [
             {
-              "id": "past",
+              "_id": "past",
               "exp": "2020-01-01T00:00:00Z"
             },
             {
-              "id": "past_unix",
+              "_id": "past_unix",
               "exp": 1577836800
             },
             {
-              "id": "future",
+              "_id": "future",
               "exp": "2999-01-01T00:00:00Z"
             },
             {
-              "id": "future_unix",
+              "_id": "future_unix",
               "exp": 32503680000
             },
             {
-              "id": "never"
+              "_id": "never"
             },
             {
-              "id": "null_exp",
+              "_id": "null_exp",
               "exp": null
             }
           ]

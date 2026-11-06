@@ -8,7 +8,7 @@ const calls = callsModel(db)
 
 beforeAll(async () => {
   const docs = Array.from({ length: 12 }, (_, i) => ({
-    call_id: `c${String(i).padStart(2, '0')}`,
+    _id: `c${String(i).padStart(2, '0')}`,
     status: i % 3 === 0 ? 'missed' : 'answered',
     dur: i,
     ts: new Date(Date.UTC(2026, 10, 1, i)),
@@ -21,9 +21,9 @@ afterAll(() => db.close())
 
 describe('query builder', () => {
   it('is thenable: await runs it', async () => {
-    const rows = await calls.where({ status: 'missed' }).sort({ call_id: 1 })
+    const rows = await calls.where({ status: 'missed' }).sort({ _id: 1 })
 
-    expect(rows.map((r) => r.call_id)).toEqual(['c00', 'c03', 'c06', 'c09'])
+    expect(rows.map((r) => r._id)).toEqual(['c00', 'c03', 'c06', 'c09'])
   })
 
   it('combines where, not, or, limit, skip and fields', async () => {
@@ -34,10 +34,10 @@ describe('query builder', () => {
       .sort({ dur: -1 })
       .skip(1)
       .limit(3)
-      .fields('call_id', 'dur')
+      .fields('_id', 'dur')
 
     expect(rows.map((r) => r.dur)).toEqual([10, 4, 2])
-    expect(Object.keys(rows[0]!).sort()).toEqual(['_v', 'call_id', 'dur'])
+    expect(Object.keys(rows[0]!).sort()).toEqual(['_id', '_v', 'dur'])
   })
 
   it('merges two where clauses on the same field with $and', async () => {
@@ -53,28 +53,28 @@ describe('query builder', () => {
   })
 
   it('pages with page(n, size)', async () => {
-    const p3 = await calls.sort({ call_id: 1 }).page(3, 4)
+    const p3 = await calls.sort({ _id: 1 }).page(3, 4)
 
-    expect(p3.map((r) => r.call_id)).toEqual(['c08', 'c09', 'c10', 'c11'].slice(0, 4))
+    expect(p3.map((r) => r._id)).toEqual(['c08', 'c09', 'c10', 'c11'].slice(0, 4))
   })
 
   it('follows a cursor with after(token) and nextCursor', async () => {
-    const q1 = calls.sort({ call_id: 1 }).limit(5)
+    const q1 = calls.sort({ _id: 1 }).limit(5)
     const first = await q1
 
     expect(first).toHaveLength(5)
     expect(q1.nextCursor).not.toBe('')
 
-    const second = await calls.sort({ call_id: 1 }).limit(5).after(q1.nextCursor)
+    const second = await calls.sort({ _id: 1 }).limit(5).after(q1.nextCursor)
 
-    expect(second.map((r) => r.call_id)).toEqual(['c05', 'c06', 'c07', 'c08', 'c09'])
+    expect(second.map((r) => r._id)).toEqual(['c05', 'c06', 'c07', 'c08', 'c09'])
   })
 
   it('iterate() follows the cursor across pages', async () => {
     const seen: string[] = []
 
-    for await (const row of calls.sort({ call_id: 1 }).limit(5).iterate()) {
-      seen.push(row.call_id)
+    for await (const row of calls.sort({ _id: 1 }).limit(5).iterate()) {
+      seen.push(row._id)
     }
 
     expect(seen).toHaveLength(12)
@@ -101,9 +101,7 @@ describe('query builder', () => {
 describe('$regex', () => {
   const regexDb = unixDb()
   const people = regexDb.model(`rx${process.pid}`, {
-    id: 'pid',
     fields: {
-      pid: { type: 'string' },
       name: { type: 'string', index: true, optional: true },
       tags: { type: 'json', optional: true },
       n: { type: 'number', optional: true },
@@ -112,16 +110,16 @@ describe('$regex', () => {
 
   beforeAll(async () => {
     await people.insert([
-      { pid: 'p1', name: 'Alice', tags: ['red', 'blue'], n: 1 },
-      { pid: 'p2', name: 'alina', tags: ['green'], n: 2 },
-      { pid: 'p3', name: 'Bob', tags: [], n: 3 },
-      { pid: 'p4', n: 4 },
+      { _id: 'p1', name: 'Alice', tags: ['red', 'blue'], n: 1 },
+      { _id: 'p2', name: 'alina', tags: ['green'], n: 2 },
+      { _id: 'p3', name: 'Bob', tags: [], n: 3 },
+      { _id: 'p4', n: 4 },
     ])
   })
 
   afterAll(() => regexDb.close())
 
-  const ids = (rows: { pid: string }[]) => rows.map((r) => r.pid).sort()
+  const ids = (rows: { _id: string }[]) => rows.map((r) => r._id).sort()
 
   it('matches a string pattern and $options', async () => {
     expect(ids(await people.where({ name: { $regex: '^Al' } }))).toEqual(['p1'])

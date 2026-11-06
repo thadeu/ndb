@@ -5,11 +5,9 @@ const ndb = connect(process.env.NDB_URL ?? 'unix:///tmp/ndb-examples.sock')
 
 // #region schema
 const sessions = ndb.model('sessions', {
-  id: 'sid',
   time: 'created_at',
   expires: 'expires_at',
   fields: {
-    sid: { type: 'string' },
     created_at: { type: 'date' },
     expires_at: { type: 'date', optional: true },
   },
@@ -17,14 +15,14 @@ const sessions = ndb.model('sessions', {
 // #endregion schema
 
 for (const id of ['s-short', 's-long', 's-keep']) {
-  await sessions.delete(id).catch(() => undefined)
+  await sessions.delete(id)
 }
 
 // #region insert
 const now = new Date()
 
-await sessions.insert({ sid: 's-short', created_at: now }, { expireIn: 2 })
-await sessions.insert([{ sid: 's-long', created_at: now }, { sid: 's-keep', created_at: now }], { expireIn: '1h' })
+await sessions.insert({ _id: 's-short', created_at: now }, { expireIn: 2 })
+await sessions.insert([{ _id: 's-long', created_at: now }, { _id: 's-keep', created_at: now }], { expireIn: '1h' })
 
 console.log('insert s-short (expire_in 2s), s-long and s-keep (expire_in 1h)')
 // #endregion insert
@@ -53,7 +51,7 @@ await new Promise((resolve) => setTimeout(resolve, 3_000))
 // #region after
 const alive = await sessions.all()
 
-console.log(`live sessions: ${alive.length} (${alive.map((s) => s.sid).join(', ')})`)
+console.log(`live sessions: ${alive.length} (${alive.map((s) => s._id).join(', ')})`)
 
 if ((await sessions.ttl('s-short')) === null) {
   console.log('ttl s-short: gone')

@@ -40,7 +40,7 @@ func docOf(t *testing.T, c *collection.Collection, id string) map[string]any {
 func TestConcurrentIncNeverLosesAnUpdate(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	c.Insert(ctx, doc(`{"post_id":"p1","n":0}`))
+	c.Insert(ctx, doc(`{"_id":"p1","n":0}`))
 
 	const workers = 40
 
@@ -48,7 +48,7 @@ func TestConcurrentIncNeverLosesAnUpdate(t *testing.T) {
 
 	for range workers {
 		wg.Go(func() {
-			if res, err := c.Update(ctx, []byte(`{"post_id":"p1","$inc":{"n":1}}`), collection.UpdateOpts{}); err != nil || res.Modified != 1 {
+			if res, err := c.Update(ctx, []byte(`{"_id":"p1","$inc":{"n":1}}`), collection.UpdateOpts{}); err != nil || res.Modified != 1 {
 				t.Errorf("res=%+v err=%v", res, err)
 			}
 		})
@@ -64,7 +64,7 @@ func TestConcurrentIncNeverLosesAnUpdate(t *testing.T) {
 func TestGuardedDecrementWinsOnce(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	c.Insert(ctx, doc(`{"post_id":"p1","qty":1}`))
+	c.Insert(ctx, doc(`{"_id":"p1","qty":1}`))
 
 	var (
 		wg sync.WaitGroup
@@ -74,7 +74,7 @@ func TestGuardedDecrementWinsOnce(t *testing.T) {
 
 	for range 2 {
 		wg.Go(func() {
-			res, err := c.Update(ctx, []byte(`{"post_id":"p1","qty":{"$gte":1},"$inc":{"qty":-1}}`), collection.UpdateOpts{})
+			res, err := c.Update(ctx, []byte(`{"_id":"p1","qty":{"$gte":1},"$inc":{"qty":-1}}`), collection.UpdateOpts{})
 			if err != nil {
 				t.Error(err)
 
@@ -97,9 +97,9 @@ func TestGuardedDecrementWinsOnce(t *testing.T) {
 func TestUpdateResultShapes(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{Indexes: []string{"g"}})
 
-	c.Insert(ctx, doc(`{"post_id":"a","g":1,"n":1}`), doc(`{"post_id":"b","g":1,"n":1}`), doc(`{"post_id":"c","g":2,"n":1}`))
+	c.Insert(ctx, doc(`{"_id":"a","g":1,"n":1}`), doc(`{"_id":"b","g":1,"n":1}`), doc(`{"_id":"c","g":2,"n":1}`))
 
-	res := upd(t, c, `{"post_id":"a","$set":{"n":5}}`, collection.UpdateOpts{})
+	res := upd(t, c, `{"_id":"a","$set":{"n":5}}`, collection.UpdateOpts{})
 
 	var doc map[string]any
 
@@ -109,19 +109,19 @@ func TestUpdateResultShapes(t *testing.T) {
 		t.Fatalf("single: %+v %s", res, res.Doc)
 	}
 
-	res = upd(t, c, `{"post_id":"zzz","$set":{"n":5}}`, collection.UpdateOpts{})
+	res = upd(t, c, `{"_id":"zzz","$set":{"n":5}}`, collection.UpdateOpts{})
 
 	if res.Matched != 0 || res.Modified != 0 || res.Doc != nil {
 		t.Fatalf("no match: %+v", res)
 	}
 
-	res = upd(t, c, `{"post_id":"a","_v":1,"$set":{"n":9}}`, collection.UpdateOpts{})
+	res = upd(t, c, `{"_id":"a","_v":1,"$set":{"n":9}}`, collection.UpdateOpts{})
 
 	if res.Matched != 0 {
 		t.Fatalf("stale _v matched: %+v", res)
 	}
 
-	res = upd(t, c, `{"post_id":"a","$set":{"n":5}}`, collection.UpdateOpts{})
+	res = upd(t, c, `{"_id":"a","$set":{"n":5}}`, collection.UpdateOpts{})
 
 	if res.Matched != 1 || res.Modified != 0 || docOf(t, c, "a")["n"] != 5.0 {
 		t.Fatalf("same value: %+v", res)
@@ -145,7 +145,7 @@ func TestUpdateResultShapes(t *testing.T) {
 func TestUpdateWithoutIDTakesAMatch(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	c.Insert(ctx, doc(`{"post_id":"a","s":"x"}`), doc(`{"post_id":"b","s":"y"}`))
+	c.Insert(ctx, doc(`{"_id":"a","s":"x"}`), doc(`{"_id":"b","s":"y"}`))
 
 	res := upd(t, c, `{"s":"y","$set":{"done":true}}`, collection.UpdateOpts{})
 
@@ -157,7 +157,7 @@ func TestUpdateWithoutIDTakesAMatch(t *testing.T) {
 func TestManyNeedsAnIndex(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	c.Insert(ctx, doc(`{"post_id":"a","s":"x"}`))
+	c.Insert(ctx, doc(`{"_id":"a","s":"x"}`))
 
 	_, err := c.Update(ctx, []byte(`{"s":"x","$set":{"n":1}}`), collection.UpdateOpts{Many: true})
 
@@ -175,7 +175,7 @@ func TestManyNeedsAnIndex(t *testing.T) {
 func TestUpsert(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	res := upd(t, c, `{"post_id":"u1","meta.k":"v","n":{"$gte":1},"$inc":{"count":2},"$push":{"tags":"a"},"$min":{"lo":4},"$max":{"hi":4}}`, collection.UpdateOpts{Upsert: true})
+	res := upd(t, c, `{"_id":"u1","meta.k":"v","n":{"$gte":1},"$inc":{"count":2},"$push":{"tags":"a"},"$min":{"lo":4},"$max":{"hi":4}}`, collection.UpdateOpts{Upsert: true})
 
 	if res.Matched != 0 || res.Modified != 1 {
 		t.Fatalf("%+v", res)
@@ -187,13 +187,13 @@ func TestUpsert(t *testing.T) {
 		t.Fatalf("%v", m)
 	}
 
-	res = upd(t, c, `{"post_id":"u1","$inc":{"count":2}}`, collection.UpdateOpts{Upsert: true})
+	res = upd(t, c, `{"_id":"u1","$inc":{"count":2}}`, collection.UpdateOpts{Upsert: true})
 
 	if res.Matched != 1 || docOf(t, c, "u1")["count"] != 4.0 {
 		t.Fatalf("second upsert: %+v", res)
 	}
 
-	_, err := c.Update(ctx, []byte(`{"post_id":"u1","count":{"$gt":100},"$inc":{"count":1}}`), collection.UpdateOpts{Upsert: true})
+	_, err := c.Update(ctx, []byte(`{"_id":"u1","count":{"$gt":100},"$inc":{"count":1}}`), collection.UpdateOpts{Upsert: true})
 
 	if code(err) != "duplicate_id" {
 		t.Fatalf("upsert onto a non-matching id: %v", err)
@@ -201,7 +201,7 @@ func TestUpsert(t *testing.T) {
 }
 
 func TestUpsertGeneratesAnID(t *testing.T) {
-	c := open(t, t.TempDir(), catalog.Def{ID: "_id"})
+	c := open(t, t.TempDir(), catalog.Def{})
 
 	res := upd(t, c, `{"k":"x","$set":{"n":1}}`, collection.UpdateOpts{Upsert: true})
 
@@ -209,7 +209,7 @@ func TestUpsertGeneratesAnID(t *testing.T) {
 
 	json.Unmarshal(res.Doc, &m)
 
-	if id, _ := m["_id"].(string); len(id) != 24 || m["k"] != "x" {
+	if id, _ := m["_id"].(string); len(id) != 36 || m["k"] != "x" {
 		t.Fatalf("%s", res.Doc)
 	}
 }
@@ -219,27 +219,27 @@ func TestOperators(t *testing.T) {
 		name, doc, body, field string
 		want                   any
 	}{
-		{"set dot", `{"post_id":"a"}`, `{"$set":{"x.y":1}}`, "x", map[string]any{"y": 1.0}},
-		{"unset", `{"post_id":"a","t":1}`, `{"$unset":{"t":true}}`, "t", nil},
-		{"unset empty string", `{"post_id":"a","t":1}`, `{"$unset":{"t":""}}`, "t", nil},
-		{"inc missing", `{"post_id":"a"}`, `{"$inc":{"n":3}}`, "n", 3.0},
-		{"inc negative", `{"post_id":"a","n":5}`, `{"$inc":{"n":-2}}`, "n", 3.0},
-		{"inc float", `{"post_id":"a","n":1}`, `{"$inc":{"n":0.5}}`, "n", 1.5},
-		{"inc dot", `{"post_id":"a","s":{"n":1}}`, `{"$inc":{"s.n":1}}`, "s", map[string]any{"n": 2.0}},
-		{"push", `{"post_id":"a","t":[1]}`, `{"$push":{"t":2}}`, "t", []any{1.0, 2.0}},
-		{"push missing", `{"post_id":"a"}`, `{"$push":{"t":2}}`, "t", []any{2.0}},
-		{"push each", `{"post_id":"a","t":[1]}`, `{"$push":{"t":{"$each":[2,3]}}}`, "t", []any{1.0, 2.0, 3.0}},
-		{"push object", `{"post_id":"a","t":[]}`, `{"$push":{"t":{"k":1}}}`, "t", []any{map[string]any{"k": 1.0}}},
-		{"pull value", `{"post_id":"a","t":[1,2,1]}`, `{"$pull":{"t":1}}`, "t", []any{2.0}},
-		{"pull cond", `{"post_id":"a","t":[1,5,9]}`, `{"$pull":{"t":{"$gte":5}}}`, "t", []any{1.0}},
-		{"pull objects", `{"post_id":"a","t":[{"status":"done","n":1},{"status":"open"}]}`, `{"$pull":{"t":{"status":"done"}}}`, "t", []any{map[string]any{"status": "open"}}},
-		{"min lower", `{"post_id":"a","n":5}`, `{"$min":{"n":3}}`, "n", 3.0},
-		{"min higher", `{"post_id":"a","n":5}`, `{"$min":{"n":9}}`, "n", 5.0},
-		{"max higher", `{"post_id":"a","n":5}`, `{"$max":{"n":9}}`, "n", 9.0},
-		{"max lower", `{"post_id":"a","n":5}`, `{"$max":{"n":1}}`, "n", 5.0},
-		{"max missing", `{"post_id":"a"}`, `{"$max":{"n":1}}`, "n", 1.0},
-		{"max strings", `{"post_id":"a","s":"b"}`, `{"$max":{"s":"c"}}`, "s", "c"},
-		{"min strings", `{"post_id":"a","s":"b"}`, `{"$min":{"s":"a"}}`, "s", "a"},
+		{"set dot", `{"_id":"a"}`, `{"$set":{"x.y":1}}`, "x", map[string]any{"y": 1.0}},
+		{"unset", `{"_id":"a","t":1}`, `{"$unset":{"t":true}}`, "t", nil},
+		{"unset empty string", `{"_id":"a","t":1}`, `{"$unset":{"t":""}}`, "t", nil},
+		{"inc missing", `{"_id":"a"}`, `{"$inc":{"n":3}}`, "n", 3.0},
+		{"inc negative", `{"_id":"a","n":5}`, `{"$inc":{"n":-2}}`, "n", 3.0},
+		{"inc float", `{"_id":"a","n":1}`, `{"$inc":{"n":0.5}}`, "n", 1.5},
+		{"inc dot", `{"_id":"a","s":{"n":1}}`, `{"$inc":{"s.n":1}}`, "s", map[string]any{"n": 2.0}},
+		{"push", `{"_id":"a","t":[1]}`, `{"$push":{"t":2}}`, "t", []any{1.0, 2.0}},
+		{"push missing", `{"_id":"a"}`, `{"$push":{"t":2}}`, "t", []any{2.0}},
+		{"push each", `{"_id":"a","t":[1]}`, `{"$push":{"t":{"$each":[2,3]}}}`, "t", []any{1.0, 2.0, 3.0}},
+		{"push object", `{"_id":"a","t":[]}`, `{"$push":{"t":{"k":1}}}`, "t", []any{map[string]any{"k": 1.0}}},
+		{"pull value", `{"_id":"a","t":[1,2,1]}`, `{"$pull":{"t":1}}`, "t", []any{2.0}},
+		{"pull cond", `{"_id":"a","t":[1,5,9]}`, `{"$pull":{"t":{"$gte":5}}}`, "t", []any{1.0}},
+		{"pull objects", `{"_id":"a","t":[{"status":"done","n":1},{"status":"open"}]}`, `{"$pull":{"t":{"status":"done"}}}`, "t", []any{map[string]any{"status": "open"}}},
+		{"min lower", `{"_id":"a","n":5}`, `{"$min":{"n":3}}`, "n", 3.0},
+		{"min higher", `{"_id":"a","n":5}`, `{"$min":{"n":9}}`, "n", 5.0},
+		{"max higher", `{"_id":"a","n":5}`, `{"$max":{"n":9}}`, "n", 9.0},
+		{"max lower", `{"_id":"a","n":5}`, `{"$max":{"n":1}}`, "n", 5.0},
+		{"max missing", `{"_id":"a"}`, `{"$max":{"n":1}}`, "n", 1.0},
+		{"max strings", `{"_id":"a","s":"b"}`, `{"$max":{"s":"c"}}`, "s", "c"},
+		{"min strings", `{"_id":"a","s":"b"}`, `{"$min":{"s":"a"}}`, "s", "a"},
 	}
 
 	for _, tc := range cases {
@@ -248,7 +248,7 @@ func TestOperators(t *testing.T) {
 
 			c.Insert(ctx, doc(tc.doc))
 
-			body := `{"post_id":"a",` + tc.body[1:]
+			body := `{"_id":"a",` + tc.body[1:]
 			upd(t, c, body, collection.UpdateOpts{})
 
 			got := docOf(t, c, "a")[tc.field]
@@ -266,9 +266,9 @@ func TestOperators(t *testing.T) {
 func TestMaxLowerDoesNotWrite(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	c.Insert(ctx, doc(`{"post_id":"a","n":5}`))
+	c.Insert(ctx, doc(`{"_id":"a","n":5}`))
 
-	res := upd(t, c, `{"post_id":"a","$max":{"n":1}}`, collection.UpdateOpts{})
+	res := upd(t, c, `{"_id":"a","$max":{"n":1}}`, collection.UpdateOpts{})
 
 	if d, _ := c.Find("a"); res.Matched != 1 || res.Modified != 0 || d.V != 1 {
 		t.Fatalf("%+v v=%d", res, d.V)
@@ -277,21 +277,21 @@ func TestMaxLowerDoesNotWrite(t *testing.T) {
 
 func TestUpdateContractErrors(t *testing.T) {
 	cases := map[string]struct{ body, code string }{
-		"unknown operator":   {`{"post_id":"a","$rename":{"a":"b"}}`, "unknown_operator"},
+		"unknown operator":   {`{"_id":"a","$rename":{"a":"b"}}`, "unknown_operator"},
 		"unknown top $not":   {`{"$not":{"a":1},"$set":{"a":1}}`, "unknown_operator"},
-		"no operator":        {`{"post_id":"a","n":1}`, "no_update"},
-		"conflict":           {`{"post_id":"a","$set":{"n":1},"$inc":{"n":1}}`, "conflicting_update"},
-		"conflict parent":    {`{"post_id":"a","$set":{"n":{}},"$inc":{"n.x":1}}`, "conflicting_update"},
-		"dollar field":       {`{"post_id":"a","$set":{"$x":1}}`, "invalid_field"},
-		"dollar nested path": {`{"post_id":"a","$set":{"a.$b":1}}`, "invalid_field"},
-		"op not object":      {`{"post_id":"a","$set":5}`, "invalid_field"},
-		"inc not number":     {`{"post_id":"a","$inc":{"s":"x"}}`, "invalid_field"},
-		"inc on string":      {`{"post_id":"a","$inc":{"s":1}}`, "invalid_field"},
-		"push on non array":  {`{"post_id":"a","$push":{"s":1}}`, "invalid_field"},
-		"pull on non array":  {`{"post_id":"a","$pull":{"s":1}}`, "invalid_field"},
-		"min mismatch":       {`{"post_id":"a","$min":{"s":1}}`, "invalid_field"},
-		"each not array":     {`{"post_id":"a","$push":{"t":{"$each":1}}}`, "invalid_field"},
-		"id change":          {`{"post_id":"a","$set":{"post_id":"b"}}`, "immutable_id"},
+		"no operator":        {`{"_id":"a","n":1}`, "no_update"},
+		"conflict":           {`{"_id":"a","$set":{"n":1},"$inc":{"n":1}}`, "conflicting_update"},
+		"conflict parent":    {`{"_id":"a","$set":{"n":{}},"$inc":{"n.x":1}}`, "conflicting_update"},
+		"dollar field":       {`{"_id":"a","$set":{"$x":1}}`, "invalid_field"},
+		"dollar nested path": {`{"_id":"a","$set":{"a.$b":1}}`, "invalid_field"},
+		"op not object":      {`{"_id":"a","$set":5}`, "invalid_field"},
+		"inc not number":     {`{"_id":"a","$inc":{"s":"x"}}`, "invalid_field"},
+		"inc on string":      {`{"_id":"a","$inc":{"s":1}}`, "invalid_field"},
+		"push on non array":  {`{"_id":"a","$push":{"s":1}}`, "invalid_field"},
+		"pull on non array":  {`{"_id":"a","$pull":{"s":1}}`, "invalid_field"},
+		"min mismatch":       {`{"_id":"a","$min":{"s":1}}`, "invalid_field"},
+		"each not array":     {`{"_id":"a","$push":{"t":{"$each":1}}}`, "invalid_field"},
+		"id change":          {`{"_id":"a","$set":{"_id":"b"}}`, "immutable_id"},
 		"empty filter":       {`{"$set":{"n":1}}`, "empty_filter"},
 	}
 
@@ -299,7 +299,7 @@ func TestUpdateContractErrors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c := open(t, t.TempDir(), catalog.Def{})
 
-			c.Insert(ctx, doc(`{"post_id":"a","s":"str"}`))
+			c.Insert(ctx, doc(`{"_id":"a","s":"str"}`))
 
 			if _, err := c.Update(ctx, []byte(tc.body), collection.UpdateOpts{}); code(err) != tc.code {
 				t.Fatalf("got %v, want %s", err, tc.code)
@@ -311,9 +311,9 @@ func TestUpdateContractErrors(t *testing.T) {
 func TestDeleteByFilter(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{Indexes: []string{"g"}})
 
-	c.Insert(ctx, doc(`{"post_id":"a","g":1}`), doc(`{"post_id":"b","g":1}`), doc(`{"post_id":"c","g":2}`))
+	c.Insert(ctx, doc(`{"_id":"a","g":1}`), doc(`{"_id":"b","g":1}`), doc(`{"_id":"c","g":2}`))
 
-	if n, err := c.Delete(ctx, []byte(`{"post_id":"zzz"}`), false); err != nil || n != 0 {
+	if n, err := c.Delete(ctx, []byte(`{"_id":"zzz"}`), false); err != nil || n != 0 {
 		t.Fatalf("n=%d err=%v", n, err)
 	}
 
@@ -321,7 +321,7 @@ func TestDeleteByFilter(t *testing.T) {
 		t.Fatalf("n=%d err=%v len=%d", n, err, c.Len())
 	}
 
-	if _, err := c.Delete(ctx, []byte(`{"post_id":"c","$set":{"a":1}}`), false); code(err) != "unknown_operator" {
+	if _, err := c.Delete(ctx, []byte(`{"_id":"c","$set":{"a":1}}`), false); code(err) != "unknown_operator" {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -329,11 +329,47 @@ func TestDeleteByFilter(t *testing.T) {
 func TestNorFilter(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	c.Insert(ctx, doc(`{"post_id":"a","s":1}`), doc(`{"post_id":"b","s":2}`))
+	c.Insert(ctx, doc(`{"_id":"a","s":1}`), doc(`{"_id":"b","s":2}`))
 
 	res := upd(t, c, `{"$nor":[{"s":1}],"$set":{"x":1}}`, collection.UpdateOpts{})
 
 	if res.Matched != 1 || docOf(t, c, "b")["x"] != 1.0 {
 		t.Fatalf("%+v", res)
+	}
+}
+
+func TestSetOnInsert(t *testing.T) {
+	c := open(t, t.TempDir(), catalog.Def{})
+
+	res := upd(t, c, `{"k":"x","$setOnInsert":{"n":1}}`, collection.UpdateOpts{Upsert: true})
+
+	if res.Matched != 0 || res.Modified != 1 {
+		t.Fatalf("insert: %+v", res)
+	}
+
+	var m map[string]any
+
+	json.Unmarshal(res.Doc, &m)
+
+	if m["k"] != "x" || m["n"] != 1.0 {
+		t.Fatalf("%s", res.Doc)
+	}
+
+	res = upd(t, c, `{"k":"x","$setOnInsert":{"n":2}}`, collection.UpdateOpts{Upsert: true})
+
+	if res.Matched != 1 || res.Modified != 0 {
+		t.Fatalf("match: %+v", res)
+	}
+
+	json.Unmarshal(res.Doc, &m)
+
+	if m["n"] != 1.0 {
+		t.Fatalf("a match must not overwrite: %s", res.Doc)
+	}
+
+	_, err := c.Update(ctx, []byte(`{"k":"x","$set":{"n":2},"$setOnInsert":{"n":3}}`), collection.UpdateOpts{Upsert: true})
+
+	if code(err) != "conflicting_update" {
+		t.Fatalf("conflict: %v", err)
 	}
 }

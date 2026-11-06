@@ -15,12 +15,12 @@ import (
 func seedPosts(t *testing.T, h http.Handler, n int) {
 	t.Helper()
 
-	call(h, "PUT", "/v1/c/posts", `{"id":"post_id"}`)
+	call(h, "PUT", "/v1/c/posts", `{}`)
 
 	docs := make([]string, n)
 
 	for i := range docs {
-		docs[i] = fmt.Sprintf(`{"post_id":"p%03d","k":%d,"n":%d}`, i, i%5, i)
+		docs[i] = fmt.Sprintf(`{"_id":"p%03d","k":%d,"n":%d}`, i, i%5, i)
 	}
 
 	expectStatus(t, call(h, "POST", "/v1/c/posts/insert", `{"insert":[`+strings.Join(docs, ",")+`]}`), http.StatusOK)
@@ -134,7 +134,7 @@ func TestAggregateGroupLimitIs422(t *testing.T) {
 
 	seedPosts(t, srv.Handler(), 100)
 
-	rec := call(srv.Handler(), "POST", "/v1/c/posts/aggregate", `{"pipeline":[{"$group":{"_id":"$post_id"}}]}`)
+	rec := call(srv.Handler(), "POST", "/v1/c/posts/aggregate", `{"pipeline":[{"$group":{"_id":"$_id"}}]}`)
 
 	expectStatus(t, rec, http.StatusUnprocessableEntity)
 

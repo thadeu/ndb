@@ -56,6 +56,10 @@ func newAPIClient(rawURL string) (*apiClient, error) {
 	token := os.Getenv("NDB_TOKEN")
 
 	if sock, ok := strings.CutPrefix(rawURL, "unix://"); ok {
+		if err := checkSocketPath(sock); err != nil {
+			return nil, err
+		}
+
 		return newUnixClient(sock, token), nil
 	}
 
@@ -121,6 +125,38 @@ func (c *apiClient) call(method, path string, body []byte) (reply, error) {
 	return reply{Header: resp.Header, Body: data}, nil
 }
 
+// stream sends one request and returns the body as a stream, with no time
+// limit: a backup of a large data dir takes as long as it takes.
+func (c *apiClient) stream(method, path string, body []byte) (io.ReadCloser, error) {
+	req, err := http.NewRequest(method, c.base+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+
+	if len(body) > 0 {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode == http.StatusOK {
+		return resp.Body, nil
+	}
+
+	defer resp.Body.Close()
+
+	data, _ := io.ReadAll(resp.Body)
+
+	return nil, parseAPIError(method, path, resp.StatusCode, data)
+}
+
 func parseAPIError(method, path string, status int, data []byte) *apiError {
 	e := &apiError{Status: status, Method: method, Path: path, Message: strings.TrimSpace(string(data))}
 
@@ -157,6 +193,16 @@ func (c *apiClient) post(path string, body []byte, v any) error {
 
 	if v == nil {
 		return nil
+	}
+
+	return json.Unmarshal(r.Body, v)
+}
+
+// del decodes the JSON answer of DELETE path into v.
+func (c *apiClient) del(path string, v any) error {
+	r, err := c.call(http.MethodDelete, path, nil)
+	if err != nil {
+		return err
 	}
 
 	return json.Unmarshal(r.Body, v)

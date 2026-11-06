@@ -69,14 +69,18 @@ echo "pages (limit 5): $(IFS=,; echo "${pages[*]}" | sed 's/,/, /g')"
 # endregion cursor
 
 # region append
-id="curl-$(date +%s)$RANDOM"
-line="{\"id\":\"$id\",\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"app\":\"cli\",\"level\":\"info\",\"msg\":\"hello from curl\"}"
+msg="hello from curl $(date +%s)$RANDOM"
+line="{\"ts\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"app\":\"cli\",\"level\":\"info\",\"msg\":\"$msg\"}"
 
 "$here/append.sh" cli 3003 "$line"
 
 echo "append: cli wrote one line"
 
-wait_for "\"id\":\"$id\"" 1
+wait_for "\"msg\":\"$msg\"" 1
 
 echo "the new line is in the collection"
+
+added=$(ndb POST /v1/c/app_logs/find "{\"where\":{\"msg\":\"$msg\"}}")
+
+echo "it has no _id, so it has no /{_id} routes: _id is \"$(jq -r '._id // ""' <<<"$added")\""
 # endregion append

@@ -13,7 +13,7 @@ import (
 )
 
 type Call struct {
-	CallID   string    `ndb:"call_id,id"`
+	ID       string    `ndb:"_id"`
 	Status   string    `ndb:"status,index"`
 	DNIS     string    `ndb:"dnis,index"`
 	Duration int       `ndb:"duration"`
@@ -43,9 +43,9 @@ func run(ctx context.Context, addr string) error {
 		return err
 	}
 
-	id := fmt.Sprintf("c%d", time.Now().UnixNano())
+	id := ndb.NewID()
 
-	_, err = calls.Insert(ctx, Call{CallID: id, Status: "answered", DNIS: "1133", Duration: 42, TS: time.Now().UTC()})
+	_, err = calls.Insert(ctx, Call{ID: id, Status: "answered", DNIS: "1133", Duration: 42, TS: time.Now().UTC()})
 	if err != nil {
 		return err
 	}
@@ -57,7 +57,7 @@ func run(ctx context.Context, addr string) error {
 
 	fmt.Printf("answered calls: %d\n", len(answered))
 
-	byID := ndb.Eq("call_id", id)
+	byID := ndb.Eq("_id", id)
 
 	res, err := calls.Update(ctx, byID, ndb.Ops{"$set": {"status": "done"}})
 	if err != nil {

@@ -5,16 +5,15 @@ require "test_helper"
 class RegexTest < Minitest::Test
   def setup
     @post = model do
-      primary_key :pid
 
       attribute :name, :string, index: true
       attribute :note, :string
     end
 
     @post.create!([
-                    { pid: "1", name: "Alpha", note: "first\nbeta" },
-                    { pid: "2", name: "alphabet", note: "one" },
-                    { pid: "3", name: "Beta", note: "two" }
+                    { _id: "1", name: "Alpha", note: "first\nbeta" },
+                    { _id: "2", name: "alphabet", note: "one" },
+                    { _id: "3", name: "Beta", note: "two" }
                   ])
   end
 
@@ -53,6 +52,6 @@ class RegexTest < Minitest::Test
   private
 
   def ids(relation)
-    relation.order(:pid).pluck(:pid)
+    relation.order(:_id).pluck(:_id)
   end
 end

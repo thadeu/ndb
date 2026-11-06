@@ -59,8 +59,8 @@ func TestQueryBodyJSON(t *testing.T) {
 		},
 		{
 			name:  "sort keeps the key order",
-			build: func() *Query[Call] { return calls.Where().Sort(Desc("ts"), Asc("call_id")) },
-			want:  `{"sort":{"ts":-1,"call_id":1}}`,
+			build: func() *Query[Call] { return calls.Where().Sort(Desc("ts"), Asc("_id")) },
+			want:  `{"sort":{"ts":-1,"_id":1}}`,
 		},
 		{
 			name:  "limit and skip",
@@ -259,7 +259,7 @@ func TestQuerySortLimitSkipFields(t *testing.T) {
 		t.Fatalf("sort+limit+skip: got %v, want %v", ids(got), want)
 	}
 
-	fields, err := calls.Where(Eq("call_id", "c3")).Fields("status").All(ctx)
+	fields, err := calls.Where(Eq("_id", "c3")).Fields("status").All(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +311,7 @@ func TestQueryIterStopsEarly(t *testing.T) {
 
 	var seen []string
 
-	for c, err := range calls.Where().Sort(Asc("call_id")).Iter(ctx) {
+	for c, err := range calls.Where().Sort(Asc("_id")).Iter(ctx) {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -332,7 +332,7 @@ func TestQueryPageAndCursor(t *testing.T) {
 	ctx := context.Background()
 	calls := seedCalls(t)
 
-	page, err := calls.Where().Sort(Asc("call_id")).Page(2, 2).All(ctx)
+	page, err := calls.Where().Sort(Asc("_id")).Page(2, 2).All(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +346,7 @@ func TestQueryPageAndCursor(t *testing.T) {
 	cursor := ""
 
 	for range 10 {
-		q := calls.Where().Sort(Asc("call_id")).Limit(2)
+		q := calls.Where().Sort(Asc("_id")).Limit(2)
 
 		if cursor != "" {
 			q.After(cursor)
@@ -375,13 +375,13 @@ func TestCursorBoundToQuery(t *testing.T) {
 	ctx := context.Background()
 	calls := seedCalls(t)
 
-	q := calls.Where().Sort(Asc("call_id")).Limit(2)
+	q := calls.Where().Sort(Asc("_id")).Limit(2)
 
 	if _, err := q.All(ctx); err != nil {
 		t.Fatal(err)
 	}
 
-	other := calls.Where().Sort(Desc("call_id")).Limit(2).After(q.NextCursor())
+	other := calls.Where().Sort(Desc("_id")).Limit(2).After(q.NextCursor())
 
 	if _, err := other.All(ctx); !errors.Is(err, ErrCursorMismatch) {
 		t.Fatalf("cursor for another sort: want ErrCursorMismatch, got %v", err)

@@ -14,9 +14,13 @@ import (
 
 // Write operators of an update body. The other top-level keys are the
 // filter. See update.go for how the two parts are split.
+//
+// $setOnInsert works like $set, but only when an upsert creates the
+// document. On a match it is ignored, so a racing writer's data is never
+// overwritten. It counts in the conflict checks like any other operator.
 
 var (
-	writeOperators  = []string{"$set", "$unset", "$inc", "$push", "$pull", "$min", "$max"}
+	writeOperators  = []string{"$set", "$setOnInsert", "$unset", "$inc", "$push", "$pull", "$min", "$max"}
 	filterOperators = []string{"$and", "$or", "$nor"}
 )
 
@@ -32,7 +36,7 @@ type fieldOp struct {
 
 // splitBody separates the filter keys from the write operators of a decoded
 // body. A top-level "$" key that is neither is unknown_operator.
-func splitBody(top map[string]any, idField string) (map[string]any, []fieldOp, error) {
+func splitBody(top map[string]any) (map[string]any, []fieldOp, error) {
 	filter := map[string]any{}
 	groups := map[string]map[string]any{}
 
@@ -56,7 +60,7 @@ func splitBody(top map[string]any, idField string) (map[string]any, []fieldOp, e
 		return nil, nil, errf("no_update", "the body has no write operator (%s)", strings.Join(writeOperators, ", "))
 	}
 
-	ops, err := buildOps(groups, idField)
+	ops, err := buildOps(groups)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -75,7 +79,7 @@ func splitFilter(top map[string]any) (map[string]any, error) {
 	return top, nil
 }
 
-func buildOps(groups map[string]map[string]any, idField string) ([]fieldOp, error) {
+func buildOps(groups map[string]map[string]any) ([]fieldOp, error) {
 	var out []fieldOp
 
 	for _, name := range writeOperators {
@@ -89,7 +93,7 @@ func buildOps(groups map[string]map[string]any, idField string) ([]fieldOp, erro
 		sort.Strings(paths)
 
 		for _, p := range paths {
-			if err := checkOpPath(name, p, idField); err != nil {
+			if err := checkOpPath(name, p); err != nil {
 				return nil, err
 			}
 
@@ -105,7 +109,7 @@ func buildOps(groups map[string]map[string]any, idField string) ([]fieldOp, erro
 	return out, nil
 }
 
-func checkOpPath(op, path, idField string) error {
+func checkOpPath(op, path string) error {
 	parts := strings.Split(path, ".")
 
 	for _, p := range parts {
@@ -264,6 +268,8 @@ func applyOp(m map[string]any, o fieldOp) (bool, error) {
 		}
 
 		return true, setPath(m, o.path, o.val)
+	case "$setOnInsert":
+		return false, nil
 	case "$unset":
 		if !exists {
 			return false, nil

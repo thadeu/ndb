@@ -5,7 +5,7 @@ require "ndb"
 
 ndb = Ndb::Client.new(url: ENV.fetch("NDB_URL", "unix:///tmp/ndb-examples.sock"))
 
-ndb.ensure_collection("orders", id: "order_id", time: "created_at", indexes: ["status"])
+ndb.ensure_collection("orders", time: "created_at", indexes: ["status"])
 
 # Seed the twelve orders once. A second run finds them and does nothing.
 def seed(ndb)
@@ -19,7 +19,7 @@ def seed(ndb)
   ]
 
   ndb.insert("orders", rows.map do |id, clock, status, amount|
-    { order_id: id, created_at: "2026-11-01T#{clock}Z", status: status, amount: amount }
+    { _id: id, created_at: "2026-11-01T#{clock}Z", status: status, amount: amount }
   end)
 end
 

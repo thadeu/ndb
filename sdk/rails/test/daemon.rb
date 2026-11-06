@@ -14,7 +14,7 @@ module TestDaemon
     attr_reader :socket, :data_dir, :binary
 
     def start
-      return socket if @pid
+      return socket if @_id
 
       @tmp = Dir.mktmpdir("ndb", "/tmp")
       @data_dir = File.join(@tmp, "d")
@@ -32,12 +32,12 @@ module TestDaemon
     end
 
     def stop
-      return unless @pid
+      return unless @_id
 
-      Process.kill("TERM", @pid)
-      Process.wait(@pid)
+      Process.kill("TERM", @_id)
+      Process.wait(@_id)
       FileUtils.rm_rf(@tmp)
-      @pid = nil
+      @_id = nil
     end
 
     # The daemon listens before recovery and answers /health with 503
@@ -65,14 +65,14 @@ module TestDaemon
     def spawn_daemon(binary)
       log = File.join(@tmp, "ndb.log")
 
-      @pid = Process.spawn(binary, "-data-dir", @data_dir, "-unix", socket, out: log, err: log)
+      @_id = Process.spawn(binary, "-data-dir", @data_dir, "-unix", socket, out: log, err: log)
     end
 
     def wait_ready
       deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + READY_DEADLINE
 
       until healthy?
-        raise "ndb daemon exited early:\n#{File.read(File.join(@tmp, 'ndb.log'))}" if Process.wait(@pid, Process::WNOHANG)
+        raise "ndb daemon exited early:\n#{File.read(File.join(@tmp, 'ndb.log'))}" if Process.wait(@_id, Process::WNOHANG)
         raise "ndb daemon did not become ready" if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
 
         sleep 0.05
@@ -114,17 +114,17 @@ class TcpDaemon
     args += ["-token-file", @token_file] if @token_file
 
     log = File.join(@tmp, "ndb.log")
-    @pid = Process.spawn(TestDaemon.binary, *args, out: log, err: log)
+    @_id = Process.spawn(TestDaemon.binary, *args, out: log, err: log)
 
     wait_ready
   end
 
   def stop
-    return unless @pid
+    return unless @_id
 
-    Process.kill("TERM", @pid)
-    Process.wait(@pid)
-    @pid = nil
+    Process.kill("TERM", @_id)
+    Process.wait(@_id)
+    @_id = nil
   end
 
   def cleanup
@@ -148,7 +148,7 @@ class TcpDaemon
     deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + TestDaemon::READY_DEADLINE
 
     until listening?
-      raise "tcp daemon exited early:\n#{File.read(File.join(@tmp, 'ndb.log'))}" if Process.wait(@pid, Process::WNOHANG)
+      raise "tcp daemon exited early:\n#{File.read(File.join(@tmp, 'ndb.log'))}" if Process.wait(@_id, Process::WNOHANG)
       raise "tcp daemon did not become ready" if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
 
       sleep 0.05

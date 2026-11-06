@@ -10,7 +10,7 @@ import (
 )
 
 type Job struct {
-	JobID  string `ndb:"job_id,id"`
+	JobID  string `ndb:"_id"`
 	Status string `ndb:"status"`
 }
 
@@ -106,7 +106,7 @@ func TestWatchDeleteEventHasZeroDocAndFromNow(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 
-	if _, err := c.Delete(ctx, Eq("job_id", "j1")); err != nil {
+	if _, err := c.Delete(ctx, Eq("_id", "j1")); err != nil {
 		t.Fatal(err)
 	}
 

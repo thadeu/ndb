@@ -59,6 +59,7 @@ export const tabs: Tab[] = [
       {
         text: 'Write',
         items: [
+          { text: 'By _id', link: '/query#by-id' },
           { text: 'Update by filter', link: '/query#update-by-filter' },
           { text: 'Write operators', link: '/query#write-operators' },
           { text: 'Arrays', link: '/query#arrays' },
@@ -112,14 +113,21 @@ export const tabs: Tab[] = [
     link: '/clients',
     groups: [
       {
+        text: 'Start',
+        items: [{ text: 'Overview', link: '/clients' }],
+      },
+      {
         text: 'SDKs',
         items: [
-          { text: 'Ruby', link: '/clients#ruby-gem-ndb' },
-          { text: 'Rails', link: '/clients#rails-gem-ndb-record' },
-          { text: 'Go', link: '/clients#go-module-github-com-thadeu-ndb-sdk-go' },
-          { text: 'TypeScript', link: '/clients#typescript-package-ndb' },
-          { text: 'Direct mode', link: '/clients#direct-mode-from-an-app' },
+          { text: 'Go', link: '/clients/go' },
+          { text: 'Ruby', link: '/clients/ruby' },
+          { text: 'Rails', link: '/clients/rails' },
+          { text: 'TypeScript', link: '/clients/typescript' },
         ],
+      },
+      {
+        text: 'Terminal',
+        items: [{ text: 'CLI', link: '/clients/cli' }],
       },
     ],
   },
@@ -152,10 +160,14 @@ export const tabs: Tab[] = [
     link: '/operations',
     groups: [
       {
-        text: 'Run',
+        text: 'Runbook',
         items: [
-          { text: 'Runbook', link: '/operations' },
-          { text: 'Docker', link: '/docker' },
+          { text: 'Overview', link: '/operations' },
+          { text: 'Health and metrics', link: '/operations#check' },
+          { text: 'Backup and restore', link: '/operations#backup-and-restore' },
+          { text: 'Recovery', link: '/operations#recovery-after-a-crash' },
+          { text: 'Compaction and TTL', link: '/operations#compaction-retention-and-ttl' },
+          { text: 'Upgrade', link: '/operations#upgrade' },
         ],
       },
     ],
@@ -167,15 +179,30 @@ export const tabs: Tab[] = [
     link: '/deployment',
     groups: [
       {
-        text: 'Deploy',
+        text: 'Start',
+        items: [{ text: 'Choose a setup', link: '/deployment' }],
+      },
+      {
+        text: 'Run ndb',
         items: [
-          { text: 'Deployment', link: '/deployment' },
-          { text: 'Docker', link: '/docker' },
+          { text: 'Linux (systemd)', link: '/deploy/linux' },
+          { text: 'Docker', link: '/deploy/docker' },
+          { text: 'Voodu', link: '/deploy/voodu' },
+        ],
+      },
+      {
+        text: 'Topologies',
+        items: [
+          { text: 'Single VM', link: '/deploy/single-vm' },
+          { text: 'Cross-VM (WireGuard)', link: '/deploy/cross-vm' },
         ],
       },
       {
         text: 'Contribute',
-        items: [{ text: 'Development', link: '/development' }],
+        items: [
+          { text: 'Development', link: '/development' },
+          { text: 'Releasing', link: '/releasing' },
+        ],
       },
     ],
   },
@@ -191,6 +218,11 @@ export const pageTab: Record<string, string> = {
   '/aggregate': 'aggregate',
   '/watch': 'watch',
   '/clients': 'clients',
+  '/clients/go': 'clients',
+  '/clients/ruby': 'clients',
+  '/clients/rails': 'clients',
+  '/clients/typescript': 'clients',
+  '/clients/cli': 'clients',
   '/examples': 'examples',
   '/examples/crud': 'examples',
   '/examples/logs': 'examples',
@@ -198,7 +230,12 @@ export const pageTab: Record<string, string> = {
   '/examples/outbox': 'examples',
   '/examples/ttl-sessions': 'examples',
   '/operations': 'operations',
-  '/docker': 'operations',
   '/deployment': 'deploy',
+  '/deploy/linux': 'deploy',
+  '/deploy/docker': 'deploy',
+  '/deploy/voodu': 'deploy',
+  '/deploy/single-vm': 'deploy',
+  '/deploy/cross-vm': 'deploy',
+  '/releasing': 'deploy',
   '/development': 'deploy',
 }

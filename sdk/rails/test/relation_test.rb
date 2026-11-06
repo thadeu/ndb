@@ -5,13 +5,12 @@ require "test_helper"
 class RelationTest < Minitest::Test
   def setup
     @post = model do
-      primary_key :post_id
 
       attribute :status, :string, index: true
       attribute :n, :integer
     end
 
-    @post.create!((1..10).map { |i| { post_id: "p#{i}", status: i.odd? ? "odd" : "even", n: i } })
+    @post.create!((1..10).map { |i| { _id: "p#{i}", status: i.odd? ? "odd" : "even", n: i } })
   end
 
   def test_relation_is_lazy
@@ -25,7 +24,7 @@ class RelationTest < Minitest::Test
   end
 
   def test_where_order_limit
-    ids = @post.where(status: "odd").order(n: :desc).limit(2).map(&:post_id)
+    ids = @post.where(status: "odd").order(n: :desc).limit(2).map(&:_id)
 
     assert_equal %w[p9 p7], ids
   end
@@ -34,17 +33,17 @@ class RelationTest < Minitest::Test
     assert_equal 4, @post.where(n: 3..6).count
     assert_equal 3, @post.where(n: 3...6).count
     assert_equal 2, @post.where(n: ..2).count
-    assert_equal 2, @post.where(post_id: %w[p1 p2]).count
+    assert_equal 2, @post.where(_id: %w[p1 p2]).count
     assert_equal 0, @post.where(missing: nil).count - 10
     assert_equal 5, @post.where.not(status: "odd").count
     assert_equal 3, @post.where(n: 1).or(@post.where(n: 2)).or(@post.where(n: 3)).count
   end
 
   def test_first_find_and_find_by
-    assert_equal "p1", @post.order(n: :asc).first.post_id
-    assert_equal "p3", @post.find("p3").post_id
-    assert_equal %w[p1 p2], @post.find(%w[p1 p2]).map(&:post_id).sort
-    assert_equal "p4", @post.find_by(n: 4).post_id
+    assert_equal "p1", @post.order(n: :asc).first._id
+    assert_equal "p3", @post.find("p3")._id
+    assert_equal %w[p1 p2], @post.find(%w[p1 p2]).map(&:_id).sort
+    assert_equal "p4", @post.find_by(n: 4)._id
     assert_nil @post.find_by(n: 99)
     assert_raises(Ndb::NotFound) { @post.find("nope") }
     assert_raises(Ndb::NotFound) { @post.find_by!(n: 99) }
@@ -54,7 +53,7 @@ class RelationTest < Minitest::Test
     assert @post.where(n: 1).exists?
     refute @post.where(n: 99).exists?
     assert_equal [1, 2, 3], @post.order(:n).limit(3).pluck(:n)
-    assert_equal [["p1", 1], ["p2", 2]], @post.order(:n).limit(2).pluck(:post_id, :n)
+    assert_equal [["p1", 1], ["p2", 2]], @post.order(:n).limit(2).pluck(:_id, :n)
     assert_equal 10, @post.count
   end
 
@@ -110,7 +109,7 @@ class RelationTest < Minitest::Test
   end
 
   def test_unknown_rows_fields_are_ignored
-    klass = model(@post.collection_name) { primary_key :post_id }
+    klass = model(@post.collection_name) {}
 
     assert_equal 10, klass.count
     assert_equal 10, klass.to_a.size

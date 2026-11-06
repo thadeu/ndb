@@ -199,6 +199,10 @@ func listen(l config.Listen) ([]net.Listener, error) {
 	}
 
 	if l.Unix != "" {
+		if err := checkSocketPath(l.Unix); err != nil {
+			return nil, err
+		}
+
 		if err := removeStaleSocket(l.Unix); err != nil {
 			return nil, err
 		}

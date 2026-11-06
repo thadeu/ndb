@@ -33,7 +33,7 @@ func openTTL(t *testing.T, def catalog.Def, clk *clock, seal bool) *collection.C
 	t.Helper()
 
 	root := t.TempDir()
-	def.Name, def.ID = "sessions", "id"
+	def.Name = "sessions"
 
 	cfg := collection.Config{Dir: filepath.Join(root, "wal"), FS: fs.OS{}, Def: def, Now: clk.now, SweepEvery: time.Hour}
 
@@ -73,10 +73,10 @@ func TestExpiresFieldHidesAtOnce(t *testing.T) {
 		c := openTTL(t, catalog.Def{ExpiresField: "exp"}, clk, seal)
 
 		for _, d := range []string{
-			`{"id":"past","exp":"2020-01-01T00:00:00Z"}`,
-			`{"id":"past_unix","exp":1577836800}`,
-			`{"id":"future","exp":"2999-01-01T00:00:00Z"}`,
-			`{"id":"never"}`,
+			`{"_id":"past","exp":"2020-01-01T00:00:00Z"}`,
+			`{"_id":"past_unix","exp":1577836800}`,
+			`{"_id":"future","exp":"2999-01-01T00:00:00Z"}`,
+			`{"_id":"never"}`,
 		} {
 			if _, err := c.Insert(ctx, doc(d)); err != nil {
 				t.Fatal(err)
@@ -118,7 +118,7 @@ func TestExpiryFollowsTheClock(t *testing.T) {
 
 	exp := rfc(clk.now().Add(time.Minute))
 
-	if _, err := c.Insert(ctx, doc(fmt.Sprintf(`{"id":"a","exp":%q}`, exp))); err != nil {
+	if _, err := c.Insert(ctx, doc(fmt.Sprintf(`{"_id":"a","exp":%q}`, exp))); err != nil {
 		t.Fatal(err)
 	}
 
@@ -141,9 +141,9 @@ func TestTTLCountsFromTheTimeField(t *testing.T) {
 	fresh := rfc(clk.now().Add(-10 * time.Minute))
 
 	for _, d := range []string{
-		fmt.Sprintf(`{"id":"old","at":%q}`, old),
-		fmt.Sprintf(`{"id":"fresh","at":%q}`, fresh),
-		`{"id":"no_time"}`,
+		fmt.Sprintf(`{"_id":"old","at":%q}`, old),
+		fmt.Sprintf(`{"_id":"fresh","at":%q}`, fresh),
+		`{"_id":"no_time"}`,
 	} {
 		if _, err := c.Insert(ctx, doc(d)); err != nil {
 			t.Fatal(err)
@@ -166,12 +166,12 @@ func TestSweepWritesExpiredTombstones(t *testing.T) {
 	c := openTTL(t, catalog.Def{ExpiresField: "exp"}, clk, true)
 
 	for i := range 5 {
-		if _, err := c.Insert(ctx, doc(fmt.Sprintf(`{"id":"e%d","exp":"2020-01-01T00:00:00Z"}`, i))); err != nil {
+		if _, err := c.Insert(ctx, doc(fmt.Sprintf(`{"_id":"e%d","exp":"2020-01-01T00:00:00Z"}`, i))); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	if _, err := c.Insert(ctx, doc(`{"id":"keep","exp":"2999-01-01T00:00:00Z"}`)); err != nil {
+	if _, err := c.Insert(ctx, doc(`{"_id":"keep","exp":"2999-01-01T00:00:00Z"}`)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -223,7 +223,7 @@ func TestSweepBatchesAreSmall(t *testing.T) {
 	c := openTTL(t, catalog.Def{ExpiresField: "exp"}, clk, false)
 
 	for i := range 250 {
-		if _, err := c.Insert(ctx, doc(fmt.Sprintf(`{"id":"e%03d","exp":"2020-01-01T00:00:00Z"}`, i))); err != nil {
+		if _, err := c.Insert(ctx, doc(fmt.Sprintf(`{"_id":"e%03d","exp":"2020-01-01T00:00:00Z"}`, i))); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -238,13 +238,13 @@ func TestUpdateThatMovesExpiryForwardKeepsTheDoc(t *testing.T) {
 	clk := newClock()
 	c := openTTL(t, catalog.Def{ExpiresField: "exp"}, clk, false)
 
-	if _, err := c.Insert(ctx, doc(`{"id":"s1","exp":"`+clk.now().Add(time.Minute).UTC().Format(time.RFC3339)+`"}`)); err != nil {
+	if _, err := c.Insert(ctx, doc(`{"_id":"s1","exp":"`+clk.now().Add(time.Minute).UTC().Format(time.RFC3339)+`"}`)); err != nil {
 		t.Fatal(err)
 	}
 
 	ch := collection.Change{Set: map[string]any{"exp": "2999-01-01T00:00:00Z"}}
 
-	if _, err := c.UpdateID(ctx, "s1", ch, 0); err != nil {
+	if _, err := c.UpdateByID(ctx, "s1", ch, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -262,7 +262,7 @@ func TestUpdateThatMovesExpiryForwardKeepsTheDoc(t *testing.T) {
 func TestSweeperRunsOnItsTick(t *testing.T) {
 	clk := newClock()
 	root := t.TempDir()
-	def := catalog.Def{Name: "sessions", ID: "id", ExpiresField: "exp"}
+	def := catalog.Def{Name: "sessions", ExpiresField: "exp"}
 
 	c, err := collection.Open(collection.Config{
 		Dir: filepath.Join(root, "wal"), FS: fs.OS{}, Def: def, Now: clk.now, SweepEvery: 10 * time.Millisecond,
@@ -273,7 +273,7 @@ func TestSweeperRunsOnItsTick(t *testing.T) {
 
 	t.Cleanup(func() { closeOnce(c) })
 
-	if _, err := c.Insert(ctx, doc(`{"id":"a","exp":"2020-01-01T00:00:00Z"}`)); err != nil {
+	if _, err := c.Insert(ctx, doc(`{"_id":"a","exp":"2020-01-01T00:00:00Z"}`)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -291,7 +291,7 @@ func TestSweeperRunsOnItsTick(t *testing.T) {
 func TestSweepSurvivesRestart(t *testing.T) {
 	clk := newClock()
 	root := t.TempDir()
-	def := catalog.Def{Name: "sessions", ID: "id", ExpiresField: "exp"}
+	def := catalog.Def{Name: "sessions", ExpiresField: "exp"}
 	cfg := collection.Config{Dir: filepath.Join(root, "wal"), Data: root, FS: fs.OS{}, Def: def, Now: clk.now, SweepEvery: time.Hour}
 
 	c, err := collection.Open(cfg)
@@ -300,7 +300,7 @@ func TestSweepSurvivesRestart(t *testing.T) {
 	}
 
 	for i := range 3 {
-		if _, err := c.Insert(ctx, doc(fmt.Sprintf(`{"id":"e%d","exp":"2020-01-01T00:00:00Z"}`, i))); err != nil {
+		if _, err := c.Insert(ctx, doc(fmt.Sprintf(`{"_id":"e%d","exp":"2020-01-01T00:00:00Z"}`, i))); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -332,8 +332,8 @@ func TestRetentionHidesOldRows(t *testing.T) {
 	c := openTTL(t, catalog.Def{Time: "at", Retention: "7d"}, clk, true)
 
 	for _, d := range []string{
-		fmt.Sprintf(`{"id":"old","at":%q}`, rfc(clk.now().Add(-8*24*time.Hour))),
-		fmt.Sprintf(`{"id":"new","at":%q}`, rfc(clk.now().Add(-24*time.Hour))),
+		fmt.Sprintf(`{"_id":"old","at":%q}`, rfc(clk.now().Add(-8*24*time.Hour))),
+		fmt.Sprintf(`{"_id":"new","at":%q}`, rfc(clk.now().Add(-24*time.Hour))),
 	} {
 		if _, err := c.Insert(ctx, doc(d)); err != nil {
 			t.Fatal(err)
@@ -353,13 +353,13 @@ func TestRetentionHidesOldRows(t *testing.T) {
 }
 
 func TestDirectModeOnlyHides(t *testing.T) {
-	d := collection.NewDirect(collection.DirectConfig{Def: catalog.Def{Name: "x", ID: "id", ExpiresField: "exp"}})
+	d := collection.NewDirect(collection.DirectConfig{Def: catalog.Def{Name: "x", ExpiresField: "exp"}})
 
 	defer d.Close()
 
 	for i, line := range []string{
-		`{"id":"gone","exp":"2020-01-01T00:00:00Z"}`,
-		`{"id":"here","exp":"2999-01-01T00:00:00Z"}`,
+		`{"_id":"gone","exp":"2020-01-01T00:00:00Z"}`,
+		`{"_id":"here","exp":"2999-01-01T00:00:00Z"}`,
 	} {
 		if err := d.Apply("a.ndjson", int64(i*100), []byte(line)); err != nil {
 			t.Fatal(err)
@@ -385,7 +385,7 @@ func TestFindByIDHidesExpiredDocs(t *testing.T) {
 	clk := newClock()
 	c := openTTL(t, catalog.Def{ExpiresField: "exp"}, clk, false)
 
-	for _, d := range []string{`{"id":"a","exp":"2020-01-01T00:00:00Z"}`, `{"id":"b"}`} {
+	for _, d := range []string{`{"_id":"a","exp":"2020-01-01T00:00:00Z"}`, `{"_id":"b"}`} {
 		if _, err := c.Insert(ctx, doc(d)); err != nil {
 			t.Fatal(err)
 		}
@@ -399,7 +399,34 @@ func TestFindByIDHidesExpiredDocs(t *testing.T) {
 		t.Fatal("a doc without expiry must be found")
 	}
 
-	if n := countOf(t, c, `{"where":{"id":"a"}}`); n != 0 {
+	if n := countOf(t, c, `{"where":{"_id":"a"}}`); n != 0 {
 		t.Fatalf("find by id plan returned %d rows", n)
+	}
+}
+
+func TestInsertReplacesAnExpiredDocumentThatIsNotSweptYet(t *testing.T) {
+	clk := newClock()
+	c := openTTL(t, catalog.Def{ExpiresField: "exp"}, clk, false)
+
+	exp := rfc(clk.now().Add(time.Minute))
+
+	if _, err := c.Insert(ctx, doc(fmt.Sprintf(`{"_id":"a","exp":%q}`, exp))); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := c.Insert(ctx, doc(`{"_id":"a"}`)); code(err) != "duplicate_id" {
+		t.Fatalf("a live document must stay: %v", err)
+	}
+
+	clk.advance(2 * time.Minute)
+
+	res, err := c.Insert(ctx, doc(`{"_id":"a","n":2}`))
+	if err != nil || res[0].V != 2 {
+		t.Fatalf("insert over the expired document: %v, %v", res, err)
+	}
+
+	got, ok := c.Find("a")
+	if !ok || field(t, got.Doc, "n") != float64(2) {
+		t.Fatalf("a = %s, %v", got.Doc, ok)
 	}
 }

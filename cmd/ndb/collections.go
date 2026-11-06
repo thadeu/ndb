@@ -69,8 +69,8 @@ func printCollections(out io.Writer, defs []catalog.Def) {
 		Columns: []tui.Column{
 			{Title: "name", Keep: true},
 			{Title: "write"},
-			{Title: "id"},
 			{Title: "time"},
+			{Title: "unique"},
 			{Title: "indexes"},
 			{Title: "ttl"},
 			{Title: "retention"},
@@ -80,7 +80,7 @@ func printCollections(out io.Writer, defs []catalog.Def) {
 
 	for _, d := range defs {
 		tb.Rows = append(tb.Rows, []string{
-			d.Name, dash(string(d.Write)), dash(d.ID), dash(d.Time), dash(strings.Join(d.Indexes, ", ")),
+			d.Name, dash(string(d.Write)), dash(d.Time), dash(strings.Join(d.Unique, ", ")), dash(strings.Join(d.Indexes, ", ")),
 			dash(d.TTL), dash(d.Retention), dash(d.Path),
 		})
 	}
@@ -111,7 +111,6 @@ func showCollection(c *apiClient, name string, asJSON bool, out io.Writer) error
 	for _, kv := range [][2]string{
 		{"name", d.Name},
 		{"write", string(d.Write)},
-		{"id", d.ID},
 		{"time", d.Time},
 		{"path", d.Path},
 		{"durability", string(d.Durability)},

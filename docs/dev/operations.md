@@ -1,157 +1,10 @@
-# Operations runbook
+# Operations
 
-## Run
+The day-to-day runbook for a running ndb: is it healthy, how to back it up, what to do after a crash, how data ages, and how to upgrade. To install it first, see [Deploy](deployment.md). Every command is in [CLI](clients/cli.md).
 
-- systemd: [deploy/systemd/ndb.service](../../deploy/systemd/ndb.service) and [ndb.yml](../../deploy/systemd/ndb.yml).
-- Docker: [docker.md](docker.md).
-- Run one daemon per data dir. A second one fails on the lock.
-- Keep `data_dir` on a local disk. Never on NFS, EFS or another network volume: `flock` and `fsync` are not reliable there.
-- Stop with SIGTERM and wait at least 30 s.
-- Configuration and durability: [configuration.md](configuration.md).
+## Check
 
-## CLI
-
-The `ndb` binary is the daemon and the CLI. `ndb` with only flags still runs the daemon; `ndb serve` is the same, written out. The data dir always lives on the host, even when the daemon runs in Docker (see [docker.md](docker.md#cli)). Common flags: `-config FILE` and `-data-dir DIR`.
-
-| Command | What it does |
-| --- | --- |
-| `ndb serve [flags]` | Run the daemon. |
-| `ndb backup <dest>` | Copy the data dir (see above). |
-| `ndb restore <backup-dir>` | Put a backup in a data dir. |
-| `ndb stats` | Per collection: rows, size, segments, WAL files, indexes, quarantined lines. |
-| `ndb size` | Disk usage per collection and per part. |
-| `ndb collections [name]` | The catalog, or the definition of one collection. |
-| `ndb compact <collection>` | Seal and merge the segments now. |
-| `ndb quarantine <collection>` | The bad lines of a direct collection. |
-| `ndb query <collection> ['<where>']` | Find rows (`-aggregate` for a pipeline). |
-| `ndb update <collection> '<json>'` | [Atomic update by filter](query.md#update-by-filter): the JSON mixes the filter and the write operators. `--many`, `--upsert`, `--expire-in 60s`. |
-| `ndb delete <collection> '<json>'` | Delete the documents that the JSON filter matches. `--many`. |
-| `ndb version` | Print the version. `ndb -version` still works. |
-| `ndb help` | List the commands. |
-
-Every command except `backup`, `restore`, `serve`, `version` and `help` is a thin client of the [HTTP API](http-api.md#stats-size-and-admin). They share these flags:
-
-- `-url unix:///run/ndb/ndb.sock` or `tcp://host:7070` picks the daemon. The default is `NDB_URL`, then the `listen.unix` socket of `ndb.yml` when something answers on it. `NDB_TOKEN` is the bearer token for TCP.
-- `-config FILE` and `-data-dir DIR`. `-data-dir` and `-url` together are an error.
-- `-json` prints the JSON of the API (`query`: NDJSON rows).
-- Only `stats` and `size` have an offline mode: with `-data-dir`, or when no daemon answers, they read the data dir (no lock, so a running daemon is fine). `collections`, `compact`, `quarantine` and `query` need a daemon and say so when none answers.
-
-Tables use box-drawing characters. On a terminal they fit its width: the widest text columns (more than 8 cells) shrink first, in proportion, down to 10 cells and then further, and their cells end in `…`; short text such as `direct` or `engine`, numbers and ids are cut last. Headers are lowercase, like the field names that `ndb query` prints. The width is the terminal size, then `COLUMNS`, then 100. Piped output is never cut. ASCII borders are used when the locale (`LC_ALL`, `LC_CTYPE`, `LANG`) is not UTF-8 or `TERM=dumb`. Color (bold header, dim borders) needs a terminal and no `NO_COLOR`. A CJK or emoji character counts as two cells; a ZWJ emoji sequence is counted per character, so it can look a little wide.
-
-### restore
-
-`ndb restore <backup-dir> [-data-dir DIR] [-force]`
-
-1. It takes the data dir lock. A running daemon holds it, so the command refuses.
-2. It refuses a data dir that is not empty, unless `-force`.
-3. It copies the backup to `<data-dir>/.restore-stage` and opens it as a daemon would: the WAL is replayed and segments and indexes are rebuilt. A backup that does not recover stops here and the data dir stays as it was.
-4. Only then it removes the old contents (`-force`) and moves the checked copy into place.
-
-### stats
-
-`ndb stats [-data-dir DIR | -url URL] [-json]` calls `GET /v1/stats`.
-
-```
-┌────────────┬────────┬──────┬───────────┬──────────┬─────┬─────────────┬────────────────┐
-│ collection │ mode   │ rows │      size │ segments │ wal │ quarantined │ indexes        │
-├────────────┼────────┼──────┼───────────┼──────────┼─────┼─────────────┼────────────────┤
-│ calls      │ direct │    3 │ 128.1 KiB │        0 │   0 │           1 │ status (ready) │
-│ posts      │ engine │    4 │ 131.1 KiB │        1 │   1 │           0 │ author (ready) │
-├────────────┼────────┼──────┼───────────┼──────────┼─────┼─────────────┼────────────────┤
-│ total      │        │    7 │ 515.2 KiB │        1 │   1 │           1 │                │
-└────────────┴────────┴──────┴───────────┴──────────┴─────┴─────────────┴────────────────┘
-ndb dev · up 12s · blobs 0 B · cursors 128.0 KiB
-```
-
-At 80 columns the stats table cuts `indexes` and keeps `direct` and `engine` whole:
-
-```
-┌────────────┬────────┬──────┬───────────┬──────────┬─────┬─────────────┬──────┐
-│ collection │ mode   │ rows │      size │ segments │ wal │ quarantined │ ind… │
-├────────────┼────────┼──────┼───────────┼──────────┼─────┼─────────────┼──────┤
-│ calls      │ direct │    3 │ 128.1 KiB │        0 │   0 │           1 │ sta… │
-│ posts      │ engine │    4 │ 131.1 KiB │        1 │   1 │           0 │ aut… │
-├────────────┼────────┼──────┼───────────┼──────────┼─────┼─────────────┼──────┤
-│ total      │        │    7 │ 515.2 KiB │        1 │   1 │           1 │      │
-└────────────┴────────┴──────┴───────────┴──────────┴─────┴─────────────┴──────┘
-ndb dev · up 3s · blobs 0 B · cursors 128.0 KiB
-```
-
-Offline (`-data-dir`, or no daemon) the table shows `-` for rows, mode, quarantined and indexes: they live in the daemon.
-
-### size
-
-`ndb size [-data-dir DIR | -url URL] [-json]` calls `GET /v1/size`: bytes per collection split in `wal`, `segments` and `meta` (`meta.bolt`), plus the shared `blobs`, `cursors.bolt` and catalog (`meta` of the `(shared)` row). It only stats files, so it takes no lock.
-
-```
-┌──────────┬───────┬──────────┬───────────┬───────┬───────────┬───────────┐
-│ name     │   wal │ segments │      meta │ blobs │   cursors │     total │
-├──────────┼───────┼──────────┼───────────┼───────┼───────────┼───────────┤
-│ calls    │   0 B │      0 B │ 128.1 KiB │   0 B │       0 B │ 128.1 KiB │
-│ posts    │ 524 B │  2.6 KiB │ 128.0 KiB │   0 B │       0 B │ 131.1 KiB │
-│ (shared) │   0 B │      0 B │ 128.0 KiB │   0 B │ 128.0 KiB │ 256.0 KiB │
-├──────────┼───────┼──────────┼───────────┼───────┼───────────┼───────────┤
-│ total    │ 524 B │  2.6 KiB │ 384.1 KiB │   0 B │ 128.0 KiB │ 515.2 KiB │
-└──────────┴───────┴──────────┴───────────┴───────┴───────────┴───────────┘
-```
-
-### collections
-
-`ndb collections [name] [-json]` calls `GET /v1/c`, or `GET /v1/c/{name}` for one collection (every definition field and the index state).
-
-```
-┌───────┬────────┬─────────┬──────┬─────────┬─────┬───────────┬─────────────────────────┐
-│ name  │ write  │ id      │ time │ indexes │ ttl │ retention │ path                    │
-├───────┼────────┼─────────┼──────┼─────────┼─────┼───────────┼─────────────────────────┤
-│ calls │ direct │ call_id │ -    │ status  │ -   │ -         │ /tmp/ndbd/logs/*.ndjson │
-│ posts │ engine │ post_id │ -    │ author  │ -   │ -         │ -                       │
-└───────┴────────┴─────────┴──────┴─────────┴─────┴───────────┴─────────────────────────┘
-```
-
-### compact
-
-`ndb compact <collection> [-json]` calls `POST /v1/c/{coll}/compact`: it seals the memtable and merges all segments into one. It waits for the end (up to 10 minutes). A direct collection fails with `not_supported`.
-
-```
-┌────────────┬──────────┬────────────────────┬──────┐
-│ collection │ segments │               size │ time │
-├────────────┼──────────┼────────────────────┼──────┤
-│ posts      │   1 -> 1 │ 2.6 KiB -> 2.6 KiB │ 24ms │
-└────────────┴──────────┴────────────────────┴──────┘
-```
-
-### quarantine
-
-`ndb quarantine <collection> [-limit N] [-json]` calls `GET /v1/c/{coll}/quarantine`. The default `-limit` is 20. See [Quarantine](#quarantine).
-
-```
-┌─────────────────────────┬────────┬───────────────────────────────────────────┬──────────┐
-│ file                    │ offset │ error                                     │ line     │
-├─────────────────────────┼────────┼───────────────────────────────────────────┼──────────┤
-│ /tmp/ndbd/logs/a.ndjson │     62 │ invalid_doc: a line must be a JSON object │ not json │
-└─────────────────────────┴────────┴───────────────────────────────────────────┴──────────┘
-showing 1 of 1 quarantined lines (newest last)
-```
-
-### query
-
-`ndb query <collection> ['<where-json>'] [-sort JSON] [-fields a,b] [-limit N] [-json|-ndjson]` calls `POST /v1/c/{coll}/find`. `ndb query <collection> -aggregate '<pipeline-json>'` calls `aggregate`. Flags may come before or after the positional arguments. The table has one column per top-level key of the first 200 rows, in order of appearance; nested values are compact JSON; number columns are right-aligned. With `-json` (or `-ndjson`) the output is the NDJSON of the API, ready for `jq`.
-
-```
-$ ndb query posts '{}' -sort '{"likes":-1}'
-┌─────────┬──────────┬───────┬─────────────────────────────────────────────────┐
-│ post_id │ author   │ likes │ title                                           │
-├─────────┼──────────┼───────┼─────────────────────────────────────────────────┤
-│ p3      │ author-3 │  4500 │ A fairly long post title number 3, to test shr… │
-│ p2      │ author-2 │  3000 │ A fairly long post title number 2, to test shr… │
-│ p1      │ author-1 │  1500 │ A fairly long post title number 1, to test shr… │
-└─────────┴──────────┴───────┴─────────────────────────────────────────────────┘
-3 rows · plan scan · examined 3
-```
-
-(The example is at 80 columns. At 160 columns, or piped, the title is whole.)
-
-## Health
+### Health
 
 `GET /health` is `200 {"status":"ok"}` after recovery and `503` before. Use it for readiness. Clients should retry `not_ready` and reconnect after a daemon restart.
 
@@ -159,39 +12,7 @@ $ ndb query posts '{}' -sort '{"likes":-1}'
 curl --unix-socket /run/ndb/ndb.sock http://ndb/health
 ```
 
-## Install
-
-```bash
-curl -fsSL https://ndb.clowk.in/install.sh | bash                    # binary only
-curl -fsSL https://ndb.clowk.in/install.sh | sudo bash -s -- --systemd  # + user, /var/lib/ndb, /etc/ndb/ndb.yml, ndb.service
-```
-
-The script checks the sha256 of the release. `NDB_VERSION=0.1.0` pins a version; `NDB_INSTALL_DIR` sets the binary dir (default `/usr/local/bin`, else `~/.local/bin`). It never overwrites an existing `/etc/ndb/ndb.yml`. Remove with `uninstall.sh` (`--systemd` stops and removes the unit and keeps the data; add `--purge` to delete `/var/lib/ndb`, `/etc/ndb` and the user).
-
-## Backup and restore
-
-`ndb backup <dest>` works with the daemon stopped or running. `dest` must not exist or must be empty.
-
-```bash
-ndb backup -config /etc/ndb/ndb.yml /backups/ndb-2026-11-05
-```
-
-- Daemon stopped: it copies the whole data dir.
-- Daemon running: it asks the daemon, on the unix socket, for a consistent copy. The copy has the catalog, the blobs and the WAL up to a mark taken between two commits. Segments and `meta.bolt` are left out, because they are derived.
-- Direct-mode collections: only their definition is saved. The data is in the apps' own files; back those up yourself.
-- Online backup needs `listen.unix`. It is refused over TCP.
-
-Restore with `ndb restore` (see [CLI](#cli)). Stop the daemon first; the command refuses when the data dir is locked.
-
-```bash
-systemctl stop ndb
-sudo -u ndb ndb restore /backups/ndb-2026-11-05 -data-dir /var/lib/ndb
-systemctl start ndb
-```
-
-Copy the backup to other storage (for example S3) from there; ndb does not upload.
-
-## Metrics
+### Metrics
 
 `GET /metrics` is Prometheus text.
 
@@ -213,17 +34,62 @@ Copy the backup to other storage (for example S3) from there; ndb does not uploa
 
 Alert on: `ndb_ready == 0`, a growing `ndb_tailer_lag_bytes`, an increase of `ndb_quarantined_total`, and `ndb_fsync_seconds` high percentiles.
 
-## Quarantine
+## Protect the data
 
-In direct mode, a line that is not a JSON object, has a bad id, or is over `max_line_size` is not applied. ndb writes it to `<data_dir>/collections/<name>/quarantine/<name>.ndjson` and goes on. It never stops on a bad line.
+### Backup and restore
 
-```json
-{"ts":"2026-11-05T16:00:18Z","file":"/data/logs/app-1.ndjson","offset":63,"reason":"invalid_doc: a line must be a JSON object","line":"not json"}
+A backup is **one NDJSON file** with the `.ndb` extension, optionally gzip-compressed (`.ndb.gz`). It works with the daemon stopped or running.
+
+```bash
+ndb backup /backups/daily -gzip                  # → /backups/daily.ndb.gz
+ndb backup - | aws s3 cp - s3://bucket/daily.ndb # stdout
 ```
 
-Find the writer that produced the line with `file` and `offset`, fix it, and watch `ndb_quarantined_total`. ndb does not read the quarantine file back to recover; delete it when you are done. `stats` shows the count as `quarantined`, and `ndb quarantine <collection>` (or `GET /v1/c/{coll}/quarantine`) lists the last lines. A direct collection is rebuilt from offset 0 at each start, but a line already in the file (same `file` and `offset`) is not written again, so the file has one entry per bad line however often the daemon restarts. The count (`quarantined`, `ndb_quarantined_total`) is the number of distinct lines in the file: it is read from the file at start, so a restart does not raise it, and it drops if you delete the file. A file written by an older version may still hold repeats; the API shows each line once.
+The file is readable with `head`, `grep` and `jq`:
 
-## Recovery
+```json
+{"ndb_backup":1,"version":"0.1.3","created_at":"2026-11-06T14:13:52Z","collections":["users"]}
+{"_section":"catalog","name":"users","definition":{"name":"users","write":"engine","unique":["email"]}}
+{"_section":"cursor","collection":"users","consumer":"mailer","pos":"e2.1"}
+{"_section":"wal","collection":"users"}
+{"_tx":1,"_ts":"...","ops":[{"_op":"put","_id":"u1","_v":1,"doc":{...}},{"_op":"put","_id":"u2","_v":1,"doc":{...}}],"_crc":"c764fece"}
+{"_tx":2,"_ts":"...","_op":"put","_id":"u1","_v":2,"doc":{...,"tags":["vip"]},"_crc":"8dd99733"}
+{"_section":"blob","ref":"sha256:ab12...","type":"audio/wav","size":48213,"data":"<base64>"}
+{"_section":"end","lines":7,"crc":"5b24d8b2"}
+```
+
+| Line | Meaning |
+|---|---|
+| header | the first line; marks the file as an ndb backup, with the format and daemon versions |
+| `catalog` | the definition of each collection (indexes, unique, TTL, write mode) |
+| `cursor` | the saved position of each `watch` consumer |
+| `wal` | the WAL lines of one collection, as stored, each with its `_crc` |
+| `snapshot` | only when `wal_retention` deleted the first WAL files: one line per live document at the backup point, then an empty `wal` section |
+| `blob` | the blobs that the saved documents use, in base64 (1 MiB per line for big ones). `-no-blobs` leaves them out. |
+| `end` | the line count and CRC of everything before it. A file without it is cut and is refused. |
+
+- **Daemon running:** the CLI asks the daemon on the unix socket (`-url unix://...`, `NDB_URL`, or `listen.unix` of `ndb.yml`). The daemon takes a mark between two commits, so the file never holds half a transaction. Online backup is refused over TCP.
+- **Daemon stopped:** the CLI opens the data dir itself, under the lock, like a short daemon start.
+- Segments and indexes are not saved: they are derived, and restore rebuilds them.
+- Direct-mode collections: only their definition is saved. The data is in the apps' own files; back those up yourself.
+- The file is written as `<name>.part` and renamed at the end. An existing file is refused without `-force`.
+
+**Restore** needs the daemon stopped:
+
+```bash
+systemctl stop ndb
+sudo -u ndb ndb restore /backups/daily.ndb.gz -data-dir /var/lib/ndb
+systemctl start ndb
+```
+
+1. It takes the data dir lock, and refuses a data dir that is not empty unless `-force`.
+2. It reads the file in one pass into `<data-dir>/.restore-stage`. Gzip is found by the first bytes, not by the name. It checks the header, the CRC of every WAL line, the transaction order, the sha256 of every blob, and the `end` line.
+3. It opens the stage like a daemon: replays the WAL, rebuilds segments, indexes and unique keys.
+4. Only then it moves the checked copy into place. On any error the data dir stays as it was.
+
+After a restore, documents keep their `_v`, and `watch` consumers resume after their last ack. A consumer whose position is older than a `snapshot` gets `history_truncated`.
+
+### Recovery after a crash
 
 Recovery runs at every start, and needs no command. After a crash (SIGKILL, power loss) the daemon:
 
@@ -236,7 +102,9 @@ While it runs, `/health` is `503`. For a large WAL this takes seconds, not minut
 
 If an `fsync` fails, the daemon exits on purpose, and recovery gives the right state when it is started again.
 
-## Compaction, retention and TTL
+## Data over time
+
+### Compaction, retention and TTL
 
 - **Compaction** runs by itself. It merges adjacent small segments and drops superseded versions, tombstones, and expired or past-retention rows. Blobs that no live document uses are deleted after a grace period.
 - **`wal_retention: 7d`** (engine mode) deletes a sealed WAL file when the checkpoint is past it, every saved `watch` cursor is after it, no open stream reads it, and it is older than 7 days. Files go from the oldest and the walk stops at the first one that stays. Without it the WAL is kept forever. A `watch` that needs a deleted file fails with `history_truncated` (410).
@@ -245,10 +113,22 @@ If an `fsync` fails, the daemon exits on purpose, and recovery gives the right s
 - **Freeing disk after expiry:** deleting an expired document does not shrink the files. Compaction removes it from the segments, and only `wal_retention` removes it from the WAL, so a TTL collection should set `wal_retention` (for example `1d`). See [configuration.md](configuration.md#freeing-disk).
 - Disk use: watch the size of `data_dir`, and `ndb_segments`.
 
-## Version and token
+### Quarantine (direct mode)
 
-`ndb -version` prints the version. To protect the TCP listener, start with `-token-file`; rotate the token by changing the file, restarting the daemon, and updating `NDB_TOKEN` in the apps. See [configuration.md](configuration.md#authentication).
+In direct mode, a line that is not a JSON object, has a bad id, or is over `max_line_size` is not applied. ndb writes it to `<data_dir>/collections/<name>/quarantine/<name>.ndjson` and goes on. It never stops on a bad line.
 
-## Upgrade
+```json
+{"ts":"2026-11-05T16:00:18Z","file":"/data/logs/app-1.ndjson","offset":63,"reason":"invalid_doc: a line must be a JSON object","line":"not json"}
+```
+
+Find the writer that produced the line with `file` and `offset`, fix it, and watch `ndb_quarantined_total`. ndb does not read the quarantine file back to recover; delete it when you are done. `stats` shows the count as `quarantined`, and `ndb quarantine <collection>` (or `GET /v1/c/{coll}/quarantine`) lists the last lines. A direct collection is rebuilt from offset 0 at each start, but a line already in the file (same `file` and `offset`) is not written again, so the file has one entry per bad line however often the daemon restarts. The count (`quarantined`, `ndb_quarantined_total`) is the number of distinct lines in the file: it is read from the file at start, so a restart does not raise it, and it drops if you delete the file. A file written by an older version may still hold repeats; the API shows each line once.
+
+## Change
+
+### Upgrade
 
 Replace the binary and restart. Take a backup first. API paths start with `/v1`, so a newer daemon serves older SDKs.
+
+### Version and token
+
+`ndb -version` prints the version. To protect the TCP listener, start with `-token-file`; rotate the token by changing the file, restarting the daemon, and updating `NDB_TOKEN` in the apps. See [configuration.md](configuration.md#authentication).

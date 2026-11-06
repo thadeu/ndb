@@ -9,7 +9,7 @@ import (
 )
 
 type Note struct {
-	ID    string `ndb:"_id,id"`
+	ID    string `ndb:"_id"`
 	Title string `json:"title"`
 	Body  string
 	Skip  string `json:"-"`
@@ -31,7 +31,7 @@ func TestInsertGeneratesIDAndReturnsResults(t *testing.T) {
 		t.Fatalf("insert with an empty generated id: %v", err)
 	}
 
-	if len(res) != 2 || len(res[0].ID) != 24 || res[1].ID != "given" || res[0].V != 1 {
+	if len(res) != 2 || len(res[0].ID) != 36 || res[1].ID != "given" || res[0].V != 1 {
 		t.Fatalf("results = %+v", res)
 	}
 
@@ -94,7 +94,7 @@ func TestIterWalksAllPages(t *testing.T) {
 }
 
 type Versioned struct {
-	ID     string `ndb:"_id,id"`
+	ID     string `ndb:"_id"`
 	Status string `ndb:"status"`
 	V      uint64 `ndb:"_v,version"`
 }

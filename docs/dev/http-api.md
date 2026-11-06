@@ -8,11 +8,14 @@ Paths start with `/v1`. `/health` and `/metrics` have no version. Every data end
 |---|---|---|---|
 | POST | `/v1/c/{coll}/find` | find query | NDJSON rows + `X-Ndb-*` headers |
 | POST | `/v1/c/{coll}/aggregate` | `{"pipeline":[...]}` | NDJSON rows + `X-Ndb-*` headers |
-| POST | `/v1/c/{coll}/insert` | `{"insert":[{...},...],"expire_in"}` | `{"results":[{"id","v"}]}` |
+| POST | `/v1/c/{coll}/insert` | `{"insert":[{...},...],"expire_in"}` | `{"results":[{"_id","v"}]}` |
 | POST | `/v1/c/{coll}/update?many&upsert&expire_in` | filter and write operators in one object | `{"matched","modified","doc"}` |
-| POST | `/v1/c/{coll}/expire` | `{"id","in"\|"at"}` | `{"id","v","expires_at"}` |
-| POST | `/v1/c/{coll}/persist` | `{"id"}` | `{"id","v"}` |
-| GET | `/v1/c/{coll}/ttl/{id}` | none | `{"id","ttl","expires_at"}` |
+| GET | `/v1/c/{coll}/{_id}` | none | the document with `_v` |
+| POST | `/v1/c/{coll}/{_id}/update?upsert&expire_in` | write operators, plus optional guard filters | `{"matched","modified","doc"}` |
+| DELETE | `/v1/c/{coll}/{_id}` | none | `{"deleted"}` |
+| POST | `/v1/c/{coll}/expire` | `{"_id","in"\|"at"}` | `{"_id","v","expires_at"}` |
+| POST | `/v1/c/{coll}/persist` | `{"_id"}` | `{"_id","v"}` |
+| GET | `/v1/c/{coll}/{_id}/ttl` | none | `{"_id","ttl","expires_at"}` |
 | POST | `/v1/c/{coll}/delete?many` | a filter | `{"deleted"}` |
 | POST | `/v1/c/{coll}/watch` | `{"consumer","from","limit","where"}` | NDJSON stream |
 | POST | `/v1/c/{coll}/ack` | `{"consumer","pos"}` | `{"ok":true}` |
@@ -27,41 +30,42 @@ Paths start with `/v1`. `/health` and `/metrics` have no version. Every data end
 | GET | `/v1/size` | none | disk usage per collection and per part |
 | PUT | `/v1/blobs` | raw bytes | the `$blob` reference |
 | GET | `/v1/blobs/{ref}` | none | the bytes; supports `Range` |
-| POST | `/v1/backup` | `{"dest":"/path"}` | unix socket only |
+| POST | `/v1/backup` | `{"no_blobs":false}` | the `.ndb` stream; unix socket only |
 | GET | `/health` | none | `{"status":"ok"}`, or 503 `recovering` |
 | GET | `/metrics` | none | Prometheus text |
 
 Details:
 
 - Request bodies are limited by the collection `max_line_size` (default 1 MiB). Unknown JSON fields are `invalid_request`.
-- `insert` creates an unknown collection (unless `allow_implicit: false`). A document without the id field gets a generated id. Insert on a direct-mode collection is `direct_collection`.
+- `/{_id}` routes: a fixed route (`find`, `stats`, `insert`...) wins over an `_id` with the same name; reach such a document with `find`. A direct-mode document without `_id` is never found by them (404). `/{_id}/update` and `DELETE /{_id}` are engine mode only.
+- `insert` creates an unknown collection (unless `allow_implicit: false`). A document without `_id` gets a generated UUIDv7 (see [Document id](configuration.md#document-id)). Insert on a direct-mode collection is `direct_collection`.
 - `update` and `delete` are [atomic update by filter](query.md#update-by-filter).
-- `PUT /v1/c/{coll}` is idempotent. Keys: `id`, `time`, `write`, `path`, `indexes`, `unique`, `durability`, `retention`, `wal_retention`, `ttl`, `expires_field`, `max_line_size`, `blob_threshold` (bytes). Merge rules: `indexes` are united; a different `id`, `write`, `path` or `time` is `catalog_conflict`; `ndb.yml` wins for `durability`, `retention` and `wal_retention`.
+- `PUT /v1/c/{coll}` is idempotent. Keys: `time`, `write`, `path`, `indexes`, `unique`, `durability`, `retention`, `wal_retention`, `ttl`, `expires_field`, `max_line_size`, `blob_threshold` (bytes). Merge rules: `indexes` are united; a different `write`, `path` or `time` is `catalog_conflict`; `id` is `catalog_invalid` (see [Document id](configuration.md#document-id)); `ndb.yml` wins for `durability`, `retention` and `wal_retention`.
 - `GET /v1/c/{coll}` answers like `PUT`: the final `definition` and the state of each index. An unknown name is `404 unknown_collection`.
 - Errors are described in [Errors](#errors).
 - `where` operators are in [Filters](query.md#filters). `{"field": {"$regex": "^abc", "$options": "i"}}` matches strings with Go RE2 (no backreferences, no look-around; flags `i`, `m`, `s`, `x`); a bad pattern or flag is `400 invalid_query`. An anchored literal prefix without `i`/`m` can use an index and zone maps, see [Regular expressions](query.md#regular-expressions).
 
 ## Update and delete
 
-`update` and `delete` take a filter, and `update` also takes write operators (`$set`, `$unset`, `$inc`, `$push`, `$pull`, `$min`, `$max`) in the same body. See [Update by filter](query.md#update-by-filter) and [Delete by filter](query.md#delete-by-filter).
+`update` and `delete` take a filter, and `update` also takes write operators (`$set`, `$setOnInsert`, `$unset`, `$inc`, `$push`, `$pull`, `$min`, `$max`) in the same body. See [Update by filter](query.md#update-by-filter) and [Delete by filter](query.md#delete-by-filter).
 
 ## Expiry (TTL like Redis)
 
 These calls need a collection with `expires_field`. They are normal writes: the daemon sets or removes that field in one transaction, so the document gets a new version, a WAL record and a `watch` event. See [configuration.md](configuration.md#ttl-like-redis) for the model and the disk notes.
 
 - `expire_in` is a Go duration string (`"90m"`, `"1h30m"`, plus `d` and `w`: `"1d"`) or a positive number of seconds. On `insert` it is a field of the body and applies to every document of the call. On `update` it is the query parameter `expire_in`. The daemon sets `expires_field` to now + `expire_in` (RFC 3339 UTC). **`expire_in` wins:** a value of `expires_field` in the document or in the operators of the same call is ignored.
-- `POST /v1/c/{coll}/expire` takes `id` and exactly one of `in` (same format as `expire_in`) or `at` (RFC 3339; a time in the past expires the document at once). It answers `{"id","v","expires_at"}`. A missing or already expired document is `404 not_found`.
-- `POST /v1/c/{coll}/persist` takes `{"id"}`, removes `expires_field`, and answers `{"id","v"}`. A missing or expired document is `404 not_found`.
-- `GET /v1/c/{coll}/ttl/{id}` answers `{"id","ttl","expires_at"}`. `ttl` is the whole seconds left, rounded up. A document that never expires has `"ttl": -1` and `"expires_at": null`. A missing or expired document is `404 not_found`. With `ttl` + `time` in the catalog the expiry is computed from the time field; if both `ttl` and `expires_field` are set, the earlier time counts.
+- `POST /v1/c/{coll}/expire` takes `_id` and exactly one of `in` (same format as `expire_in`) or `at` (RFC 3339; a time in the past expires the document at once). It answers `{"_id","v","expires_at"}`. A missing or already expired document is `404 not_found`.
+- `POST /v1/c/{coll}/persist` takes `{"_id"}`, removes `expires_field`, and answers `{"_id","v"}`. A missing or expired document is `404 not_found`.
+- `GET /v1/c/{coll}/{_id}/ttl` answers `{"_id","ttl","expires_at"}`. `ttl` is the whole seconds left, rounded up. A document that never expires has `"ttl": -1` and `"expires_at": null`. A missing or expired document is `404 not_found`. With `ttl` + `time` in the catalog the expiry is computed from the time field; if both `ttl` and `expires_field` are set, the earlier time counts.
 - `400 ttl_not_enabled`: the collection has no `expires_field`. `400 ttl_derived`: the collection only has `ttl` + `time`, so the expiry comes from the time field and cannot be set or removed (`expire_in`, `expire`, `persist`). `ttl` still works. A bad `expire_in`, or an `expire` without exactly one of `in` and `at`, is `400 invalid_request`.
 - Direct-mode collections: the write calls are `409 direct_collection`, and `ttl` is `400 not_supported`.
 
 ```bash
-curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/v1/c/sessions -d '{"id":"sid","expires_field":"exp"}'
-curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/sessions/insert -d '{"insert":[{"sid":"s1"}],"expire_in":"1h"}'
-curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/sessions/expire -d '{"id":"s1","in":"30m"}'
-curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/sessions/ttl/s1
-curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/sessions/persist -d '{"id":"s1"}'
+curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/v1/c/sessions -d '{"expires_field":"exp"}'
+curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/sessions/insert -d '{"insert":[{"_id":"s1"}],"expire_in":"1h"}'
+curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/sessions/expire -d '{"_id":"s1","in":"30m"}'
+curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/sessions/s1/ttl
+curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/sessions/persist -d '{"_id":"s1"}'
 ```
 
 ## Stats, size and admin
@@ -100,7 +104,7 @@ The CLI (`ndb stats`, `ndb size`, `ndb collections`, `ndb compact`, `ndb quarant
 
 ## Backup endpoint
 
-`POST /v1/backup` writes to the disk of the daemon host, so it works on the unix socket only. Over TCP the answer is `403 forbidden`. Use `ndb backup` instead of calling it by hand. See [operations.md](operations.md#backup-and-restore).
+`POST /v1/backup` streams the backup file (NDJSON, `application/x-ndjson`) taken at a mark between two commits. It works on the unix socket only. Over TCP the answer is `403 forbidden`. Use `ndb backup` instead of calling it by hand. See [operations.md](operations.md#backup-and-restore).
 
 ## Blobs
 
@@ -124,12 +128,12 @@ The body is `{"error":{"code":"...","message":"..."}}`.
 | `unknown_operator`, `no_update`, `conflicting_update`, `invalid_field`, `unindexed_many`, `empty_filter` | 400 | The body of an update or delete breaks the [contract](query.md#contract-errors). |
 | `duplicate_id` | 409 | A document with this id exists. |
 | `unique_violation` | 409 | A `unique` field value exists. |
-| `catalog_conflict` | 409 | Two declarations of the collection disagree (`id`, `write`, `path`, `time`). |
+| `catalog_conflict` | 409 | Two declarations of the collection disagree (`write`, `path`, `time`). |
 | `direct_collection` | 409 | Write call on a direct-mode collection. |
-| `catalog_invalid` | 400 | The collection definition is not valid. |
+| `catalog_invalid` | 400 | The collection definition is not valid (for example, it has `id`). |
 | `ttl_not_enabled` | 400 | `expire_in`, `expire` or `persist` on a collection without `expires_field`. |
 | `ttl_derived` | 400 | `expire_in`, `expire` or `persist` on a collection whose expiry comes from `ttl` + `time`. |
-| `invalid_doc`, `missing_id`, `invalid_id`, `immutable_id`, `invalid_batch`, `invalid_path`, `invalid_index` | 400 | A document or definition is not valid. |
+| `invalid_doc`, `missing_id` (a direct-mode tombstone without `_id`), `invalid_id`, `immutable_id`, `invalid_batch`, `invalid_path`, `invalid_index` | 400 | A document or definition is not valid. |
 | `request_too_large`, `line_too_large` | 413 | Body or line is over `max_line_size` (or the blob limit). |
 | `invalid_blob_ref` | 400 | The blob reference is not `sha256:<64 hex>`. |
 | `unauthorized` | 401 | TCP request without the right bearer token (`-token-file`). |

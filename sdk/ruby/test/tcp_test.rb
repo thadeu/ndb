@@ -27,16 +27,16 @@ class TcpTest < Minitest::Test
   def test_roundtrip_over_tcp
     tcp = Ndb::Client.new(url: plain.url)
 
-    tcp.ensure_collection(@coll, id: "cid", indexes: ["a"])
-    tcp.insert(@coll, [{ cid: "1", a: "x" }])
+    tcp.ensure_collection(@coll, indexes: ["a"])
+    tcp.insert(@coll, [{ _id: "1", a: "x" }])
 
-    assert_equal [{ "cid" => "1", "a" => "x" }], tcp.find(@coll, where: { a: "x" }).rows
+    assert_equal [{ "_id" => "1", "a" => "x" }], tcp.find(@coll, where: { a: "x" }).rows
   end
 
   def test_keep_alive_reuses_one_connection_over_tcp
     tcp = Ndb::Client.new(url: plain.url)
 
-    tcp.ensure_collection(@coll, id: "cid")
+    tcp.ensure_collection(@coll)
     20.times { tcp.find(@coll, {}) }
 
     assert_equal 1, tcp.pool.created
@@ -45,8 +45,8 @@ class TcpTest < Minitest::Test
   def test_threads_share_the_pool_over_tcp
     tcp = Ndb::Client.new(url: plain.url)
 
-    tcp.ensure_collection(@coll, id: "cid")
-    tcp.insert(@coll, [{ cid: "1" }])
+    tcp.ensure_collection(@coll)
+    tcp.insert(@coll, [{ _id: "1" }])
 
     counts = 8.times.map { Thread.new { 25.times.map { tcp.find(@coll, {}).rows.size }.sum } }.map(&:value)
 
@@ -63,8 +63,8 @@ class TcpTest < Minitest::Test
   def test_reconnects_after_the_daemon_restarts
     tcp = Ndb::Client.new(url: plain.url)
 
-    tcp.ensure_collection(@coll, id: "cid")
-    tcp.insert(@coll, [{ cid: "1" }])
+    tcp.ensure_collection(@coll)
+    tcp.insert(@coll, [{ _id: "1" }])
 
     plain.stop
 
@@ -72,7 +72,7 @@ class TcpTest < Minitest::Test
 
     plain.start
 
-    assert_equal [{ "cid" => "1" }], tcp.find(@coll, {}).rows
+    assert_equal [{ "_id" => "1" }], tcp.find(@coll, {}).rows
   end
 
   def test_connection_refused_is_connection_error
@@ -108,7 +108,7 @@ class TcpTest < Minitest::Test
     tcp.insert("tcp_watch", [{ "_id" => "w1" }])
 
     seen = []
-    tcp.watch("tcp_watch", "c", limit: 1) { |ev| seen << ev["id"] }
+    tcp.watch("tcp_watch", "c", limit: 1) { |ev| seen << ev["_id"] }
 
     assert_equal ["w1"], seen
     assert_raises(Ndb::Unauthorized) { Ndb::Client.new(url: secured.url).watch("tcp_watch", "c", limit: 1) { nil } }

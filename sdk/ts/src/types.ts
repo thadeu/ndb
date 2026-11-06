@@ -18,7 +18,6 @@ export interface FieldDef {
 export type Fields = Record<string, FieldDef>
 
 export interface Schema<F extends Fields> {
-  id?: Extract<keyof F, string>
   time?: Extract<keyof F, string>
 
   // The date field that holds when a document expires. Needed by expireIn,
@@ -37,9 +36,11 @@ export type Doc<F extends Fields> = {
   [K in OptionalKeys<F>]?: ValueOf<F[K]>
 }
 
-export type Input<F extends Fields> = { [K in keyof F]?: ValueOf<F[K]> }
+// _id is the primary key of every document. Leave it out on insert and the
+// daemon makes a UUIDv7.
+export type Input<F extends Fields> = { [K in keyof F]?: ValueOf<F[K]> } & { _id?: string }
 
-export type Row<F extends Fields> = Doc<F> & { _v: number }
+export type Row<F extends Fields> = Doc<F> & { _id: string; _v: number }
 
 export interface Ops<V> {
   $eq?: V
@@ -66,13 +67,15 @@ type JsonKeys<F extends Fields> = Extract<{ [K in keyof F]: F[K]['type'] extends
 export type Where<F extends Fields> = {
   [K in keyof F]?: Operand<ValueOf<F[K]>> | Ops<Operand<ValueOf<F[K]>>> | RegexOperand<ValueOf<F[K]>>
 } & {
+  _id?: string | Ops<string>
+} & {
   [P in `${JsonKeys<F>}.${string}`]?: unknown
 }
 
-export type SortSpec<F extends Fields> = Partial<Record<Extract<keyof F, string>, 1 | -1>>
+export type SortSpec<F extends Fields> = Partial<Record<Extract<keyof F, string> | '_id', 1 | -1>>
 
 export interface WriteResult {
-  id: string
+  _id: string
   v: number
 }
 
@@ -92,6 +95,10 @@ export type Filter<F extends Fields> = Where<F> & {
 // or a dot path. Keys of this object must start with "$".
 export interface UpdateOps<F extends Fields = Fields> {
   $set?: Input<F> & Record<string, unknown>
+
+  // Like $set, but only when an upsert creates the document; ignored on a match.
+  $setOnInsert?: Input<F> & Record<string, unknown>
+
   $unset?: Record<string, true | ''>
 
   // Negative numbers subtract. A missing field counts as 0.
@@ -111,7 +118,7 @@ export interface UpdateOps<F extends Fields = Fields> {
 }
 
 export interface UpdateOptions {
-  // Update every match. The filter needs the id or an indexed field
+  // Update every match. The filter needs _id or an indexed field
   // (UnindexedManyError otherwise).
   many?: boolean
 
@@ -177,7 +184,7 @@ export interface WatchEvent<R> {
   consumer: string
   pos: string
   op: 'put' | 'del'
-  id: string
+  _id: string
   v: number
   doc: R | undefined
 }

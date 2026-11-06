@@ -300,9 +300,9 @@ func TestBackupOnlineAndOffline(t *testing.T) {
 		}
 	}
 
-	online := filepath.Join(t.TempDir(), "online")
+	online := filepath.Join(t.TempDir(), "online.ndb")
 
-	if err := run([]string{"backup", "-config", absent, "-data-dir", dir, "-unix", sock, online}); err != nil {
+	if err := run([]string{"backup", "-config", absent, "-url", "unix://" + sock, online}); err != nil {
 		t.Fatalf("online backup: %v", err)
 	}
 
@@ -314,14 +314,20 @@ func TestBackupOnlineAndOffline(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	offline := filepath.Join(t.TempDir(), "offline")
+	offline := filepath.Join(t.TempDir(), "offline.ndb")
 
 	if err := run([]string{"backup", "-config", absent, "-data-dir", dir, offline}); err != nil {
 		t.Fatalf("offline backup: %v", err)
 	}
 
-	for name, copyDir := range map[string]string{"online": online, "offline": offline} {
-		if got := rowsOn(t, copyDir, "log"); got != n {
+	for name, file := range map[string]string{"online": online, "offline": offline} {
+		target := filepath.Join(t.TempDir(), "data")
+
+		if err := run([]string{"restore", "-config", absent, "-data-dir", target, file}); err != nil {
+			t.Fatalf("%s restore: %v", name, err)
+		}
+
+		if got := rowsOn(t, target, "log"); got != n {
 			t.Errorf("%s copy has %d rows, want %d", name, got, n)
 		}
 	}

@@ -1,78 +1,110 @@
 package engine
 
 import (
-	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/thadeu/ndb/internal/backup"
+	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/collection"
+	"github.com/thadeu/ndb/internal/config"
+	"github.com/thadeu/ndb/internal/wal"
 )
 
-// Backup copies a consistent state of the running daemon to dest, an empty or
-// new dir that a restore opens as a data dir. It returns the last tx of each
-// engine-mode collection in the copy.
+// Backup writes a consistent state of the running daemon to w as one backup
+// file (see package backup).
 //
 // What is consistent:
+//   - The catalog and the watch positions are read first. A position is only
+//     acked after its tx is in the WAL, so the WAL marks taken next are never
+//     behind a saved position.
 //   - The WAL of each engine collection up to a mark taken between two
 //     commits: every write acked before Backup started is in, no write is
 //     half in, and the copy is a prefix of the commit order. Commits go on
-//     while the files are copied; later ones are not in the copy.
-//   - The blobs, copied after the marks, so every blob that a copied WAL
-//     line refers to is there (a blob is durable before its line).
-//   - catalog.bolt and cursors.bolt as bbolt snapshots. They are taken
-//     last and may be a little newer than the WAL marks; a newer catalog
-//     only declares collections or indexes, and a cursor ahead of the
-//     copied WAL is the caller's to reset.
+//     while the lines are written; later ones are not in the copy.
+//   - The blobs that the saved WAL lines refer to, read after the marks, so
+//     each one is there (a blob is durable before its line).
 //
 // Left out: segments and meta.bolt. They are derived from the WAL; the
 // restored daemon rebuilds them. Direct-mode collections keep their data in
-// the apps' own files; only their definition (in the catalog) is copied.
-func (db *DB) Backup(ctx context.Context, dest string) (map[string]uint64, error) {
-	if err := backup.PrepareDest(dest); err != nil {
-		return nil, err
+// the apps' own files; only their definition is saved.
+func (db *DB) Backup(ctx context.Context, w io.Writer, opts backup.Options) error {
+	defs := db.cat.List()
+
+	entries, err := db.cursors.All()
+	if err != nil {
+		return err
 	}
 
 	cols := db.engineCollections()
-	marks := map[string]collection.WALMark{}
+	marks := map[string]backup.Mark{}
+	snaps := map[string]backup.Snapshot{}
 
-	for name, col := range cols {
-		m, err := col.eng.WALMark()
+	for _, d := range defs {
+		if d.Write == catalog.Direct {
+			continue
+		}
+
+		col, ok := cols[d.Name]
+		if !ok {
+			return fmt.Errorf("backup: collection %s is not open", d.Name)
+		}
+
+		dir := filepath.Join(db.dir, "collections", d.Name)
+
+		first, has, err := backup.FirstTx(dir)
 		if err != nil {
-			return nil, fmt.Errorf("backup: %s: %w", name, err)
+			return fmt.Errorf("backup: %s: %w", d.Name, err)
 		}
 
-		marks[name] = m
-	}
+		if !has || first <= 1 {
+			m, err := col.eng.WALMark()
+			if err != nil {
+				return fmt.Errorf("backup: %s: %w", d.Name, err)
+			}
 
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
+			marks[d.Name] = markOf(m)
 
-	err := backup.CopyTree(filepath.Join(db.dir, "blobs"), filepath.Join(dest, "blobs"), func(rel string) bool {
-		return rel == "tmp"
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	last := map[string]uint64{}
-
-	for name, m := range marks {
-		if err := copyWAL(filepath.Join(db.dir, "collections", name), filepath.Join(dest, "collections", name), m); err != nil {
-			return nil, fmt.Errorf("backup: %s: %w", name, err)
+			continue
 		}
 
-		last[name] = m.Tx
+		m, docs, err := col.eng.WALMarkSnapshot()
+		if err != nil {
+			return fmt.Errorf("backup: %s: %w", d.Name, err)
+		}
+
+		snaps[d.Name] = backup.Snapshot{Tx: m.Tx, Lines: snapshotLines(ctx, docs)}
 	}
 
-	if err := db.snapshotFiles(dest); err != nil {
-		return nil, err
+	src := backup.Source{
+		Defs:      defs,
+		Cursors:   entries,
+		Blobs:     db.blobs,
+		Snapshots: snaps,
+		WAL: func(name string, emit func([]byte) error) error {
+			m := marks[name]
+
+			return backup.ScanWAL(filepath.Join(db.dir, "collections", name), &m, func(line []byte) error {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+
+				return emit(line)
+			})
+		},
 	}
 
-	return last, nil
+	return backup.Write(w, src, opts)
+}
+
+func markOf(m collection.WALMark) backup.Mark {
+	return backup.Mark{Seq: m.Seq, Offset: m.Offset}
 }
 
 func (db *DB) engineCollections() map[string]*Collection {
@@ -90,56 +122,53 @@ func (db *DB) engineCollections() map[string]*Collection {
 	return out
 }
 
-// copyWAL copies the WAL files of one collection: the rotated ones whole,
-// the one at the mark up to its offset, and nothing after.
-func copyWAL(src, dst string, m collection.WALMark) error {
-	entries, err := os.ReadDir(src)
+// snapshotLines encodes each document as a WAL put record, with its own tx
+// and _v, so the restore checks the same CRC as for a WAL line.
+func snapshotLines(ctx context.Context, docs []collection.SnapshotDoc) func(func([]byte) error) error {
+	return func(emit func([]byte) error) error {
+		var buf []byte
+
+		for _, d := range docs {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+
+			raw, err := d.Raw()
+			if err != nil {
+				return err
+			}
+
+			rec := wal.Record{Tx: max(d.Tx, 1), TS: time.Now(), Ops: []wal.Op{{Kind: wal.Put, ID: d.ID, V: d.V, Doc: raw}}}
+
+			buf, err = wal.Encode(buf[:0], rec)
+			if err != nil {
+				return err
+			}
+
+			if err := emit(buf); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
+}
+
+// Offline saves the data dir of a stopped daemon. It opens the data dir like
+// a daemon would (it takes the lock, so a running daemon gives lock.ErrLocked),
+// which recovers the WAL and gives the same consistent state as an online
+// backup, snapshots included.
+func Offline(dataDir string, w io.Writer, opts backup.Options) error {
+	if info, err := os.Stat(dataDir); err != nil || !info.IsDir() {
+		return fmt.Errorf("backup: data dir %s does not exist", dataDir)
+	}
+
+	db, err := Open(config.Config{DataDir: dataDir, AllowImplicit: true}, slog.New(slog.DiscardHandler))
 	if err != nil {
 		return err
 	}
 
-	for _, e := range entries {
-		var seq int
+	err = db.Backup(context.Background(), w, opts)
 
-		if _, err := fmt.Sscanf(e.Name(), "%06d.ndjson", &seq); err != nil || seq > m.Seq {
-			continue
-		}
-
-		limit := int64(-1)
-
-		if seq == m.Seq {
-			limit = m.Offset
-		}
-
-		if err := backup.CopyFile(filepath.Join(src, e.Name()), filepath.Join(dst, e.Name()), limit); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// snapshotFiles writes catalog.bolt and cursors.bolt into dest.
-func (db *DB) snapshotFiles(dest string) error {
-	snaps := []struct {
-		name string
-		take func(*bytes.Buffer) error
-	}{
-		{"catalog.bolt", func(b *bytes.Buffer) error { return db.cat.Snapshot(b) }},
-		{"cursors.bolt", func(b *bytes.Buffer) error { return db.cursors.Snapshot(b) }},
-	}
-
-	for _, s := range snaps {
-		var buf bytes.Buffer
-
-		if err := s.take(&buf); err != nil {
-			return fmt.Errorf("backup: %s: %w", s.name, err)
-		}
-
-		if err := backup.WriteFile(filepath.Join(dest, s.name), buf.Bytes()); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return errors.Join(err, db.Close())
 }

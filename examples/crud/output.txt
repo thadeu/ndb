@@ -1,7 +1,7 @@
 insert u1, u2 -> v1, v1
 get u1: ada@example.com plan=free v1
-update u1 plan=pro (if_version 1) -> v2
-update u1 plan=team (if_version 1) -> version_conflict
-reload u1: v2, retry with if_version 2 -> v3
+update u1 plan=pro (_v 1) -> v2
+update u1 plan=team (_v 1) -> matched 0
+reload u1: v2, retry with _v 2 -> v3
 delete u2
 count: 1 user(s), 1 on plan team

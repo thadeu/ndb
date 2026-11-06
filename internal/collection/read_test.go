@@ -56,7 +56,7 @@ func ids(t *testing.T, p collection.Page) []string {
 	out := make([]string, len(p.Rows))
 
 	for i, r := range p.Rows {
-		out[i], _ = field(t, r, "post_id").(string)
+		out[i], _ = field(t, r, "_id").(string)
 	}
 
 	return out
@@ -98,15 +98,15 @@ func TestQueryWhereAndProjection(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
 	seed(t, c,
-		`{"post_id":"p1","status":"draft","n":1,"meta":{"a":1,"b":2}}`,
-		`{"post_id":"p2","status":"published","n":2}`,
-		`{"post_id":"p3","status":"published","n":3}`,
+		`{"_id":"p1","status":"draft","n":1,"meta":{"a":1,"b":2}}`,
+		`{"_id":"p2","status":"published","n":2}`,
+		`{"_id":"p3","status":"published","n":3}`,
 	)
 
 	eq(t, ids(t, rq(t, c, `{"where":{"status":"published","n":{"$gt":2}}}`)), []string{"p3"})
 	eq(t, ids(t, rq(t, c, `{}`)), []string{"p1", "p2", "p3"})
 
-	p := rq(t, c, `{"where":{"post_id":"p1"},"fields":["status","meta.b"]}`)
+	p := rq(t, c, `{"where":{"_id":"p1"},"fields":["status","meta.b"]}`)
 
 	if string(p.Rows[0]) != `{"meta":{"b":2},"status":"draft"}` {
 		t.Fatalf("projection = %s", p.Rows[0])
@@ -116,13 +116,13 @@ func TestQueryWhereAndProjection(t *testing.T) {
 func TestQueryNoSortIsInsertionOrder(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	seed(t, c, `{"post_id":"z"}`, `{"post_id":"a"}`, `{"post_id":"m"}`)
-	c.UpdateID(ctx, "z", collection.Change{Set: map[string]any{"x": 1}}, 0)
+	seed(t, c, `{"_id":"z"}`, `{"_id":"a"}`, `{"_id":"m"}`)
+	c.UpdateByID(ctx, "z", collection.Change{Set: map[string]any{"x": 1}}, 0)
 
 	eq(t, ids(t, rq(t, c, `{}`)), []string{"z", "a", "m"})
 
-	c.DeleteID(ctx, "a")
-	seed(t, c, `{"post_id":"a"}`)
+	c.DeleteByID(ctx, "a")
+	seed(t, c, `{"_id":"a"}`)
 
 	eq(t, ids(t, rq(t, c, `{}`)), []string{"z", "m", "a"})
 }
@@ -131,7 +131,7 @@ func TestQueryCountAndSkipLimit(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
 	for i := range 10 {
-		seed(t, c, fmt.Sprintf(`{"post_id":"p%02d","n":%d}`, i, i))
+		seed(t, c, fmt.Sprintf(`{"_id":"p%02d","n":%d}`, i, i))
 	}
 
 	p := rq(t, c, `{"where":{"n":{"$gte":3}},"sort":{"n":1},"skip":2,"limit":3,"count":true}`)
@@ -162,7 +162,7 @@ func TestQueryCountAndSkipLimit(t *testing.T) {
 func TestQueryTiesOnSortField(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	seed(t, c, `{"post_id":"c","g":1}`, `{"post_id":"a","g":1}`, `{"post_id":"b","g":1}`, `{"post_id":"d","g":0}`)
+	seed(t, c, `{"_id":"c","g":1}`, `{"_id":"a","g":1}`, `{"_id":"b","g":1}`, `{"_id":"d","g":0}`)
 
 	eq(t, ids(t, rq(t, c, `{"sort":{"g":1}}`)), []string{"d", "a", "b", "c"})
 	eq(t, ids(t, rq(t, c, `{"sort":{"g":-1}}`)), []string{"c", "b", "a", "d"})
@@ -171,7 +171,7 @@ func TestQueryTiesOnSortField(t *testing.T) {
 func TestQuerySortMissingAndTypes(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	seed(t, c, `{"post_id":"s","v":"x"}`, `{"post_id":"n","v":1}`, `{"post_id":"m"}`, `{"post_id":"z","v":null}`, `{"post_id":"b","v":true}`)
+	seed(t, c, `{"_id":"s","v":"x"}`, `{"_id":"n","v":1}`, `{"_id":"m"}`, `{"_id":"z","v":null}`, `{"_id":"b","v":true}`)
 
 	eq(t, ids(t, rq(t, c, `{"sort":{"v":1}}`)), []string{"m", "z", "n", "s", "b"})
 }
@@ -213,12 +213,12 @@ func TestCursorPaginationInsertsBetweenPages(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
 	for i := 0; i < 9; i++ {
-		seed(t, c, fmt.Sprintf(`{"post_id":"p%d","n":%d}`, i, i*10))
+		seed(t, c, fmt.Sprintf(`{"_id":"p%d","n":%d}`, i, i*10))
 	}
 
 	pages := pageAll(t, c, `{"sort":{"n":1},"limit":3}`, func(page int) {
 		if page == 0 {
-			seed(t, c, `{"post_id":"early","n":5}`, `{"post_id":"late","n":95}`)
+			seed(t, c, `{"_id":"early","n":5}`, `{"_id":"late","n":95}`)
 		}
 	})
 
@@ -235,7 +235,7 @@ func TestCursorPaginationDescTiesNoSkipNoRepeat(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
 	for i := 0; i < 12; i++ {
-		seed(t, c, fmt.Sprintf(`{"post_id":"p%02d","g":%d}`, i, i%3))
+		seed(t, c, fmt.Sprintf(`{"_id":"p%02d","g":%d}`, i, i%3))
 	}
 
 	var all []string
@@ -252,12 +252,12 @@ func TestCursorPaginationDescTiesNoSkipNoRepeat(t *testing.T) {
 func TestCursorNoSortUsesInsertionPosition(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	seed(t, c, `{"post_id":"c"}`, `{"post_id":"a"}`, `{"post_id":"b"}`, `{"post_id":"d"}`)
+	seed(t, c, `{"_id":"c"}`, `{"_id":"a"}`, `{"_id":"b"}`, `{"_id":"d"}`)
 
 	pages := pageAll(t, c, `{"limit":2}`, func(page int) {
 		if page == 0 {
-			c.UpdateID(ctx, "c", collection.Change{Set: map[string]any{"x": 1}}, 0)
-			seed(t, c, `{"post_id":"e"}`)
+			c.UpdateByID(ctx, "c", collection.Change{Set: map[string]any{"x": 1}}, 0)
+			seed(t, c, `{"_id":"e"}`)
 		}
 	})
 
@@ -267,7 +267,7 @@ func TestCursorNoSortUsesInsertionPosition(t *testing.T) {
 func TestCursorMismatchAndInvalid(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	seed(t, c, `{"post_id":"a","n":1}`, `{"post_id":"b","n":2}`)
+	seed(t, c, `{"_id":"a","n":1}`, `{"_id":"b","n":2}`)
 
 	next := rq(t, c, `{"where":{"n":{"$gt":0}},"sort":{"n":1},"limit":1}`).Next
 
@@ -291,14 +291,14 @@ func TestSnapshotCursorIgnoresLaterWrites(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
 	for i := 0; i < 6; i++ {
-		seed(t, c, fmt.Sprintf(`{"post_id":"p%d","n":%d}`, i, i))
+		seed(t, c, fmt.Sprintf(`{"_id":"p%d","n":%d}`, i, i))
 	}
 
 	pages := pageAll(t, c, `{"sort":{"n":1},"limit":2,"snapshot":true,"count":true}`, func(page int) {
 		if page == 0 {
-			seed(t, c, `{"post_id":"new","n":2}`)
-			c.DeleteID(ctx, "p3")
-			c.UpdateID(ctx, "p4", collection.Change{Set: map[string]any{"n": -1}}, 0)
+			seed(t, c, `{"_id":"new","n":2}`)
+			c.DeleteByID(ctx, "p3")
+			c.UpdateByID(ctx, "p4", collection.Change{Set: map[string]any{"n": -1}}, 0)
 		}
 	})
 
@@ -312,7 +312,7 @@ func TestSnapshotCursorIgnoresLaterWrites(t *testing.T) {
 func TestSnapshotCursorExpires(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	seed(t, c, `{"post_id":"a"}`, `{"post_id":"b"}`, `{"post_id":"c"}`)
+	seed(t, c, `{"_id":"a"}`, `{"_id":"b"}`, `{"_id":"c"}`)
 	c.SetSnapshotTTL(40 * time.Millisecond)
 
 	next := rq(t, c, `{"limit":1,"snapshot":true}`).Next
@@ -327,7 +327,7 @@ func TestSnapshotCursorExpires(t *testing.T) {
 func TestQueryDoesNotSeeWritesAfterItStarts(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	seedN(t, c, 2000, func(i int) string { return fmt.Sprintf(`{"post_id":"p%04d","n":%d}`, i, i) })
+	seedN(t, c, 2000, func(i int) string { return fmt.Sprintf(`{"_id":"p%04d","n":%d}`, i, i) })
 
 	var (
 		wg   sync.WaitGroup
@@ -346,8 +346,8 @@ func TestQueryDoesNotSeeWritesAfterItStarts(t *testing.T) {
 			default:
 			}
 
-			c.Insert(ctx, doc(fmt.Sprintf(`{"post_id":"w%d","n":-1}`, i)))
-			c.UpdateID(ctx, "p0000", collection.Change{Set: map[string]any{"n": i}}, 0)
+			c.Insert(ctx, doc(fmt.Sprintf(`{"_id":"w%d","n":-1}`, i)))
+			c.UpdateByID(ctx, "p0000", collection.Change{Set: map[string]any{"n": i}}, 0)
 		}
 	}()
 
@@ -379,9 +379,9 @@ func TestQueryTimeField(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{Time: "at"})
 
 	seed(t, c,
-		`{"post_id":"a","at":"2026-11-04T10:00:00-03:00"}`,
-		`{"post_id":"b","at":"2026-11-04T12:30:00Z"}`,
-		`{"post_id":"c","at":"2026-11-04T11:00:00Z"}`,
+		`{"_id":"a","at":"2026-11-04T10:00:00-03:00"}`,
+		`{"_id":"b","at":"2026-11-04T12:30:00Z"}`,
+		`{"_id":"c","at":"2026-11-04T11:00:00Z"}`,
 	)
 
 	eq(t, ids(t, rq(t, c, `{"where":{"at":{"$lt":"2026-11-04T12:00:00Z"}},"sort":{"at":1}}`, "at")), []string{"c"})
@@ -389,21 +389,21 @@ func TestQueryTimeField(t *testing.T) {
 }
 
 func TestIndexPlanAndInLookups(t *testing.T) {
-	c := open(t, t.TempDir(), catalog.Def{Indexes: []string{"post_id_ref", "tags", "n"}})
+	c := open(t, t.TempDir(), catalog.Def{Indexes: []string{"_id_ref", "tags", "n"}})
 
 	seedN(t, c, 300, func(i int) string {
-		return fmt.Sprintf(`{"post_id":"c%d","post_id_ref":"p%d","n":%d,"tags":["t%d","all"]}`, i, i%100, i, i%7)
+		return fmt.Sprintf(`{"_id":"c%d","_id_ref":"p%d","n":%d,"tags":["t%d","all"]}`, i, i%100, i, i%7)
 	})
 
 	waitReady(t, c)
 
-	p := rq(t, c, `{"where":{"post_id_ref":{"$in":["p1","p2","nope"]}},"sort":{"post_id":1}}`)
+	p := rq(t, c, `{"where":{"_id_ref":{"$in":["p1","p2","nope"]}},"sort":{"_id":1}}`)
 
-	if len(p.Rows) != 6 || p.Plan != "index:post_id_ref" || p.Examined != 6 {
+	if len(p.Rows) != 6 || p.Plan != "index:_id_ref" || p.Examined != 6 {
 		t.Fatalf("rows %d plan %s examined %d", len(p.Rows), p.Plan, p.Examined)
 	}
 
-	if p := rq(t, c, `{"where":{"post_id":{"$in":["c1","c2"]}}}`); p.Plan != "id" || p.Examined != 2 {
+	if p := rq(t, c, `{"where":{"_id":{"$in":["c1","c2"]}}}`); p.Plan != "id" || p.Examined != 2 {
 		t.Fatalf("plan %s examined %d", p.Plan, p.Examined)
 	}
 
@@ -423,12 +423,12 @@ func TestIndexPlanAndInLookups(t *testing.T) {
 func TestIndexFollowsUpdatesDeletesAndArrays(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{Indexes: []string{"tags", "status"}})
 
-	seed(t, c, `{"post_id":"a","tags":["x","y"],"status":"new"}`, `{"post_id":"b","tags":["y"],"status":"new"}`, `{"post_id":"c","status":"old"}`)
+	seed(t, c, `{"_id":"a","tags":["x","y"],"status":"new"}`, `{"_id":"b","tags":["y"],"status":"new"}`, `{"_id":"c","status":"old"}`)
 	waitReady(t, c)
 
-	c.UpdateID(ctx, "a", collection.Change{Set: map[string]any{"tags": []any{"z"}}}, 0)
-	c.UpdateID(ctx, "c", collection.Change{Set: map[string]any{"status": "new"}}, 0)
-	c.DeleteID(ctx, "b")
+	c.UpdateByID(ctx, "a", collection.Change{Set: map[string]any{"tags": []any{"z"}}}, 0)
+	c.UpdateByID(ctx, "c", collection.Change{Set: map[string]any{"status": "new"}}, 0)
+	c.DeleteByID(ctx, "b")
 
 	eq(t, ids(t, rq(t, c, `{"where":{"tags":"y"}}`)), nil)
 	eq(t, ids(t, rq(t, c, `{"where":{"tags":"z"}}`)), []string{"a"})
@@ -461,7 +461,7 @@ func waitReady(t *testing.T, c *collection.Collection) {
 func TestIndexBuildIsCorrectWhileBuilding(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	seedN(t, c, 3000, func(i int) string { return fmt.Sprintf(`{"post_id":"p%04d","g":%d}`, i, i%10) })
+	seedN(t, c, 3000, func(i int) string { return fmt.Sprintf(`{"_id":"p%04d","g":%d}`, i, i%10) })
 
 	gate := make(chan struct{})
 	reached := make(chan struct{}, 1)
@@ -493,9 +493,9 @@ func TestIndexBuildIsCorrectWhileBuilding(t *testing.T) {
 		t.Fatalf("while building: plan %s rows %d", p.Plan, len(p.Rows))
 	}
 
-	c.UpdateID(ctx, "p0003", collection.Change{Set: map[string]any{"g": 4}}, 0)
-	c.DeleteID(ctx, "p0013")
-	seed(t, c, `{"post_id":"late","g":3}`)
+	c.UpdateByID(ctx, "p0003", collection.Change{Set: map[string]any{"g": 4}}, 0)
+	c.DeleteByID(ctx, "p0013")
+	seed(t, c, `{"_id":"late","g":3}`)
 
 	close(gate)
 	waitReady(t, c)
@@ -515,14 +515,14 @@ func TestIndexBuildIsCorrectWhileBuilding(t *testing.T) {
 
 func TestIndexBuildRestart(t *testing.T) {
 	dir := t.TempDir()
-	def := catalog.Def{Name: "posts", ID: "post_id", Indexes: []string{"g"}}
+	def := catalog.Def{Name: "posts", Indexes: []string{"g"}}
 
 	c, err := collection.Open(collection.Config{Dir: dir, FS: fs.OS{}, Def: def})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	seedN(t, c, 2000, func(i int) string { return fmt.Sprintf(`{"post_id":"p%04d","g":%d}`, i, i%4) })
+	seedN(t, c, 2000, func(i int) string { return fmt.Sprintf(`{"_id":"p%04d","g":%d}`, i, i%4) })
 
 	c.Close()
 
@@ -542,7 +542,7 @@ func TestIndexBuildRestart(t *testing.T) {
 func TestQueryContextCanceled(t *testing.T) {
 	c := open(t, t.TempDir(), catalog.Def{})
 
-	seed(t, c, `{"post_id":"a"}`)
+	seed(t, c, `{"_id":"a"}`)
 
 	q, _ := query.Parse(nil, query.Options{})
 	cctx, cancel := contextWithCancel()

@@ -35,10 +35,6 @@ export class Model<F extends Fields> {
     readonly schema: Schema<F>,
   ) {}
 
-  get idField(): string {
-    return this.schema.id ?? '_id'
-  }
-
   path(op?: string): string {
     const base = `/v1/c/${encodeURIComponent(this.name)}`
 
@@ -71,28 +67,38 @@ export class Model<F extends Fields> {
     return this.insert(docs, opts)
   }
 
-  // Atomic update by filter. The filter and the operators are sent as one
-  // body; the daemon matches and writes in one step on the newest state, so
+  // Atomic update. A string is an _id (POST /{_id}/update); an object is a
+  // filter (POST /update). The filter and the operators are sent as one body;
+  // the daemon matches and writes in one step on the newest state, so
   // concurrent updates never interleave. A version guard is a filter:
-  // { call_id: 'c1', _v: 7 }. Matching nothing is not an error: matched is 0.
-  async update(filter: Filter<F>, ops: UpdateOps<F>, opts: UpdateOptions = {}): Promise<UpdateResult<F>> {
+  // { _id: 'c1', _v: 7 }. Matching nothing is not an error: matched is 0.
+  // many does not apply to an _id.
+  async update(idOrFilter: string | Filter<F>, ops: UpdateOps<F>, opts: UpdateOptions = {}): Promise<UpdateResult<F>> {
     await this.ready()
 
-    const body = mergeUpdate(filter, ops)
-    const query = writeQuery({ many: opts.many, upsert: opts.upsert, expire_in: opts.expireIn })
+    const byId = typeof idOrFilter === 'string'
+    const body = mergeUpdate(byId ? {} : idOrFilter, ops)
+    const query = writeQuery({ many: byId ? undefined : opts.many, upsert: opts.upsert, expire_in: opts.expireIn })
+    const op = byId ? `${encodeURIComponent(idOrFilter)}/update` : 'update'
     const out = await this.db.transport.request<{ matched: number; modified: number; doc?: Record<string, unknown> }>(
       'POST',
-      this.path('update') + query,
+      this.path(op) + query,
       body,
     )
 
     return { matched: out.matched, modified: out.modified, doc: out.doc && (this.decode(out.doc) as Row<F>) }
   }
 
-  // Deletes the documents that the filter matches: one, or every match with
-  // many (same rule as update).
-  async delete(filter: Filter<F>, opts: DeleteOptions = {}): Promise<DeleteResult> {
+  // Deletes by _id (a string), or the documents that the filter matches: one,
+  // or every match with many (same rule as update).
+  async delete(idOrFilter: string | Filter<F>, opts: DeleteOptions = {}): Promise<DeleteResult> {
     await this.ready()
+
+    if (typeof idOrFilter === 'string') {
+      return this.db.transport.request<DeleteResult>('DELETE', this.path(encodeURIComponent(idOrFilter)))
+    }
+
+    const filter = idOrFilter
 
     return this.db.transport.request<DeleteResult>('POST', this.path('delete') + writeQuery({ many: opts.many }), toWhere(filter))
   }
@@ -101,18 +107,18 @@ export class Model<F extends Fields> {
   // NotFoundError for a missing or expired document, and TtlError when the
   // schema has no expires field.
   expire(id: string, duration: Duration): Promise<ExpireResult> {
-    return this.setExpiry({ id, in: duration })
+    return this.setExpiry({ _id: id, in: duration })
   }
 
   expireAt(id: string, at: Date): Promise<ExpireResult> {
-    return this.setExpiry({ id, at: at.toISOString() })
+    return this.setExpiry({ _id: id, at: at.toISOString() })
   }
 
   // Removes the expiry of a document (PERSIST in Redis).
   async persist(id: string): Promise<WriteResult> {
     await this.ready()
 
-    return this.db.transport.request<WriteResult>('POST', this.path('persist'), { id })
+    return this.db.transport.request<WriteResult>('POST', this.path('persist'), { _id: id })
   }
 
   // The seconds left (rounded up), -1 when the document never expires, null
@@ -121,7 +127,7 @@ export class Model<F extends Fields> {
     await this.ready()
 
     try {
-      const out = await this.db.transport.request<{ ttl: number }>('GET', `${this.path('ttl')}/${encodeURIComponent(id)}`)
+      const out = await this.db.transport.request<{ ttl: number }>('GET', this.path(`${encodeURIComponent(id)}/ttl`))
 
       return out.ttl
     } catch (err) {
@@ -138,13 +144,24 @@ export class Model<F extends Fields> {
 
     const out = await this.db.transport.request<WriteResult & { expires_at: string }>('POST', this.path('expire'), body)
 
-    return { id: out.id, v: out.v, expiresAt: new Date(out.expires_at) }
+    return { _id: out._id, v: out.v, expiresAt: new Date(out.expires_at) }
   }
 
-  find(id: string): Promise<Row<F> | null> {
-    return this.query()
-      .where({ [this.idField]: id } as Where<F>)
-      .first()
+  // The document with this _id, or null.
+  async get(id: string): Promise<Row<F> | null> {
+    await this.ready()
+
+    try {
+      const doc = await this.db.transport.request<Record<string, unknown>>('GET', this.path(encodeURIComponent(id)))
+
+      return this.decode(doc) as Row<F>
+    } catch (err) {
+      if (err instanceof NotFoundError) {
+        return null
+      }
+
+      throw err
+    }
   }
 
   query(): Query<F> {
@@ -252,7 +269,6 @@ export class Model<F extends Fields> {
     const entries = Object.entries(this.schema.fields)
 
     return {
-      id: this.schema.id,
       time: this.schema.time,
       expires_field: this.schema.expires,
       indexes: entries.filter(([, d]) => d.index).map(([n]) => n),

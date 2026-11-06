@@ -2,16 +2,14 @@ package collection
 
 import (
 	"bytes"
-	"crypto/rand"
-	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"strings"
-	"time"
 )
 
-// withID returns the doc id, adding a generated _id when the collection
-// uses _id and the doc has none. Docs that already carry their id keep
+// idField is the primary key of every collection.
+const idField = "_id"
+
+// withID returns the doc id, adding a generated _id when the doc has none. Docs that already carry their id keep
 // their original bytes (compacted).
 func (c *Collection) withID(raw []byte) (string, json.RawMessage, error) {
 	m, err := decodeObject(raw)
@@ -19,14 +17,10 @@ func (c *Collection) withID(raw []byte) (string, json.RawMessage, error) {
 		return "", nil, err
 	}
 
-	val, present := m[c.def.ID]
+	val, present := m[idField]
 
 	if !present {
-		if c.def.ID != "_id" {
-			return "", nil, errf("missing_id", "field %q is required", c.def.ID)
-		}
-
-		id := newID()
+		id := NewID()
 		m["_id"] = id
 
 		doc, err := json.Marshal(m)
@@ -36,7 +30,7 @@ func (c *Collection) withID(raw []byte) (string, json.RawMessage, error) {
 
 	id, ok := val.(string)
 	if !ok || id == "" {
-		return "", nil, errf("invalid_id", "field %q must be a non-empty string", c.def.ID)
+		return "", nil, errf("invalid_id", "field %q must be a non-empty string", idField)
 	}
 
 	var buf bytes.Buffer
@@ -62,7 +56,7 @@ func decodeObject(raw []byte) (map[string]any, error) {
 }
 
 // applyChange returns cur with $set and $unset applied.
-func applyChange(cur json.RawMessage, ch Change, idField string) (json.RawMessage, error) {
+func applyChange(cur json.RawMessage, ch Change) (json.RawMessage, error) {
 	if _, ok := ch.Set[idField]; ok {
 		return nil, errf("immutable_id", "%s cannot change", idField)
 	}
@@ -133,15 +127,4 @@ func unsetPath(m map[string]any, path string) {
 	}
 
 	delete(obj, parts[len(parts)-1])
-}
-
-// newID is 24 hex chars: 4 bytes of unix seconds + 8 random bytes, so ids
-// sort roughly by creation time.
-func newID() string {
-	var b [12]byte
-
-	binary.BigEndian.PutUint32(b[:4], uint32(time.Now().Unix()))
-	_, _ = rand.Read(b[4:])
-
-	return hex.EncodeToString(b[:])
 }

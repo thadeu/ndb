@@ -215,7 +215,7 @@ func (c *Collection) findExpired() ([]expireItem, error) {
 			return nil, err
 		}
 
-		id, _ := row[c.def.ID].(string)
+		id, _ := row[idField].(string)
 		v, _ := row["_v"].(float64)
 
 		items = append(items, expireItem{id: id, v: uint64(v)})

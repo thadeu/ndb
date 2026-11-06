@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -60,9 +61,9 @@ func TestReopenRecoversDocuments(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	col := ensure(t, db, catalog.Def{Name: "posts", ID: "post_id"})
+	col := ensure(t, db, catalog.Def{Name: "posts"})
 
-	if _, err := col.Insert(ctx, []byte(`{"post_id":"p1","n":1}`), []byte(`{"post_id":"p2","n":2}`)); err != nil {
+	if _, err := col.Insert(ctx, []byte(`{"_id":"p1","n":1}`), []byte(`{"_id":"p2","n":2}`)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -101,7 +102,7 @@ func TestCloseKeepsEveryAckedWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	col := ensure(t, db, catalog.Def{Name: "events", ID: "event_id"})
+	col := ensure(t, db, catalog.Def{Name: "events"})
 
 	var (
 		acked atomic.Int64
@@ -145,9 +146,9 @@ func TestCloseKeepsEveryAckedWrite(t *testing.T) {
 func TestEnsureMergesIndexesAndRejectsConflicts(t *testing.T) {
 	db := open(t, cfg(t.TempDir(), nil))
 
-	ensure(t, db, catalog.Def{Name: "calls", ID: "call_id", Indexes: []string{"status"}})
+	ensure(t, db, catalog.Def{Name: "calls", Indexes: []string{"status"}})
 
-	def, err := db.Ensure(catalog.Def{Name: "calls", ID: "call_id", Indexes: []string{"dnis"}})
+	def, err := db.Ensure(catalog.Def{Name: "calls", Indexes: []string{"dnis"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,9 +163,9 @@ func TestEnsureMergesIndexesAndRejectsConflicts(t *testing.T) {
 		t.Fatalf("live indexes = %d, want 2", got)
 	}
 
-	_, err = db.Ensure(catalog.Def{Name: "calls", ID: "other_id"})
-	if !errors.Is(err, catalog.ErrConflict) {
-		t.Fatalf("changed id: want catalog_conflict, got %v", err)
+	_, err = db.Ensure(catalog.Def{Name: "calls", LegacyID: "_id"})
+	if !errors.Is(err, catalog.ErrInvalid) {
+		t.Fatalf("id setting: want catalog_invalid, got %v", err)
 	}
 }
 
@@ -203,7 +204,7 @@ func TestImplicitCreateCanBeTurnedOff(t *testing.T) {
 func TestDropIndexRemovesItFromTheLiveCollection(t *testing.T) {
 	db := open(t, cfg(t.TempDir(), nil))
 
-	ensure(t, db, catalog.Def{Name: "calls", ID: "call_id", Indexes: []string{"status", "dnis"}})
+	ensure(t, db, catalog.Def{Name: "calls", Indexes: []string{"status", "dnis"}})
 
 	if _, err := db.DropIndex("calls", "dnis"); err != nil {
 		t.Fatal(err)
@@ -226,7 +227,7 @@ func TestDirectCollectionReadsAppFilesAndRefusesWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	line := `{"call_id":"c1","status":"answered"}` + "\n"
+	line := `{"_id":"c1","status":"answered"}` + "\n"
 
 	if err := os.WriteFile(filepath.Join(files, "a.ndjson"), []byte(line), 0o644); err != nil {
 		t.Fatal(err)
@@ -236,7 +237,6 @@ func TestDirectCollectionReadsAppFilesAndRefusesWrites(t *testing.T) {
 		Name:    "calls",
 		Write:   catalog.Direct,
 		Path:    filepath.Join(files, "*.ndjson"),
-		ID:      "call_id",
 		Indexes: []string{"status"},
 	}
 
@@ -258,7 +258,7 @@ func TestDirectCollectionReadsAppFilesAndRefusesWrites(t *testing.T) {
 		t.Fatalf("rows = %d, want 1", len(page.Rows))
 	}
 
-	if _, err := col.Insert(ctx, []byte(`{"call_id":"c2"}`)); !errors.Is(err, engine.ErrDirect) {
+	if _, err := col.Insert(ctx, []byte(`{"_id":"c2"}`)); !errors.Is(err, engine.ErrDirect) {
 		t.Fatalf("insert into direct collection: want ErrDirect, got %v", err)
 	}
 }
@@ -271,9 +271,9 @@ func TestDaemonCollectionsSealAndRecoverFromSegments(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	col := ensure(t, db, catalog.Def{Name: "posts", ID: "post_id"})
+	col := ensure(t, db, catalog.Def{Name: "posts"})
 
-	if _, err := col.Insert(ctx, []byte(`{"post_id":"p1"}`), []byte(`{"post_id":"p2"}`)); err != nil {
+	if _, err := col.Insert(ctx, []byte(`{"_id":"p1"}`), []byte(`{"_id":"p2"}`)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -313,7 +313,7 @@ func TestDirectCollectionHidesExpiredRowsAndKeepsTheFiles(t *testing.T) {
 
 	def := catalog.Def{
 		Name: "sessions", Write: catalog.Direct, Path: filepath.Join(files, "*.ndjson"),
-		ID: "sid", Time: "at", Retention: "30d", ExpiresField: "exp",
+		Time: "at", Retention: "30d", ExpiresField: "exp",
 	}
 
 	db := open(t, cfg(filepath.Join(root, "data"), map[string]catalog.Def{"sessions": def}))
@@ -370,5 +370,50 @@ func TestRelativeGlobFromConfigFindsTheFiles(t *testing.T) {
 
 	if len(page.Rows) != 1 {
 		t.Fatalf("rows = %d, want 1", len(page.Rows))
+	}
+}
+
+func TestDirectLineWithoutIDHasNoIDAndSurvivesRestart(t *testing.T) {
+	root := t.TempDir()
+	files := filepath.Join(root, "logs")
+
+	if err := os.MkdirAll(files, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	lines := `{"level":"error","msg":"boom"}` + "\n" + `{"_id":"k1","level":"info"}` + "\n"
+
+	if err := os.WriteFile(filepath.Join(files, "a.ndjson"), []byte(lines), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	def := catalog.Def{Name: "logs", Write: catalog.Direct, Path: filepath.Join(files, "*.ndjson")}
+	c := cfg(filepath.Join(root, "data"), map[string]catalog.Def{"logs": def})
+
+	for range 2 {
+		db, err := engine.Open(c, slog.Default())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		col, err := db.Get("logs")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		page, err := col.Find(ctx, []byte(`{"where":{"level":"error"}}`))
+		if err != nil || len(page.Rows) != 1 || strings.Contains(string(page.Rows[0]), `"_id"`) {
+			t.Fatalf("rows = %q, err %v", page.Rows, err)
+		}
+
+		if _, ok := col.Get("a.ndjson:0"); ok {
+			t.Fatal("a line without _id must not be addressable by its fallback key")
+		}
+
+		if doc, ok := col.Get("k1"); !ok || !strings.Contains(string(doc.Doc), `"level":"info"`) {
+			t.Fatalf("k1 = %s, %v", doc.Doc, ok)
+		}
+
+		db.Close()
 	}
 }

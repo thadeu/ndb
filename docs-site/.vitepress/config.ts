@@ -43,6 +43,8 @@ function docsVersion(): string {
 // raw .md, with the example code imports expanded into code blocks.
 const docsRoots = [
   { dir: resolve(here, '../../docs/dev'), prefix: '' },
+  { dir: resolve(here, '../../docs/dev/clients'), prefix: 'clients/' },
+  { dir: resolve(here, '../../docs/dev/deploy'), prefix: 'deploy/' },
   { dir: resolve(here, '../../docs/examples'), prefix: 'examples/' },
 ]
 const siteUrl = (process.env.DOCS_URL ?? '').replace(/\/$/, '')
@@ -190,6 +192,8 @@ export default defineConfig({
   ],
 
   rewrites: {
+    'docs/dev/clients/:page.md': 'clients/:page.md',
+    'docs/dev/deploy/:page.md': 'deploy/:page.md',
     'docs/dev/:page.md': ':page.md',
     'docs/examples/index.md': 'examples.md',
     'docs/examples/:page.md': 'examples/:page.md',

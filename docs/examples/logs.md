@@ -91,7 +91,7 @@ The four programs print the same text.
 ## Notes
 
 - A direct collection is read only. `insert` on it is `direct_collection`, so these programs have no write step.
-- The Go struct and the TypeScript schema declare `id` and `time` as in `ndb.yml`. A different value is `catalog_conflict`. The Ruby client does not declare the collection at all.
+- The Go struct and the TypeScript schema declare `time` and the indexes as in `ndb.yml`. A different value is `catalog_conflict`. The Ruby client does not declare the collection at all.
 - Every SDK supports every step of this example.
 - More: [Storage](/storage#write-modes), [Clients](/clients#direct-mode-from-an-app).
 

@@ -15,23 +15,23 @@ import (
 )
 
 type expireReport struct {
-	ID        string `json:"id"`
+	ID        string `json:"_id"`
 	V         uint64 `json:"v"`
 	ExpiresAt string `json:"expires_at"`
 }
 
 type persistReport struct {
-	ID string `json:"id"`
+	ID string `json:"_id"`
 	V  uint64 `json:"v"`
 }
 
 type ttlReport struct {
-	ID        string  `json:"id"`
+	ID        string  `json:"_id"`
 	TTL       int64   `json:"ttl"`
 	ExpiresAt *string `json:"expires_at"`
 }
 
-// runExpire is "ndb expire <collection> <id> <duration>": the document
+// runExpire is "ndb expire <collection> <_id> <duration>": the document
 // expires that long from now. A bare number is seconds.
 func runExpire(args []string) error {
 	return expire(args, os.Stdout)
@@ -48,7 +48,7 @@ func expire(args []string, out io.Writer) error {
 	}
 
 	if len(pos) != 3 {
-		return errors.New("usage: ndb expire <collection> <id> <duration> [-url u] [-json]")
+		return errors.New("usage: ndb expire <collection> <_id> <duration> [-url u] [-json]")
 	}
 
 	c, err := ttlClient(cf, fl, "expire")
@@ -56,7 +56,7 @@ func expire(args []string, out io.Writer) error {
 		return err
 	}
 
-	body, err := json.Marshal(map[string]any{"id": pos[1], "in": durationArg(pos[2])})
+	body, err := json.Marshal(map[string]any{"_id": pos[1], "in": durationArg(pos[2])})
 	if err != nil {
 		return err
 	}
@@ -71,12 +71,12 @@ func expire(args []string, out io.Writer) error {
 		return writeJSON(out, rep)
 	}
 
-	renderTTLTable(out, []string{"id", "version", "expires at"}, []string{rep.ID, strconv.FormatUint(rep.V, 10), rep.ExpiresAt})
+	renderTTLTable(out, []string{"_id", "version", "expires at"}, []string{rep.ID, strconv.FormatUint(rep.V, 10), rep.ExpiresAt})
 
 	return nil
 }
 
-// runPersist is "ndb persist <collection> <id>": the document stops expiring.
+// runPersist is "ndb persist <collection> <_id>": the document stops expiring.
 func runPersist(args []string) error {
 	return persist(args, os.Stdout)
 }
@@ -92,7 +92,7 @@ func persist(args []string, out io.Writer) error {
 	}
 
 	if len(pos) != 2 {
-		return errors.New("usage: ndb persist <collection> <id> [-url u] [-json]")
+		return errors.New("usage: ndb persist <collection> <_id> [-url u] [-json]")
 	}
 
 	c, err := ttlClient(cf, fl, "persist")
@@ -100,7 +100,7 @@ func persist(args []string, out io.Writer) error {
 		return err
 	}
 
-	body, err := json.Marshal(map[string]any{"id": pos[1]})
+	body, err := json.Marshal(map[string]any{"_id": pos[1]})
 	if err != nil {
 		return err
 	}
@@ -115,12 +115,12 @@ func persist(args []string, out io.Writer) error {
 		return writeJSON(out, rep)
 	}
 
-	renderTTLTable(out, []string{"id", "version"}, []string{rep.ID, strconv.FormatUint(rep.V, 10)})
+	renderTTLTable(out, []string{"_id", "version"}, []string{rep.ID, strconv.FormatUint(rep.V, 10)})
 
 	return nil
 }
 
-// runTTL is "ndb ttl <collection> <id>": the time left, or -1 when the
+// runTTL is "ndb ttl <collection> <_id>": the time left, or -1 when the
 // document never expires.
 func runTTL(args []string) error {
 	return ttl(args, os.Stdout)
@@ -137,7 +137,7 @@ func ttl(args []string, out io.Writer) error {
 	}
 
 	if len(pos) != 2 {
-		return errors.New("usage: ndb ttl <collection> <id> [-url u] [-json]")
+		return errors.New("usage: ndb ttl <collection> <_id> [-url u] [-json]")
 	}
 
 	c, err := ttlClient(cf, fl, "ttl")
@@ -147,7 +147,7 @@ func ttl(args []string, out io.Writer) error {
 
 	var rep ttlReport
 
-	if err := c.get("/v1/c/"+url.PathEscape(pos[0])+"/ttl/"+url.PathEscape(pos[1]), &rep); err != nil {
+	if err := c.get("/v1/c/"+url.PathEscape(pos[0])+"/"+url.PathEscape(pos[1])+"/ttl", &rep); err != nil {
 		return err
 	}
 
@@ -165,7 +165,7 @@ func ttl(args []string, out io.Writer) error {
 		at = *rep.ExpiresAt
 	}
 
-	renderTTLTable(out, []string{"id", "ttl", "seconds", "expires at"}, []string{rep.ID, left, strconv.FormatInt(rep.TTL, 10), at})
+	renderTTLTable(out, []string{"_id", "ttl", "seconds", "expires at"}, []string{rep.ID, left, strconv.FormatInt(rep.TTL, 10), at})
 
 	return nil
 }

@@ -12,7 +12,7 @@ import (
 	"github.com/thadeu/ndb/internal/fs"
 )
 
-var aggDef = catalog.Def{Name: "calls", ID: "id", Time: "ts", Indexes: []string{"status"}}
+var aggDef = catalog.Def{Name: "calls", Time: "ts", Indexes: []string{"status"}}
 
 // aggDoc makes document i, with null, missing, mixed types, arrays and
 // time zones in the offsets, so the column engine falls back to _raw often.
@@ -25,7 +25,7 @@ func aggDoc(i int) string {
 		ts = fmt.Sprintf(`"2026-11-%02dT%02d:%02d:00-03:00"`, 1+i%6, i%24, (i*7)%60)
 	}
 
-	doc := fmt.Sprintf(`{"id":"d%04d","status":%s,"dur":%s,"ts":%s,"n":%d`, i, status, dur, ts, i)
+	doc := fmt.Sprintf(`{"_id":"d%04d","status":%s,"dur":%s,"ts":%s,"n":%d`, i, status, dur, ts, i)
 
 	if i%4 == 0 {
 		doc += fmt.Sprintf(`,"tags":["t%d","u"]`, i%3)
@@ -67,13 +67,13 @@ func fillAgg(t *testing.T, c *collection.Collection, seal bool) {
 	for i := 0; i < 500; i += 17 {
 		set := map[string]any{"status": "z", "dur": 1000 + i}
 
-		if _, err := c.UpdateID(ctx, fmt.Sprintf("d%04d", i), collection.Change{Set: set}, 0); err != nil {
+		if _, err := c.UpdateByID(ctx, fmt.Sprintf("d%04d", i), collection.Change{Set: set}, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	for i := 3; i < 500; i += 29 {
-		if err := c.DeleteID(ctx, fmt.Sprintf("d%04d", i)); err != nil {
+		if err := c.DeleteByID(ctx, fmt.Sprintf("d%04d", i)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -106,8 +106,8 @@ func aggRows(t *testing.T, c *collection.Collection, body string) []string {
 var aggPipelines = []string{
 	`{"pipeline":[{"$group":{"_id":"$status","n":{"$count":{}},"s":{"$sum":"$dur"},"a":{"$avg":"$dur"},"lo":{"$min":"$dur"},"hi":{"$max":"$dur"}}}]}`,
 	`{"pipeline":[{"$match":{"status":{"$in":["a","b"]}}},{"$group":{"_id":{"s":"$status","h":{"$dateTrunc":{"date":"$ts","unit":"hour"}}},"n":{"$count":{}}}}]}`,
-	`{"pipeline":[{"$group":{"_id":{"$dateTrunc":{"date":"$ts","unit":"day","timezone":"America/Sao_Paulo"}},"n":{"$sum":1},"first":{"$first":"$id"},"last":{"$last":"$id"}}}]}`,
-	`{"pipeline":[{"$sort":{"n":-1}},{"$group":{"_id":"$meta.city","f":{"$first":"$id"},"l":{"$last":"$id"},"top":{"$max":"$n"}}}]}`,
+	`{"pipeline":[{"$group":{"_id":{"$dateTrunc":{"date":"$ts","unit":"day","timezone":"America/Sao_Paulo"}},"n":{"$sum":1},"first":{"$first":"$_id"},"last":{"$last":"$_id"}}}]}`,
+	`{"pipeline":[{"$sort":{"n":-1}},{"$group":{"_id":"$meta.city","f":{"$first":"$_id"},"l":{"$last":"$_id"},"top":{"$max":"$n"}}}]}`,
 	`{"pipeline":[{"$match":{"n":{"$gte":100,"$lt":400}}},{"$group":{"_id":"$tags","c":{"$count":{}}}},{"$sort":{"c":-1}},{"$limit":3}]}`,
 	`{"pipeline":[{"$group":{"_id":null,"c":{"$count":{}},"lo":{"$min":"$ts"},"hi":{"$max":"$ts"},"f":{"$first":"$ts"}}}]}`,
 	`{"pipeline":[{"$group":{"_id":"$status","c":{"$count":{}}}},{"$match":{"c":{"$gt":5}}},{"$project":{"c":1,"_id":0}},{"$skip":1}]}`,
@@ -184,7 +184,7 @@ func TestAggregateGroupLimit(t *testing.T) {
 
 		c.SetGroupLimit(4096)
 
-		p, err := c.ParseAggregate([]byte(`{"pipeline":[{"$group":{"_id":"$id","c":{"$count":{}}}}]}`))
+		p, err := c.ParseAggregate([]byte(`{"pipeline":[{"$group":{"_id":"$_id","c":{"$count":{}}}}]}`))
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -14,7 +14,7 @@ import (
 	"github.com/thadeu/ndb/internal/fs"
 )
 
-var blobDef = catalog.Def{Name: "calls", ID: "call_id", BlobThreshold: 64}
+var blobDef = catalog.Def{Name: "calls", BlobThreshold: 64}
 
 func openBlobs(t *testing.T, fsys fs.FS, dir string) *blob.Store {
 	t.Helper()
@@ -72,7 +72,7 @@ func TestInsertAndUpdateExternalizeLargeStrings(t *testing.T) {
 	big := strings.Repeat("a", 500)
 	other := strings.Repeat("b", 700)
 
-	if _, err := c.Insert(ctx, doc(`{"call_id":"c1","note":"short","audio":"`+big+`"}`)); err != nil {
+	if _, err := c.Insert(ctx, doc(`{"_id":"c1","note":"short","audio":"`+big+`"}`)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -91,7 +91,7 @@ func TestInsertAndUpdateExternalizeLargeStrings(t *testing.T) {
 		t.Fatalf("refs = %v", refs)
 	}
 
-	if _, err := c.UpdateID(ctx, "c1", collection.Change{Set: map[string]any{"audio": other}}, 0); err != nil {
+	if _, err := c.UpdateByID(ctx, "c1", collection.Change{Set: map[string]any{"audio": other}}, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -107,7 +107,7 @@ func TestNoBlobsWithoutThreshold(t *testing.T) {
 	dir := t.TempDir()
 	blobs := openBlobs(t, fs.OS{}, dir)
 
-	c, err := collection.Open(collection.Config{Dir: filepath.Join(dir, "col"), FS: fs.OS{}, Def: catalog.Def{Name: "p", ID: "id"}, Blobs: blobs})
+	c, err := collection.Open(collection.Config{Dir: filepath.Join(dir, "col"), FS: fs.OS{}, Def: catalog.Def{Name: "p"}, Blobs: blobs})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestNoBlobsWithoutThreshold(t *testing.T) {
 
 	big := strings.Repeat("a", 500)
 
-	if _, err := c.Insert(ctx, doc(`{"id":"1","v":"`+big+`"}`)); err != nil {
+	if _, err := c.Insert(ctx, doc(`{"_id":"1","v":"`+big+`"}`)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -136,7 +136,7 @@ func TestCrashBetweenBlobAndWALLeavesNoDanglingRef(t *testing.T) {
 
 	big := strings.Repeat("z", 300)
 
-	if _, err := c.Insert(ctx, doc(`{"call_id":"c1","audio":"`+big+`"}`)); err == nil {
+	if _, err := c.Insert(ctx, doc(`{"_id":"c1","audio":"`+big+`"}`)); err == nil {
 		t.Fatal("insert succeeded although the WAL write failed")
 	}
 
@@ -163,7 +163,7 @@ func TestBlobFailureWritesNothingToWAL(t *testing.T) {
 
 	big := strings.Repeat("z", 300)
 
-	if _, err := c.Insert(ctx, doc(`{"call_id":"c1","audio":"`+big+`"}`)); err == nil {
+	if _, err := c.Insert(ctx, doc(`{"_id":"c1","audio":"`+big+`"}`)); err == nil {
 		t.Fatal("insert succeeded although the blob was not durable")
 	}
 
@@ -179,7 +179,7 @@ func TestBlobFailureWritesNothingToWAL(t *testing.T) {
 func TestWALMarkIsARecordBoundaryAcrossRotation(t *testing.T) {
 	dir := t.TempDir()
 
-	c, err := collection.Open(collection.Config{Dir: dir, FS: fs.OS{}, Def: catalog.Def{Name: "p", ID: "id"}, WALSegmentSize: 512})
+	c, err := collection.Open(collection.Config{Dir: dir, FS: fs.OS{}, Def: catalog.Def{Name: "p"}, WALSegmentSize: 512})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestWALMarkIsARecordBoundaryAcrossRotation(t *testing.T) {
 	defer c.Close()
 
 	for i := range 20 {
-		if _, err := c.Insert(ctx, doc(`{"id":"`+strings.Repeat("x", i+1)+`","pad":"`+strings.Repeat("p", 100)+`"}`)); err != nil {
+		if _, err := c.Insert(ctx, doc(`{"_id":"`+strings.Repeat("x", i+1)+`","pad":"`+strings.Repeat("p", 100)+`"}`)); err != nil {
 			t.Fatal(err)
 		}
 	}

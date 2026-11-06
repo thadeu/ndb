@@ -14,14 +14,14 @@ import (
 )
 
 type Event struct {
-	EventID   string    `ndb:"event_id,id"`
+	ID        string    `ndb:"_id"`
 	Topic     string    `ndb:"topic,index"`
 	CreatedAt time.Time `ndb:"created_at,time"`
 }
 
 type Receipt struct {
-	EventID string    `ndb:"event_id,id"`
-	DoneAt  time.Time `ndb:"done_at"`
+	ID     string    `ndb:"_id"`
+	DoneAt time.Time `ndb:"done_at"`
 }
 
 func main() {
@@ -64,7 +64,7 @@ func run(ctx context.Context) error {
 	for i, topic := range topics {
 		id := fmt.Sprintf("evt-%d", i+1)
 
-		if _, err := outbox.Insert(ctx, Event{EventID: id, Topic: topic, CreatedAt: time.Now().UTC()}); err != nil {
+		if _, err := outbox.Insert(ctx, Event{ID: id, Topic: topic, CreatedAt: time.Now().UTC()}); err != nil {
 			return err
 		}
 
@@ -139,7 +139,7 @@ func run(ctx context.Context) error {
 // charge is the work of the consumer. The receipt id is the event id, so a second
 // delivery of the same event fails with duplicate_id and the work is not done twice.
 func charge(ctx context.Context, receipts *ndb.Coll[Receipt], eventID string) error {
-	_, err := receipts.Insert(ctx, Receipt{EventID: eventID, DoneAt: time.Now().UTC()})
+	_, err := receipts.Insert(ctx, Receipt{ID: eventID, DoneAt: time.Now().UTC()})
 
 	return err
 }
@@ -151,11 +151,11 @@ func reset(ctx context.Context, outbox *ndb.Coll[Event], receipts *ndb.Coll[Rece
 	for i := 1; i <= 5; i++ {
 		id := fmt.Sprintf("evt-%d", i)
 
-		if err := outbox.Delete(ctx, id); err != nil && !errors.Is(err, ndb.ErrNotFound) {
+		if _, err := outbox.DeleteID(ctx, id); err != nil {
 			return err
 		}
 
-		if err := receipts.Delete(ctx, id); err != nil && !errors.Is(err, ndb.ErrNotFound) {
+		if _, err := receipts.DeleteID(ctx, id); err != nil {
 			return err
 		}
 	}

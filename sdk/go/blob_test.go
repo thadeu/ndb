@@ -12,7 +12,7 @@ import (
 )
 
 type Recording struct {
-	CallID string `ndb:"call_id,id"`
+	CallID string `ndb:"_id"`
 	Audio  Blob   `ndb:"audio"`
 }
 

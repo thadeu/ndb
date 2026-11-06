@@ -28,7 +28,7 @@ func benchCollection(b *testing.B) *collection.Collection {
 	b.Helper()
 
 	n := benchRows()
-	def := catalog.Def{Name: "posts", ID: "post_id", Indexes: []string{"ref"}, Durability: catalog.Relaxed}
+	def := catalog.Def{Name: "posts", Indexes: []string{"ref"}, Durability: catalog.Relaxed}
 
 	c, err := collection.Open(collection.Config{Dir: b.TempDir(), FS: fs.OS{}, Def: def})
 	if err != nil {
@@ -41,7 +41,7 @@ func benchCollection(b *testing.B) *collection.Collection {
 		docs := make([][]byte, 0, 2000)
 
 		for i := start; i < min(start+2000, n); i++ {
-			docs = append(docs, fmt.Appendf(nil, `{"post_id":"c%d","ref":"r%d","n":%d}`, i, i/100, i))
+			docs = append(docs, fmt.Appendf(nil, `{"_id":"c%d","ref":"r%d","n":%d}`, i, i/100, i))
 		}
 
 		if _, err := c.Insert(ctx, docs...); err != nil {
@@ -93,7 +93,7 @@ func BenchmarkQueryByIDWhere(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		q, _ := query.Parse(fmt.Appendf(nil, `{"where":{"post_id":"c%d"}}`, i*7919%n), query.Options{})
+		q, _ := query.Parse(fmt.Appendf(nil, `{"where":{"_id":"c%d"}}`, i*7919%n), query.Options{})
 		start := time.Now()
 
 		if _, err := c.Query(ctx, q); err != nil {

@@ -15,7 +15,7 @@ import (
 type Event struct {
 	Pos string          `json:"pos"`
 	Op  string          `json:"op"`
-	ID  string          `json:"id"`
+	ID  string          `json:"_id"`
 	V   uint64          `json:"v,omitempty"`
 	Doc json.RawMessage `json:"doc,omitempty"`
 

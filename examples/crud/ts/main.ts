@@ -1,64 +1,52 @@
-// CRUD on the users collection: insert, get, update with if_version, delete, count.
-import { connect, NotFoundError, VersionConflictError } from '@thadeu/ndb'
+// CRUD on the users collection: insert, get by _id, update with a _v guard, delete, count.
+import { connect } from '@thadeu/ndb'
 
 // #region connect
 const ndb = connect(process.env.NDB_URL ?? 'unix:///tmp/ndb-examples.sock') // NDB_TOKEN is read by the SDK
 
 const users = ndb.model('users', {
-  id: 'user_id',
   fields: {
-    user_id: { type: 'string' },
-    email: { type: 'string' },
+    email: { type: 'string', unique: true },
     plan: { type: 'string', index: true },
   },
 })
 // #endregion connect
 
 for (const id of ['u1', 'u2']) {
-  try {
-    await users.delete(id)
-  } catch (err) {
-    if (!(err instanceof NotFoundError)) {
-      throw err
-    }
-  }
+  await users.delete(id)
 }
 
 // #region insert
 const results = await users.insert([
-  { user_id: 'u1', email: 'ada@example.com', plan: 'free' },
-  { user_id: 'u2', email: 'grace@example.com', plan: 'free' },
+  { _id: 'u1', email: 'ada@example.com', plan: 'free' },
+  { _id: 'u2', email: 'grace@example.com', plan: 'free' },
 ])
 
 console.log(`insert u1, u2 -> v${results[0]?.v}, v${results[1]?.v}`)
 // #endregion insert
 
 // #region get
-const ada = await users.find('u1')
+const ada = await users.get('u1')
 
 console.log(`get u1: ${ada?.email} plan=${ada?.plan} v${ada?._v}`)
 // #endregion get
 
 // #region update
-const saved = await users.update('u1', { plan: 'pro' }, { ifVersion: ada?._v })
+const saved = await users.update({ _id: 'u1', _v: ada?._v }, { $set: { plan: 'pro' } })
 
-console.log(`update u1 plan=pro (if_version ${ada?._v}) -> v${saved.v}`)
+console.log(`update u1 plan=pro (_v ${ada?._v}) -> v${saved.doc?._v}`)
 // #endregion update
 
 // #region conflict
-try {
-  await users.update('u1', { plan: 'team' }, { ifVersion: ada?._v })
-} catch (err) {
-  if (!(err instanceof VersionConflictError)) {
-    throw err
-  }
+const stale = await users.update({ _id: 'u1', _v: ada?._v }, { $set: { plan: 'team' } })
 
-  console.log(`update u1 plan=team (if_version ${ada?._v}) -> version_conflict`)
+if (stale.matched === 0) {
+  console.log(`update u1 plan=team (_v ${ada?._v}) -> matched 0`)
 
-  const fresh = await users.find('u1')
-  const retried = await users.update('u1', { plan: 'team' }, { ifVersion: fresh?._v })
+  const fresh = await users.get('u1')
+  const retried = await users.update({ _id: 'u1', _v: fresh?._v }, { $set: { plan: 'team' } })
 
-  console.log(`reload u1: v${fresh?._v}, retry with if_version ${fresh?._v} -> v${retried.v}`)
+  console.log(`reload u1: v${fresh?._v}, retry with _v ${fresh?._v} -> v${retried.doc?._v}`)
 }
 // #endregion conflict
 

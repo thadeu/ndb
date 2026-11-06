@@ -48,8 +48,11 @@ const maxLineLimit = 16 << 20
 // Def is one collection. An empty field in a declaration means "not
 // specified": it keeps the current value.
 type Def struct {
-	Name          string     `json:"name" yaml:"-"`
-	ID            string     `json:"id,omitempty" yaml:"id"`
+	Name string `json:"name" yaml:"-"`
+
+	// LegacyID only exists to reject the removed "id" setting with a clear
+	// message. The primary key is always _id.
+	LegacyID      string     `json:"id,omitempty" yaml:"id"`
 	Time          string     `json:"time,omitempty" yaml:"time"`
 	Write         WriteMode  `json:"write,omitempty" yaml:"write"`
 	Path          string     `json:"path,omitempty" yaml:"path"`
@@ -216,6 +219,15 @@ func (c *Catalog) DropIndex(name, field string) (Def, error) {
 	return d, c.save(d)
 }
 
+// Put stores a definition exactly as given, with no merge and no default.
+// A restore uses it to rebuild the catalog from a backup.
+func (c *Catalog) Put(d Def) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.save(d)
+}
+
 func (c *Catalog) save(d Def) error {
 	data, err := json.Marshal(d)
 	if err != nil {
@@ -235,10 +247,6 @@ func (c *Catalog) save(d Def) error {
 }
 
 func withDefaults(d Def, src Source) Def {
-	if d.ID == "" {
-		d.ID = "_id"
-	}
-
 	switch {
 	case d.Write == "" && d.Path != "":
 		d.Write = Direct
@@ -265,7 +273,6 @@ func merge(cur, decl Def, src Source) (Def, error) {
 		cur, decl string
 		set       func(string)
 	}{
-		{"id", cur.ID, decl.ID, func(v string) { next.ID = v }},
 		{"time", cur.Time, decl.Time, func(v string) { next.Time = v }},
 		{"ttl", cur.TTL, decl.TTL, func(v string) { next.TTL = v }},
 		{"expires_field", cur.ExpiresField, decl.ExpiresField, func(v string) { next.ExpiresField = v }},
@@ -338,6 +345,8 @@ var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 // validateDecl checks one declaration on its own.
 func validateDecl(d Def) error {
 	switch {
+	case d.LegacyID != "":
+		return fmt.Errorf("%w: the primary key is always _id: declare %q with unique: [%s] (or name the field _id)", ErrInvalid, d.LegacyID, d.LegacyID)
 	case !nameRe.MatchString(d.Name):
 		return fmt.Errorf("%w: bad collection name %q", ErrInvalid, d.Name)
 	case d.Write != "" && d.Write != Engine && d.Write != Direct:
