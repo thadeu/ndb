@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Docs: Docker has a Compose section: a dev quick start with no config and no volume (`volumes_from`), the anonymous-volume warning, a production file, and TCP inside the Compose network.
+
 ## [0.2.2] - 2026-11-06
 
 ### Changed

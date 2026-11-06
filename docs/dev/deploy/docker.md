@@ -18,13 +18,81 @@ docker run -d --name ndb \
 ```
 
 - No command is needed. The defaults are: config `/etc/ndb/ndb.yml` (optional), data dir `/var/lib/ndb`, socket `/run/ndb/ndb.sock` with mode `0660`. A `command:` only adds flags, such as `-tcp 0.0.0.0:7070`.
-- `/var/lib/ndb` is the data volume. Mount it for ndb only, on a local disk.
+- `/var/lib/ndb` is the data volume. Mount a named volume for ndb only, on a local disk. Without it the data is in an anonymous volume, see [Compose](#compose).
 - `/run/ndb` is the socket dir. Mount the same volume in every app container that talks to ndb. The apps must be allowed to open the socket: run them with group 65532 (see [deploy/examples/single-vm](single-vm.md)).
 - The process runs as UID 65532. A bind mount must allow this user to write. Named volumes work as they are.
 - For TCP, add `-tcp 0.0.0.0:7070` and publish the port on a private network only, and add `-token-file` (mount the token file as a secret).
 - Run one replica. Two daemons cannot share one data dir.
 - No shell in the image, but `ndb` is the entrypoint binary: see [CLI](#cli). For health checks use `ndb health` (see [Health check](#health-check)).
 - Stop timeout above 30 s, so that running requests finish.
+
+## Compose
+
+### Quick start (dev)
+
+The image has every default, so ndb needs no config, no command and no volume. The SDKs create the collections and their indexes on first use. The app reaches the socket with `volumes_from`:
+
+```yaml
+services:
+  ndb:
+    image: ghcr.io/thadeu/ndb:latest
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/ndb", "health"]
+      interval: 1s
+      retries: 60
+
+  app:
+    build: .
+    volumes_from: [ndb]                  # sees /run/ndb/ndb.sock
+    environment:
+      NDB_URL: unix:///run/ndb/ndb.sock
+    depends_on:
+      ndb:
+        condition: service_healthy
+```
+
+- `volumes_from` mounts every volume of `ndb` in the app, so the app sees `/run/ndb`. It also sees the data dir `/var/lib/ndb` and can write to it (even with `ndb:ro`, a root app could). Use it for dev, not for production.
+- The app must run as root or in group 65532 to open the socket (mode `0660`).
+
+::: warning The data lives in an anonymous volume
+The image declares `VOLUME /var/lib/ndb`, so Docker keeps the data across `restart` and a crash. But `docker compose down` and then `up` (or a new image version) creates a new container with a new, empty volume: ndb starts with no data. The old volume is still on disk, orphaned. For anything you want to keep, use a named volume.
+:::
+
+### Production
+
+Name the data volume, and share only the socket dir with the apps:
+
+```yaml
+services:
+  ndb:
+    image: ghcr.io/thadeu/ndb:0.2.2
+    volumes:
+      - ndb-data:/var/lib/ndb            # data: survives down/up and upgrades
+      - ndb-run:/run/ndb                 # socket: shared with the apps
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/ndb", "health"]
+
+  app:
+    build: .
+    user: "1000:65532"                   # group of the socket
+    volumes:
+      - ndb-run:/run/ndb
+    environment:
+      NDB_URL: unix:///run/ndb/ndb.sock
+    depends_on:
+      ndb:
+        condition: service_healthy
+
+volumes:
+  ndb-data:
+  ndb-run:
+```
+
+Add `- ./ndb.yml:/etc/ndb/ndb.yml:ro` only for what code cannot declare: direct mode, `durability`, `retention`, `wal_retention`, TCP.
+
+### Over TCP
+
+Inside the Compose network, TCP needs no shared volume: `command: ["-tcp", "0.0.0.0:7070"]` on ndb and `NDB_URL: tcp://ndb:7070` in the app. Do not publish the port. Outside a private network, add `-token-file`.
 
 ## Health check
 
