@@ -4,6 +4,7 @@ import { csrf } from 'hono/csrf';
 import { secureHeaders } from 'hono/secure-headers';
 
 import { type Connection, Connections, NAME } from './connections';
+import { type DiscoverOptions, DiscoverError, discover } from './discover';
 import { formatUptime } from './format';
 import { Ndb, NdbError, type Stats, target } from './ndb';
 import { type Env, readPrefix } from './prefix';
@@ -15,6 +16,7 @@ import { devtoolsRoutes } from '@/routes/devtools';
 import { watchRoutes } from '@/routes/watch';
 
 import type { Current } from '@/html/layout';
+import { suggestName } from '@/components/discover';
 import { ConnectionsPage, type ConnectionStatus } from '@/views/connections';
 import { OfflinePage } from '@/views/offline';
 import { OverviewPage } from '@/views/overview';
@@ -29,6 +31,7 @@ export interface Assets {
 
 export interface AppOptions {
   timeoutMs?: number;
+  discover?: DiscoverOptions;
 }
 
 function message(error: unknown): string {
@@ -108,6 +111,7 @@ export function createApp(connections: Connections, assets: Assets, options: App
         fixed={connections.fixed}
         notice={c.req.query('notice')}
         error={c.req.query('error')}
+        adding={c.req.query('new') === '1' || Boolean(tested) || Boolean(c.req.query('error'))}
         tested={tested ? { ok: tested === 'ok', message: c.req.query('msg') ?? '' } : undefined}
       />,
     );
@@ -116,7 +120,10 @@ export function createApp(connections: Connections, assets: Assets, options: App
   async function readForm(c: Context<Env>): Promise<Connection> {
     const form = await c.req.parseBody().catch(() => ({}) as Record<string, unknown>);
 
-    return { name: String(form.name ?? '').trim(), url: String(form.url ?? '').trim(), token: String(form.token ?? '') || undefined };
+    const url = String(form.url ?? '').trim();
+    const name = String(form.name ?? '').trim() || suggestName(url);
+
+    return { name, url, token: String(form.token ?? '') || undefined };
   }
 
   function back(c: Context<Env>, params: Record<string, string>) {
@@ -155,6 +162,22 @@ export function createApp(connections: Connections, assets: Assets, options: App
     if ((c.req.header('accept') ?? '').includes('json')) return c.json(result);
 
     return back(c, { tested: result.ok ? 'ok' : 'bad', msg: result.message });
+  });
+
+  app.post('/connections/discover', async c => {
+    if (!sameOrigin(c)) return c.text('Forbidden', 403);
+
+    if (connections.fixed) return c.text('The connection is fixed by NDB_URL.', 403);
+
+    const body = (await c.req.json().catch(() => ({}))) as { host?: unknown; ports?: unknown };
+
+    try {
+      return c.json(await discover(String(body.host ?? ''), String(body.ports ?? ''), options.discover));
+    } catch (error) {
+      if (error instanceof DiscoverError) return c.json({ error: error.message }, 400);
+
+      throw error;
+    }
   });
 
   app.post('/connections/:name/delete', c => {

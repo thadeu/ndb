@@ -358,3 +358,33 @@ describe('backups tab', () => {
     expect(response.headers.get('location')).toContain('unix+socket');
   });
 });
+
+describe('discover route', () => {
+  const post = (body: unknown, headers: Record<string, string> = {}) =>
+    page('/connections/discover', { method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json', origin: 'http://ui', ...headers } });
+
+  const open = createApp(store, { css: () => new Response('body{}'), ui: () => new Response('//'), favicon: () => new Response('<svg/>') }, { discover: { configPaths: [], socketDirs: [dir], tmpDir: join(dir, 'none') } });
+
+  it('finds the test socket and classifies fake TCP servers', async () => {
+    const auth = Bun.serve({ port: 0, fetch: () => Response.json({ error: { code: 'unauthorized', message: 'x' } }, { status: 401 }) });
+    const hello = Bun.serve({ port: 0, fetch: () => new Response('hello') });
+
+    try {
+      const local = await open.fetch(new Request('http://ui/connections/discover', { method: 'POST', body: JSON.stringify({ host: '', ports: `${auth.port},${hello.port}` }), headers: { 'content-type': 'application/json', origin: 'http://ui' } }));
+      const body = (await local.json()) as { found: { url: string; state: string }[]; searched: number; hint?: string };
+
+      expect(body.found.find(f => f.url === url)?.state).toBe('ok');
+      expect(body.found.find(f => f.url === `tcp://127.0.0.1:${auth.port}`)?.state).toBe('needs_token');
+      expect(body.found.some(f => f.url.endsWith(`:${hello.port}`))).toBe(false);
+      expect(body.hint).toBeUndefined();
+    } finally {
+      auth.stop(true);
+      hello.stop(true);
+    }
+  });
+
+  it('rejects a bad Origin and a bad host', async () => {
+    expect((await post({ host: '' }, { origin: 'http://evil' })).status).toBe(403);
+    expect((await post({ host: 'http://x/y' })).status).toBe(400);
+  });
+});

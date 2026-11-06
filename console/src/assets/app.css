@@ -126,6 +126,13 @@ h1 { margin: 0; font-size: 40px; font-weight: 800; letter-spacing: -0.03em; line
 .conn-error { font-size: 12px; color: var(--pink-dark-text); }
 .conn-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 20px 14px; }
 .conn-foot form { margin: 0; }
+
+/* part: add card (opens the New connection drawer) */
+.conn-add { align-items: center; justify-content: center; gap: 8px; min-height: 200px; border-style: dashed; border-width: 1.5px; color: var(--muted); text-align: center; transition: border-color .12s, color .12s, background .12s; }
+.conn-add:hover { border-color: var(--pink); color: var(--pink-dark-text); background: var(--pink-wash); }
+.conn-add-icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; border: 1.5px solid currentColor; font-size: 22px; line-height: 1; }
+.conn-add-title { font-weight: 700; font-size: 16px; color: var(--ink); }
+.conn-add-hint { font-size: 13px; }
 .badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 999px; background: var(--neutral-wash); color: var(--muted-strong); }
 .badge.pink { background: var(--pink-wash); color: var(--pink-dark-text); }
 .badge.ok { background: var(--neutral-wash); color: var(--green); }
@@ -193,6 +200,17 @@ td.mono { font-size: 13px; }
 .dialog-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 0 20px 20px; }
 .dialog-x { position: absolute; top: 12px; right: 14px; font-size: 24px; line-height: 1; color: var(--muted); }
 .confirm .dialog-head { padding-right: 20px; }
+
+/* part: drawer (a dialog on the right edge or the bottom edge) */
+.dialog.drawer { max-width: 100%; margin: 0; overflow-y: auto; outline: none; }
+.dialog.drawer-right { width: min(480px, 100vw); height: 100dvh; max-height: 100dvh; margin-left: auto; border-width: 0 0 0 1px; border-radius: 0; animation: drawer-in .2s ease-out; }
+.dialog.drawer-bottom { width: 100%; max-height: 88vh; margin-top: auto; border-width: 1px 0 0; border-radius: 18px 18px 0 0; animation: drawer-up .22s ease-out; }
+.dialog.drawer .dialog-head { padding: 24px 56px 4px 24px; }
+.dialog.drawer .dialog-body { padding: 16px 24px 28px; }
+.dialog.drawer .grid-fields { grid-template-columns: 1fr; }
+.dialog.drawer form + .hint { margin-top: 16px; }
+@keyframes drawer-in { from { transform: translateX(100%); } to { transform: none; } }
+@keyframes drawer-up { from { transform: translateY(100%); } to { transform: none; } }
 .confirm form { margin: 0; }
 
 /* part: code box */
@@ -369,3 +387,26 @@ span.tcaret { cursor: default; }
   .switcher-url { display: none; }
   .form-actions .btn { flex: 1 1 auto; }
 }
+
+/* part: discover (find a daemon for the new connection form) */
+.discover { display: flex; flex-direction: column; gap: 8px; }
+.discover .test-result:empty { display: none; }
+.discover-bar { display: flex; align-items: stretch; gap: 8px; }
+.discover-bar .input { flex: 1 1 auto; min-width: 0; }
+.discover-bar .discover-ports { flex: 0 0 76px; }
+.discover-bar .btn { flex: none; }
+.discover-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-field); }
+.discover-list:empty { display: none; }
+.discover-list li + li { border-top: 1px solid var(--border); }
+.discover-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border: 0; background: var(--bg); color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.discover-item:hover { background: var(--neutral-wash); }
+.discover-item.on { background: var(--pink-wash); }
+.discover-kind { flex: none; display: grid; place-items: center; width: 40px; height: 28px; border-radius: 6px; background: var(--neutral-wash); color: var(--muted-strong); font: 500 11px 'JetBrains Mono', monospace; }
+.discover-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.discover-url { font: 400 13px 'JetBrains Mono', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.discover-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.discover-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.discover-item.ok .discover-dot { background: var(--green); }
+.discover-item.pink .discover-dot { background: var(--pink); }
+.discover-use { flex: none; font-size: 13px; font-weight: 600; color: var(--muted); }
+.discover-item:hover .discover-use, .discover-item.on .discover-use { color: var(--pink-dark-text); }

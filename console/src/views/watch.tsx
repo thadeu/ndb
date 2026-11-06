@@ -6,6 +6,7 @@ import { Button } from '@/ui/button';
 import { Card } from '@/ui/card';
 import { Empty } from '@/ui/empty';
 import { Input } from '@/ui/input';
+import { noSpelling } from '@/ui/input';
 
 export interface WatchPageProps {
   current: Current;
@@ -46,7 +47,7 @@ export const WatchPage: FC<WatchPageProps> = ({ current, collections, coll, wher
           <label class="label" for="watch-where">
             where
           </label>
-          <Input id="watch-where" mono name="where" value={where} placeholder='{"status":"failed"}' spellcheck={false} />
+          <Input id="watch-where" mono name="where" value={where} placeholder='{"status":"failed"}' {...noSpelling} />
         </div>
 
         <Button variant="dark" type="submit">

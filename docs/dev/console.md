@@ -60,3 +60,14 @@ With no config, the console offers `unix:///run/ndb/ndb.sock`. Add other daemons
 - **Dev Tools:** it only sends paths that start with `/v1/`, plus `/health` and `/metrics`. `/v1/backup` (use the Backups tab) and `watch` (use the Watch tab) are refused. The editor text and the last 50 requests are kept in the browser for each connection. *Copy as curl* writes `$NDB_TOKEN` as a placeholder, never the token.
 - **Watch:** each stream opens a watch with a consumer named `ndb-ui-xxxxxxxx` and never acks. ndb stores a position row for every consumer name that it sees, so each stream leaves one row in `cursors.bolt`, at the start point of the stream. With `wal_retention`, the WAL files from the oldest such position are kept until the row is removed. ndb has no call to remove a consumer yet.
 - **Backups:** the download streams `POST /v1/backup` and works on a unix socket connection only (ndb answers `403` over TCP; run `ndb backup` on the host). It can compress with gzip. Restore is not in the console, because it replaces the data directory while ndb is stopped. See [Backup and restore](operations.md#backup-and-restore).
+
+## Discover
+
+The New connection drawer has three fields: Name (optional; empty takes `local` for a socket or the host for TCP), URL or host, and Token. Type the full URL, or type a host and press **Discover**: the list under the field shows the daemons it found, and a click fills the URL.
+
+- **Empty host, `localhost`, `127.0.0.1`, or `::1`:** the console looks for unix sockets: `listen.unix` of `ndb.yml` (`NDB_CONFIG`, `./ndb.yml`, `/etc/ndb/ndb.yml`), `/run/ndb/ndb.sock`, and each `*.sock` in `/run/ndb`, `/var/run`, `/run`, `/tmp`, `$XDG_RUNTIME_DIR`, and in the subfolders of `/tmp` with `ndb` in the name (at most 50). It also tries TCP on `127.0.0.1`.
+- **Other host:** it tries TCP on the port in the field (`10.10.0.1:7071`), or on `7070`.
+- Each candidate gets `GET /health` with an 800 ms timeout. `ok` shows the version and the collection count. `needs a token` is a `401`. `starting` is a `503` while ndb recovers. Anything else is dropped.
+- The probe never sends a saved token. In Docker, mount the ndb socket volume, or the console cannot see the sockets.
+- Discover needs JavaScript. Without it, type the full URL. With `NDB_URL`, the form is hidden.
+

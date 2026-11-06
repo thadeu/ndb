@@ -11,6 +11,7 @@ import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { useOutsideClick } from '@/hooks/useOutsideClick';
 import { useSend } from '@/hooks/useSend';
 import { Segmented } from '@/ui/segmented';
+import { noSpelling } from '@/ui/input';
 
 export interface DevtoolsProps {
   name: string;
@@ -375,7 +376,7 @@ export const Devtools: FC<DevtoolsProps> = ({ name, collection, sendUrl, browser
                 class="ed-ta"
                 style={`height:${editorHeight}`}
                 value={text}
-                spellcheck={false}
+                {...noSpelling}
                 wrap="off"
                 aria-label="Requests"
                 onInput={(event: Event) => {

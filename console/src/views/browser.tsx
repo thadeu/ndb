@@ -12,6 +12,7 @@ import { Dialog, openDialog } from '@/ui/dialog';
 import { Empty } from '@/ui/empty';
 import { Input } from '@/ui/input';
 import { Textarea } from '@/ui/textarea';
+import { noSpelling } from '@/ui/input';
 
 export interface BrowserQuery {
   coll: string;
@@ -116,7 +117,7 @@ const Rows: FC<BrowserPageProps & { selectedId?: string }> = ({ current, query, 
 
         <label class="wherebox">
           <span class="wherelabel">where</span>
-          <input class="whereinput mono" type="text" name="where" value={query.where} placeholder='{"status":"pending"}' aria-label="Filter" spellcheck={false} />
+          <input class="whereinput mono" type="text" name="where" value={query.where} placeholder='{"status":"pending"}' aria-label="Filter" {...noSpelling} />
         </label>
 
         <Button variant="dark" size="sm" type="submit">
@@ -158,7 +159,7 @@ const InsertDialog: FC<{ current: Current; query: BrowserQuery; open: boolean; e
     <form class="stack" method="post" action={`c/${encodeURIComponent(current.name)}/browser/insert`} data-insert-form>
       <input type="hidden" name="coll" value={query.coll} />
 
-      <Textarea mono name="doc" rows={10} spellcheck={false} aria-label="Document JSON" placeholder={'{\n  "status": "new"\n}'} required />
+      <Textarea mono name="doc" rows={10} {...noSpelling} aria-label="Document JSON" placeholder={'{\n  "status": "new"\n}'} required />
 
       <p class="note bad" data-insert-error hidden={!error}>
         {error}

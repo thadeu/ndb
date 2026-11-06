@@ -1,4 +1,5 @@
 import type { FC } from 'hono/jsx';
+import { noSpelling } from './input';
 
 export interface TextareaProps {
   class?: string;
@@ -11,7 +12,7 @@ export const Textarea: FC<TextareaProps> = ({ class: extra, mono = false, childr
   const className = ['textarea', mono ? 'mono' : '', extra ?? ''].filter(Boolean).join(' ');
 
   return (
-    <textarea class={className} {...rest}>
+    <textarea class={className} {...noSpelling} {...rest}>
       {children}
     </textarea>
   );

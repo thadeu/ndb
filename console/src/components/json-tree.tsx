@@ -2,6 +2,7 @@ import type { FC } from 'hono/jsx';
 import { useEffect, useRef, useState } from 'hono/jsx';
 
 import { addField, containerIds, deepEqual, flatten, getIn, parseScalar, pathId, removeIn, type Path, type Row, scalarText, setIn } from './json-model';
+import { noSpelling } from '@/ui/input';
 
 const LOCKED = new Set(['_id', '_v']);
 
@@ -57,7 +58,7 @@ const ValueInput: FC<{ draft: string; onDraft: (text: string) => void; onCommit:
     if (event.key === 'Escape') onCancel();
   };
 
-  return <input ref={input} class="tinput" value={draft} aria-label="Value" onInput={(event: Event) => onDraft((event.target as HTMLInputElement).value)} onKeyDown={keys} onBlur={onCommit} />;
+  return <input ref={input} class="tinput" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" {...noSpelling} value={draft} aria-label="Value" onInput={(event: Event) => onDraft((event.target as HTMLInputElement).value)} onKeyDown={keys} onBlur={onCommit} />;
 };
 
 // TreeRows draws the rows. It has no state, so the server uses it for the
@@ -148,9 +149,9 @@ const AddRow: FC<{ state: AddState; onSubmit: (key: string, value: string) => vo
 
   return (
     <div class="tadd">
-      {!state.isArray && <input class="tinput" placeholder="field" aria-label="Field name" value={key} onInput={(event: Event) => setKey((event.target as HTMLInputElement).value)} onKeyDown={keys} />}
+      {!state.isArray && <input class="tinput" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" {...noSpelling} placeholder="field" aria-label="Field name" value={key} onInput={(event: Event) => setKey((event.target as HTMLInputElement).value)} onKeyDown={keys} />}
 
-      <input class="tinput" placeholder="value (JSON or text)" aria-label="Field value" value={value} onInput={(event: Event) => setValue((event.target as HTMLInputElement).value)} onKeyDown={keys} />
+      <input class="tinput" data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" {...noSpelling} placeholder="value (JSON or text)" aria-label="Field value" value={value} onInput={(event: Event) => setValue((event.target as HTMLInputElement).value)} onKeyDown={keys} />
 
       <button type="button" class="tbtn" onClick={() => onSubmit(key.trim(), value)}>
         Add

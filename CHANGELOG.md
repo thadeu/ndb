@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Console: a Discover row in the New connection form finds ndb daemons on this machine (unix sockets and `127.0.0.1`) or on another host, and fills the URL. See [Console](docs/dev/console.md#discover).
+
+### Changed
+
+- Console: New connection opens in a right drawer from a "+ New connection" card. Name is optional (taken from the URL), and Discover sits next to the URL field.
+- Console: fields turn off spelling marks and the 1Password, LastPass, Bitwarden, and Dashlane fill prompts.
+
 ## [0.3.0] - 2026-11-06
 
 ### Added

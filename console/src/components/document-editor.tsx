@@ -7,6 +7,7 @@ import { byteSize, deepEqual, describeDiff, diffDocs, isEmptyDiff } from '@/comp
 import { JsonTree } from '@/components/json-tree';
 import { useSend } from '@/hooks/useSend';
 import { Segmented } from '@/ui/segmented';
+import { noSpelling } from '@/ui/input';
 
 export interface EditorProps {
   coll: string;
@@ -166,7 +167,7 @@ export const DocumentEditor: FC<EditorProps> = ({ coll, id, doc, saveUrl, writab
       {mode === 'tree' ? (
         <JsonTree value={draft} editable={writable} baseline={doc} onChange={next => setDraft(next as Record<string, unknown>)} />
       ) : (
-        <textarea class="textarea mono doc-json" spellcheck={false} aria-label="Document JSON" readOnly={!writable} value={text} onInput={(event: Event) => setText((event.target as HTMLTextAreaElement).value)} />
+        <textarea class="textarea mono doc-json" {...noSpelling} aria-label="Document JSON" readOnly={!writable} value={text} onInput={(event: Event) => setText((event.target as HTMLTextAreaElement).value)} />
       )}
 
       {typeof parsed === 'string' && mode === 'json' && <p class="note bad">{parsed}</p>}

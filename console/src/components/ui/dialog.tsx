@@ -7,6 +7,7 @@ export interface DialogProps {
   open?: boolean;
   closeHref?: string;
   footer?: Child;
+  class?: string;
   children?: Child;
 }
 
@@ -17,8 +18,8 @@ export const openDialog = (id: string) => ({ 'data-dialog-open': id });
 
 // Dialog is a native <dialog>. The server can render it open (the URL then
 // shows it), and the script upgrades it to a modal.
-export const Dialog: FC<DialogProps> = ({ id, title, description, open = false, closeHref, footer, children }) => (
-  <dialog id={id} class="dialog" open={open} aria-labelledby={`${id}-title`}>
+export const Dialog: FC<DialogProps> = ({ id, title, description, open = false, closeHref, footer, class: extra, children }) => (
+  <dialog id={id} class={extra ? `dialog ${extra}` : 'dialog'} open={open} aria-labelledby={`${id}-title`}>
     <div class="dialog-head">
       <h2 class="dialog-title" id={`${id}-title`}>
         {title}
