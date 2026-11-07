@@ -97,10 +97,14 @@ func run(args []string) error {
 		}
 	}
 
-	// memory_limit is the Go heap soft limit (plan §11.4). Segment reads
-	// still decode into the heap; mmap is not used yet.
-	if cfg.MemoryLimit > 0 {
+	// memory_limit is the Go heap soft limit (plan §11.4). Without it (and
+	// without GOMEMLIMIT) the default keeps the daemon near 512 MB: the GC
+	// works harder instead of letting the heap double.
+	switch {
+	case cfg.MemoryLimit > 0:
 		debug.SetMemoryLimit(cfg.MemoryLimit)
+	case os.Getenv("GOMEMLIMIT") == "":
+		debug.SetMemoryLimit(config.DefaultMemoryLimit)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)

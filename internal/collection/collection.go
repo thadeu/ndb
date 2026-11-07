@@ -387,6 +387,10 @@ func (c *Collection) Insert(ctx context.Context, docs ...[]byte) ([]Result, erro
 }
 
 func (c *Collection) insert(ctx context.Context, req insertReq) ([]Result, error) {
+	if err := c.waitRoom(ctx); err != nil {
+		return nil, err
+	}
+
 	_, ops, err := c.w.Commit(ctx, req)
 	if err != nil {
 		return nil, err

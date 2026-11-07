@@ -2,6 +2,7 @@ package collection
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -80,6 +81,7 @@ type sealer struct {
 
 	running  sync.Mutex
 	stop     chan struct{}
+	wake     chan struct{}
 	stopOnce sync.Once
 	wg       sync.WaitGroup
 }
@@ -125,6 +127,7 @@ func (c *Collection) openSegments(cfg Config) (recovery.Position, error) {
 		tick:  cfg.SealTick,
 		last:  time.Now(),
 		stop:  make(chan struct{}),
+		wake:  make(chan struct{}, 1),
 
 		compactMin: cfg.CompactMin,
 		onCompact:  cfg.OnCompact,
@@ -766,6 +769,44 @@ func (c *Collection) sealDue(now time.Time) bool {
 	return dirty && now.Sub(s.last) >= s.age
 }
 
+// writeHold is how many times its seal size a memtable may grow before
+// writes wait for a seal (waitRoom).
+const writeHold = 2
+
+// waitRoom holds a write while the memtable is over writeHold times its seal
+// size, and wakes the sealer: when writes come faster than seals, they slow
+// down instead of growing the memory.
+func (c *Collection) waitRoom(ctx context.Context) error {
+	s := c.seal
+
+	if s == nil {
+		return nil
+	}
+
+	limit := writeHold * min(s.bytes, c.shared.budget())
+
+	for {
+		c.mu.RLock()
+		mem := c.memBytes
+		c.mu.RUnlock()
+
+		if mem < limit || s.stopping() {
+			return nil
+		}
+
+		select {
+		case s.wake <- struct{}{}:
+		default:
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Millisecond):
+		}
+	}
+}
+
 func (c *Collection) startSealer() {
 	c.seal.wg.Add(1)
 
@@ -783,6 +824,10 @@ func (c *Collection) runSealer() {
 		select {
 		case <-c.seal.stop:
 			return
+		case <-c.seal.wake:
+			if err := c.Seal(); err != nil && !errors.Is(err, errStopped) {
+				log.Printf("ndb: seal failed, retrying on the next tick: %v", err)
+			}
 		case <-t.C:
 			if c.sealDue(time.Now()) {
 				if err := c.Seal(); err != nil && !errors.Is(err, errStopped) {

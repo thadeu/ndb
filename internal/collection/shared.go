@@ -1,6 +1,9 @@
 package collection
 
-import "sync"
+import (
+	"math"
+	"sync"
+)
 
 // DefaultWriteBuffer is the memtable budget of a daemon: the documents of
 // every collection that are not sealed yet.
@@ -51,6 +54,15 @@ func (s *Shared) overBudget(c *Collection, mem int64) bool {
 	}
 
 	return total > s.writeBuffer && mem > 0 && mem == largest
+}
+
+// budget is the write buffer; without a Shared, no limit.
+func (s *Shared) budget() int64 {
+	if s == nil {
+		return math.MaxInt64
+	}
+
+	return s.writeBuffer
 }
 
 // forget removes a closed collection from the budget.

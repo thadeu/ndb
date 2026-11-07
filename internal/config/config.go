@@ -62,6 +62,9 @@ func ParseUnixMode(s string) (os.FileMode, error) {
 	return os.FileMode(n), nil
 }
 
+// DefaultMemoryLimit is the Go heap soft limit when memory_limit is not set.
+const DefaultMemoryLimit = 384 << 20
+
 type Config struct {
 	DataDir       string `yaml:"data_dir"`
 	Listen        Listen `yaml:"listen"`

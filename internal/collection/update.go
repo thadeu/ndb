@@ -98,6 +98,10 @@ func (c *Collection) UpdateID(ctx context.Context, id string, body []byte, opts 
 }
 
 func (c *Collection) update(ctx context.Context, top map[string]any, opts UpdateOpts) (UpdateResult, error) {
+	if err := c.waitRoom(ctx); err != nil {
+		return UpdateResult{}, err
+	}
+
 	filterMap, ops, err := splitBody(top)
 	if err != nil {
 		return UpdateResult{}, err
