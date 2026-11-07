@@ -68,31 +68,40 @@ func FindMany(ctx context.Context, pattern string, cols []Named, body []byte) (P
 		ex    Explain
 	)
 
-	for i, n := range cols {
-		cur, hasCur, done := startIn(q, n.Name, after, afterIn)
+	parts, err := runPool(ctx, patternWorkers, len(cols), func(i int) (part, error) {
+		cur, hasCur, done := startIn(q, cols[i].Name, after, afterIn)
 		if done && !q.Count {
-			continue
+			return part{}, nil
 		}
 
-		part, err := n.C.queryRows(ctx, qs[i], cur, hasCur)
-		if err != nil {
-			return Page{}, err
+		p, err := cols[i].C.queryRows(ctx, qs[i], cur, hasCur)
+		if done {
+			p.rows = nil
 		}
 
-		if !done {
-			for _, r := range part.rows {
-				rows = append(rows, patternRow{row: r, coll: n.Name})
-			}
+		return p, err
+	})
+	if err != nil {
+		return Page{}, err
+	}
+
+	for i, p := range parts {
+		for _, r := range p.rows {
+			rows = append(rows, patternRow{row: r, coll: cols[i].Name})
 		}
 
-		total += part.total
-		ex.add(part.ex)
+		total += p.total
+		ex.add(p.ex)
 	}
 
 	slices.SortFunc(rows, func(a, b patternRow) int { return cmpAcross(q, a, b) })
 
 	return pageAcross(q, pattern, rows, total, ex), nil
 }
+
+// patternWorkers is how many collections of a pattern (or partitions) one
+// read runs at once. Each one also runs its own units (ScanWorkers).
+const patternWorkers = 4
 
 // AggregateMany runs a pipeline over cols: one group table per collection,
 // merged, then the stages after the group stage.
@@ -116,14 +125,18 @@ func AggregateMany(ctx context.Context, cols []Named, body []byte) (Page, error)
 
 	budget := cols[0].C.budget()
 
+	parts, err := runPool(ctx, patternWorkers, len(cols), func(i int) (aggPart, error) {
+		part, _, err := cols[i].C.aggTable(ctx, ps[i], budget)
+
+		return part, err
+	})
+	if err != nil {
+		return Page{}, err
+	}
+
 	var all aggPart
 
-	for i, n := range cols {
-		part, _, err := n.C.aggTable(ctx, ps[i], budget)
-		if err != nil {
-			return Page{}, err
-		}
-
+	for _, part := range parts {
 		all = joinAgg(all, part)
 	}
 
