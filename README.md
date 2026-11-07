@@ -7,11 +7,21 @@
 
 # ndb
 
-Drop NDJSON. Query it. NoSQL. ndb is a query engine for NDJSON: one Go daemon with a JSON query language (operators like `$eq`, `$in`, `$regex`) over HTTP, on a unix socket (and optional TCP with a bearer token). Go, Ruby and TypeScript SDKs call the same API, so the same query gives the same result in every language and from `curl`.
+**The API of Elasticsearch. The filters of MongoDB. One Go binary.**
+
+ndb takes the routes developers know from Elasticsearch (`POST /logs/_search`, `_count`, `_bulk`, `_update_by_query`, index patterns like `logs-2026-*`, date math like `now-7d/d`) and the query language they know from MongoDB (`$in`, `$gte`, `$regex`, `$elemMatch`, `$inc`, `$group`), and runs them on plain NDJSON. No JVM, no cluster, no schema: one daemon on a unix socket (and optional TCP with a bearer token). Go, Ruby, Rails and TypeScript SDKs speak the same API, so the same query gives the same result in every language and from `curl`.
+
+```bash
+curl --unix-socket /run/ndb/ndb.sock http://ndb/calls/_search -d '{
+  "query": { "status": { "$in": ["missed", "busy"] }, "ts": { "$gte": "now-1d/d" } },
+  "sort": { "ts": -1 },
+  "limit": 50
+}'
+```
 
 Your apps keep NDJSON as the source of truth: either they append to files (direct mode) or ndb keeps a write-ahead log for them (engine mode). ndb builds indexes and columnar segments from that data. If you delete the derived data, ndb rebuilds it.
 
-> Status: pre-release (`v0.x`). The API may still change.
+> Status: 1.0. The HTTP API is stable: routes and keys change only in a major release. See the [HTTP API](docs/dev/http.md).
 
 ## Run
 

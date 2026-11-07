@@ -568,3 +568,142 @@
   height: auto;
   margin-bottom: 20px;
 }
+
+/* part: best of both */
+.both {
+  margin-top: 72px;
+}
+
+.both-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.both-column {
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--ndb-line);
+  border-radius: 12px;
+  background: var(--ndb-paper);
+}
+
+.both-title {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.both-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.both-list li {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.both-what {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.both-example {
+  overflow-wrap: anywhere;
+  font-family: var(--ndb-font-mono);
+  font-size: 12.5px;
+  color: var(--ndb-muted);
+}
+
+/* part: best of both code tabs */
+.snippet-card {
+  margin-top: 16px;
+  overflow: hidden;
+  border: 1px solid var(--ndb-line);
+  border-radius: 12px;
+  background: var(--ndb-paper);
+}
+
+.snippet-tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 8px 8px 0;
+  border-bottom: 1px solid var(--ndb-line);
+}
+
+.snippet-tab {
+  flex: none;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--ndb-muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.snippet-tab.active {
+  border-bottom-color: var(--ndb-accent);
+  color: var(--ndb-ink);
+  font-weight: 600;
+}
+
+.snippet-code {
+  margin: 0;
+  font-family: var(--ndb-font-mono);
+  overflow-x: auto;
+  padding: 16px 20px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.snippet-note {
+  margin: 0;
+  padding: 0 20px 16px;
+  color: var(--ndb-muted);
+  font-size: 13px;
+}
+
+/* part: reasons */
+.reasons {
+  margin-top: 72px;
+}
+
+.reasons .use-card,
+.reasons .use-card:nth-child(n + 4) {
+  grid-column: span 2;
+}
+
+.reason {
+  cursor: default;
+}
+
+.reason:hover {
+  border-color: var(--ndb-line);
+}
+
+.honest-note {
+  margin: 16px 0 0;
+  color: var(--ndb-muted);
+  font-size: 13px;
+}
+
+@media (max-width: 960px) {
+  .reasons .use-card,
+  .reasons .use-card:nth-child(n + 4) {
+    grid-column: span 1;
+  }
+}
+
+@media (max-width: 720px) {
+  .both-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

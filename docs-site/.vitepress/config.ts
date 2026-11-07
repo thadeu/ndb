@@ -165,7 +165,7 @@ function brandAssets(): Plugin {
 
 export default defineConfig({
   title: 'ndb',
-  description: 'Drop NDJSON. Query it. NoSQL. One Go daemon with a JSON query API.',
+  description: 'The API of Elasticsearch with the filters of MongoDB, on plain NDJSON, from one Go binary.',
   lang: 'en-US',
   base: process.env.DOCS_BASE ?? '/',
   srcDir: '..',

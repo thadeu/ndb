@@ -26,9 +26,9 @@ const sections: Section[] = [
       {
         icon: 'search',
         title: 'Query',
-        text: 'Search with operators, date math, sort, and cursor pagination.',
+        text: 'MongoDB operators on Elasticsearch-style routes: filters, date math, sort, cursors.',
         command: 'POST /calls/_search',
-        link: '/query',
+        link: '/http/queries',
       },
       {
         icon: 'chart',
@@ -47,7 +47,7 @@ const sections: Section[] = [
       {
         icon: 'plug',
         title: 'Clients',
-        text: 'Go, Ruby, Rails, and TypeScript SDKs over a unix socket or TCP with a token.',
+        text: 'Go, Ruby, Rails, and TypeScript SDKs with one vocabulary: query, search, upsert.',
         command: 'gem "ndb-rails"',
         link: '/clients',
       },
@@ -199,12 +199,126 @@ const steps: Step[] = [
 ]
 
 const capabilities = [
-  'Filters and regex',
-  'Sort and cursor pagination',
+  'Elasticsearch-style routes',
+  'MongoDB operators',
+  'Date math: now-7d/d',
+  '$elemMatch',
+  'Collection patterns: logs-*',
+  'Upsert and atomic $inc',
   'Aggregations',
-  'Watch new lines',
-  'Indexes',
-  'Go, Ruby and TypeScript SDKs',
+  'Watch and ack',
+  'Go, Ruby, Rails and TypeScript SDKs',
+]
+
+interface Borrowed {
+  what: string
+  example: string
+}
+
+const fromElastic: Borrowed[] = [
+  { what: 'Routes you already know', example: 'POST /logs/_search, _count, _bulk' },
+  { what: 'Writes by query', example: '_update_by_query, _delete_by_query' },
+  { what: 'Index patterns', example: 'POST /logs-2026-*/_search' },
+  { what: 'Date math', example: '{"ts": {"$gte": "now-7d/d"}}' },
+  { what: 'Upsert by id', example: '_bulk {"docs": [...], "upsert": true}' },
+]
+
+const fromMongo: Borrowed[] = [
+  { what: 'A query is plain JSON', example: '{"status": {"$in": ["missed", "busy"]}}' },
+  { what: 'Rich filters', example: '$gte $regex $exists $or $not $elemMatch' },
+  { what: 'Atomic updates', example: '{"$inc": {"qty": -1}, "$push": {...}}' },
+  { what: 'Pipelines', example: '$match $group $sort $dateTrunc' },
+  { what: 'Optimistic locks', example: '{"query": {"_v": 7}, "update": {...}}' },
+]
+
+interface Snippet {
+  label: string
+  code: string
+}
+
+const snippets: Snippet[] = [
+  {
+    label: 'curl',
+    code: `curl --unix-socket /run/ndb/ndb.sock http://ndb/calls/_search -d '{
+  "query": {
+    "status": { "$in": ["missed", "busy"] },
+    "ts": { "$gte": "now-1d/d" }
+  },
+  "sort": { "ts": -1 },
+  "limit": 50
+}'`,
+  },
+  {
+    label: 'Go',
+    code: `rows, err := calls.
+  Query(ndb.In("status", "missed", "busy"), ndb.Gte("ts", "now-1d/d")).
+  Sort(ndb.Desc("ts")).
+  Limit(50).
+  All(ctx)`,
+  },
+  {
+    label: 'Ruby',
+    code: `calls.query(status: %w[missed busy], ts: { "$gte" => "now-1d/d" })
+     .sort(ts: -1)
+     .limit(50)
+     .all`,
+  },
+  {
+    label: 'Rails',
+    code: `Call.where(status: %w[missed busy])
+    .where(ts: { "$gte" => "now-1d/d" })
+    .order(ts: :desc)
+    .limit(50)`,
+  },
+  {
+    label: 'TypeScript',
+    code: `const rows = await calls
+  .query({ status: { $in: ['missed', 'busy'] }, ts: { $gte: 'now-1d/d' } })
+  .sort({ ts: -1 })
+  .limit(50)
+  .all()`,
+  },
+]
+
+const activeSnippet = ref(0)
+
+interface Reason {
+  icon: string
+  title: string
+  text: string
+}
+
+const reasons: Reason[] = [
+  {
+    icon: 'server',
+    title: 'No JVM, no cluster',
+    text: 'One static Go binary and one data directory. It starts in a blink and runs next to your app.',
+  },
+  {
+    icon: 'database',
+    title: 'Your data stays plain NDJSON',
+    text: 'The source of truth is files you can read with cat and jq. Indexes and segments are rebuilt from them.',
+  },
+  {
+    icon: 'search',
+    title: 'Filters you do not have to learn',
+    text: 'If you wrote a MongoDB query, you can write an ndb query. Same operators, same JSON.',
+  },
+  {
+    icon: 'check',
+    title: 'Writes that do not race',
+    text: 'Update and delete by query run in one atomic step: a guarded $inc never sells the last item twice.',
+  },
+  {
+    icon: 'bell',
+    title: 'Changes as a stream',
+    text: 'watch and ack give you an outbox consumer without Kafka or Redis.',
+  },
+  {
+    icon: 'globe',
+    title: 'A contract, not a guess',
+    text: 'Every route, header, limit and error code is written down. curl and four SDKs speak the same API.',
+  },
 ]
 </script>
 
@@ -212,15 +326,15 @@ const capabilities = [
   <main class="landing">
     <section class="hero">
       <div class="hero-text">
-        <p class="eyebrow">NoSQL on NDJSON</p>
+        <p class="eyebrow">Elasticsearch API · MongoDB queries · one Go binary</p>
 
         <h1 class="hero-title">
           <span class="sr-only">ndb: </span>
-          Your NDJSON files are already a database.
+          The API of Elasticsearch. The filters of MongoDB.
         </h1>
 
         <p class="hero-lead">
-          Drop NDJSON. Query it. NoSQL. Filters, aggregations and live watch over the files your app already writes, from one Go binary with Go, Ruby and TypeScript SDKs.
+          <code>POST /logs/_search</code> with a <code>{"$gte": "now-7d"}</code> query. ndb takes the routes developers know from Elasticsearch and the query language they know from MongoDB, and runs them on plain NDJSON from one small daemon. No JVM, no cluster, no schema.
         </p>
 
         <div class="hero-actions">
@@ -240,13 +354,80 @@ const capabilities = [
           </div>
 
           <div class="hero-buttons">
-            <a class="install-button large" :href="withBase('/query')">Get started</a>
-            <a class="ghost-button" href="#use-cases">Use cases</a>
+            <a class="install-button large" :href="withBase('/http')">Read the API</a>
+            <a class="ghost-button" href="#best-of-both">Why ndb</a>
           </div>
         </div>
       </div>
 
       <HeroDemo class="hero-demo" />
+    </section>
+
+    <section id="best-of-both" class="both">
+      <h2 class="card-section-title">The best of two worlds</h2>
+
+      <p class="quick-lead">The URL reads like Elasticsearch. The body reads like MongoDB. Both are what you already know.</p>
+
+      <div class="both-grid">
+        <div class="both-column">
+          <h3 class="both-title">From Elasticsearch</h3>
+
+          <ul class="both-list">
+            <li v-for="item in fromElastic" :key="item.what">
+              <span class="both-what">{{ item.what }}</span>
+              <code class="both-example">{{ item.example }}</code>
+            </li>
+          </ul>
+        </div>
+
+        <div class="both-column">
+          <h3 class="both-title">From MongoDB</h3>
+
+          <ul class="both-list">
+            <li v-for="item in fromMongo" :key="item.what">
+              <span class="both-what">{{ item.what }}</span>
+              <code class="both-example">{{ item.example }}</code>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="snippet-card">
+        <div class="snippet-tabs" role="tablist" aria-label="The same search in every client">
+          <button
+            v-for="(item, index) in snippets"
+            :key="item.label"
+            class="snippet-tab"
+            :class="{ active: index === activeSnippet }"
+            type="button"
+            role="tab"
+            :aria-selected="index === activeSnippet"
+            @click="activeSnippet = index"
+          >
+            {{ item.label }}
+          </button>
+        </div>
+
+        <pre class="snippet-code"><code>{{ snippets[activeSnippet].code }}</code></pre>
+
+        <p class="snippet-note">One search: calls missed or busy since the start of yesterday, newest first. The same query from curl and every SDK.</p>
+      </div>
+    </section>
+
+    <section class="reasons">
+      <h2 class="card-section-title">Why developers try ndb</h2>
+
+      <div class="use-grid">
+        <div v-for="item in reasons" :key="item.title" class="use-card reason">
+          <Icon class="card-icon" :name="item.icon" :size="22" />
+
+          <h3 class="card-title">{{ item.title }}</h3>
+
+          <p class="card-text">{{ item.text }}</p>
+        </div>
+      </div>
+
+      <p class="honest-note">ndb filters, sorts and aggregates. It does not rank full-text results like a search engine; for that, keep Elasticsearch.</p>
     </section>
 
     <section id="use-cases" class="use-cases">

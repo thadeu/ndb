@@ -1,4 +1,4 @@
 ---
 layout: home
-title: ndb documentation
+title: "ndb: the Elasticsearch API with MongoDB filters"
 ---
