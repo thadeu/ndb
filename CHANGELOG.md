@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-07
+
+ndb 1.1 keeps its data on disk: the memory of the daemon has a fixed size (about 512 MB) whatever the number of documents. The API and the SDKs do not change. The first start writes the key files of the existing segments, once.
+
 ### Changed
 
 - **Memory has a fixed size (M16).** Sealed documents stay on disk: each segment has key files next to it (its ids with a bloom filter, the keys of each index field, the values of each unique field) and one bitmap of live rows, saved with the checkpoint. The memtable is the only map of documents. A sealed document costs ~20–40 bytes of memory instead of ~340, and the daemon stays near 512 MB of RSS whatever the data size. See [Storage: memory](docs/dev/storage.md#memory).
@@ -257,7 +261,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/thadeu/ndb/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/thadeu/ndb/compare/v0.4.0...v1.0.0
 [0.4.0]: https://github.com/thadeu/ndb/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/thadeu/ndb/compare/v0.3.2...v0.3.3
