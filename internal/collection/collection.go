@@ -95,6 +95,10 @@ type Config struct {
 	// 200 ms). Watch events of a relaxed collection wait for that fsync.
 	FlushEvery time.Duration
 
+	// Shared is the write buffer budget and the heavy work slot of the
+	// daemon (shared.go). Nil gives this collection its own.
+	Shared *Shared
+
 	// SweepEvery is how often the TTL sweeper runs (default 10 s). Now is the
 	// clock of TTL and retention reads (default time.Now); tests set it.
 	SweepEvery time.Duration
@@ -130,6 +134,7 @@ type Collection struct {
 	tombs    map[string]uint64
 
 	seal    *sealer
+	shared  *Shared
 	sweep   *sweeper
 	onFatal func(error)
 	now     func() time.Time
@@ -180,6 +185,7 @@ func Open(cfg Config) (*Collection, error) {
 		scanWorkers: cfg.ScanWorkers,
 		docs:        newDocCache(cfg.DocCache),
 		blobs:       cfg.Blobs,
+		shared:      cfg.Shared,
 	}
 
 	c.feed = &engineFeed{fs: cfg.FS, dir: cfg.Dir, buf: cfg.WatchBuffer}
@@ -302,6 +308,7 @@ func (c *Collection) Close() error {
 	c.stopSweeper()
 	c.rd.close()
 	c.stopSealer()
+	c.shared.forget(c)
 
 	if c.w == nil {
 		c.closeSegments()

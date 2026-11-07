@@ -309,6 +309,12 @@ func (c *Collection) Seal() error {
 
 	defer s.running.Unlock()
 
+	if !c.shared.acquire(s.stop) {
+		return errStopped
+	}
+
+	defer c.shared.release()
+
 	snap, err := c.capture()
 	if err != nil {
 		return err
@@ -508,6 +514,10 @@ func (c *Collection) sealDue(now time.Time) bool {
 		return true
 	}
 
+	if c.shared.overBudget(c, c.memBytes) {
+		return true
+	}
+
 	dirty := c.memBytes > 0 || len(c.tombs) > 0
 
 	return dirty && now.Sub(s.last) >= s.age
@@ -532,7 +542,7 @@ func (c *Collection) runSealer() {
 			return
 		case <-t.C:
 			if c.sealDue(time.Now()) {
-				if err := c.Seal(); err != nil {
+				if err := c.Seal(); err != nil && !errors.Is(err, errStopped) {
 					log.Printf("ndb: seal failed, retrying on the next tick: %v", err)
 				}
 			}

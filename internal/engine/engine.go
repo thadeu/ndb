@@ -56,6 +56,10 @@ type DB struct {
 	// groupLimit is the group table memory of one aggregate (0 = default).
 	groupLimit int64
 
+	// shared is the write buffer budget and the heavy work slot that every
+	// collection of the daemon shares.
+	shared *collection.Shared
+
 	// mu guards cols. Opening a collection (recovery) runs under it.
 	mu   sync.RWMutex
 	cols map[string]*Collection
@@ -118,6 +122,7 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		ctx:        ctx,
 		cancel:     cancel,
 		groupLimit: cfg.GroupLimit,
+		shared:     collection.NewShared(cfg.WriteBuffer),
 		cols:       map[string]*Collection{},
 	}
 
@@ -314,6 +319,7 @@ func (db *DB) open(def catalog.Def) (*Collection, error) {
 		FS:         fs.OS{},
 		Def:        def,
 		GroupLimit: db.groupLimit,
+		Shared:     db.shared,
 		Blobs:      db.blobs,
 		Observer:   wm,
 		OnCompact:  db.compacted,

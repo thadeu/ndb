@@ -29,6 +29,7 @@ listen:
   unix: /run/ndb.sock
   tcp: 127.0.0.1:7070
 memory_limit: 1GiB
+write_buffer: 16MiB
 allow_implicit: true
 
 collections:
@@ -51,8 +52,8 @@ collections:
 		t.Fatalf("got %+v", cfg)
 	}
 
-	if cfg.MemoryLimit != 1<<30 {
-		t.Fatalf("memory_limit = %d", cfg.MemoryLimit)
+	if cfg.MemoryLimit != 1<<30 || cfg.WriteBuffer != 16<<20 {
+		t.Fatalf("memory_limit = %d, write_buffer = %d", cfg.MemoryLimit, cfg.WriteBuffer)
 	}
 
 	calls := cfg.Collections["calls"]

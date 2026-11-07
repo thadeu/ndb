@@ -92,6 +92,12 @@ func (c *Collection) compactRange(lo, hi int) error {
 
 	defer s.running.Unlock()
 
+	if !c.shared.acquire(s.stop) {
+		return errStopped
+	}
+
+	defer c.shared.release()
+
 	if lo < 0 || hi > len(s.readers) || lo >= hi {
 		return fmt.Errorf("compact: bad range %d..%d of %d segments", lo, hi, len(s.readers))
 	}
@@ -140,8 +146,8 @@ func (c *Collection) compactRange(lo, hi int) error {
 	return nil
 }
 
-// errStopped ends a compaction because the collection is closing (a drop,
-// a truncate, a shutdown): its result would be thrown away.
+// errStopped ends a seal or a compaction because the collection is closing
+// (a drop, a truncate, a shutdown): its result would be thrown away.
 var errStopped = errors.New("compaction stopped: the collection is closing")
 
 // stopping tells if the sealer was asked to stop.

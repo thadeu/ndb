@@ -32,6 +32,7 @@ listen:
   unix_mode: "0660"        # default; owner and group can connect
   tcp: 10.10.0.1:7070
 memory_limit: 1GiB
+write_buffer: 32MiB
 group_limit: 256MiB
 blob_max_size: 1GiB
 allow_implicit: true
@@ -66,6 +67,7 @@ An unknown key is an error at start (the file is read in strict mode). Sizes are
 | `listen.unix` | unix socket path. A relative path starts at the folder of `ndb.yml`. |
 | `listen.tcp` | TCP address. Bind to a private address only, and set `-token-file`. |
 | `memory_limit` | Go heap soft limit (`GOMEMLIMIT`). |
+| `write_buffer` | memory for the documents not sealed yet, shared by every collection and partition. Over it, the largest memtable is written to a segment. Default 32 MiB. |
 | `group_limit` | memory limit of one aggregate group table. Over it: `group_limit_exceeded`. |
 | `blob_max_size` | largest blob. Default 1 GiB. |
 | `allow_implicit` | `false` forbids creating a collection by the first `insert`. Default `true`. |

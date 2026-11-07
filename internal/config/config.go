@@ -66,6 +66,7 @@ type Config struct {
 	DataDir       string `yaml:"data_dir"`
 	Listen        Listen `yaml:"listen"`
 	MemoryLimit   int64  `yaml:"-"`
+	WriteBuffer   int64  `yaml:"-"`
 	GroupLimit    int64  `yaml:"-"`
 	BlobMaxSize   int64  `yaml:"-"`
 	AllowImplicit bool   `yaml:"allow_implicit"`
@@ -78,6 +79,7 @@ type file struct {
 	Config `yaml:",inline"`
 
 	MemoryLimit string                `yaml:"memory_limit"`
+	WriteBuffer string                `yaml:"write_buffer"`
 	GroupLimit  string                `yaml:"group_limit"`
 	BlobMaxSize string                `yaml:"blob_max_size"`
 	Collections map[string]collection `yaml:"collections"`
@@ -131,6 +133,10 @@ func Load(path string) (Config, error) {
 
 	if cfg.MemoryLimit, err = parseSize(f.MemoryLimit); err != nil {
 		return Config{}, fmt.Errorf("%w: memory_limit: %v", ErrInvalid, err)
+	}
+
+	if cfg.WriteBuffer, err = parseSize(f.WriteBuffer); err != nil {
+		return Config{}, fmt.Errorf("%w: write_buffer: %v", ErrInvalid, err)
 	}
 
 	if cfg.GroupLimit, err = parseSize(f.GroupLimit); err != nil {
