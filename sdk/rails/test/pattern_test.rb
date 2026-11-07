@@ -6,8 +6,8 @@ class PatternTest < Minitest::Test
   def setup
     base = "#{NdbTestHelpers.next_name}-logs-"
 
-    client.insert("#{base}1", [{ _id: "a1", lvl: "info" }, { _id: "a2", lvl: "error" }])
-    client.insert("#{base}2", [{ _id: "b1", lvl: "error" }])
+    client.bulk("#{base}1", [{ _id: "a1", lvl: "info" }, { _id: "a2", lvl: "error" }])
+    client.bulk("#{base}2", [{ _id: "b1", lvl: "error" }])
 
     @logs = model("#{base}*") do
       attribute :lvl, :string

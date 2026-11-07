@@ -5,10 +5,14 @@ require "uri"
 require "time"
 
 module Ndb
-  Page = Struct.new(:rows, :next_cursor, :plan, :examined, :total)
+  # One page of a search or an aggregate: the rows, the cursor of the next
+  # page (nil on the last one), the plan, how many rows were examined, and
+  # the total (with count: true).
+  Page = Struct.new(:rows, :next, :plan, :examined, :total)
 
-  # The HTTP API of the daemon (plan §12.1). It builds JSON and reads
-  # NDJSON; it has no query semantics.
+  # The HTTP API of the daemon, one method per route. It builds JSON and
+  # reads the answers; it has no query semantics. Ndb::Collection is the
+  # friendlier layer on top of it.
   class Client
     DEFAULT_SOCKET = "/var/run/ndb/ndb.sock"
 
@@ -33,123 +37,148 @@ module Ndb
 
     def socket = @endpoint.path
 
-    def find(coll, body)
-      page(post(coll, "find", Conditions.regexps(body)))
+    # A collection (or a pattern such as "logs-2026-*") with the query
+    # builder. definition is what the first call declares (PUT /{coll}).
+    def collection(name, definition = {})
+      Collection.new(self, name, definition)
     end
 
+    # POST /{coll}/_search: body is { "query", "sort", "fields", "limit",
+    # "skip", "after", "count", ... }. Returns a Page.
+    def search(coll, body = {})
+      page(post(coll, "_search", Conditions.regexps(body)))
+    end
+
+    # POST /{coll}/_count: how many documents match query.
+    def count(coll, query = nil)
+      body = query ? { query: Conditions.regexps(query) } : {}
+
+      json(post(coll, "_count", body)).fetch("count")
+    end
+
+    # POST /{coll}/_aggregate: body is { "pipeline", "limit", "skip",
+    # "after", "count" }. Returns a Page.
     def aggregate(coll, body)
-      page(post(coll, "aggregate", Conditions.regexps(body)))
+      page(post(coll, "_aggregate", Conditions.regexps(body)))
     end
 
     # The document with this _id (and its "_v"), or nil.
     def get(coll, id)
-      json(request("GET", id_path(coll, id), nil))
+      json(request("GET", doc_path(coll, "_doc", id), nil))
     rescue NotFound
       nil
     end
 
-    # Each document gets a generated UUIDv7 _id unless it carries one.
+    # POST /{coll}/_doc: one document; it gets a generated UUIDv7 _id unless
+    # it carries one. Returns {"_id", "_v"}.
+    def insert(coll, doc)
+      json(post(coll, "_doc", doc))
+    end
+
+    # POST /{coll}/_bulk: many documents in one transaction, all or nothing.
     # expire_in (seconds, or "30m" / "1h" / "1d") sets the expires_field of
-    # every document to now + expire_in, in the same transaction.
-    def insert(coll, docs, expire_in: nil)
-      body = { insert: docs }
+    # every document to now + expire_in. Returns the results.
+    def bulk(coll, docs, expire_in: nil)
+      body = { docs: docs }
       body[:expire_in] = expire_in if expire_in
 
-      json(post(coll, "insert", body)).fetch("results")
+      json(post(coll, "_bulk", body)).fetch("results")
     end
 
-    # Atomic update. A String is the _id of one document (POST /{_id}/update);
-    # a Hash is a filter (POST /update). The filter and the write operators go
-    # in one body; the daemon matches and writes in one step on the newest state, so
-    # concurrent updates never interleave.
+    # POST /{coll}/_update/{id}: applies the write operators to the document
+    # with this _id, in one atomic step. guard adds conditions on the same
+    # document ({ _v: 7 }); matched is 0 when they fail.
     #
-    #   client.update("stock", { sku: "a", qty: { "$gte" => 1 } }, { "$inc" => { qty: -1 } })
+    #   client.update("stock", "a", { "$inc" => { qty: -1 } }, guard: { qty: { "$gte" => 1 } })
     #   # => {"matched" => 1, "modified" => 1, "doc" => {...with "_v"}}
     #
-    # Operators: $set, $setOnInsert, $unset, $inc, $push, $pull, $min, $max (dot paths work).
-    # Nothing matched is not an error: {"matched" => 0, "modified" => 0}. A
-    # version guard is a filter: { _id: "x", _v: 7 }. many: true updates every
-    # match (no "doc" in the answer) and needs _id or an indexed field in the
-    # filter; it does not apply to an _id String. upsert: true creates the document from the equality fields
-    # of the filter when nothing matches. expire_in (seconds, or "30m") sets
-    # the expires_field.
-    def update(coll, id_or_filter, ops, many: false, upsert: false, expire_in: nil)
-      if id_or_filter.is_a?(String)
-        query = write_query(upsert: upsert, expire_in: expire_in)
+    # Operators: $set, $setOnInsert, $unset, $inc, $push, $pull, $min, $max
+    # (dot paths work). upsert: true creates the document with this _id.
+    def update(coll, id, ops, guard: nil, upsert: false, expire_in: nil)
+      body = write_body(update: check_ops(ops), query: guard && Conditions.equality(guard), upsert: upsert, expire_in: expire_in)
 
-        return json(request("POST", "#{id_path(coll, id_or_filter)}/update#{query}", merge_update({}, ops)))
-      end
-
-      query = write_query(many: many, upsert: upsert, expire_in: expire_in)
-
-      json(post(coll, "update#{query}", merge_update(id_or_filter, ops)))
+      json(request("POST", doc_path(coll, "_update", id), body))
     end
 
-    # Deletes by _id (a String), or the documents that the filter matches (one,
-    # or every match with many: true, which needs _id or an indexed field).
-    # {"deleted" => n}
-    def delete(coll, id_or_filter, many: false)
-      return json(request("DELETE", id_path(coll, id_or_filter), nil)) if id_or_filter.is_a?(String)
+    # POST /{coll}/_update_by_query: the atomic update by query. The daemon
+    # matches and writes in one step on the newest state, so concurrent
+    # updates never interleave. Without many it updates the first match;
+    # many: true updates every match and needs _id or an indexed field in
+    # the query. upsert: true creates the document from the equality fields
+    # of the query when nothing matches.
+    def update_by(coll, query, ops, many: false, upsert: false, expire_in: nil)
+      body = write_body(query: Conditions.equality(query), update: check_ops(ops), many: many, upsert: upsert, expire_in: expire_in)
 
-      json(post(coll, "delete#{write_query(many: many)}", id_or_filter))
+      json(post(coll, "_update_by_query", body))
+    end
+
+    # DELETE /{coll}/_doc/{id}: {"deleted" => 0 | 1}.
+    def delete(coll, id)
+      json(request("DELETE", doc_path(coll, "_doc", id), nil))
+    end
+
+    # POST /{coll}/_delete_by_query: the first match, or every match with
+    # many: true (same rule as update_by). {"deleted" => n}
+    def delete_by(coll, query, many: false)
+      json(post(coll, "_delete_by_query", write_body(query: Conditions.equality(query), many: many)))
     end
 
     # Makes a document expire, like EXPIRE in Redis: in: seconds or "30m", or
-    # at: a Time or an RFC 3339 String. Returns {"_id", "v", "expires_at"}.
+    # at: a Time or an RFC 3339 String. Returns {"_id", "_v", "expires_at"}.
     # Raises NotFound for a missing or expired document, TtlNotEnabled when
     # the collection has no expires_field, TtlDerived when the expiry comes
     # from ttl + time.
     def expire(coll, id, **time)
-      body = { _id: id }
+      body = {}
       body[:in] = time[:in] if time[:in]
       body[:at] = time[:at].respond_to?(:utc) ? time[:at].utc.iso8601(9) : time[:at] if time[:at]
 
-      json(post(coll, "expire", body))
+      json(request("POST", doc_path(coll, "_expire", id), body))
     end
 
     # Removes the expiry of a document, like PERSIST in Redis.
     def persist(coll, id)
-      json(post(coll, "persist", _id: id))
+      json(request("POST", doc_path(coll, "_persist", id), nil))
     end
 
     # The seconds left of a document (an Integer, rounded up), -1 when it
     # never expires, nil when it is missing or expired.
     def ttl(coll, id)
-      json(request("GET", "#{id_path(coll, id)}/ttl", nil)).fetch("ttl")
+      json(request("GET", doc_path(coll, "_ttl", id), nil)).fetch("ttl")
     rescue NotFound
       nil
     end
 
     # Streams the changes of a collection for a named consumer: first the ones
     # after its last ack, then the new ones. Yields one Hash per event (pos,
-    # op, id, v, doc). where is the same Hash/Range conditions as find, and
-    # only the matching events come; limit ends the stream after that many
-    # events. Without a block it returns an Enumerator. Delivery is at least
-    # once: ack the pos of an event when its work is done.
+    # op, _id, _v, doc). query is the same conditions as a search, and only
+    # the matching events come; limit ends the stream after that many events.
+    # Without a block it returns an Enumerator. Delivery is at least once: ack
+    # the pos of an event when its work is done.
     #
     # The stream raises WatchLagged when the consumer is too slow, and
     # HistoryTruncated when its position is older than the kept WAL; call
     # watch again for the first, start over for the second.
-    def watch(coll, consumer, where: nil, from: nil, limit: nil, &block)
-      return enum_for(:watch, coll, consumer, where: where, from: from, limit: limit) unless block
+    def watch(coll, consumer, query: nil, from: nil, limit: nil, &block)
+      return enum_for(:watch, coll, consumer, query: query, from: from, limit: limit) unless block
 
       body = { consumer: consumer, from: from, limit: limit }.compact
-      body[:where] = Conditions.equality(where) if where
+      body[:query] = Conditions.equality(query) if query
 
-      with_ready_retry { stream_events("#{path(coll)}/watch", body, &block) }
+      with_ready_retry { stream_events("#{path(coll)}/_watch", body, &block) }
     end
 
     # Stores the position of an event for its consumer: the next watch with
     # that consumer name starts after it.
     def ack(coll, consumer, pos)
-      json(post(coll, "ack", consumer: consumer, pos: pos))
+      json(post(coll, "_ack", consumer: consumer, pos: pos))
     end
 
     # Removes every document of the collection and keeps its definition and
     # indexes. The cost does not depend on the number of documents. Watch
     # consumers get one event with op "truncate". {"collection", "truncated"}
     def truncate(coll)
-      json(request("POST", "#{path(coll)}/truncate?confirm=#{confirm(coll)}", nil))
+      json(request("POST", "#{path(coll)}/_truncate?confirm=#{confirm(coll)}", nil))
     end
 
     # Removes the collection: its documents, its definition and the positions
@@ -159,24 +188,64 @@ module Ndb
       json(request("DELETE", "#{path(coll)}?confirm=#{confirm(coll)}", nil))
     end
 
+    # PUT /{coll}: creates the collection or merges the definition into it.
     def ensure_collection(coll, definition = {})
       json(request("PUT", path(coll), definition))
     end
 
+    # PUT /{coll}/_indexes/{field}: adds an index, built in the background.
+    def ensure_index(coll, field)
+      json(request("PUT", doc_path(coll, "_indexes", field), nil)).fetch("indexes")
+    end
+
+    # DELETE /{coll}/_indexes/{field}.
+    def drop_index(coll, field)
+      json(request("DELETE", doc_path(coll, "_indexes", field), nil)).fetch("indexes")
+    end
+
+    # GET /{coll}/_stats: rows, indexes, files and bytes of one collection.
+    def collection_stats(coll)
+      json(request("GET", "#{path(coll)}/_stats", nil))
+    end
+
+    # POST /{coll}/_compact: seals and merges every segment now.
+    def compact(coll)
+      json(post(coll, "_compact", nil))
+    end
+
+    # GET /_health: true when the daemon is ready; raises NotReady while it
+    # recovers. It does not wait.
+    def health
+      request("GET", "/_health", nil, wait: false)
+
+      true
+    end
+
+    # GET /_collections: one definition per collection.
     def collections
-      json(request("GET", "/v1/c", nil)).fetch("collections")
+      json(request("GET", "/_collections", nil)).fetch("collections")
+    end
+
+    # GET /_stats: every collection, totals, version and uptime.
+    def stats
+      json(request("GET", "/_stats", nil))
+    end
+
+    # GET /_size: disk use per collection and per part.
+    def size
+      json(request("GET", "/_size", nil))
     end
 
     # Uploads an IO (streamed) and returns the reference hash.
     def put_blob(io, content_type = nil)
-      json(request("PUT", "/v1/blobs", io, headers: { "Content-Type" => content_type || "application/octet-stream" }))
+      json(request("POST", "/_blobs", io, headers: { "Content-Type" => content_type || "application/octet-stream" }))
     end
 
     # The bytes of a blob, or of its range from..to (inclusive).
     def get_blob(ref, from: nil, to: nil)
       headers = from ? { "Range" => "bytes=#{from}-#{to}" } : {}
 
-      request("GET", "/v1/blobs/#{ref}", nil, headers: headers).body
+      request("GET", "/_blobs/#{ref}", nil, headers: headers).body
     end
 
     private
@@ -185,51 +254,50 @@ module Ndb
       value.to_s.strip.empty? ? nil : value
     end
 
-    def write_query(many: false, upsert: false, expire_in: nil)
-      params = {}
-
-      params["many"] = "true" if many
-      params["upsert"] = "true" if upsert
-      params["expire_in"] = expire_in.to_s if expire_in
-
-      params.empty? ? "" : "?#{URI.encode_www_form(params)}"
+    # The body of a write, without the options that are off.
+    def write_body(**parts)
+      parts.reject { |_, v| v.nil? || v == false }
     end
 
-    # The filter and the operators in one body. An operator key without "$"
-    # would be read as a filter key by the daemon, so it is refused here.
-    def merge_update(filter, ops)
+    # An operator key without "$" is a mistake, so it is refused here.
+    def check_ops(ops)
       ops.each_key do |key|
         next if key.to_s.start_with?("$")
 
         raise ArgumentError, "update operator #{key.to_s.inspect} must start with $ (for example \"$set\")"
       end
 
-      filter.to_h.transform_keys(&:to_s).merge(ops.to_h.transform_keys(&:to_s))
+      ops
     end
 
-    def post(coll, verb, body)
-      request("POST", "#{path(coll)}/#{verb}", body)
+    def post(coll, action, body)
+      request("POST", "#{path(coll)}/#{action}", body)
     end
 
     def path(coll)
-      "/v1/c/#{URI.encode_www_form_component(coll).gsub('+', '%20')}"
+      "/#{escape(coll)}"
+    end
+
+    def escape(segment)
+      URI.encode_www_form_component(segment).gsub("+", "%20")
     end
 
     def confirm(coll)
       URI.encode_www_form_component(coll)
     end
 
-    def id_path(coll, id)
-      "#{path(coll)}/#{URI.encode_www_form_component(id).gsub('+', '%20')}"
+    def doc_path(coll, action, id)
+      "#{path(coll)}/#{action}/#{escape(id)}"
     end
 
-    def request(method, target, body, headers: {})
+    def request(method, target, body, headers: {}, wait: true)
       payload = encode(body)
       headers = authorize(headers)
 
       safe = idempotent?(method, target) && !payload.respond_to?(:read)
+      timeout = wait ? @ready_timeout : 0
 
-      with_ready_retry(idempotent: safe) do
+      with_ready_retry(idempotent: safe, timeout: timeout) do
         response = @pool.with { |conn| conn.request(method, target, payload, headers: headers, idempotent: safe) }
 
         raise_api_error(response) if response.status >= 300
@@ -239,20 +307,20 @@ module Ndb
     end
 
     def idempotent?(method, target)
-      method == "GET" || target.match?(%r{/(find|count|aggregate|get|stats)\z})
+      method == "GET" || target.match?(%r{/(_search|_count|_aggregate)\z})
     end
 
     # Runs the block again while the daemon is not ready. It repeats only
     # when the request certainly was not processed (not_ready, a failed
     # connect), or for a read when the connection dropped. Never a timeout.
-    def with_ready_retry(idempotent: false)
-      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + @ready_timeout
+    def with_ready_retry(idempotent: false, timeout: @ready_timeout)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
       delay = RETRY_BASE
 
       begin
         yield
       rescue NotReady, ConnectError, ConnectionError => e
-        raise if @ready_timeout <= 0 || e.is_a?(TimeoutError)
+        raise if timeout <= 0 || e.is_a?(TimeoutError)
         raise unless e.is_a?(NotReady) || e.is_a?(ConnectError) || idempotent
 
         wait = (delay / 2) + (rand * delay / 2)

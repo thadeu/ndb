@@ -40,7 +40,7 @@ module Ndb
       end
 
       # Runs a find with a whole body built elsewhere, such as from a search
-      # form: { "where" => {...}, "sort" => {...}, "limit" => 50, "after" =>
+      # form: { "query" => {...}, "sort" => {...}, "limit" => 50, "after" =>
       # token, "count" => true }. The body is sent as is (the daemon
       # validates it). Returns the records, the next cursor (nil on the last
       # page) and the total (with "count" => true).
@@ -49,7 +49,7 @@ module Ndb
 
         page = ndb_find(body.transform_keys(&:to_s))
 
-        SearchResult.new(page.rows.map { |row| instantiate(row) }, page.next_cursor, page.total)
+        SearchResult.new(page.rows.map { |row| instantiate(row) }, page.next, page.total)
       end
 
       # Finds the record with these attributes, or builds an unsaved one.
@@ -200,7 +200,7 @@ module Ndb
       def ndb_find(body)
         ensure_collection!
 
-        Rails.client.find(collection_name, body.merge("versions" => true))
+        Rails.client.search(collection_name, body.merge("versions" => true))
       end
 
       def ndb_aggregate(body)
@@ -212,20 +212,22 @@ module Ndb
       def ndb_insert(doc, expire_in: nil)
         ensure_collection!
 
-        Rails.client.insert(collection_name, [doc], expire_in: expire_in).first
+        return Rails.client.insert(collection_name, doc) unless expire_in
+
+        Rails.client.bulk(collection_name, [doc], expire_in: expire_in).first
       end
 
-      # Atomic update by filter, see Ndb::Client#update.
-      def ndb_update(filter, ops, **options)
+      # Atomic update by query, see Ndb::Client#update_by.
+      def ndb_update(query, ops, **options)
         ensure_collection!
 
-        Rails.client.update(collection_name, filter, ops, **options)
+        Rails.client.update_by(collection_name, query, ops, **options)
       end
 
-      def ndb_delete(filter, **options)
+      def ndb_delete(query, **options)
         ensure_collection!
 
-        Rails.client.delete(collection_name, filter, **options)
+        Rails.client.delete_by(collection_name, query, **options)
       end
 
       private

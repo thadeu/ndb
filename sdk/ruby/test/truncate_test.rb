@@ -7,14 +7,14 @@ class TruncateTest < Minitest::Test
     @coll = NdbTestHelpers.next_name
 
     client.ensure_collection(@coll, indexes: ["n"])
-    client.insert(@coll, (1..5).map { |i| { _id: "c#{i}", n: i } })
+    client.bulk(@coll, (1..5).map { |i| { _id: "c#{i}", n: i } })
   end
 
   def test_truncate_keeps_the_definition_and_sends_one_watch_event
     assert_equal({ "collection" => @coll, "truncated" => true }, client.truncate(@coll))
     assert_nil client.get(@coll, "c1")
 
-    client.insert(@coll, [{ _id: "c9", n: 9 }])
+    client.bulk(@coll, [{ _id: "c9", n: 9 }])
 
     events = client.watch(@coll, "relay", limit: 2).to_a
 

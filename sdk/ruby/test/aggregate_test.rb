@@ -7,7 +7,7 @@ class AggregateTest < Minitest::Test
     @coll = collection_name
 
     client.ensure_collection(@coll)
-    client.insert(@coll, [
+    client.bulk(@coll, [
                     { _id: "a", status: "answered", duration: 10 },
                     { _id: "b", status: "answered", duration: 30 },
                     { _id: "c", status: "failed", duration: 5 }
@@ -24,7 +24,7 @@ class AggregateTest < Minitest::Test
   end
 
   def test_count_uses_find_with_count_true
-    page = client.find(@coll, where: { status: "answered" }, count: true, limit: 1)
+    page = client.search(@coll, query: { status: "answered" }, count: true, limit: 1)
 
     assert_equal 2, page.total
   end

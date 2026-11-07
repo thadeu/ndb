@@ -28,16 +28,16 @@ class TcpTest < Minitest::Test
     tcp = Ndb::Client.new(url: plain.url)
 
     tcp.ensure_collection(@coll, indexes: ["a"])
-    tcp.insert(@coll, [{ _id: "1", a: "x" }])
+    tcp.bulk(@coll, [{ _id: "1", a: "x" }])
 
-    assert_equal [{ "_id" => "1", "a" => "x" }], tcp.find(@coll, where: { a: "x" }).rows
+    assert_equal [{ "_id" => "1", "a" => "x" }], tcp.search(@coll, query: { a: "x" }).rows
   end
 
   def test_keep_alive_reuses_one_connection_over_tcp
     tcp = Ndb::Client.new(url: plain.url)
 
     tcp.ensure_collection(@coll)
-    20.times { tcp.find(@coll, {}) }
+    20.times { tcp.search(@coll, {}) }
 
     assert_equal 1, tcp.pool.created
   end
@@ -46,9 +46,9 @@ class TcpTest < Minitest::Test
     tcp = Ndb::Client.new(url: plain.url)
 
     tcp.ensure_collection(@coll)
-    tcp.insert(@coll, [{ _id: "1" }])
+    tcp.bulk(@coll, [{ _id: "1" }])
 
-    counts = 8.times.map { Thread.new { 25.times.map { tcp.find(@coll, {}).rows.size }.sum } }.map(&:value)
+    counts = 8.times.map { Thread.new { 25.times.map { tcp.search(@coll, {}).rows.size }.sum } }.map(&:value)
 
     assert_equal [25] * 8, counts
     assert_operator tcp.pool.created, :<=, 8
@@ -64,21 +64,21 @@ class TcpTest < Minitest::Test
     tcp = Ndb::Client.new(url: plain.url)
 
     tcp.ensure_collection(@coll)
-    tcp.insert(@coll, [{ _id: "1" }])
+    tcp.bulk(@coll, [{ _id: "1" }])
 
     plain.stop
 
-    assert_raises(Ndb::ConnectionError) { tcp.find(@coll, {}) }
+    assert_raises(Ndb::ConnectionError) { tcp.search(@coll, {}) }
 
     plain.start
 
-    assert_equal [{ "_id" => "1" }], tcp.find(@coll, {}).rows
+    assert_equal [{ "_id" => "1" }], tcp.search(@coll, {}).rows
   end
 
   def test_connection_refused_is_connection_error
     dead = Ndb::Client.new(url: "tcp://127.0.0.1:1")
 
-    assert_raises(Ndb::ConnectionError) { dead.find("x", {}) }
+    assert_raises(Ndb::ConnectionError) { dead.search("x", {}) }
   end
 
   def test_token_success
@@ -105,7 +105,7 @@ class TcpTest < Minitest::Test
 
   def test_watch_sends_the_token
     tcp = Ndb::Client.new(url: secured.url, token: TcpDaemon::TOKEN)
-    tcp.insert("tcp_watch", [{ "_id" => "w1" }])
+    tcp.bulk("tcp_watch", [{ "_id" => "w1" }])
 
     seen = []
     tcp.watch("tcp_watch", "c", limit: 1) { |ev| seen << ev["_id"] }

@@ -80,7 +80,7 @@ module Ndb
       query = {}
       where = Conditions.combine(values[:where])
 
-      query["where"] = where unless where.empty?
+      query["query"] = where unless where.empty?
       query["sort"] = values[:order] unless values[:order].empty?
       query.merge!(window)
       query["after"] = values[:after] if values[:after]
@@ -148,7 +148,7 @@ module Ndb
     def next_cursor
       load
 
-      @result.next_cursor
+      @result.next
     end
 
     def first(count = nil)
@@ -179,7 +179,7 @@ module Ndb
     end
 
     def exists?
-      klass.ndb_find(to_query.slice("where").merge("limit" => 1, "fields" => [klass.primary_key])).rows.any?
+      klass.ndb_find(to_query.slice("query").merge("limit" => 1, "fields" => [klass.primary_key])).rows.any?
     end
 
     def pluck(*fields)
@@ -198,7 +198,7 @@ module Ndb
     def count
       return calculate(:count) unless values[:group].empty?
 
-      klass.ndb_find(to_query.slice("where").merge("count" => true, "limit" => 1, "fields" => [klass.primary_key])).total
+      klass.ndb_find(to_query.slice("query").merge("count" => true, "limit" => 1, "fields" => [klass.primary_key])).total
     end
 
     # Pagination

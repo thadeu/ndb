@@ -9,7 +9,7 @@ class IdTest < Minitest::Test
     @coll = collection_name
 
     client.ensure_collection(@coll, { unique: ["slug"] })
-    client.insert(@coll, [{ _id: "a", slug: "x", n: 1 }])
+    client.bulk(@coll, [{ _id: "a", slug: "x", n: 1 }])
   end
 
   def test_new_id_is_a_uuid_v7_in_creation_order
@@ -46,7 +46,7 @@ class IdTest < Minitest::Test
   end
 
   def test_insert_without_id_generates_one
-    res = client.insert(@coll, [{ slug: "y" }])
+    res = client.bulk(@coll, [{ slug: "y" }])
 
     assert_match UUID7, res.first["_id"]
     assert_equal "y", client.get(@coll, res.first["_id"])["slug"]

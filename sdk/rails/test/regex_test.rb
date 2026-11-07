@@ -18,9 +18,9 @@ class RegexTest < Minitest::Test
   end
 
   def test_query_json
-    assert_equal({ "where" => { "name" => { "$regex" => "^a", "$options" => "im" } } },
+    assert_equal({ "query" => { "name" => { "$regex" => "^a", "$options" => "im" } } },
                  @post.where(name: /^a/i).to_query)
-    assert_equal({ "where" => { "name" => { "$not" => { "$regex" => "x", "$options" => "m" } } } },
+    assert_equal({ "query" => { "name" => { "$not" => { "$regex" => "x", "$options" => "m" } } } },
                  @post.where.not(name: /x/).to_query)
   end
 

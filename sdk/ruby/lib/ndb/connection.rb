@@ -138,7 +138,7 @@ module Ndb
     def send_request(method, target, body, headers)
       open_socket unless @socket
 
-      head = +"#{method} #{target} HTTP/1.1\r\nHost: #{@endpoint.host_header}\r\nAccept: application/json\r\n"
+      head = +"#{method} #{target} HTTP/1.1\r\nHost: #{@endpoint.host_header}\r\nAccept: application/x-ndjson\r\n"
 
       { "Content-Type" => "application/json" }.merge(headers).each { |name, value| head << "#{name}: #{value}\r\n" }
 

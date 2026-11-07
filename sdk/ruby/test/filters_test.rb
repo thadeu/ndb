@@ -8,7 +8,7 @@ class FiltersTest < Minitest::Test
     now = Time.now.utc
 
     client.ensure_collection(@coll, time: "ts")
-    client.insert(@coll, [
+    client.bulk(@coll, [
                     { _id: "o1", ts: (now - (48 * 3600)).iso8601, items: [{ sku: "a", qty: 1 }, { sku: "b", qty: 5 }] },
                     { _id: "o2", ts: (now - 60).iso8601, items: [{ sku: "a", qty: 3 }] }
                   ])
@@ -25,6 +25,6 @@ class FiltersTest < Minitest::Test
   private
 
   def ids(where)
-    client.find(@coll, where: where).rows.map { |r| r["_id"] }
+    client.search(@coll, query: where).rows.map { |r| r["_id"] }
   end
 end

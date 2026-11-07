@@ -101,7 +101,7 @@ class RetryTest < Minitest::Test
       sock.close
     end
 
-    assert_raises(Ndb::ConnectionError) { Ndb::Client.new(url: url, ready_timeout: 1).insert("c", [{ a: 1 }]) }
+    assert_raises(Ndb::ConnectionError) { Ndb::Client.new(url: url, ready_timeout: 1).bulk("c", [{ a: 1 }]) }
     assert_equal 1, calls.size
   end
 
@@ -111,7 +111,7 @@ class RetryTest < Minitest::Test
       sock.close
     end
 
-    assert_raises(Ndb::ConnectionError) { Ndb::Client.new(url: url, ready_timeout: 0.4).find("c", {}) }
+    assert_raises(Ndb::ConnectionError) { Ndb::Client.new(url: url, ready_timeout: 0.4).search("c", {}) }
     assert_operator calls.size, :>=, 2
   end
 
@@ -135,7 +135,7 @@ class RetryTest < Minitest::Test
     client = Ndb::Client.new(url: url, ready_timeout: 0)
     client.collections
 
-    assert_raises(Ndb::ConnectionError) { client.insert("c", [{ a: 1 }]) }
+    assert_raises(Ndb::ConnectionError) { client.bulk("c", [{ a: 1 }]) }
     sleep 0.1
 
     assert_equal 2, requests.size

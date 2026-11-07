@@ -9,7 +9,7 @@ require "json"
 # JSON, so the model layer is checked against the case too.
 class SharedCasesTest < Minitest::Test
   CASES_DIR = File.expand_path("../../../spec/cases", __dir__)
-  RELATION_KEYS = %w[where sort limit skip after].freeze
+  RELATION_KEYS = %w[query sort limit skip after].freeze
 
   Dir[File.join(CASES_DIR, "**", "*.json")].sort.each do |path|
     spec = JSON.parse(File.read(path))
@@ -34,7 +34,7 @@ class SharedCasesTest < Minitest::Test
     body = request.fetch("body")
     expect = spec.fetch("expect")
 
-    assert_relation_builds(coll, spec, body) if request["op"] == "find"
+    assert_relation_builds(coll, spec, body) if request["op"] == "search"
 
     if expect["error"]
       error = assert_raises(Ndb::Error, path) { send_request(coll, request) }
@@ -47,7 +47,7 @@ class SharedCasesTest < Minitest::Test
 
   def send_request(coll, request)
     case request["op"]
-    when "find" then client.find(coll, request["body"])
+    when "search" then client.search(coll, request["body"])
     when "aggregate" then aggregate(coll, request["body"])
     else flunk "request op #{request['op'].inspect} is not supported"
     end
@@ -65,25 +65,23 @@ class SharedCasesTest < Minitest::Test
     body = step["body"]
 
     case step["op"]
-    when "insert" then client.insert(coll, body["insert"])
-    when "update" then client.update(coll, body.reject { |k, _| k.start_with?("$") }, body.select { |k, _| k.start_with?("$") })
-    when "delete" then client.delete(coll, body)
+    when "bulk" then client.bulk(coll, body["docs"])
     else flunk "#{path}: setup op #{step['op'].inspect} is not supported"
     end
   end
 
   def assert_relation_builds(coll, spec, body)
     return unless (body.keys - RELATION_KEYS).empty?
-    return if contains_null?(body["where"])
+    return if contains_null?(body["query"])
 
     klass = model(coll)
-    relation = klass.where(body["where"] || {})
+    relation = klass.where(body["query"] || {})
     relation = relation.order(*body["sort"].map { |f, d| { f => d == -1 ? :desc : :asc } }) if body["sort"]
     relation = relation.limit(body["limit"]) if body["limit"]
     relation = relation.offset(body["skip"]) if body["skip"]
     relation = relation.after(body["after"]) if body["after"]
 
-    expected = body.reject { |key, value| key == "where" && value.empty? }
+    expected = body.reject { |key, value| key == "query" && value.empty? }
 
     assert_equal canonical(expected), canonical(relation.to_query), spec["name"]
   end

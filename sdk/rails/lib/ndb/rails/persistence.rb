@@ -205,7 +205,7 @@ module Ndb
     end
 
     def refresh_expiry(result, expires_at)
-      @version = result["v"]
+      @version = result["_v"]
 
       field = self.class.expires_field
 
@@ -282,7 +282,7 @@ module Ndb
         result = self.class.ndb_insert(insert_document, expire_in: @expire_in)
 
         self.id = result["_id"] if id.nil?
-        loaded!(result["v"])
+        loaded!(result["_v"])
 
         true
       end

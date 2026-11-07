@@ -7,7 +7,7 @@ class WatchTest < Minitest::Test
     @coll = NdbTestHelpers.next_name
 
     client.ensure_collection(@coll)
-    client.insert(@coll, (1..6).map { |i| { _id: "c#{i}", n: i } })
+    client.bulk(@coll, (1..6).map { |i| { _id: "c#{i}", n: i } })
   end
 
   def test_watch_yields_events_until_the_limit_and_ack_resumes
@@ -31,7 +31,7 @@ class WatchTest < Minitest::Test
   def test_watch_where_delivers_only_matching_events
     seen = []
 
-    client.watch(@coll, "filtered", where: { n: 5.. }, limit: 2) { |ev| seen << ev["_id"] }
+    client.watch(@coll, "filtered", query: { n: 5.. }, limit: 2) { |ev| seen << ev["_id"] }
 
     assert_equal %w[c5 c6], seen
   end
@@ -44,7 +44,7 @@ class WatchTest < Minitest::Test
 
   def test_watch_with_a_bad_where_raises_invalid_query
     error = assert_raises(Ndb::InvalidQuery) do
-      client.watch(@coll, "bad", where: { n: { "$bogus" => 1 } }) { |_| nil }
+      client.watch(@coll, "bad", query: { n: { "$bogus" => 1 } }) { |_| nil }
     end
 
     assert_equal "invalid_query", error.code

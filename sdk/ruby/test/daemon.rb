@@ -40,12 +40,12 @@ module TestDaemon
       @pid = nil
     end
 
-    # The daemon listens before recovery and answers /health with 503
+    # The daemon listens before recovery and answers /_health with 503
     # until recovery ends, so a connect alone does not mean it is ready.
     def health_ok?(klass, *args)
       io = klass.new(*args)
 
-      io.write("GET /health HTTP/1.0\r\n\r\n")
+      io.write("GET /_health HTTP/1.0\r\n\r\n")
 
       io.gets.to_s.split(" ")[1] == "200"
     rescue SystemCallError, IOError
@@ -143,7 +143,7 @@ class TcpDaemon
   end
 
   # The daemon binds the unix socket before the TCP listener and answers
-  # /health with 503 until recovery ends: wait for 200, then for the TCP port.
+  # /_health with 503 until recovery ends: wait for 200, then for the TCP port.
   def wait_ready
     deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + TestDaemon::READY_DEADLINE
 

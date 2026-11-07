@@ -15,57 +15,57 @@ class RelationQueryTest < Minitest::Test
   end
 
   def test_equality
-    assert_equal({ "where" => { "status" => "x" } }, query(@post.where(status: "x")))
+    assert_equal({ "query" => { "status" => "x" } }, query(@post.where(status: "x")))
   end
 
   def test_endless_range
     t = Time.utc(2026, 11, 1)
 
-    assert_equal({ "where" => { "created_at" => { "$gte" => "2026-11-01T00:00:00.000Z" } } },
+    assert_equal({ "query" => { "created_at" => { "$gte" => "2026-11-01T00:00:00.000Z" } } },
                  query(@post.where(created_at: t..)))
   end
 
   def test_beginless_ranges
-    assert_equal({ "where" => { "n" => { "$lte" => 5 } } }, query(@post.where(n: ..5)))
-    assert_equal({ "where" => { "n" => { "$lt" => 5 } } }, query(@post.where(n: ...5)))
+    assert_equal({ "query" => { "n" => { "$lte" => 5 } } }, query(@post.where(n: ..5)))
+    assert_equal({ "query" => { "n" => { "$lt" => 5 } } }, query(@post.where(n: ...5)))
   end
 
   def test_exclusive_and_inclusive_ranges
-    assert_equal({ "where" => { "n" => { "$gte" => 1, "$lt" => 9 } } }, query(@post.where(n: 1...9)))
-    assert_equal({ "where" => { "n" => { "$gte" => 1, "$lte" => 9 } } }, query(@post.where(n: 1..9)))
+    assert_equal({ "query" => { "n" => { "$gte" => 1, "$lt" => 9 } } }, query(@post.where(n: 1...9)))
+    assert_equal({ "query" => { "n" => { "$gte" => 1, "$lte" => 9 } } }, query(@post.where(n: 1..9)))
   end
 
   def test_array_is_in
-    assert_equal({ "where" => { "dnis" => { "$in" => %w[1133 1144] } } }, query(@post.where(dnis: %w[1133 1144])))
+    assert_equal({ "query" => { "dnis" => { "$in" => %w[1133 1144] } } }, query(@post.where(dnis: %w[1133 1144])))
   end
 
   def test_nil_is_exists_false
-    assert_equal({ "where" => { "dnis" => { "$exists" => false } } }, query(@post.where(dnis: nil)))
+    assert_equal({ "query" => { "dnis" => { "$exists" => false } } }, query(@post.where(dnis: nil)))
   end
 
   def test_where_not
-    assert_equal({ "where" => { "status" => { "$ne" => "x" } } }, query(@post.where.not(status: "x")))
-    assert_equal({ "where" => { "s" => { "$nin" => %w[a b] } } }, query(@post.where.not(s: %w[a b])))
-    assert_equal({ "where" => { "s" => { "$exists" => true } } }, query(@post.where.not(s: nil)))
-    assert_equal({ "where" => { "$not" => { "n" => { "$gt" => 1 } } } }, query(@post.where.not(n: { "$gt" => 1 })))
+    assert_equal({ "query" => { "status" => { "$ne" => "x" } } }, query(@post.where.not(status: "x")))
+    assert_equal({ "query" => { "s" => { "$nin" => %w[a b] } } }, query(@post.where.not(s: %w[a b])))
+    assert_equal({ "query" => { "s" => { "$exists" => true } } }, query(@post.where.not(s: nil)))
+    assert_equal({ "query" => { "$not" => { "n" => { "$gt" => 1 } } } }, query(@post.where.not(n: { "$gt" => 1 })))
   end
 
   def test_or
     rel = @post.where(status: "a").or(@post.where(status: "b"))
 
-    assert_equal({ "where" => { "$or" => [{ "status" => "a" }, { "status" => "b" }] } }, query(rel))
+    assert_equal({ "query" => { "$or" => [{ "status" => "a" }, { "status" => "b" }] } }, query(rel))
   end
 
   def test_chained_where_is_and
     rel = @post.where(a: 1).where(b: 2)
 
-    assert_equal({ "where" => { "a" => 1, "b" => 2 } }, query(rel))
+    assert_equal({ "query" => { "a" => 1, "b" => 2 } }, query(rel))
   end
 
   def test_chained_where_on_the_same_field_uses_and
     rel = @post.where(n: 1..5).where(n: { "$ne" => 3 })
 
-    assert_equal({ "where" => { "$and" => [{ "n" => { "$gte" => 1, "$lte" => 5 } }, { "n" => { "$ne" => 3 } }] } },
+    assert_equal({ "query" => { "$and" => [{ "n" => { "$gte" => 1, "$lte" => 5 } }, { "n" => { "$ne" => 3 } }] } },
                  query(rel))
   end
 
@@ -112,6 +112,6 @@ class RelationQueryTest < Minitest::Test
     base = @post.where(a: 1)
     base.where(b: 2)
 
-    assert_equal({ "where" => { "a" => 1 } }, query(base))
+    assert_equal({ "query" => { "a" => 1 } }, query(base))
   end
 end

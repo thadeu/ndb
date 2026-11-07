@@ -16,7 +16,7 @@ class SearchTest < Minitest::Test
   end
 
   def test_search_takes_a_whole_body_and_pages
-    body = JSON.parse('{"where":{"status":"answered"},"sort":{"dur":-1},"limit":1,"count":true}')
+    body = JSON.parse('{"query":{"status":"answered"},"sort":{"dur":-1},"limit":1,"count":true}')
     page = @call.search(body)
 
     assert_equal ["c3"], page.records.map(&:id)
@@ -30,7 +30,7 @@ class SearchTest < Minitest::Test
   end
 
   def test_search_takes_symbol_keys
-    assert_equal %w[c2 c3], @call.search(where: { dur: { "$gte" => 30 } }, sort: { _id: 1 }).records.map(&:id)
+    assert_equal %w[c2 c3], @call.search(query: { dur: { "$gte" => 30 } }, sort: { _id: 1 }).records.map(&:id)
   end
 
   def test_where_raw_keeps_json_meaning_and_chains
@@ -48,6 +48,6 @@ class SearchTest < Minitest::Test
   def test_bad_input
     assert_raises(ArgumentError) { @call.search("x") }
     assert_raises(ArgumentError) { @call.where_raw([1]) }
-    assert_raises(Ndb::InvalidQuery) { @call.search("where" => { "dur" => { "$bad" => 1 } }) }
+    assert_raises(Ndb::InvalidQuery) { @call.search("query" => { "dur" => { "$bad" => 1 } }) }
   end
 end

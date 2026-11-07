@@ -7,7 +7,7 @@ class RegexTest < Minitest::Test
     @coll = collection_name
 
     client.ensure_collection(@coll, indexes: ["name"])
-    client.insert(@coll, [
+    client.bulk(@coll, [
                     { _id: "1", name: "Alpha", note: "first\nbeta line", tags: %w[red Green] },
                     { _id: "2", name: "alphabet", note: "one line", tags: %w[blue] },
                     { _id: "3", name: "Beta", note: "a\nb", tags: [] }
@@ -45,14 +45,14 @@ class RegexTest < Minitest::Test
   end
 
   def test_string_pattern_is_sent_unchanged_and_uses_the_index
-    page = client.find(@coll, where: { name: { "$regex" => "^alpha" } })
+    page = client.search(@coll, query: { name: { "$regex" => "^alpha" } })
 
     assert_equal ["2"], page.rows.map { |r| r["_id"] }
     assert_equal "index:name", page.plan
   end
 
   def test_regexp_with_i_does_not_use_the_prefix_index
-    page = client.find(@coll, where: { name: /^alpha/i })
+    page = client.search(@coll, query: { name: /^alpha/i })
 
     refute_equal "index:name", page.plan
   end
@@ -60,7 +60,7 @@ class RegexTest < Minitest::Test
   def test_watch_where_accepts_a_regexp
     seen = []
 
-    client.watch(@coll, "rx", where: { name: /^beta$/i }, limit: 1) { |ev| seen << ev["_id"] }
+    client.watch(@coll, "rx", query: { name: /^beta$/i }, limit: 1) { |ev| seen << ev["_id"] }
 
     assert_equal ["3"], seen
   end
@@ -69,7 +69,7 @@ class RegexTest < Minitest::Test
     dead = Ndb::Client.new(socket: "/tmp/ndb-no-such-regex.sock", ready_timeout: 0)
 
     [/a(?=b)/, /(?<!a)b/, /(a)\1/, /\h/, /a++/, /(?>a)/, /\R/].each do |regexp|
-      error = assert_raises(Ndb::InvalidQuery, regexp.inspect) { dead.find(@coll, where: { name: regexp }) }
+      error = assert_raises(Ndb::InvalidQuery, regexp.inspect) { dead.search(@coll, query: { name: regexp }) }
 
       assert_equal "invalid_query", error.code
     end
@@ -86,6 +86,6 @@ class RegexTest < Minitest::Test
   private
 
   def ids(where)
-    client.find(@coll, where: where, sort: { _id: 1 }).rows.map { |r| r["_id"] }
+    client.search(@coll, query: where, sort: { _id: 1 }).rows.map { |r| r["_id"] }
   end
 end

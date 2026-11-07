@@ -45,7 +45,7 @@ module TestDaemon
     def health_ok?(klass, *args)
       io = klass.new(*args)
 
-      io.write("GET /health HTTP/1.0\r\n\r\n")
+      io.write("GET /_health HTTP/1.0\r\n\r\n")
 
       io.gets.to_s.split(" ")[1] == "200"
     rescue SystemCallError, IOError

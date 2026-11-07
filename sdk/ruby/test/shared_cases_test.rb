@@ -41,7 +41,7 @@ class SharedCasesTest < Minitest::Test
 
   def send_request(coll, request)
     case request["op"]
-    when "find" then client.find(coll, request["body"])
+    when "search" then client.search(coll, request["body"])
     when "aggregate" then aggregate(coll, request["body"])
     else flunk "request op #{request['op'].inspect} is not supported"
     end
@@ -59,9 +59,7 @@ class SharedCasesTest < Minitest::Test
     body = step["body"]
 
     case step["op"]
-    when "insert" then client.insert(coll, body["insert"])
-    when "update" then client.update(coll, body.reject { |k, _| k.start_with?("$") }, body.select { |k, _| k.start_with?("$") })
-    when "delete" then client.delete(coll, body)
+    when "bulk" then client.bulk(coll, body["docs"])
     else flunk "#{path}: setup op #{step['op'].inspect} is not supported"
     end
   end
