@@ -44,7 +44,7 @@ func (c *Collection) clock() time.Time {
 }
 
 func (c *Collection) queryOptions() query.Options {
-	return query.Options{TimeField: c.def.Time, ExpiresField: c.def.ExpiresField}
+	return query.Options{TimeField: c.def.Time, ExpiresField: c.def.ExpiresField, Now: c.clock}
 }
 
 // hidden lists the where clauses of the rows that a read must not see.

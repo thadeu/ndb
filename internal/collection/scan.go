@@ -397,9 +397,13 @@ func (sc *segScan) row(rows segment.GroupRows, i, abs int) error {
 // whose column cannot answer.
 func (st *rowState) match() (bool, error) {
 	cands := make([][]query.Value, len(st.sc.where))
-	known := true
+	known := !st.sc.q.NeedsDoc()
 
 	for slot, at := range st.sc.where {
+		if !known {
+			break
+		}
+
 		cell := st.rows.Cells[at][st.i]
 
 		if !cell.Known {

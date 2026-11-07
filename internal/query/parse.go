@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"slices"
 	"strings"
+	"time"
 )
 
 type Options struct {
@@ -14,6 +15,9 @@ type Options struct {
 	// ExpiresField is the TTL field of the collection. Like the time field,
 	// its RFC 3339 strings compare as time.
 	ExpiresField string
+
+	// Now is the clock of date math (now-7d); nil is time.Now.
+	Now func() time.Time
 }
 
 type SortKey struct {
@@ -39,6 +43,17 @@ type Query struct {
 	where Node
 	raw   any
 	paths []string
+
+	// now is the instant of every date math of the query, read once. A
+	// cursor keeps it, so the pages of one walk see the same window.
+	now time.Time
+
+	// parent is the query of an $elemMatch filter: it owns the clock.
+	parent *Query
+
+	// needsDoc: a node needs the decoded document ($elemMatch), so the
+	// column values alone cannot answer.
+	needsDoc bool
 }
 
 // Cond is one index-friendly condition of the where clause (top level,
@@ -70,6 +85,8 @@ func Parse(body []byte, opts Options) (*Query, error) {
 			return nil, invalid("unknown key %q", k)
 		}
 	}
+
+	q.now = cursorNow(top["after"])
 
 	if err := q.parseWhere(top["where"]); err != nil {
 		return nil, err
@@ -303,13 +320,19 @@ func (q *Query) compileField(path string, v any) (Node, error) {
 		return nil, invalid("%s mixes operators and plain keys", path)
 	}
 
-	if !isObj || operatorKeys(m) == 0 {
-		f.ops = []op{{name: "eq", vals: []Value{FromJSON(v, f.isTime)}}}
-
-		return f, nil
+	if _, ok := m["$elemMatch"]; ok {
+		return q.compileElemMatch(path, m)
 	}
 
-	ops, err := compileOps(m, f.isTime)
+	if !isObj || operatorKeys(m) == 0 {
+		val, err := q.value(v, f.isTime)
+
+		f.ops = []op{{name: "eq", vals: []Value{val}}}
+
+		return f, err
+	}
+
+	ops, err := q.compileOps(m, f.isTime)
 	if err != nil {
 		return nil, err
 	}
@@ -333,7 +356,7 @@ func operatorKeys(m map[string]any) int {
 	return n
 }
 
-func compileOps(m map[string]any, isTime bool) ([]op, error) {
+func (q *Query) compileOps(m map[string]any, isTime bool) ([]op, error) {
 	ops := make([]op, 0, len(m))
 
 	if _, ok := m["$options"]; ok {
@@ -358,7 +381,7 @@ func compileOps(m map[string]any, isTime bool) ([]op, error) {
 			continue
 		}
 
-		o, err := compileOp(k, m[k], isTime)
+		o, err := q.compileOp(k, m[k], isTime)
 		if err != nil {
 			return nil, err
 		}
@@ -369,14 +392,20 @@ func compileOps(m map[string]any, isTime bool) ([]op, error) {
 	return ops, nil
 }
 
-func compileOp(key string, v any, isTime bool) (op, error) {
+func (q *Query) compileOp(key string, v any, isTime bool) (op, error) {
 	name := strings.TrimPrefix(key, "$")
 
 	switch name {
 	case "eq", "ne":
-		return op{name: name, vals: []Value{FromJSON(v, isTime)}}, nil
+		val, err := q.value(v, isTime)
+
+		return op{name: name, vals: []Value{val}}, err
 	case "gt", "gte", "lt", "lte":
-		val := FromJSON(v, isTime)
+		val, err := q.value(v, isTime)
+		if err != nil {
+			return op{}, err
+		}
+
 		if !val.Scalar() {
 			return op{}, invalid("%s needs a scalar operand", key)
 		}
@@ -391,7 +420,12 @@ func compileOp(key string, v any, isTime bool) (op, error) {
 		vals := make([]Value, len(list))
 
 		for i, e := range list {
-			vals[i] = FromJSON(e, isTime)
+			val, err := q.value(e, isTime)
+			if err != nil {
+				return op{}, err
+			}
+
+			vals[i] = val
 		}
 
 		return op{name: name, vals: vals}, nil
@@ -408,12 +442,105 @@ func compileOp(key string, v any, isTime bool) (op, error) {
 			return op{}, invalid("$not needs an operator object")
 		}
 
-		sub, err := compileOps(m, isTime)
+		sub, err := q.compileOps(m, isTime)
 
 		return op{name: name, sub: sub}, err
+	case "elemMatch":
+		return op{}, invalid("$elemMatch must be the only operator of its field")
 	}
 
 	return op{}, invalid("unknown operator %s", key)
+}
+
+// value is the Value of an operand. On the time field, a string that starts
+// with "now" is date math, resolved with the clock of the query.
+func (q *Query) value(v any, isTime bool) (Value, error) {
+	s, ok := v.(string)
+
+	if !ok || !isTime || !isDateMath(s) {
+		return FromJSON(v, isTime), nil
+	}
+
+	t, err := resolveDateMath(s, q.clock())
+	if err != nil {
+		return Value{}, err
+	}
+
+	return timeValue(t), nil
+}
+
+// clock is the instant of date math: read once per query.
+func (q *Query) clock() time.Time {
+	if q.parent != nil {
+		return q.parent.clock()
+	}
+
+	if q.now.IsZero() {
+		q.now = time.Now()
+
+		if q.opts.Now != nil {
+			q.now = q.opts.Now()
+		}
+	}
+
+	return q.now
+}
+
+// compileElemMatch compiles {"$elemMatch": {...}}: one element of the array
+// at path must match the whole inner filter. Field keys (and $and, $or,
+// $nor) make an object filter; operators only ($gt, $in...) make a filter on
+// the element itself.
+func (q *Query) compileElemMatch(path string, m map[string]any) (Node, error) {
+	if len(m) != 1 {
+		return nil, invalid("$elemMatch must be the only operator of %s", path)
+	}
+
+	inner, ok := m["$elemMatch"].(map[string]any)
+	if !ok || len(inner) == 0 {
+		return nil, invalid("$elemMatch needs a non-empty object")
+	}
+
+	q.root().needsDoc = true
+
+	n := &elemNode{parts: splitPath(path), isTime: q.IsTime(path)}
+
+	if operatorKeys(inner) == len(inner) && !hasLogical(inner) {
+		ops, err := q.compileOps(inner, n.isTime)
+		n.ops = ops
+
+		return n, err
+	}
+
+	sub := &Query{opts: Options{Now: q.opts.Now}, parent: q}
+
+	obj, err := sub.compileWhere(inner)
+	n.obj = obj
+
+	return n, err
+}
+
+func hasLogical(m map[string]any) bool {
+	for _, k := range []string{"$and", "$or", "$nor"} {
+		if _, ok := m[k]; ok {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (q *Query) root() *Query {
+	if q.parent != nil {
+		return q.parent.root()
+	}
+
+	return q
+}
+
+// NeedsDoc tells if the where needs the decoded document: the column
+// values of its paths cannot answer it.
+func (q *Query) NeedsDoc() bool {
+	return q.needsDoc
 }
 
 func compileRegexOp(m map[string]any) (op, error) {

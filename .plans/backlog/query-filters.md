@@ -3,6 +3,13 @@
 > Decision (2026-11-07): after collection patterns (0.4.x). Keep the current
 > filter language; do not add an Elasticsearch-like DSL. No full-text search
 > (no use case).
+> Built (2026-11-07, unreleased): `internal/query/datemath.go`, `elemNode` in
+> `internal/query/match.go`, docs/dev/query.md#date-math and #array-elements.
+> Changes from the draft:
+> - `$elemMatch` must be the only operator of its field.
+> - A query with `$elemMatch` decodes segment rows (`Query.NeedsDoc`); the
+>   column values cannot keep the element structure.
+> - An aggregate does not pin `now` in its cursor (it runs again per page).
 
 ## Why
 

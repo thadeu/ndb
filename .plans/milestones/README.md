@@ -42,7 +42,7 @@ Deferred ideas: [`../backlog/`](../backlog/).
 | Truncate and drop | O(1) empty or remove a collection; time-split collections (month, week, year) | done (0.3.3) | [backlog/truncate-drop.md](../backlog/truncate-drop.md) |
 | Delete by index only | big `delete?many` without decoding each document | done (0.3.2) | [backlog/truncate-drop.md](../backlog/truncate-drop.md#related-delete-by-index-only) |
 | Collection patterns | read many collections by name prefix (`logs-2026-*`): `find`, `count`, `aggregate`, `_coll` per row | done (unreleased, 0.4.0) | [backlog/collection-patterns.md](../backlog/collection-patterns.md) |
-| Date math and `$elemMatch` | `now-7d/d` in ranges on the time field; one array element matches many conditions | planned (0.4.x) | [backlog/query-filters.md](../backlog/query-filters.md) |
+| Date math and `$elemMatch` | `now-7d/d` in ranges on the time field; one array element matches many conditions | done (unreleased, 0.4.0) | [backlog/query-filters.md](../backlog/query-filters.md) |
 | Relationships | `include` in find | not now | [backlog/relationships.md](../backlog/relationships.md) |
 
 ## Dependencies

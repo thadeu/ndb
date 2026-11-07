@@ -112,6 +112,7 @@ A field with a plain value means equality: `{"status": "answered"}`. Several fie
 | `$exists` | `true` or `false`. Missing is not `null`. |
 | `$not` (in a field) | negate an operator object: `{"duration": {"$not": {"$gt": 10}}}`. |
 | `$regex`, `$options` | string match, see [Regular expressions](#regular-expressions). |
+| `$elemMatch` | one element of an array matches the whole inner filter, see [Array elements](#array-elements). |
 | `$and`, `$or`, `$nor` | non-empty array of filter objects. `$nor` matches when none of them does. |
 | `$not` (top level) | negate a filter object: `{"$not": {"status": "failed"}}`. |
 
@@ -128,8 +129,8 @@ Rules:
 - `{"a": null}` matches an explicit `null` only. Use `{"a": {"$exists": false}}` for a missing field.
 - Arrays: a field matches when any element matches. Dot paths walk into arrays of objects (`items.sku`).
 - Mixing operators and plain keys in one field object is an error: `{"a": {"$gt": 1, "b": 2}}`.
-- Unknown operators are `invalid_query`: `$elemMatch` does not exist yet.
-- Time: for the collection `time` field, RFC 3339 strings are compared as instants, so offsets do not matter.
+- Unknown operators are `invalid_query`.
+- Time: for the collection `time` field, RFC 3339 strings are compared as instants, so offsets do not matter. A string that starts with `now` is [date math](#date-math).
 - Cross-type order (sort, cursors, indexes): `missing < null < number < string < time < object < array < bool`.
 
 ### Regular expressions
@@ -145,6 +146,50 @@ Rules:
 - A time field is matched as its RFC 3339 text.
 - The pattern is compiled once per query, not once per row.
 - Planner: a pattern anchored with `^`, with a literal start (`^abc`, `^abc.*`, `^ab*`), and without `i` or `m`, is turned into the range `[abc, abd)` on that field. A ready index on the field answers it (`X-Ndb-Plan: index:<field>`), and the zone maps of the segments skip row groups outside the range (`row_groups_skipped`). The regex is still run on every candidate. Without such a prefix (no `^`, a group or alternation first, `i`, `m`, or only `$not`/`$or`) the regex is a filter on a scan. `explain: true` shows which one ran.
+
+### Date math
+
+On the collection `time` field (and the `expires_field`), a string that starts with `now` is an instant relative to the time of the request:
+
+```json
+{ "at": { "$gte": "now-7d/d" } }
+{ "at": { "$gte": "now-1h", "$lt": "now" } }
+{ "at": { "$gte": "now/M" } }
+```
+
+```
+now ( +N<unit> | -N<unit> )* ( /<unit> )?
+units: s m h d w M y      (m = minute, M = month)
+```
+
+| Expression | Meaning (request at Thu 2026-11-05 14:30:15 UTC) |
+|---|---|
+| `now-1h` | 2026-11-05 13:30:15 |
+| `now-7d/d` | 2026-10-29 00:00:00 |
+| `now/w` | 2026-11-02 00:00:00 (weeks start on Monday) |
+| `now/M` | 2026-11-01 00:00:00 |
+| `now-1M/M` | 2026-10-01 00:00:00 |
+
+- `/<unit>` rounds down to the start of the unit, in UTC.
+- It works in `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin` and plain equality, so in `find`, `aggregate` `$match`, update and delete filters, and `watch` `where`. The result is a time value, so indexes and zone maps work as with an RFC 3339 string.
+- `now` is read once per request: every `now` of one query is the same instant. A `find` cursor keeps the `now` of its first page, so the pages of one walk see the same window. An aggregate reads `now` on each request. A `watch` reads it when the stream opens.
+- On any other field, `"now-1h"` is a plain string.
+- A broken expression (`now-7x`, `now--1d`, `now/`) is `invalid_query`.
+
+### Array elements
+
+Conditions on dot paths into an array match each on its own element: `{"items.sku": "a", "items.qty": {"$gt": 2}}` matches `[{"sku":"a","qty":1},{"sku":"b","qty":5}]`. `$elemMatch` asks for one element that matches all of them:
+
+```json
+{ "items": { "$elemMatch": { "sku": "a", "qty": { "$gt": 2 } } } }
+{ "scores": { "$elemMatch": { "$gte": 10, "$lt": 20 } } }
+```
+
+- Field keys (and `$and`, `$or`, `$nor`, `$not`) filter an array of objects. Operators only filter an array of scalars: the element itself.
+- A field that is not an array, or is missing, does not match. `$elemMatch` can nest, and works in `$not`, `$or` and dot paths (`"order.items"`).
+- `$elemMatch` must be the only operator of its field. Put other conditions on the same field in `$and`.
+- Plan: `$elemMatch` itself uses no index. Add a condition that an index can answer (`"items.sku": "a"`) and the index gives the candidates; `$elemMatch` checks each. A row read from a segment is decoded for it.
+- `$elemMatch` in `fields` and positional updates (`items.$.qty`) are not supported.
 
 ## By _id
 

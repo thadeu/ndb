@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"strings"
+	"time"
 )
 
 // Pos is where a row sits in the result order.
@@ -132,6 +133,9 @@ type cursor struct {
 	// Pattern and Coll are set only by a read over a collection pattern.
 	Pattern string `json:"m,omitempty"`
 	Coll    string `json:"c,omitempty"`
+
+	// Now is the instant of the date math of the first page (unix ns).
+	Now int64 `json:"t,omitempty"`
 }
 
 // EncodeCursor makes the opaque next token: base64 JSON of the sort values,
@@ -148,6 +152,10 @@ func (q *Query) EncodePatternCursor(p Pos, pattern, coll string) string {
 
 func (q *Query) encode(p Pos, c cursor) string {
 	c.Keys, c.ID, c.Seq, c.Hash = make([][]any, len(p.Keys)), p.ID, p.Seq, q.Hash()
+
+	if !q.now.IsZero() {
+		c.Now = q.now.UnixNano()
+	}
 
 	for i, k := range p.Keys {
 		if k.Kind == Missing {
@@ -213,4 +221,29 @@ func (q *Query) decode(tok, pattern string) (Pos, cursor, error) {
 	}
 
 	return p, c, nil
+}
+
+// cursorNow is the date math instant that an after token keeps, or zero.
+// A broken token is reported later, by DecodeCursor.
+func cursorNow(raw json.RawMessage) time.Time {
+	var tok string
+
+	if raw == nil || json.Unmarshal(raw, &tok) != nil {
+		return time.Time{}
+	}
+
+	b, err := base64.RawURLEncoding.DecodeString(tok)
+	if err != nil {
+		return time.Time{}
+	}
+
+	var c struct {
+		Now int64 `json:"t"`
+	}
+
+	if json.Unmarshal(b, &c) != nil || c.Now == 0 {
+		return time.Time{}
+	}
+
+	return time.Unix(0, c.Now)
 }

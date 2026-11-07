@@ -10,6 +10,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Collection patterns: `POST /v1/c/logs-2026-*/find` and `/aggregate` read every collection whose name starts with `logs-2026-`, for collections split by time. Rows are merged in the `sort` order (then `_coll`, then `_id`); each row starts with `_coll`, the name of its collection. `count`, `skip`, `limit` and `after` work over the whole result; each collection uses its own indexes. `GET /v1/c/logs-*` lists the matched names. Writes and admin calls on a pattern are `400 pattern_read_only`. See [Collection patterns](docs/dev/query.md#collection-patterns).
 - Error codes `invalid_pattern`, `pattern_read_only` and `pattern_too_wide` (more than 256 collections).
+- Date math on the time field: `{"at": {"$gte": "now-7d/d"}}`, with `+N`/`-N` in `s m h d w M y` and rounding with `/unit` (UTC). It resolves to a time value, so indexes and zone maps work. A `find` cursor keeps the `now` of its first page. See [Date math](docs/dev/query.md#date-math).
+- `$elemMatch`: one element of an array matches the whole inner filter (field keys for objects, operators for scalars). See [Array elements](docs/dev/query.md#array-elements).
+- SDKs: Go `ndb.ElemMatch`; TypeScript `$elemMatch` in `Where`. Date math strings work in every SDK as is.
 - SDKs: Go `ndb.Pattern[T](db, "logs-*")` and the `ndb:"_coll"` field; Ruby `ndb.find("logs-*", ...)`; Rails `self.collection_name = "logs-*"` and `record.source_collection`; TypeScript `db.model('logs-*', schema)` and `row._coll`.
 
 ## [0.3.3] - 2026-11-07

@@ -179,6 +179,8 @@ rows, err := calls.
 ```
 
 - Filters: `Eq`, `Ne`, `Gt`, `Gte`, `Lt`, `Lte`, `In`, `Exists`, `Regex`, `Or`, `Not`. The filters in one `Where` are ANDed. Dot paths such as `"agent.id"` work.
+- `ElemMatch(field, filters...)` matches when one element of an array matches every filter: `ElemMatch("items", Eq("sku", "a"), Gt("qty", 2))`. For an array of scalars, use an empty field name: `ElemMatch("scores", Gte("", 10), Lt("", 20))`.
+- On the time field, a string that starts with `now` is [date math](../query.md#date-math): `Gte("ts", "now-7d/d")`.
 - `Regex(field, pattern, ndb.IgnoreCase, ...)` matches strings with Go RE2 (no backreferences, no look-around). An anchored prefix such as `^abc` can use an index. For other operators, see the [query language](../query.md).
 - The order of `Sort` keys is the order of the sort. The id is always the last key.
 - `Fields` returns only these fields. The other struct fields keep their zero value.

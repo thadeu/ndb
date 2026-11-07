@@ -1,5 +1,7 @@
 package ndb
 
+import "maps"
+
 // Filter is one condition of a Where. The filters of one Where are ANDed.
 // A Filter only holds JSON for the daemon; it does no matching itself.
 type Filter struct {
@@ -100,6 +102,30 @@ func Or(filters ...Filter) Filter {
 // Not matches when f does not match.
 func Not(f Filter) Filter {
 	return Filter{doc: map[string]any{"$not": f.doc}}
+}
+
+// ElemMatch matches when one element of the array field matches every
+// filter: ElemMatch("items", Eq("sku", "a"), Gt("qty", 2)). The filters name
+// fields of the element. For an array of scalars, use an empty field name
+// for the element itself: ElemMatch("scores", Gte("", 10), Lt("", 20)).
+func ElemMatch(field string, filters ...Filter) Filter {
+	inner := map[string]any{}
+
+	var fields []Filter
+
+	for _, f := range filters {
+		if ops, ok := f.doc[""].(map[string]any); ok && len(f.doc) == 1 {
+			maps.Copy(inner, ops)
+
+			continue
+		}
+
+		fields = append(fields, f)
+	}
+
+	maps.Copy(inner, whereOf(fields))
+
+	return operator(field, "$elemMatch", inner)
 }
 
 func operator(field, name string, v any) Filter {

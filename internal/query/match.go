@@ -67,6 +67,46 @@ func (n notNode) matchCols(cands [][]Value) bool {
 	return !n.inner.matchCols(cands)
 }
 
+// elemNode is $elemMatch: one element of the array at parts matches obj
+// (an object filter) or ops (operators on the element).
+type elemNode struct {
+	parts  []string
+	isTime bool
+	obj    Node
+	ops    []op
+}
+
+func (n *elemNode) match(m map[string]any) bool {
+	var leaves []any
+
+	resolve(m, n.parts, &leaves)
+
+	for _, l := range leaves {
+		arr, ok := l.([]any)
+		if ok && slices.ContainsFunc(arr, n.matchElem) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (n *elemNode) matchElem(el any) bool {
+	if n.obj == nil {
+		return matchAll(n.ops, candidates([]any{el}, n.isTime), true)
+	}
+
+	m, ok := el.(map[string]any)
+
+	return ok && n.obj.match(m)
+}
+
+// matchCols is never used: a query with an elemNode needs the document
+// (Query.NeedsDoc).
+func (n *elemNode) matchCols([][]Value) bool {
+	return false
+}
+
 // op is one operator: name has no "$". sub is used by "not".
 type op struct {
 	name string

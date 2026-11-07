@@ -58,6 +58,11 @@ export interface Ops<V> {
 
   // i, m, s and x. A RegExp in $regex brings its own flags: use one or the other.
   $options?: string
+
+  // One element of the array matches the whole filter: field keys for an
+  // array of objects ({ sku: 'a', qty: { $gt: 2 } }), operators for an array
+  // of scalars ({ $gte: 10, $lt: 20 }).
+  $elemMatch?: Record<string, unknown>
 }
 
 type Operand<V> = V extends Date ? Date | string : V
