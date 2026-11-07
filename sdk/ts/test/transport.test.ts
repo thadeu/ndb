@@ -13,10 +13,10 @@ describe.each([
   it('streams NDJSON rows as an async iterator', async () => {
     const name = collName()
 
-    await db.request('PUT', `/v1/c/${name}`, {})
-    await db.request('POST', `/v1/c/${name}/insert`, { insert: [{ _id: 'a', k: 'a' }, { _id: 'b', k: 'b' }] })
+    await db.request('PUT', `/${name}`, {})
+    await db.request('POST', `/${name}/_bulk`, { docs: [{ _id: 'a', k: 'a' }, { _id: 'b', k: 'b' }] })
 
-    const res = await db.stream('POST', `/v1/c/${name}/find`, { sort: { k: 1 } })
+    const res = await db.stream('POST', `/${name}/_search`, { sort: { k: 1 } })
     const rows: unknown[] = []
 
     for await (const row of res.rows()) {
@@ -27,7 +27,7 @@ describe.each([
   })
 
   it('raises a typed error with code and status', async () => {
-    const err = await db.request('POST', `/v1/c/nope${collName()}/find`, {}).catch((e: unknown) => e)
+    const err = await db.request('POST', `/nope${collName()}/_search`, {}).catch((e: unknown) => e)
 
     expect(err).toBeInstanceOf(NdbError)
     expect(err).toBeInstanceOf(NotFoundError)
@@ -38,11 +38,11 @@ describe.each([
   it('maps codes to subclasses', async () => {
     const name = collName()
 
-    await db.request('PUT', `/v1/c/${name}`, {})
-    await db.request('POST', `/v1/c/${name}/insert`, { insert: [{ k: 'a' }] })
+    await db.request('PUT', `/${name}`, {})
+    await db.request('POST', `/${name}/_bulk`, { docs: [{ k: 'a' }] })
 
     const err = await db
-      .request('POST', `/v1/c/${name}/update`, { k: 'a', $rename: { x: 'y' } })
+      .request('POST', `/${name}/_update_by_query`, { query: { k: 'a' }, update: { $rename: { x: 'y' } } })
       .catch((e: unknown) => e)
 
     expect(err).toBeInstanceOf(InvalidUpdateError)

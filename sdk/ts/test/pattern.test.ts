@@ -11,18 +11,18 @@ describe('collection patterns', () => {
   it('reads every collection of the pattern, with _coll on each row', async () => {
     const base = `${collName()}-logs-`
 
-    await db.model(`${base}1`, schema).insert([
+    await db.collection(`${base}1`, schema).insert([
       { _id: 'a1', at: 1, lvl: 'info' },
       { _id: 'a2', at: 3, lvl: 'error' },
     ])
-    await db.model(`${base}2`, schema).insert({ _id: 'b1', at: 2, lvl: 'error' })
+    await db.collection(`${base}2`, schema).insert({ _id: 'b1', at: 2, lvl: 'error' })
 
-    const logs = db.model(`${base}*`, schema)
-    const rows = await logs.where({}).sort({ at: -1 }).all()
+    const logs = db.collection(`${base}*`, schema)
+    const rows = await logs.query({}).sort({ at: -1 }).all()
 
     expect(rows.map((r) => r._id)).toEqual(['a2', 'b1', 'a1'])
     expect(rows.map((r) => r._coll)).toEqual([`${base}1`, `${base}2`, `${base}1`])
-    expect(await logs.where({ lvl: 'error' }).count()).toBe(2)
+    expect(await logs.query({ lvl: 'error' }).count()).toBe(2)
 
     await expect(logs.insert({ at: 9, lvl: 'x' })).rejects.toMatchObject({ code: 'pattern_read_only' })
   })

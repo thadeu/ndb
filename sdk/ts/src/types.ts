@@ -81,9 +81,17 @@ export type Where<F extends Fields> = {
 
 export type SortSpec<F extends Fields> = Partial<Record<Extract<keyof F, string> | '_id', 1 | -1>>
 
+// A blob reference, the value of a document field that holds bytes stored
+// with putBlob.
+export interface Blob {
+  $blob: string
+  size: number
+  type?: string
+}
+
 export interface WriteResult {
   _id: string
-  v: number
+  _v: number
 }
 
 // A duration for the daemon: seconds, or a string such as "90m", "1h30m", "1d".
@@ -124,12 +132,26 @@ export interface UpdateOps<F extends Fields = Fields> {
   $max?: Record<string, number | string>
 }
 
-export interface UpdateOptions {
-  // Update every match. The filter needs _id or an indexed field
+// Options of update by _id.
+export interface UpdateOptions<F extends Fields = Fields> {
+  // Extra conditions on the same document, such as { _v: 7 } (optimistic
+  // concurrency): matched is 0 when they fail.
+  guard?: Filter<F>
+
+  // Create the document with this _id when it is missing.
+  upsert?: boolean
+
+  // The daemon sets the expires field to now + expireIn, in the same write.
+  expireIn?: Duration
+}
+
+// Options of updateBy.
+export interface UpdateByOptions {
+  // Update every match. The query needs _id or an indexed field
   // (UnindexedManyError otherwise).
   many?: boolean
 
-  // Create the document from the equality fields of the filter when nothing
+  // Create the document from the equality fields of the query when nothing
   // matches.
   upsert?: boolean
 
@@ -141,7 +163,7 @@ export interface DeleteOptions {
   many?: boolean
 }
 
-// matched is 0 when the filter matched nothing (that is not an error), and
+// matched is 0 when the query matched nothing (that is not an error), and
 // modified is 0 when the operators left the document as it was. doc is the
 // new document with its version; it is absent for many.
 export interface UpdateResult<F extends Fields = Fields> {
@@ -170,10 +192,10 @@ export interface AggregateOptions {
   count?: boolean
 }
 
-// The whole body of a find, built elsewhere (a search form, a saved search).
-// It is sent as is; the daemon validates it.
-export interface FindBody {
-  where?: Record<string, unknown>
+// The whole body of a search, built elsewhere (a search form, a saved
+// search). It is sent as is; the daemon validates it.
+export interface SearchBody {
+  query?: Record<string, unknown>
   fields?: string[]
   sort?: Record<string, 1 | -1>
   limit?: number
@@ -182,8 +204,8 @@ export interface FindBody {
   count?: boolean
 }
 
-// One page of a find. next is '' on the last page; total is set with count.
-export interface FindResult<R> {
+// One page of a search. next is '' on the last page; total is set with count.
+export interface SearchResult<R> {
   rows: R[]
   next: string
   total: number
@@ -203,7 +225,7 @@ export interface WatchOptions<F extends Fields = Fields> {
   // Only the events whose document matches are delivered. A delete has no
   // document: it comes only if this stream saw an earlier matching put of
   // that id. The stored position still moves over the events left out.
-  where?: Where<F>
+  query?: Where<F>
 }
 
 // op "truncate": every document before this event is gone; _id is "".
@@ -212,6 +234,6 @@ export interface WatchEvent<R> {
   pos: string
   op: 'put' | 'del' | 'truncate'
   _id: string
-  v: number
+  _v: number
   doc: R | undefined
 }

@@ -15,7 +15,7 @@ describe('watch', () => {
       { _id: 'a', status: 's', ts: new Date() },
       { _id: 'b', status: 's', ts: new Date() },
     ])
-    await calls.delete({ _id: 'b' })
+    await calls.deleteBy({ _id: 'b' })
 
     const ctl = new AbortController()
     const seen: string[] = []
@@ -64,7 +64,7 @@ describe('watch', () => {
 
     const seen: string[] = []
 
-    for await (const ev of calls.watch('w3', { where: { status: 'pending' }, limit: 2 })) {
+    for await (const ev of calls.watch('w3', { query: { status: 'pending' }, limit: 2 })) {
       seen.push(ev._id)
     }
 
@@ -76,7 +76,7 @@ describe('watch', () => {
 
     await calls.insert({ _id: 'a', status: 'pending', ts: new Date() })
 
-    const stream = calls.watch('w4', { where: { status: { $bogus: 1 } } as never })
+    const stream = calls.watch('w4', { query: { status: { $bogus: 1 } } as never })
 
     await expect(stream.next()).rejects.toMatchObject({ code: 'invalid_query' })
   })

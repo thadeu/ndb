@@ -3,7 +3,7 @@ import { connect } from '../src/index.js'
 
 const db = connect('tcp://127.0.0.1:1')
 
-const calls = db.model('calls', {
+const calls = db.collection('calls', {
   time: 'ts',
   fields: {
     status: { type: 'string', index: true },
@@ -24,10 +24,10 @@ it('infers row types from the schema', async () => {
 
 it('rejects wrong field names and wrong value types', () => {
   // @ts-expect-error unknown field in where
-  calls.where({ statuz: 'x' })
+  calls.query({ statuz: 'x' })
 
   // @ts-expect-error wrong value type
-  calls.where({ dur: 'ten' })
+  calls.query({ dur: 'ten' })
 
   // @ts-expect-error unknown field in sort
   calls.sort({ nope: 1 })
@@ -36,21 +36,21 @@ it('rejects wrong field names and wrong value types', () => {
   void calls.insert({ nope: 1 })
 
   // @ts-expect-error the id option is gone, the key is _id
-  db.model('bad', { id: 'a', fields: { a: { type: 'string' } } })
+  db.collection('bad', { id: 'a', fields: { a: { type: 'string' } } })
 
   // @ts-expect-error unknown field type
-  db.model('bad', { fields: { a: { type: 'text' } } })
+  db.collection('bad', { fields: { a: { type: 'text' } } })
 })
 
 it('accepts operators, dot paths on json fields and Date operands', () => {
-  calls.where({ dur: { $gt: 1, $lt: 9 }, 'meta.city': 'Rio', ts: { $gte: new Date() } })
+  calls.query({ dur: { $gt: 1, $lt: 9 }, 'meta.city': 'Rio', ts: { $gte: new Date() } })
 })
 
 it('allows RegExp on string fields only', () => {
-  void calls.where({ status: /^a/i })
-  void calls.where({ status: { $regex: /^a/ } })
-  void calls.where({ status: { $regex: '^a', $options: 'i' } })
+  void calls.query({ status: /^a/i })
+  void calls.query({ status: { $regex: /^a/ } })
+  void calls.query({ status: { $regex: '^a', $options: 'i' } })
 
   // @ts-expect-error a RegExp is not a number
-  calls.where({ dur: /1/ })
+  calls.query({ dur: /1/ })
 })

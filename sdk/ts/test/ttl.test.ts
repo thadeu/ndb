@@ -7,7 +7,7 @@ const db = unixDb()
 afterAll(() => db.close())
 
 function sessions() {
-  return db.model(collName(), {
+  return db.collection(collName(), {
     expires: 'exp',
     fields: { user: { type: 'string', optional: true }, exp: { type: 'date', optional: true } },
   })
@@ -18,13 +18,13 @@ describe('expiry like Redis', () => {
     const s = sessions()
 
     await s.insert([{ _id: 'a' }, { _id: 'b' }], { expireIn: '1h' })
-    await s.create({ _id: 'c' }, { expireIn: 90 })
+    await s.insert({ _id: 'c' }, { expireIn: 90 })
 
     expect(await s.ttl('a')).toBeGreaterThan(3590)
     expect(await s.ttl('b')).toBeLessThanOrEqual(3600)
     expect(await s.ttl('c')).toBeLessThanOrEqual(90)
 
-    await s.update({ _id: 'a' }, { $set: { user: 'u' } }, { expireIn: '30m' })
+    await s.update('a', { $set: { user: 'u' } }, { expireIn: '30m' })
 
     expect(await s.ttl('a')).toBeLessThanOrEqual(1800)
 
@@ -43,14 +43,14 @@ describe('expiry like Redis', () => {
 
     const res = await s.expire('s1', '30m')
 
-    expect(res.v).toBe(2)
+    expect(res._v).toBe(2)
     expect(res.expiresAt.getTime()).toBeGreaterThan(Date.now())
     expect(await s.ttl('s1')).toBeLessThanOrEqual(1800)
 
-    expect((await s.expireAt('s1', new Date(Date.now() + 7_200_000))).v).toBe(3)
+    expect((await s.expireAt('s1', new Date(Date.now() + 7_200_000)))._v).toBe(3)
     expect(await s.ttl('s1')).toBeGreaterThan(7190)
 
-    expect((await s.persist('s1')).v).toBe(4)
+    expect((await s.persist('s1'))._v).toBe(4)
     expect(await s.ttl('s1')).toBe(-1)
   })
 
@@ -67,7 +67,7 @@ describe('expiry like Redis', () => {
   })
 
   it('a schema without expires fails with TtlError', async () => {
-    const plain = db.model(collName(), { fields: { n: { type: 'number' } } })
+    const plain = db.collection(collName(), { fields: { n: { type: 'number' } } })
 
     await expect(plain.insert({ n: 1 }, { expireIn: 60 })).rejects.toBeInstanceOf(TtlError)
     await expect(plain.expire('x', 60)).rejects.toMatchObject({ code: 'ttl_not_enabled' })

@@ -1,5 +1,5 @@
 export { connect, Ndb } from './ndb.js'
-export { Model } from './model.js'
+export { Collection } from './collection.js'
 export { newId } from './id.js'
 export { Query } from './query.js'
 export * from './errors.js'

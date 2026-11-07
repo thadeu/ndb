@@ -61,16 +61,16 @@ it('finds the shared cases', () => {
 
 describe.each(transports)('shared cases over %s', (_t, db) => {
   it.each(cases)('%s', async (_file, c) => {
-    const base = `/v1/c/${collName()}`
+    const base = `/${collName()}`
 
     await db.request('PUT', base, c.setup.catalog)
 
     for (const w of c.setup.writes) {
-      await db.request('POST', `${base}/${w.op}`, w.body)
+      await db.request('POST', `${base}/_${w.op}`, w.body)
     }
 
     const run = async () => {
-      const res = await db.stream('POST', `${base}/${c.request.op}`, c.request.body)
+      const res = await db.stream('POST', `${base}/_${c.request.op}`, c.request.body)
       const rows: unknown[] = []
 
       for await (const row of res.rows()) {

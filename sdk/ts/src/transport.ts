@@ -18,7 +18,7 @@ const notConnected = new Set(['ECONNREFUSED', 'ENOENT'])
 const retryBaseMs = 50
 const retryCapMs = 1000
 const defaultReadyTimeoutMs = 10_000
-const readOps = /\/(find|count|aggregate|get|stats)$/
+const readOps = /\/(_search|_count|_aggregate)$/
 
 export interface ConnectOptions {
   // Bearer token for the TCP listener. Default: env NDB_TOKEN.
@@ -50,9 +50,9 @@ export class Transport {
     }
   }
 
-  async stream(method: Method, path: string, body?: unknown, signal?: AbortSignal): Promise<Streamed> {
+  async stream(method: Method, path: string, body?: unknown, signal?: AbortSignal, contentType?: string): Promise<Streamed> {
     const res = await this.withReadyRetry(method, path, signal, async () => {
-      const r = await this.send(method, path, body, signal)
+      const r = await this.send(method, path, body, signal, contentType)
 
       if (r.statusCode >= 300) {
         throw await apiError(r)
@@ -70,8 +70,9 @@ export class Transport {
     }
   }
 
-  async request<T = unknown>(method: Method, path: string, body?: unknown): Promise<T> {
-    const res = await this.stream(method, path, body)
+  // contentType sends body as raw bytes (blobs) instead of JSON.
+  async request<T = unknown>(method: Method, path: string, body?: unknown, contentType?: string): Promise<T> {
+    const res = await this.stream(method, path, body, undefined, contentType)
     const text = await res.body.setEncoding('utf8').toArray()
 
     return (text.length > 0 ? JSON.parse(text.join('')) : undefined) as T
@@ -108,8 +109,9 @@ export class Transport {
     }
   }
 
-  private headers(): Record<string, string> {
-    const headers: Record<string, string> = { 'content-type': 'application/json' }
+  // Rows come as NDJSON: the SDK reads them one by one (jsonRows).
+  private headers(contentType = 'application/json'): Record<string, string> {
+    const headers: Record<string, string> = { 'content-type': contentType, accept: 'application/x-ndjson' }
 
     if (this.token) {
       headers.authorization = `Bearer ${this.token}`
@@ -123,13 +125,15 @@ export class Transport {
     path: string,
     body: unknown,
     signal?: AbortSignal,
+    contentType?: string,
   ): Promise<Dispatcher.ResponseData> {
+    const raw = contentType !== undefined
     const opts = {
       method,
       path,
       signal,
-      headers: this.headers(),
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: this.headers(contentType),
+      body: body === undefined ? undefined : raw ? (body as Uint8Array | string) : JSON.stringify(body),
     }
 
     try {

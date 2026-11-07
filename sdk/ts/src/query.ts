@@ -1,4 +1,4 @@
-import type { Model } from './model.js'
+import type { Collection } from './collection.js'
 import type { Fields, Row, SortSpec, Where } from './types.js'
 import { toWhere } from './where.js'
 
@@ -15,18 +15,19 @@ export class Query<F extends Fields, R = Row<F>> implements PromiseLike<R[]> {
   nextCursor = ''
 
   constructor(
-    private readonly model: Model<F>,
+    private readonly coll: Collection<F>,
     private readonly state: State = { clauses: [] },
   ) {}
 
-  where(w: Where<F>): Query<F, R> {
+  // Adds conditions, ANDed with the ones already there.
+  query(w: Where<F>): Query<F, R> {
     return this.with({ clauses: [...this.state.clauses, toWhere(w) as Record<string, unknown>] })
   }
 
-  // A where object built elsewhere, such as from a search form. It is not
+  // A query built elsewhere, such as from a search form. It is not
   // type-checked and is sent as is; the daemon validates it. It is ANDed
   // with the other clauses.
-  whereRaw(w: Record<string, unknown>): Query<F, R> {
+  rawQuery(w: Record<string, unknown>): Query<F, R> {
     return this.with({ clauses: [...this.state.clauses, w] })
   }
 
@@ -87,18 +88,18 @@ export class Query<F extends Fields, R = Row<F>> implements PromiseLike<R[]> {
     return null
   }
 
+  // How many documents match (POST /{coll}/_count). limit, skip and sort do
+  // not change it.
   async count(): Promise<number> {
-    await this.model.ready()
+    await this.coll.ready()
 
-    const body = { where: this.whereDoc(), count: true, limit: 1 }
-    const res = await this.model.db.transport.stream('POST', this.model.path('find'), body)
+    const out = await this.coll.db.transport.request<{ count: number }>('POST', this.coll.path('_count'), { query: this.whereDoc() })
 
-    await res.body.dump()
-
-    return Number(res.header('x-ndb-total') ?? 0)
+    return out.count
   }
 
-  async *iterate(): AsyncGenerator<R> {
+  // Every row, following the cursor page by page (limit is the page size).
+  async *each(): AsyncGenerator<R> {
     let body = this.body()
 
     for (;;) {
@@ -113,21 +114,21 @@ export class Query<F extends Fields, R = Row<F>> implements PromiseLike<R[]> {
   }
 
   private async *rows(body: Record<string, unknown>): AsyncGenerator<R> {
-    await this.model.ready()
+    await this.coll.ready()
 
-    const res = await this.model.db.transport.stream('POST', this.model.path('find'), body)
+    const res = await this.coll.db.transport.stream('POST', this.coll.path('_search'), body)
 
     this.nextCursor = res.header('x-ndb-next') ?? ''
 
     for await (const raw of res.rows()) {
-      yield this.model.decode(raw as Record<string, unknown>) as R
+      yield this.coll.decode(raw as Record<string, unknown>) as R
     }
   }
 
   private body(): Record<string, unknown> {
     const { fields, sort, limit, skip, after } = this.state
 
-    return { where: this.whereDoc(), fields, sort, limit, skip, after, versions: true }
+    return { query: this.whereDoc(), fields, sort, limit, skip, after, versions: true }
   }
 
   private whereDoc(): Record<string, unknown> {
@@ -147,6 +148,6 @@ export class Query<F extends Fields, R = Row<F>> implements PromiseLike<R[]> {
   }
 
   private with(patch: Partial<State>): Query<F, R> {
-    return new Query<F, R>(this.model, { ...this.state, ...patch })
+    return new Query<F, R>(this.coll, { ...this.state, ...patch })
   }
 }

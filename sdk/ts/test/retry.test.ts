@@ -78,7 +78,7 @@ describe('ready retry', () => {
 
     closers.push(() => db.close())
 
-    await db.request('POST', '/v1/c/x/insert', { insert: [] })
+    await db.request('POST', '/x/_bulk', { docs: [] })
 
     expect(calls).toBe(3)
   })
@@ -122,7 +122,7 @@ describe('ready retry', () => {
 
     const started = Date.now()
 
-    await expect(db.stream('GET', '/health', undefined, ac.signal)).rejects.toBeDefined()
+    await expect(db.stream('GET', '/_health', undefined, ac.signal)).rejects.toBeDefined()
     expect(Date.now() - started).toBeLessThan(2000)
   })
 
@@ -143,14 +143,14 @@ describe('ready retry', () => {
   it('never repeats a write that was sent and dropped', async () => {
     const { db, conns } = await dropServer()
 
-    await expect(db.request('POST', '/v1/c/x/insert', { insert: [{ a: 1 }] })).rejects.toBeDefined()
+    await expect(db.request('POST', '/x/_bulk', { docs: [{ a: 1 }] })).rejects.toBeDefined()
     expect(conns()).toBe(1)
   })
 
   it('repeats a read that was sent and dropped', async () => {
     const { db, conns } = await dropServer()
 
-    await expect(db.request('POST', '/v1/c/x/find', {})).rejects.toBeDefined()
+    await expect(db.request('POST', '/x/_search', {})).rejects.toBeDefined()
     expect(conns()).toBeGreaterThan(1)
   })
 })

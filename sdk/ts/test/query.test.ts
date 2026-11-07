@@ -21,14 +21,14 @@ afterAll(() => db.close())
 
 describe('query builder', () => {
   it('is thenable: await runs it', async () => {
-    const rows = await calls.where({ status: 'missed' }).sort({ _id: 1 })
+    const rows = await calls.query({ status: 'missed' }).sort({ _id: 1 })
 
     expect(rows.map((r) => r._id)).toEqual(['c00', 'c03', 'c06', 'c09'])
   })
 
   it('combines where, not, or, limit, skip and fields', async () => {
     const rows = await calls
-      .where({ dur: { $gte: 2 } })
+      .query({ dur: { $gte: 2 } })
       .not({ status: 'missed' })
       .or({ dur: { $lt: 5 } }, { dur: { $gt: 9 } })
       .sort({ dur: -1 })
@@ -41,15 +41,15 @@ describe('query builder', () => {
   })
 
   it('merges two where clauses on the same field with $and', async () => {
-    const rows = await calls.where({ dur: { $gt: 2 } }).where({ dur: { $lt: 5 } })
+    const rows = await calls.query({ dur: { $gt: 2 } }).query({ dur: { $lt: 5 } })
 
     expect(rows.map((r) => r.dur).sort()).toEqual([3, 4])
   })
 
   it('counts and returns the first row', async () => {
-    expect(await calls.where({ status: 'missed' }).count()).toBe(4)
+    expect(await calls.query({ status: 'missed' }).count()).toBe(4)
     expect((await calls.sort({ dur: -1 }).first())?.dur).toBe(11)
-    expect(await calls.where({ status: 'zzz' }).first()).toBeNull()
+    expect(await calls.query({ status: 'zzz' }).first()).toBeNull()
   })
 
   it('pages with page(n, size)', async () => {
@@ -70,10 +70,10 @@ describe('query builder', () => {
     expect(second.map((r) => r._id)).toEqual(['c05', 'c06', 'c07', 'c08', 'c09'])
   })
 
-  it('iterate() follows the cursor across pages', async () => {
+  it('each() follows the cursor across pages', async () => {
     const seen: string[] = []
 
-    for await (const row of calls.sort({ _id: 1 }).limit(5).iterate()) {
+    for await (const row of calls.sort({ _id: 1 }).limit(5).each()) {
       seen.push(row._id)
     }
 
@@ -100,7 +100,7 @@ describe('query builder', () => {
 
 describe('$regex', () => {
   const regexDb = unixDb()
-  const people = regexDb.model(`rx${process.pid}`, {
+  const people = regexDb.collection(`rx${process.pid}`, {
     fields: {
       name: { type: 'string', index: true, optional: true },
       tags: { type: 'json', optional: true },
@@ -122,41 +122,41 @@ describe('$regex', () => {
   const ids = (rows: { _id: string }[]) => rows.map((r) => r._id).sort()
 
   it('matches a string pattern and $options', async () => {
-    expect(ids(await people.where({ name: { $regex: '^Al' } }))).toEqual(['p1'])
-    expect(ids(await people.where({ name: { $regex: '^al', $options: 'i' } }))).toEqual(['p1', 'p2'])
+    expect(ids(await people.query({ name: { $regex: '^Al' } }))).toEqual(['p1'])
+    expect(ids(await people.query({ name: { $regex: '^al', $options: 'i' } }))).toEqual(['p1', 'p2'])
   })
 
   it('accepts a RegExp as the value and as $regex', async () => {
-    expect(ids(await people.where({ name: /^al/i }))).toEqual(['p1', 'p2'])
-    expect(ids(await people.where({ name: { $regex: /^Al/ } }))).toEqual(['p1'])
-    expect(ids(await people.where({ name: { $regex: /LI/i, $ne: 'alina' } }))).toEqual(['p1'])
+    expect(ids(await people.query({ name: /^al/i }))).toEqual(['p1', 'p2'])
+    expect(ids(await people.query({ name: { $regex: /^Al/ } }))).toEqual(['p1'])
+    expect(ids(await people.query({ name: { $regex: /LI/i, $ne: 'alina' } }))).toEqual(['p1'])
   })
 
   it('works in not, or, array fields and counts', async () => {
     expect(ids(await people.not({ name: /^Al/i }))).toEqual(['p3', 'p4'])
     expect(ids(await people.or({ name: /^B/ }, { name: /na$/ }))).toEqual(['p2', 'p3'])
-    expect(ids(await people.where({ tags: { $regex: '^gr' } } as never))).toEqual(['p2'])
-    expect(await people.where({ name: /^al/i }).count()).toBe(2)
+    expect(ids(await people.query({ tags: { $regex: '^gr' } } as never))).toEqual(['p2'])
+    expect(await people.query({ name: /^al/i }).count()).toBe(2)
   })
 
   it('never matches non-strings', async () => {
-    expect(ids(await people.where({ n: { $regex: '.' } } as never))).toEqual([])
+    expect(ids(await people.query({ n: { $regex: '.' } } as never))).toEqual([])
   })
 
   it('rejects unsupported RegExp flags before sending', () => {
-    expect(() => people.where({ name: /a/g })).toThrow(InvalidQueryError)
-    expect(() => people.where({ name: { $regex: /a/u } })).toThrow(/flag "u"/)
+    expect(() => people.query({ name: /a/g })).toThrow(InvalidQueryError)
+    expect(() => people.query({ name: { $regex: /a/u } })).toThrow(/flag "u"/)
     expect(() => people.not({ name: /a/y })).toThrow(/flag "y"/)
   })
 
   it('rejects RegExp flags together with $options', () => {
-    expect(() => people.where({ name: { $regex: /a/i, $options: 's' } })).toThrow(InvalidQueryError)
+    expect(() => people.query({ name: { $regex: /a/i, $options: 's' } })).toThrow(InvalidQueryError)
   })
 
   it('maps a bad pattern or flag to InvalidQueryError', async () => {
-    await expect(people.where({ name: { $regex: '(' } }).then((r) => r)).rejects.toBeInstanceOf(InvalidQueryError)
-    await expect(people.where({ name: { $regex: 'a(?=b)' } }).then((r) => r)).rejects.toBeInstanceOf(InvalidQueryError)
-    await expect(people.where({ name: { $regex: 'a', $options: 'g' } }).then((r) => r)).rejects.toBeInstanceOf(
+    await expect(people.query({ name: { $regex: '(' } }).then((r) => r)).rejects.toBeInstanceOf(InvalidQueryError)
+    await expect(people.query({ name: { $regex: 'a(?=b)' } }).then((r) => r)).rejects.toBeInstanceOf(InvalidQueryError)
+    await expect(people.query({ name: { $regex: 'a', $options: 'g' } }).then((r) => r)).rejects.toBeInstanceOf(
       InvalidQueryError,
     )
   })

@@ -43,7 +43,7 @@ async function waitReady(sock: string): Promise<void> {
 
   for (let i = 0; i < 200; i++) {
     try {
-      const res = await client.request({ path: '/health', method: 'GET' })
+      const res = await client.request({ path: '/_health', method: 'GET' })
 
       await res.body.dump()
 

@@ -1,6 +1,6 @@
-import { Model } from './model.js'
+import { Collection } from './collection.js'
 import { Transport, type ConnectOptions } from './transport.js'
-import type { Fields, Schema } from './types.js'
+import type { Blob, Fields, Schema } from './types.js'
 
 export class Ndb {
   readonly transport: Transport
@@ -9,12 +9,44 @@ export class Ndb {
     this.transport = new Transport(addr, opts)
   }
 
-  model<const F extends Fields>(name: string, schema: Schema<F>): Model<F> {
-    return new Model<F>(this, name, schema)
+  // A collection of the daemon; see Collection. Nothing is sent until its
+  // first call.
+  collection<const F extends Fields>(name: string, schema: Schema<F>): Collection<F> {
+    return new Collection<F>(this, name, schema)
   }
 
+  // Resolves when the daemon is ready (GET /_health).
   async health(): Promise<void> {
-    await this.transport.request('GET', '/health')
+    await this.transport.request('GET', '/_health')
+  }
+
+  // The catalog: one definition per collection (GET /_collections).
+  async collections(): Promise<Record<string, unknown>[]> {
+    return (await this.transport.request<{ collections: Record<string, unknown>[] }>('GET', '/_collections')).collections
+  }
+
+  // Every collection, totals, version and uptime (GET /_stats).
+  stats(): Promise<Record<string, unknown>> {
+    return this.transport.request('GET', '/_stats')
+  }
+
+  // Disk use per collection and per part (GET /_size).
+  size(): Promise<Record<string, unknown>> {
+    return this.transport.request('GET', '/_size')
+  }
+
+  // Stores bytes in the blob store (POST /_blobs) and returns the reference
+  // to put in a document field.
+  putBlob(data: Uint8Array | string, contentType = 'application/octet-stream'): Promise<Blob> {
+    return this.transport.request<Blob>('POST', '/_blobs', data, contentType)
+  }
+
+  // The bytes of a blob (GET /_blobs/{ref}).
+  async getBlob(blob: Blob | string): Promise<Uint8Array> {
+    const ref = typeof blob === 'string' ? blob : blob.$blob
+    const res = await this.transport.stream('GET', `/_blobs/${encodeURIComponent(ref)}`)
+
+    return new Uint8Array(await res.body.arrayBuffer())
   }
 
   request<T = unknown>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown): Promise<T> {

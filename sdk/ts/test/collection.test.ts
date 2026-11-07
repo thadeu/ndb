@@ -7,7 +7,7 @@ const db = unixDb()
 
 afterAll(() => db.close())
 
-describe('model writes and reads', () => {
+describe('collection writes and reads', () => {
   it('ensures the collection on first use and inserts with versions', async () => {
     const calls = callsModel(db)
     const results = await calls.insert([
@@ -16,14 +16,14 @@ describe('model writes and reads', () => {
     ])
 
     expect(results).toEqual([
-      { _id: 'c1', v: expect.any(Number) },
-      { _id: 'c2', v: expect.any(Number) },
+      { _id: 'c1', _v: expect.any(Number) },
+      { _id: 'c2', _v: expect.any(Number) },
     ])
   })
 
   it('lets the daemon generate an empty id', async () => {
-    const notes = db.model(collName(), { fields: { text: { type: 'string' } } })
-    const [res] = await notes.create({ text: 'hi' })
+    const notes = db.collection(collName(), { fields: { text: { type: 'string' } } })
+    const res = await notes.insert({ text: 'hi' })
 
     expect(res?._id).toBeTruthy()
   })
@@ -31,7 +31,7 @@ describe('model writes and reads', () => {
   it('finds by id with its version and a Date for date fields', async () => {
     const calls = callsModel(db)
 
-    await calls.create({ _id: 'c1', status: 'answered', ts: new Date('2026-11-01T10:00:00Z') })
+    await calls.insert({ _id: 'c1', status: 'answered', ts: new Date('2026-11-01T10:00:00Z') })
 
     const row = await calls.get('c1')
 
@@ -44,13 +44,10 @@ describe('model writes and reads', () => {
   it('updates by filter with set and unset, guarded by _v', async () => {
     const calls = callsModel(db)
 
-    await calls.create({ _id: 'c1', status: 'ringing', dur: 5, ts: new Date() })
+    await calls.insert({ _id: 'c1', status: 'ringing', dur: 5, ts: new Date() })
 
     const row = await calls.get('c1')
-    const upd = await calls.update(
-      { _id: 'c1', _v: row!._v },
-      { $set: { status: 'answered' }, $unset: { dur: true } },
-    )
+    const upd = await calls.update('c1', { $set: { status: 'answered' }, $unset: { dur: true } }, { guard: { _v: row!._v } })
     const after = await calls.get('c1')
 
     expect(upd).toMatchObject({ matched: 1, modified: 1 })
@@ -58,7 +55,7 @@ describe('model writes and reads', () => {
     expect(after?.status).toBe('answered')
     expect(after?.dur).toBeUndefined()
 
-    const stale = await calls.update({ _id: 'c1', _v: row!._v }, { $set: { status: 'x' } })
+    const stale = await calls.update('c1', { $set: { status: 'x' } }, { guard: { _v: row!._v } })
 
     expect(stale).toEqual({ matched: 0, modified: 0, doc: undefined })
   })
@@ -66,31 +63,31 @@ describe('model writes and reads', () => {
   it('does a guarded decrement once, and many with an index', async () => {
     const calls = callsModel(db)
 
-    await calls.create([
+    await calls.insert([
       { _id: 'a', status: 'q', dur: 1, ts: new Date() },
       { _id: 'b', status: 'q', dur: 1, ts: new Date() },
     ])
 
     const guard = { _id: 'a', dur: { $gte: 1 } }
     const tries = await Promise.all([
-      calls.update(guard, { $inc: { dur: -1 } }),
-      calls.update(guard, { $inc: { dur: -1 } }),
+      calls.updateBy(guard, { $inc: { dur: -1 } }),
+      calls.updateBy(guard, { $inc: { dur: -1 } }),
     ])
 
     expect(tries.map((r) => r.modified).sort()).toEqual([0, 1])
     expect((await calls.get('a'))?.dur).toBe(0)
 
-    const many = await calls.update({ status: 'q' }, { $inc: { dur: 10 } }, { many: true })
+    const many = await calls.updateBy({ status: 'q' }, { $inc: { dur: 10 } }, { many: true })
 
     expect(many).toEqual({ matched: 2, modified: 2, doc: undefined })
-    await expect(calls.update({ dur: 10 }, { $set: { vip: true } }, { many: true })).rejects.toMatchObject({
+    await expect(calls.updateBy({ dur: 10 }, { $set: { vip: true } }, { many: true })).rejects.toMatchObject({
       code: 'unindexed_many',
     })
   })
 
   it('upserts from the equality fields of the filter', async () => {
     const calls = callsModel(db)
-    const res = await calls.update({ _id: 'new' }, { $inc: { dur: 2 }, $set: { status: 'n' } }, { upsert: true })
+    const res = await calls.update('new', { $inc: { dur: 2 }, $set: { status: 'n' } }, { upsert: true })
 
     expect(res.matched).toBe(0)
     expect(res.doc).toMatchObject({ _id: 'new', dur: 2, status: 'n', _v: 1 })
@@ -99,7 +96,7 @@ describe('model writes and reads', () => {
   it('refuses operator keys without $ before sending', async () => {
     const calls = callsModel(db)
 
-    await expect(calls.update({ _id: 'c1' }, { set: { status: 'x' } } as never)).rejects.toBeInstanceOf(
+    await expect(calls.update('c1', { set: { status: 'x' } } as never)).rejects.toBeInstanceOf(
       InvalidUpdateError,
     )
   })
@@ -107,21 +104,21 @@ describe('model writes and reads', () => {
   it('deletes by filter', async () => {
     const calls = callsModel(db)
 
-    await calls.create({ _id: 'c1', status: 'a', ts: new Date() })
+    await calls.insert({ _id: 'c1', status: 'a', ts: new Date() })
 
     const row = await calls.get('c1')
 
-    expect(await calls.delete({ _id: 'c1', _v: row!._v + 5 })).toEqual({ deleted: 0 })
-    expect(await calls.delete({ _id: 'c1', _v: row!._v })).toEqual({ deleted: 1 })
+    expect(await calls.deleteBy({ _id: 'c1', _v: row!._v + 5 })).toEqual({ deleted: 0 })
+    expect(await calls.deleteBy({ _id: 'c1', _v: row!._v })).toEqual({ deleted: 1 })
     expect(await calls.get('c1')).toBeNull()
-    expect(await calls.delete({ _id: 'c1' })).toEqual({ deleted: 0 })
+    expect(await calls.deleteBy({ _id: 'c1' })).toEqual({ deleted: 0 })
   })
 
   it('raises duplicate_id on a repeated id', async () => {
     const calls = callsModel(db)
 
-    await calls.create({ _id: 'c1', status: 'a', ts: new Date() })
-    await expect(calls.create({ _id: 'c1', status: 'b', ts: new Date() })).rejects.toBeInstanceOf(
+    await calls.insert({ _id: 'c1', status: 'a', ts: new Date() })
+    await expect(calls.insert({ _id: 'c1', status: 'b', ts: new Date() })).rejects.toBeInstanceOf(
       DuplicateIdError,
     )
   })
@@ -131,15 +128,15 @@ describe('by _id', () => {
   it('get, update and delete use the /{_id} routes', async () => {
     const calls = callsModel(db)
 
-    await calls.create({ _id: 'a', status: 'q', dur: 3, ts: new Date() })
+    await calls.insert({ _id: 'a', status: 'q', dur: 3, ts: new Date() })
 
     const res = await calls.update('a', { $inc: { dur: -1 } })
 
     expect(res).toMatchObject({ matched: 1, modified: 1, doc: { _id: 'a', dur: 2, _v: 2 } })
 
-    const stale = await calls.update('a', { $set: { status: 'x' } }, { many: true })
+    const guarded = await calls.update('a', { $set: { status: 'x' } }, { guard: { dur: { $gte: 1 } } })
 
-    expect(stale.matched).toBe(1)
+    expect(guarded.matched).toBe(1)
 
     const upserted = await calls.update('z', { $set: { status: 'n' } }, { upsert: true })
 

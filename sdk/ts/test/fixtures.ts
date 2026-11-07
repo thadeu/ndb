@@ -2,7 +2,7 @@ import type { Ndb } from '../src/index.js'
 import { collName } from './helpers.js'
 
 export function callsModel(db: Ndb) {
-  return db.model(collName(), {
+  return db.collection(collName(), {
     time: 'ts',
     fields: {
       status: { type: 'string', index: true },

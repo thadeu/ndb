@@ -4,7 +4,7 @@ interface WatchLine {
   pos?: string
   op?: 'put' | 'del' | 'truncate'
   _id?: string
-  v?: number
+  _v?: number
   doc?: Record<string, unknown>
   heartbeat?: boolean
   error?: { code: string; message: string }
@@ -15,7 +15,7 @@ export interface RawEvent {
   pos: string
   op: 'put' | 'del' | 'truncate'
   _id: string
-  v: number
+  _v: number
   doc: Record<string, unknown> | undefined
 }
 
@@ -31,6 +31,6 @@ export async function* watchEvents(lines: AsyncIterable<unknown>, consumer: stri
       throw makeError(line.error.code, line.error.message)
     }
 
-    yield { consumer, pos: line.pos!, op: line.op!, _id: line._id ?? '', v: line.v!, doc: line.doc }
+    yield { consumer, pos: line.pos!, op: line.op!, _id: line._id ?? '', _v: line._v!, doc: line.doc }
   }
 }

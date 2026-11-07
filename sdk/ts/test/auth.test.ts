@@ -18,7 +18,7 @@ describe('token over tcp', () => {
   it('accepts the right token', async () => {
     const db = track(connect(inject('tokenTcpAddr'), { token: inject('token') }))
 
-    await expect(db.request('GET', '/v1/c')).resolves.toBeDefined()
+    await expect(db.request('GET', '/_collections')).resolves.toBeDefined()
   })
 
   it.each([
@@ -28,7 +28,7 @@ describe('token over tcp', () => {
     vi.stubEnv('NDB_TOKEN', '')
 
     const db = track(connect(inject('tokenTcpAddr'), opts))
-    const err = await db.request('GET', '/v1/c').catch((e: unknown) => e)
+    const err = await db.request('GET', '/_collections').catch((e: unknown) => e)
 
     expect(err).toBeInstanceOf(UnauthorizedError)
     expect(err).toBeInstanceOf(NdbError)
@@ -41,11 +41,11 @@ describe('token over tcp', () => {
 
     const fromEnv = track(connect(inject('tokenTcpAddr')))
 
-    await expect(fromEnv.request('GET', '/v1/c')).resolves.toBeDefined()
+    await expect(fromEnv.request('GET', '/_collections')).resolves.toBeDefined()
 
     const explicit = track(connect(inject('tokenTcpAddr'), { token: 'nope' }))
 
-    await expect(explicit.request('GET', '/v1/c')).rejects.toBeInstanceOf(UnauthorizedError)
+    await expect(explicit.request('GET', '/_collections')).rejects.toBeInstanceOf(UnauthorizedError)
   })
 })
 
