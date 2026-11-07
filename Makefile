@@ -1,4 +1,4 @@
-.PHONY: test race lint fuzz-smoke bench build dist up docs docs-build
+.PHONY: test race lint fuzz-smoke bench bench-go build dist up docs docs-build
 
 test:
 	go test ./...
@@ -20,7 +20,14 @@ fuzz-smoke:
 		done; \
 	done
 
-bench:
+# The ESL benchmark (benchmark/esl): live writes with a consumer, a kill -9,
+# a bulk load and reads, in about two minutes, on its own daemon. Run it
+# before and after a change of impact; it is not part of CI.
+bench: build
+	go run ./benchmark/esl -ndb bin/ndb
+
+# The Go micro-benchmarks of the packages.
+bench-go:
 	go test -run=^$$ -bench=. -benchmem ./...
 
 # Static, CGO-free release build. VERSION defaults to the git description.
