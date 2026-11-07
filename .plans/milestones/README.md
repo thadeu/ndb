@@ -39,8 +39,8 @@ Deferred ideas: [`../backlog/`](../backlog/).
 |---|---|---|---|
 | `_id` primary key | `_id` in every collection (UUIDv7), `id:` becomes `unique:`, `/{_id}` routes | in progress (0.1.3) | — |
 | Rails finders and destroy | `find_by_<attr>[_and_<attr>]` and `!`; atomic `find_or_create_by` (upsert) and `find_or_initialize_by`; `destroy!`, record `delete`, `Model.destroy(id)`, relation `destroy_all` / `delete_all` | planned (0.1.3, after `_id`) | — |
-| Truncate and drop | O(1) empty or remove a collection; time-split collections (month, week, year) | not started | [backlog/truncate-drop.md](../backlog/truncate-drop.md) |
-| Delete by index only | big `delete?many` without decoding each document | not started | [backlog/truncate-drop.md](../backlog/truncate-drop.md#related-delete-by-index-only) |
+| Truncate and drop | O(1) empty or remove a collection; time-split collections (month, week, year) | done (0.3.3) | [backlog/truncate-drop.md](../backlog/truncate-drop.md) |
+| Delete by index only | big `delete?many` without decoding each document | done (0.3.2) | [backlog/truncate-drop.md](../backlog/truncate-drop.md#related-delete-by-index-only) |
 | Relationships | `include` in find | not now | [backlog/relationships.md](../backlog/relationships.md) |
 
 ## Dependencies
