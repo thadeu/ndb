@@ -95,7 +95,7 @@ func backupOnline(c *apiClient, w io.Writer, noBlobs bool) error {
 		return err
 	}
 
-	rc, err := c.stream("POST", "/v1/backup", body)
+	rc, err := c.stream("POST", "/_backup", body)
 	if err != nil {
 		return err
 	}

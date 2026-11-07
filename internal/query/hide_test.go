@@ -10,7 +10,7 @@ import (
 var cutoff = time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
 
 func TestHideRemovesRowsAtOrBeforeTheCutoff(t *testing.T) {
-	q, err := query.Parse([]byte(`{"where":{"a":1}}`), query.Options{ExpiresField: "exp"})
+	q, err := query.Parse([]byte(`{"query":{"a":1}}`), query.Options{ExpiresField: "exp"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestHideRemovesRowsAtOrBeforeTheCutoff(t *testing.T) {
 }
 
 func TestHideKeepsTheIndexableConditions(t *testing.T) {
-	q, err := query.Parse([]byte(`{"where":{"a":1}}`), query.Options{ExpiresField: "exp"})
+	q, err := query.Parse([]byte(`{"query":{"a":1}}`), query.Options{ExpiresField: "exp"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,8 +58,8 @@ func TestHideKeepsTheIndexableConditions(t *testing.T) {
 }
 
 func TestHideDoesNotChangeTheCursorHash(t *testing.T) {
-	a, _ := query.Parse([]byte(`{"where":{"a":1}}`), query.Options{ExpiresField: "exp"})
-	b, _ := query.Parse([]byte(`{"where":{"a":1}}`), query.Options{ExpiresField: "exp"})
+	a, _ := query.Parse([]byte(`{"query":{"a":1}}`), query.Options{ExpiresField: "exp"})
+	b, _ := query.Parse([]byte(`{"query":{"a":1}}`), query.Options{ExpiresField: "exp"})
 
 	if err := b.Hide(query.ExpiredWhere("exp", cutoff)); err != nil {
 		t.Fatal(err)

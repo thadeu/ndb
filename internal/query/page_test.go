@@ -49,7 +49,7 @@ func TestCmpNoSortUsesSeq(t *testing.T) {
 }
 
 func TestCursorRoundTripAndHash(t *testing.T) {
-	q, _ := query.Parse([]byte(`{"where":{"a":1},"sort":{"at":-1},"limit":3}`), query.Options{TimeField: "at"})
+	q, _ := query.Parse([]byte(`{"query":{"a":1},"sort":{"at":-1},"limit":3}`), query.Options{TimeField: "at"})
 	pos := query.Pos{Keys: []query.Value{query.FromJSON("2026-11-04T12:00:00Z", true)}, ID: "c9", Seq: 7}
 
 	tok := q.EncodeCursor(pos, "snap1")
@@ -63,13 +63,13 @@ func TestCursorRoundTripAndHash(t *testing.T) {
 		t.Fatalf("%+v %s", got, snap)
 	}
 
-	other, _ := query.Parse([]byte(`{"where":{"a":2},"sort":{"at":-1}}`), query.Options{TimeField: "at"})
+	other, _ := query.Parse([]byte(`{"query":{"a":2},"sort":{"at":-1}}`), query.Options{TimeField: "at"})
 
 	if _, _, err := other.DecodeCursor(tok); err == nil || err.(*query.Error).Code() != "cursor_mismatch" {
 		t.Fatalf("want cursor_mismatch, got %v", err)
 	}
 
-	same, _ := query.Parse([]byte(`{"where":{"a":1},"sort":{"at":-1},"limit":50,"skip":4,"fields":["a"]}`), query.Options{TimeField: "at"})
+	same, _ := query.Parse([]byte(`{"query":{"a":1},"sort":{"at":-1},"limit":50,"skip":4,"fields":["a"]}`), query.Options{TimeField: "at"})
 
 	if _, _, err := same.DecodeCursor(tok); err != nil {
 		t.Fatalf("limit, skip and fields must not change the hash: %v", err)

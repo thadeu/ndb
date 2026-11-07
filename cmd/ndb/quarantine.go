@@ -59,7 +59,7 @@ func quarantine(args []string, out io.Writer) error {
 
 	var rep quarantineReport
 
-	if err := c.get(fmt.Sprintf("/v1/c/%s/quarantine?limit=%d", url.PathEscape(pos[0]), *limit), &rep); err != nil {
+	if err := c.get(fmt.Sprintf("/%s/_quarantine?limit=%d", url.PathEscape(pos[0]), *limit), &rep); err != nil {
 		return err
 	}
 

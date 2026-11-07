@@ -44,7 +44,7 @@ var topKeys = []string{"pipeline", "limit", "skip", "after", "count", "explain"}
 
 var knownStages = []string{"$match", "$group", "$sort", "$limit", "$skip", "$project"}
 
-// Parse validates the body of POST /v1/c/{coll}/aggregate. Every error has
+// Parse validates the body of POST /{coll}/_aggregate. Every error has
 // the code invalid_pipeline.
 func Parse(body []byte, opts Options) (*Pipeline, error) {
 	if len(bytes.TrimSpace(body)) == 0 {
@@ -211,9 +211,9 @@ func (p *Pipeline) buildQuery(matches []json.RawMessage, sortArg json.RawMessage
 	switch len(matches) {
 	case 0:
 	case 1:
-		body["where"] = matches[0]
+		body["query"] = matches[0]
 	default:
-		body["where"] = map[string]any{"$and": matches}
+		body["query"] = map[string]any{"$and": matches}
 	}
 
 	if sortArg != nil {

@@ -69,7 +69,7 @@ func TestGCBlobsKeepsLiveDocumentsBlobs(t *testing.T) {
 		t.Fatalf("result = %+v", res)
 	}
 
-	page, err := col.Find(ctx, []byte(`{"where":{"_id":"keep"}}`))
+	page, err := col.Find(ctx, []byte(`{"query":{"_id":"keep"}}`))
 	if err != nil || len(page.Rows) != 1 {
 		t.Fatalf("find: %v %v", page.Rows, err)
 	}

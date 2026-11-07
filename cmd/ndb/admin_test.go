@@ -413,7 +413,7 @@ func TestUpdateDeleteCommands(t *testing.T) {
 	base := []string{"-config", "none.yml", "-url", "unix://" + sock, "-json"}
 
 	raw := runCmd(t, func(a []string, o *strings.Builder) error { return update(a, o) },
-		append([]string{"stock", `{"_id":"a","$inc":{"qty":-1}}`, "--expire-in", "60s"}, base...)...)
+		append([]string{"stock", "a", `{"$inc":{"qty":-1}}`, "--expire-in", "60s"}, base...)...)
 
 	var up updateReport
 
@@ -422,7 +422,7 @@ func TestUpdateDeleteCommands(t *testing.T) {
 	}
 
 	raw = runCmd(t, func(a []string, o *strings.Builder) error { return update(a, o) },
-		append([]string{"stock", `{"g":1,"$set":{"x":1}}`, "--many"}, base...)...)
+		append([]string{"stock", `{"g":1}`, `{"$set":{"x":1}}`, "--many"}, base...)...)
 
 	var many updateReport
 
@@ -441,7 +441,7 @@ func TestUpdateDeleteCommands(t *testing.T) {
 
 	var out strings.Builder
 
-	if err := update(append([]string{"stock", `{"_id":"a"}`}, base...), &out); err == nil || !strings.Contains(err.Error(), "no_update") {
+	if err := update(append([]string{"stock", `{"_id":"a"}`, `{}`}, base...), &out); err == nil || !strings.Contains(err.Error(), "no_update") {
 		t.Fatalf("update without operators = %v", err)
 	}
 }

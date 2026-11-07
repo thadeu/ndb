@@ -1,10 +1,13 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/thadeu/ndb/internal/catalog"
@@ -15,7 +18,7 @@ import (
 
 type writeResult struct {
 	ID string `json:"_id"`
-	V  uint64 `json:"v"`
+	V  uint64 `json:"_v"`
 }
 
 type indexBody struct {
@@ -25,15 +28,36 @@ type indexBody struct {
 	Total int    `json:"total"`
 }
 
-type insertReq struct {
-	Insert   []json.RawMessage `json:"insert"`
+// bulkReq is the body of POST /{coll}/_bulk.
+type bulkReq struct {
+	Docs     []json.RawMessage `json:"docs"`
 	ExpireIn json.RawMessage   `json:"expire_in"`
 }
 
-// find streams the rows as NDJSON. The page metadata goes in headers, which
-// are sent before the first row: X-Ndb-Next (absent on the last page),
-// X-Ndb-Plan, X-Ndb-Examined and, with count: true, X-Ndb-Total. With
-// explain: true, X-Ndb-Explain is the JSON of the plan counters.
+// updateReq is the body of _update/{id} and _update_by_query. query is the
+// filter (or, for one id, extra guards such as "_v"); update holds the write
+// operators.
+type updateReq struct {
+	Query    map[string]any  `json:"query"`
+	Update   map[string]any  `json:"update"`
+	Many     bool            `json:"many"`
+	Upsert   bool            `json:"upsert"`
+	ExpireIn json.RawMessage `json:"expire_in"`
+}
+
+// deleteReq is the body of _delete_by_query.
+type deleteReq struct {
+	Query map[string]any `json:"query"`
+	Many  bool           `json:"many"`
+}
+
+// countReq is the body of _count.
+type countReq struct {
+	Query json.RawMessage `json:"query"`
+}
+
+// find is POST /{coll}/_search. The body holds the rows (see writePage);
+// the page data is in X-Ndb-* headers.
 func (s *Server) find(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	col, err := db.Get(r.PathValue("coll"))
 	if err != nil {
@@ -45,15 +69,15 @@ func (s *Server) find(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	s.read(w, r, db, &s.metrics.find, col.Find)
 }
 
-// findPattern is find over every collection of a pattern (logs-2026-*).
+// findPattern is _search over every collection of a pattern (logs-2026-*).
 func (s *Server) findPattern(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	s.read(w, r, db, &s.metrics.find, func(ctx context.Context, body []byte) (collection.Page, error) {
 		return db.FindPattern(ctx, r.PathValue("coll"), body)
 	})
 }
 
-// aggregate streams the output rows of a pipeline as NDJSON, with the same
-// headers as find (plan §10.2, §10.6).
+// aggregate is POST /{coll}/_aggregate: the output rows of a pipeline, with
+// the same answer and headers as _search.
 func (s *Server) aggregate(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	col, err := db.Get(r.PathValue("coll"))
 	if err != nil {
@@ -85,7 +109,8 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request, db *engine.DB, too
 
 	page, err := run(r.Context(), body)
 
-	took.Observe(time.Since(began))
+	elapsed := time.Since(began)
+	took.Observe(elapsed)
 
 	if err != nil {
 		writeError(w, err)
@@ -95,13 +120,72 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request, db *engine.DB, too
 
 	s.metrics.rows.Add(int64(len(page.Rows)))
 
-	writePage(w, page)
+	w.Header().Set("X-Ndb-Took-Ms", strconv.FormatInt(elapsed.Milliseconds(), 10))
+
+	writePage(w, r, page)
 }
 
-func (s *Server) insert(w http.ResponseWriter, r *http.Request, db *engine.DB) {
-	name := r.PathValue("coll")
+// countDocs is POST /{coll}/_count: {"count": n} for {"query": {...}}.
+func (s *Server) countDocs(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+	col, err := db.Get(r.PathValue("coll"))
+	if err != nil {
+		writeError(w, err)
 
-	var req insertReq
+		return
+	}
+
+	s.runCount(w, r, db, col.Find)
+}
+
+// countPattern is _count over every collection of a pattern.
+func (s *Server) countPattern(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+	s.runCount(w, r, db, func(ctx context.Context, body []byte) (collection.Page, error) {
+		return db.FindPattern(ctx, r.PathValue("coll"), body)
+	})
+}
+
+// runCount runs a find with count: true and limit 1, and answers its total.
+func (s *Server) runCount(w http.ResponseWriter, r *http.Request, db *engine.DB, run func(context.Context, []byte) (collection.Page, error)) {
+	var req countReq
+
+	body, err := readBody(w, r, db.MaxLine(r.PathValue("coll")))
+	if err == nil {
+		err = decodeOptional(body, &req)
+	}
+
+	if err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	find := map[string]any{"count": true, "limit": 1}
+
+	if req.Query != nil {
+		find["query"] = req.Query
+	}
+
+	raw, err := json.Marshal(find)
+	if err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	page, err := run(r.Context(), raw)
+	if err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]int{"count": *page.Total})
+}
+
+// insertOne is POST /{coll}/_doc: the body is the document. An unknown
+// collection is created (unless allow_implicit is false).
+func (s *Server) insertOne(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+	name := r.PathValue("coll")
 
 	body, err := readBody(w, r, db.MaxLine(name))
 	if err != nil {
@@ -110,22 +194,39 @@ func (s *Server) insert(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
-	if err := decode(body, &req); err != nil {
+	if trimmed := bytes.TrimSpace(body); len(trimmed) == 0 || trimmed[0] != '{' {
+		writeError(w, badRequest("the body must be a JSON object: the document"))
+
+		return
+	}
+
+	res, ok := s.insertDocs(w, r, db, name, [][]byte{body}, 0)
+	if ok {
+		writeJSON(w, http.StatusOK, res[0])
+	}
+}
+
+// bulk is POST /{coll}/_bulk: {"docs": [...], "expire_in"}, all or nothing.
+func (s *Server) bulk(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+	name := r.PathValue("coll")
+
+	var req bulkReq
+
+	body, err := readBody(w, r, db.MaxLine(name))
+	if err == nil {
+		err = decode(body, &req)
+	}
+
+	if err != nil {
 		writeError(w, err)
 
 		return
 	}
 
-	if len(req.Insert) == 0 {
-		writeError(w, badRequest("insert must be a non-empty array"))
+	if len(req.Docs) == 0 {
+		writeError(w, badRequest("docs must be a non-empty array"))
 
 		return
-	}
-
-	docs := make([][]byte, len(req.Insert))
-
-	for i, d := range req.Insert {
-		docs[i] = d
 	}
 
 	expireIn, err := parseExpireIn(req.ExpireIn)
@@ -135,11 +236,26 @@ func (s *Server) insert(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
+	docs := make([][]byte, len(req.Docs))
+
+	for i, d := range req.Docs {
+		docs[i] = d
+	}
+
+	res, ok := s.insertDocs(w, r, db, name, docs, expireIn)
+	if ok {
+		writeJSON(w, http.StatusOK, map[string]any{"results": res})
+	}
+}
+
+// insertDocs writes docs in one transaction. On an error it answers it and
+// returns false.
+func (s *Server) insertDocs(w http.ResponseWriter, r *http.Request, db *engine.DB, name string, docs [][]byte, expireIn time.Duration) ([]writeResult, bool) {
 	col, err := db.GetOrCreate(name)
 	if err != nil {
 		writeError(w, err)
 
-		return
+		return nil, false
 	}
 
 	var res []collection.Result
@@ -153,7 +269,7 @@ func (s *Server) insert(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	if err != nil {
 		writeError(w, err)
 
-		return
+		return nil, false
 	}
 
 	s.metrics.writes.Add(int64(len(res)))
@@ -164,17 +280,18 @@ func (s *Server) insert(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		out[i] = writeResult{ID: x.ID, V: x.V}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"results": out})
+	return out, true
 }
 
-// update is the atomic update by filter: the body mixes the filter and the
-// write operators, the options are in the query string.
+// update is POST /{coll}/_update_by_query: {"query", "update", "many",
+// "upsert", "expire_in"}. The match and the write are one atomic step.
 func (s *Server) update(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	s.runUpdate(w, r, db, "")
 }
 
-// updateID is POST /v1/c/{coll}/{id}/update: the same update, on the
-// document with this _id. The body filter keys are extra guards.
+// updateID is POST /{coll}/_update/{id}: the same update on the document
+// with this _id. The keys of query are extra guards (the _v of optimistic
+// concurrency).
 func (s *Server) updateID(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	s.runUpdate(w, r, db, r.PathValue("id"))
 }
@@ -182,14 +299,40 @@ func (s *Server) updateID(w http.ResponseWriter, r *http.Request, db *engine.DB)
 func (s *Server) runUpdate(w http.ResponseWriter, r *http.Request, db *engine.DB, id string) {
 	name := r.PathValue("coll")
 
+	var req updateReq
+
 	body, err := readBody(w, r, db.MaxLine(name))
+	if err == nil {
+		err = decode(body, &req)
+	}
+
 	if err != nil {
 		writeError(w, err)
 
 		return
 	}
 
-	opts, err := updateOpts(r)
+	expireIn, err := parseExpireIn(req.ExpireIn)
+	if err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	if id != "" && req.Many {
+		writeError(w, badRequest("many does not apply to one _id"))
+
+		return
+	}
+
+	joined, err := collection.JoinUpdate(req.Query, req.Update)
+	if err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	raw, err := json.Marshal(joined)
 	if err != nil {
 		writeError(w, err)
 
@@ -203,14 +346,14 @@ func (s *Server) runUpdate(w http.ResponseWriter, r *http.Request, db *engine.DB
 		return
 	}
 
+	opts := collection.UpdateOpts{Many: req.Many, Upsert: req.Upsert, ExpireIn: expireIn}
+
 	var res collection.UpdateResult
 
 	if id == "" {
-		res, err = col.Update(r.Context(), body, opts)
+		res, err = col.Update(r.Context(), raw, opts)
 	} else {
-		opts.Many = false
-
-		res, err = col.UpdateID(r.Context(), id, body, opts)
+		res, err = col.UpdateID(r.Context(), id, raw, opts)
 	}
 
 	if err != nil {
@@ -230,7 +373,7 @@ func (s *Server) runUpdate(w http.ResponseWriter, r *http.Request, db *engine.DB
 	writeJSON(w, http.StatusOK, out)
 }
 
-// get is GET /v1/c/{coll}/{id}: the document with its "_v".
+// get is GET /{coll}/_doc/{id}: the document with its "_v".
 func (s *Server) get(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	col, err := db.Get(r.PathValue("coll"))
 	if err != nil {
@@ -252,7 +395,7 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	_, _ = w.Write(append(doc.Doc, '\n'))
 }
 
-// removeID is DELETE /v1/c/{coll}/{id}.
+// removeID is DELETE /{coll}/_doc/{id}.
 func (s *Server) removeID(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	col, err := db.Get(r.PathValue("coll"))
 	if err != nil {
@@ -273,69 +416,24 @@ func (s *Server) removeID(w http.ResponseWriter, r *http.Request, db *engine.DB)
 	writeJSON(w, http.StatusOK, map[string]int{"deleted": n})
 }
 
-func updateOpts(r *http.Request) (collection.UpdateOpts, error) {
-	var opts collection.UpdateOpts
-
-	many, err := boolParam(r, "many")
-	if err != nil {
-		return opts, err
-	}
-
-	upsert, err := boolParam(r, "upsert")
-	if err != nil {
-		return opts, err
-	}
-
-	expireIn, err := parseExpireParam(r.URL.Query().Get("expire_in"))
-	if err != nil {
-		return opts, err
-	}
-
-	return collection.UpdateOpts{Many: many, Upsert: upsert, ExpireIn: expireIn}, nil
-}
-
-// boolParam reads an optional true/false query parameter.
-func boolParam(r *http.Request, name string) (bool, error) {
-	raw := r.URL.Query().Get(name)
-
-	if raw == "" {
-		return false, nil
-	}
-
-	b, err := strconv.ParseBool(raw)
-	if err != nil {
-		return false, badRequest("%s must be true or false", name)
-	}
-
-	return b, nil
-}
-
-// parseExpireParam reads expire_in from the query string: a duration
-// string or a number of seconds, like the field of the insert body.
-func parseExpireParam(raw string) (time.Duration, error) {
-	if raw == "" {
-		return 0, nil
-	}
-
-	if _, err := strconv.ParseFloat(raw, 64); err != nil {
-		raw = strconv.Quote(raw)
-	}
-
-	return parseExpireIn(json.RawMessage(raw))
-}
-
-// remove is delete by filter: the body is the filter.
+// remove is POST /{coll}/_delete_by_query: {"query", "many"}.
 func (s *Server) remove(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
 
+	var req deleteReq
+
 	body, err := readBody(w, r, db.MaxLine(name))
+	if err == nil {
+		err = decode(body, &req)
+	}
+
 	if err != nil {
 		writeError(w, err)
 
 		return
 	}
 
-	many, err := boolParam(r, "many")
+	raw, err := json.Marshal(req.Query)
 	if err != nil {
 		writeError(w, err)
 
@@ -349,7 +447,7 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
-	n, err := col.Delete(r.Context(), body, many)
+	n, err := col.Delete(r.Context(), raw, req.Many)
 	if err != nil {
 		writeError(w, err)
 
@@ -361,7 +459,7 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	writeJSON(w, http.StatusOK, map[string]int{"deleted": n})
 }
 
-// ensure is ensure_collection (PUT /v1/c/{coll}). The answer has the final
+// ensure is ensure_collection (PUT /{coll}). The answer has the final
 // definition and the state of each index.
 func (s *Server) ensure(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
@@ -408,7 +506,7 @@ func (s *Server) list(w http.ResponseWriter, _ *http.Request, db *engine.DB) {
 	writeJSON(w, http.StatusOK, map[string]any{"collections": db.Definitions()})
 }
 
-// listPattern is GET /v1/c/{pattern}: the names a pattern matches.
+// listPattern is GET /{pattern}: the names a pattern matches.
 func (s *Server) listPattern(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	names, err := db.Match(r.PathValue("coll"))
 	if err != nil {
@@ -418,6 +516,27 @@ func (s *Server) listPattern(w http.ResponseWriter, r *http.Request, db *engine.
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"collections": append([]string{}, names...)})
+}
+
+// ensureIndex is PUT /{coll}/_indexes/{field}: it adds a secondary index to
+// an existing collection and builds it in the background.
+func (s *Server) ensureIndex(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+	name := r.PathValue("coll")
+
+	if _, ok := db.Definition(name); !ok {
+		writeError(w, fmt.Errorf("%w: %s", catalog.ErrUnknown, name))
+
+		return
+	}
+
+	def, err := db.Ensure(catalog.Def{Name: name, Indexes: []string{r.PathValue("field")}})
+	if err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"collection": name, "indexes": def.Indexes})
 }
 
 func (s *Server) dropIndex(w http.ResponseWriter, r *http.Request, db *engine.DB) {
@@ -443,10 +562,12 @@ func indexBodies(st engine.Stats) []indexBody {
 	return out
 }
 
-func writePage(w http.ResponseWriter, page collection.Page) {
+// writePage answers the rows of a page: a JSON array, or NDJSON when the
+// client asks for application/x-ndjson. The rows are the same in both; the
+// page data is in headers, sent before the body.
+func writePage(w http.ResponseWriter, r *http.Request, page collection.Page) {
 	h := w.Header()
 
-	h.Set("Content-Type", "application/x-ndjson")
 	h.Set("X-Ndb-Plan", page.Plan)
 	h.Set("X-Ndb-Examined", strconv.Itoa(page.Examined))
 
@@ -464,15 +585,48 @@ func writePage(w http.ResponseWriter, page collection.Page) {
 		}
 	}
 
+	if wantsNDJSON(r) {
+		h.Set("Content-Type", "application/x-ndjson")
+		w.WriteHeader(http.StatusOK)
+
+		for _, row := range page.Rows {
+			if _, err := w.Write(append(row, '\n')); err != nil {
+				return
+			}
+		}
+
+		return
+	}
+
+	h.Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
-	for _, row := range page.Rows {
-		if _, err := w.Write(row); err != nil {
-			return
+	_, _ = w.Write(jsonArray(page.Rows))
+}
+
+// wantsNDJSON tells if the Accept header asks for NDJSON.
+func wantsNDJSON(r *http.Request) bool {
+	return strings.Contains(r.Header.Get("Accept"), "application/x-ndjson")
+}
+
+// jsonArray joins rows into one JSON array.
+func jsonArray(rows []json.RawMessage) []byte {
+	n := 2
+
+	for _, row := range rows {
+		n += len(row) + 1
+	}
+
+	out := make([]byte, 0, n)
+	out = append(out, '[')
+
+	for i, row := range rows {
+		if i > 0 {
+			out = append(out, ',')
 		}
 
-		if _, err := w.Write([]byte{'\n'}); err != nil {
-			return
-		}
+		out = append(out, row...)
 	}
+
+	return append(out, ']', '\n')
 }

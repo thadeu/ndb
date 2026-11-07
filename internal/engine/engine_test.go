@@ -249,7 +249,7 @@ func TestDirectCollectionReadsAppFilesAndRefusesWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	page, err := col.Find(ctx, []byte(`{"where":{"status":"answered"}}`))
+	page, err := col.Find(ctx, []byte(`{"query":{"status":"answered"}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +363,7 @@ func TestRelativeGlobFromConfigFindsTheFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	page, err := col.Find(ctx, []byte(`{"where":{"status":"answered"}}`))
+	page, err := col.Find(ctx, []byte(`{"query":{"status":"answered"}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +401,7 @@ func TestDirectLineWithoutIDHasNoIDAndSurvivesRestart(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		page, err := col.Find(ctx, []byte(`{"where":{"level":"error"}}`))
+		page, err := col.Find(ctx, []byte(`{"query":{"level":"error"}}`))
 		if err != nil || len(page.Rows) != 1 || strings.Contains(string(page.Rows[0]), `"_id"`) {
 			t.Fatalf("rows = %q, err %v", page.Rows, err)
 		}

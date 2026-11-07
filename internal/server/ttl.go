@@ -14,13 +14,8 @@ import (
 )
 
 type expireReq struct {
-	ID string          `json:"_id"`
 	In json.RawMessage `json:"in"`
 	At string          `json:"at"`
-}
-
-type persistReq struct {
-	ID string `json:"_id"`
 }
 
 // parseExpireIn reads expire_in: a Go duration string ("90m", "1d") or a
@@ -55,7 +50,7 @@ func parseExpireIn(raw json.RawMessage) (time.Duration, error) {
 	return time.Duration(secs * float64(time.Second)), nil
 }
 
-// expire is POST /v1/c/{coll}/expire: {"_id", "in" | "at"}.
+// expire is POST /{coll}/_expire/{id}: {"in" | "at"}.
 func (s *Server) expire(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
 
@@ -88,7 +83,9 @@ func (s *Server) expire(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
-	v, at, err := col.Expire(r.Context(), req.ID, e)
+	id := r.PathValue("id")
+
+	v, at, err := col.Expire(r.Context(), id, e)
 	if err != nil {
 		writeError(w, err)
 
@@ -97,7 +94,7 @@ func (s *Server) expire(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 
 	s.metrics.writes.Add(1)
 
-	writeJSON(w, http.StatusOK, map[string]any{"_id": req.ID, "v": v, "expires_at": at.UTC().Format(time.RFC3339Nano)})
+	writeJSON(w, http.StatusOK, map[string]any{"_id": id, "_v": v, "expires_at": at.UTC().Format(time.RFC3339Nano)})
 }
 
 // expiry is the "in" or "at" of the request. Exactly one must be set.
@@ -123,33 +120,18 @@ func (r expireReq) expiry() (collection.Expiry, error) {
 	return collection.Expiry{At: at}, nil
 }
 
-// persist is POST /v1/c/{coll}/persist: {"_id"}.
+// persist is POST /{coll}/_persist/{id}: the document stops expiring.
 func (s *Server) persist(w http.ResponseWriter, r *http.Request, db *engine.DB) {
-	name := r.PathValue("coll")
+	id := r.PathValue("id")
 
-	var req persistReq
-
-	body, err := readBody(w, r, db.MaxLine(name))
+	col, err := db.Get(r.PathValue("coll"))
 	if err != nil {
 		writeError(w, err)
 
 		return
 	}
 
-	if err := decode(body, &req); err != nil {
-		writeError(w, err)
-
-		return
-	}
-
-	col, err := db.Get(name)
-	if err != nil {
-		writeError(w, err)
-
-		return
-	}
-
-	v, err := col.Persist(r.Context(), req.ID)
+	v, err := col.Persist(r.Context(), id)
 	if err != nil {
 		writeError(w, err)
 
@@ -158,10 +140,10 @@ func (s *Server) persist(w http.ResponseWriter, r *http.Request, db *engine.DB) 
 
 	s.metrics.writes.Add(1)
 
-	writeJSON(w, http.StatusOK, writeResult{ID: req.ID, V: v})
+	writeJSON(w, http.StatusOK, writeResult{ID: id, V: v})
 }
 
-// ttl is GET /v1/c/{coll}/{id}/ttl: the whole seconds left (rounded up), or
+// ttl is GET /{coll}/_ttl/{id}: the whole seconds left (rounded up), or
 // -1 when the document never expires.
 func (s *Server) ttl(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	col, err := db.Get(r.PathValue("coll"))

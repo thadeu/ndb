@@ -7,9 +7,9 @@
     },
     "writes": [
       {
-        "op": "insert",
+        "op": "bulk",
         "body": {
-          "insert": [
+          "docs": [
             {
               "_id": "p0",
               "n": 0
@@ -40,7 +40,7 @@
     ]
   },
   "request": {
-    "op": "find",
+    "op": "search",
     "body": {
       "sort": {
         "n": -1

@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -16,13 +15,13 @@ import (
 
 type expireReport struct {
 	ID        string `json:"_id"`
-	V         uint64 `json:"v"`
+	V         uint64 `json:"_v"`
 	ExpiresAt string `json:"expires_at"`
 }
 
 type persistReport struct {
 	ID string `json:"_id"`
-	V  uint64 `json:"v"`
+	V  uint64 `json:"_v"`
 }
 
 type ttlReport struct {
@@ -56,14 +55,14 @@ func expire(args []string, out io.Writer) error {
 		return err
 	}
 
-	body, err := json.Marshal(map[string]any{"_id": pos[1], "in": durationArg(pos[2])})
+	body, err := json.Marshal(map[string]any{"in": durationArg(pos[2])})
 	if err != nil {
 		return err
 	}
 
 	var rep expireReport
 
-	if err := c.post("/v1/c/"+url.PathEscape(pos[0])+"/expire", body, &rep); err != nil {
+	if err := c.post(docPath(pos[0], "_expire", pos[1]), body, &rep); err != nil {
 		return err
 	}
 
@@ -100,14 +99,9 @@ func persist(args []string, out io.Writer) error {
 		return err
 	}
 
-	body, err := json.Marshal(map[string]any{"_id": pos[1]})
-	if err != nil {
-		return err
-	}
-
 	var rep persistReport
 
-	if err := c.post("/v1/c/"+url.PathEscape(pos[0])+"/persist", body, &rep); err != nil {
+	if err := c.post(docPath(pos[0], "_persist", pos[1]), nil, &rep); err != nil {
 		return err
 	}
 
@@ -147,7 +141,7 @@ func ttl(args []string, out io.Writer) error {
 
 	var rep ttlReport
 
-	if err := c.get("/v1/c/"+url.PathEscape(pos[0])+"/"+url.PathEscape(pos[1])+"/ttl", &rep); err != nil {
+	if err := c.get(docPath(pos[0], "_ttl", pos[1]), &rep); err != nil {
 		return err
 	}
 

@@ -82,7 +82,7 @@ func TestTokenRequiredOnTCP(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		req, _ := http.NewRequest("GET", url+"/v1/c", nil)
+		req, _ := http.NewRequest("GET", url+"/_collections", nil)
 
 		if c.auth != "" {
 			req.Header.Set("Authorization", c.auth)
@@ -113,7 +113,7 @@ func TestTokenRequiredOnTCP(t *testing.T) {
 func TestTokenNotRequiredOnUnixSocket(t *testing.T) {
 	unix, _, _ := tokenServer(t, "s3cret")
 
-	resp, body := do(t, unix, "GET", "/v1/c", "", nil)
+	resp, body := do(t, unix, "GET", "/_collections", "", nil)
 
 	if resp.StatusCode != 200 {
 		t.Fatalf("unix without token: %d %s", resp.StatusCode, body)
@@ -123,7 +123,7 @@ func TestTokenNotRequiredOnUnixSocket(t *testing.T) {
 func TestBackupStillForbiddenOverTCPWithToken(t *testing.T) {
 	_, tcp, addr := tokenServer(t, "s3cret")
 
-	req, _ := http.NewRequest("POST", "http://"+addr+"/v1/backup", strings.NewReader(`{"dest":"`+filepath.Join(t.TempDir(), "bk")+`"}`))
+	req, _ := http.NewRequest("POST", "http://"+addr+"/_backup", strings.NewReader(`{"dest":"`+filepath.Join(t.TempDir(), "bk")+`"}`))
 	req.Header.Set("Authorization", "Bearer s3cret")
 
 	resp, err := tcp.Do(req)

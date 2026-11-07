@@ -7,9 +7,9 @@
     },
     "writes": [
       {
-        "op": "insert",
+        "op": "bulk",
         "body": {
-          "insert": [
+          "docs": [
             {
               "_id": "z"
             },
@@ -25,7 +25,7 @@
     ]
   },
   "request": {
-    "op": "find",
+    "op": "search",
     "body": {}
   },
   "expect": {

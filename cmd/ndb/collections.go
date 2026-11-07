@@ -51,7 +51,7 @@ func collections(args []string, out io.Writer) error {
 		Collections []catalog.Def `json:"collections"`
 	}
 
-	if err := c.get("/v1/c", &list); err != nil {
+	if err := c.get("/_collections", &list); err != nil {
 		return err
 	}
 
@@ -96,7 +96,7 @@ type collectionBody struct {
 func showCollection(c *apiClient, name string, asJSON bool, out io.Writer) error {
 	var body collectionBody
 
-	if err := c.get("/v1/c/"+url.PathEscape(name), &body); err != nil {
+	if err := c.get("/"+url.PathEscape(name), &body); err != nil {
 		return err
 	}
 

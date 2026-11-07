@@ -26,8 +26,8 @@ type watchReq struct {
 	From     string `json:"from"`
 	Limit    int    `json:"limit"`
 
-	// Where is the optional filter, the where of find.
-	Where json.RawMessage `json:"where"`
+	// Query is the optional filter, the query of _search.
+	Query json.RawMessage `json:"query"`
 }
 
 type ackReq struct {
@@ -71,11 +71,11 @@ func (s *Server) watch(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
-	if string(req.Where) == "null" {
-		req.Where = nil
+	if string(req.Query) == "null" {
+		req.Query = nil
 	}
 
-	stream, err := db.WatchWhere(name, req.Consumer, req.From, req.Where)
+	stream, err := db.WatchWhere(name, req.Consumer, req.From, req.Query)
 	if err != nil {
 		writeError(w, err)
 
@@ -103,8 +103,8 @@ func validateWatch(req watchReq) error {
 		return badRequest("from must be beginning or now")
 	case req.Limit < 0:
 		return badRequest("limit must be zero or more")
-	case len(req.Where) > 0 && req.Where[0] != '{' && string(req.Where) != "null":
-		return badRequest("where must be an object")
+	case len(req.Query) > 0 && req.Query[0] != '{' && string(req.Query) != "null":
+		return badRequest("query must be an object")
 	}
 
 	return nil

@@ -57,14 +57,14 @@ func runWriterChild() {
 
 	waitHealthy(client)
 
-	put(client, "/v1/c/log", `{"id":"k"}`)
+	put(client, "/log", `{"id":"k"}`)
 
 	// Numbers continue from the rows on disk, so n is the global write count:
 	// after a restart, rows >= the highest acked n.
 	for n := int64(rowCount(client)) + 1; ; n++ {
-		body := fmt.Sprintf(`{"insert":[{"k":"w%d","n":%d}]}`, n, n)
+		body := fmt.Sprintf(`{"docs":[{"k":"w%d","n":%d}]}`, n, n)
 
-		status := post(client, "/v1/c/log/insert", body)
+		status := post(client, "/log/_bulk", body)
 
 		if status != http.StatusOK {
 			panic(fmt.Sprintf("insert %d: status %d", n, status))
@@ -120,7 +120,7 @@ func waitHealthy(client *http.Client) {
 	deadline := time.Now().Add(10 * time.Second)
 
 	for time.Now().Before(deadline) {
-		resp, err := client.Get("http://ndb/health")
+		resp, err := client.Get("http://ndb/_health")
 		if err == nil {
 			resp.Body.Close()
 
@@ -147,7 +147,7 @@ func put(client *http.Client, path, body string) {
 }
 
 func rowCount(client *http.Client) int {
-	resp, err := client.Get("http://ndb/v1/c/log/stats")
+	resp, err := client.Get("http://ndb/log/_stats")
 	if err != nil {
 		panic(err)
 	}
@@ -197,14 +197,14 @@ func TestDaemonStopsGracefullyOnSIGTERM(t *testing.T) {
 
 	waitHealthy(client)
 
-	put(client, "/v1/c/log", `{"id":"k"}`)
+	put(client, "/log", `{"id":"k"}`)
 
 	const n = 200
 
 	for i := range n {
-		body := fmt.Sprintf(`{"insert":[{"k":"d%d"}]}`, i)
+		body := fmt.Sprintf(`{"docs":[{"k":"d%d"}]}`, i)
 
-		if status := post(client, "/v1/c/log/insert", body); status != http.StatusOK {
+		if status := post(client, "/log/_bulk", body); status != http.StatusOK {
 			t.Fatalf("insert %d: status %d", i, status)
 		}
 	}
@@ -290,12 +290,12 @@ func TestBackupOnlineAndOffline(t *testing.T) {
 
 	waitHealthy(client)
 
-	put(client, "/v1/c/log", `{"id":"k"}`)
+	put(client, "/log", `{"id":"k"}`)
 
 	const n = 50
 
 	for i := range n {
-		if status := post(client, "/v1/c/log/insert", fmt.Sprintf(`{"insert":[{"k":"d%d"}]}`, i)); status != http.StatusOK {
+		if status := post(client, "/log/_bulk", fmt.Sprintf(`{"docs":[{"k":"d%d"}]}`, i)); status != http.StatusOK {
 			t.Fatalf("insert %d: status %d", i, status)
 		}
 	}
@@ -392,7 +392,7 @@ func TestDaemonTokenFileOnTCP(t *testing.T) {
 	waitHealthy(unixClient(sock))
 
 	status := func(auth string) int {
-		req, _ := http.NewRequest("GET", "http://"+addr+"/v1/c", nil)
+		req, _ := http.NewRequest("GET", "http://"+addr+"/_collections", nil)
 
 		if auth != "" {
 			req.Header.Set("Authorization", auth)
@@ -416,7 +416,7 @@ func TestDaemonTokenFileOnTCP(t *testing.T) {
 		t.Fatalf("token: %d", got)
 	}
 
-	if got := post(unixClient(sock), "/v1/c/x/find", `{}`); got == 401 {
+	if got := post(unixClient(sock), "/x/_search", `{}`); got == 401 {
 		t.Fatal("unix socket asked for a token")
 	}
 }

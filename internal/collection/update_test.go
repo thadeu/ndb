@@ -278,7 +278,7 @@ func TestMaxLowerDoesNotWrite(t *testing.T) {
 func TestUpdateContractErrors(t *testing.T) {
 	cases := map[string]struct{ body, code string }{
 		"unknown operator":   {`{"_id":"a","$rename":{"a":"b"}}`, "unknown_operator"},
-		"unknown top $not":   {`{"$not":{"a":1},"$set":{"a":1}}`, "unknown_operator"},
+		"unknown top $where": {`{"$where":"x","$set":{"a":1}}`, "unknown_operator"},
 		"no operator":        {`{"_id":"a","n":1}`, "no_update"},
 		"conflict":           {`{"_id":"a","$set":{"n":1},"$inc":{"n":1}}`, "conflicting_update"},
 		"conflict parent":    {`{"_id":"a","$set":{"n":{}},"$inc":{"n.x":1}}`, "conflicting_update"},

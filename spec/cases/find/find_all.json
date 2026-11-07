@@ -4,11 +4,11 @@
   "setup": {
     "catalog": { "write": "engine" },
     "writes": [
-      { "op": "insert", "body": { "insert": [{ "_id": "p1", "status": "draft" }] } },
-      { "op": "insert", "body": { "insert": [{ "_id": "p2", "status": "published" }] } }
+      { "op": "bulk", "body": { "docs": [{ "_id": "p1", "status": "draft" }] } },
+      { "op": "bulk", "body": { "docs": [{ "_id": "p2", "status": "published" }] } }
     ]
   },
-  "request": { "op": "find", "body": { "where": {} } },
+  "request": { "op": "search", "body": { "query": {} } },
   "expect": {
     "ordered": false,
     "rows": [

@@ -191,7 +191,7 @@ func (c *Collection) findExpired() ([]expireItem, error) {
 		return nil, err
 	}
 
-	body, err := json.Marshal(map[string]any{"where": where, "limit": sweepBatch, "versions": true})
+	body, err := json.Marshal(map[string]any{"query": where, "limit": sweepBatch, "versions": true})
 	if err != nil {
 		return nil, err
 	}

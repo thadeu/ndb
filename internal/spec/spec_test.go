@@ -21,9 +21,9 @@ func (e *listEngine) EnsureCollection(context.Context, string, json.RawMessage) 
 
 func (e *listEngine) Do(_ context.Context, _ string, step spec.Step) ([]json.RawMessage, error) {
 	switch step.Op {
-	case "insert":
+	case "bulk":
 		var body struct {
-			Insert []json.RawMessage `json:"insert"`
+			Insert []json.RawMessage `json:"docs"`
 		}
 
 		if err := json.Unmarshal(step.Body, &body); err != nil {
@@ -33,7 +33,7 @@ func (e *listEngine) Do(_ context.Context, _ string, step spec.Step) ([]json.Raw
 		e.docs = append(e.docs, body.Insert...)
 
 		return nil, nil
-	case "find":
+	case "search":
 		return e.docs, nil
 	}
 

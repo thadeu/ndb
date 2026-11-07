@@ -15,7 +15,7 @@ import (
 func seedPosts(t *testing.T, h http.Handler, n int) {
 	t.Helper()
 
-	call(h, "PUT", "/v1/c/posts", `{}`)
+	call(h, "PUT", "/posts", `{}`)
 
 	docs := make([]string, n)
 
@@ -23,7 +23,7 @@ func seedPosts(t *testing.T, h http.Handler, n int) {
 		docs[i] = fmt.Sprintf(`{"_id":"p%03d","k":%d,"n":%d}`, i, i%5, i)
 	}
 
-	expectStatus(t, call(h, "POST", "/v1/c/posts/insert", `{"insert":[`+strings.Join(docs, ",")+`]}`), http.StatusOK)
+	expectStatus(t, call(h, "POST", "/posts/_bulk", `{"docs":[`+strings.Join(docs, ",")+`]}`), http.StatusOK)
 }
 
 func TestAggregateStreamsNDJSONWithMetadataHeaders(t *testing.T) {
@@ -31,7 +31,7 @@ func TestAggregateStreamsNDJSONWithMetadataHeaders(t *testing.T) {
 
 	seedPosts(t, h, 20)
 
-	rec := call(h, "POST", "/v1/c/posts/aggregate", `{"pipeline":[{"$group":{"_id":"$k","n":{"$count":{}}}}],"limit":2,"count":true}`)
+	rec := call(h, "POST", "/posts/_aggregate", `{"pipeline":[{"$group":{"_id":"$k","n":{"$count":{}}}}],"limit":2,"count":true}`)
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -67,7 +67,7 @@ func TestAggregateLastPageHasNoNext(t *testing.T) {
 
 	seedPosts(t, h, 20)
 
-	rec := call(h, "POST", "/v1/c/posts/aggregate", `{"pipeline":[{"$group":{"_id":"$k"}}],"limit":5}`)
+	rec := call(h, "POST", "/posts/_aggregate", `{"pipeline":[{"$group":{"_id":"$k"}}],"limit":5}`)
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -85,7 +85,7 @@ func TestAggregateExplainHeader(t *testing.T) {
 
 	seedPosts(t, h, 5)
 
-	rec := call(h, "POST", "/v1/c/posts/aggregate", `{"pipeline":[{"$group":{"_id":null}}],"explain":true}`)
+	rec := call(h, "POST", "/posts/_aggregate", `{"pipeline":[{"$group":{"_id":null}}],"explain":true}`)
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -103,9 +103,9 @@ func TestAggregateErrors(t *testing.T) {
 		path, body, code string
 		status           int
 	}{
-		"invalid pipeline": {"/v1/c/posts/aggregate", `{"pipeline":[{"$match":{}}]}`, "invalid_pipeline", http.StatusBadRequest},
-		"cursor":           {"/v1/c/posts/aggregate", `{"pipeline":[{"$group":{"_id":null}}],"after":"!!!"}`, "cursor_invalid", http.StatusBadRequest},
-		"unknown coll":     {"/v1/c/nope/aggregate", `{"pipeline":[{"$group":{"_id":null}}]}`, "unknown_collection", http.StatusNotFound},
+		"invalid pipeline": {"/posts/_aggregate", `{"pipeline":[{"$match":{}}]}`, "invalid_pipeline", http.StatusBadRequest},
+		"cursor":           {"/posts/_aggregate", `{"pipeline":[{"$group":{"_id":null}}],"after":"!!!"}`, "cursor_invalid", http.StatusBadRequest},
+		"unknown coll":     {"/nope/_aggregate", `{"pipeline":[{"$group":{"_id":null}}]}`, "unknown_collection", http.StatusNotFound},
 	}
 
 	for name, c := range cases {
@@ -134,7 +134,7 @@ func TestAggregateGroupLimitIs422(t *testing.T) {
 
 	seedPosts(t, srv.Handler(), 100)
 
-	rec := call(srv.Handler(), "POST", "/v1/c/posts/aggregate", `{"pipeline":[{"$group":{"_id":"$_id"}}]}`)
+	rec := call(srv.Handler(), "POST", "/posts/_aggregate", `{"pipeline":[{"$group":{"_id":"$_id"}}]}`)
 
 	expectStatus(t, rec, http.StatusUnprocessableEntity)
 

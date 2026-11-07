@@ -13,7 +13,7 @@ import (
 )
 
 // runSize is "ndb size": disk usage per collection and per part. It asks the
-// daemon (GET /v1/size); with -data-dir, or when no daemon answers, it scans
+// daemon (GET /_size); with -data-dir, or when no daemon answers, it scans
 // the data dir itself, which works with the daemon stopped or running.
 func runSize(args []string) error {
 	return size(args, os.Stdout)
@@ -58,7 +58,7 @@ func collectUsage(t target) (diskusage.Usage, error) {
 
 	var u diskusage.Usage
 
-	err := t.client.get("/v1/size", &u)
+	err := t.client.get("/_size", &u)
 
 	return u, err
 }

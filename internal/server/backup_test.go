@@ -17,9 +17,9 @@ import (
 func TestBackupEndpointStreamsTheFileOnUnixSocket(t *testing.T) {
 	c := unixServer(t)
 
-	do(t, c, "POST", "/v1/c/b/insert", `{"insert":[{"_id":"1"}]}`, nil)
+	do(t, c, "POST", "/b/_bulk", `{"docs":[{"_id":"1"}]}`, nil)
 
-	resp, body := do(t, c, "POST", "/v1/backup", `{}`, nil)
+	resp, body := do(t, c, "POST", "/_backup", `{}`, nil)
 
 	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "application/x-ndjson" {
 		t.Fatalf("backup: %d %s", resp.StatusCode, body)
@@ -35,7 +35,7 @@ func TestBackupEndpointStreamsTheFileOnUnixSocket(t *testing.T) {
 		t.Fatalf("the document is not in the file:\n%s", body)
 	}
 
-	resp, _ = do(t, c, "POST", "/v1/backup", `{"nope":1}`, nil)
+	resp, _ = do(t, c, "POST", "/_backup", `{"nope":1}`, nil)
 
 	if resp.StatusCode != 400 {
 		t.Fatalf("unknown field: %d", resp.StatusCode)
@@ -58,7 +58,7 @@ func TestBackupEndpointRefusesTCP(t *testing.T) {
 
 	defer ts.Close()
 
-	resp, err := http.Post(ts.URL+"/v1/backup", "application/json", strings.NewReader(`{"dest":"`+filepath.Join(t.TempDir(), "bk")+`"}`))
+	resp, err := http.Post(ts.URL+"/_backup", "application/json", strings.NewReader(`{"dest":"`+filepath.Join(t.TempDir(), "bk")+`"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

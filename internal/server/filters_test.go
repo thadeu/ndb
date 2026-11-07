@@ -11,23 +11,23 @@ import (
 func TestDateMathRoute(t *testing.T) {
 	_, h := newHandler(t)
 
-	expectStatus(t, call(h, "PUT", "/v1/c/events", `{"time":"at","indexes":["at"]}`), http.StatusOK)
+	expectStatus(t, call(h, "PUT", "/events", `{"time":"at","indexes":["at"]}`), http.StatusOK)
 
 	now := time.Now().UTC()
 	at := func(d time.Duration) string { return now.Add(-d).Format(time.RFC3339) }
 
 	docs := `[{"_id":"old","at":"` + at(10*24*time.Hour) + `"},{"_id":"day","at":"` + at(20*time.Hour) + `"},{"_id":"hour","at":"` + at(30*time.Minute) + `"}]`
 
-	expectStatus(t, call(h, "POST", "/v1/c/events/insert", `{"insert":`+docs+`}`), http.StatusOK)
+	expectStatus(t, call(h, "POST", "/events/_bulk", `{"docs":`+docs+`}`), http.StatusOK)
 
 	// Two docs sealed in a segment, one in the memtable.
-	expectStatus(t, call(h, "POST", "/v1/c/events/compact", ``), http.StatusOK)
-	expectStatus(t, call(h, "POST", "/v1/c/events/insert", `{"insert":[{"_id":"now","at":"`+at(time.Second)+`"}]}`), http.StatusOK)
+	expectStatus(t, call(h, "POST", "/events/_compact", ``), http.StatusOK)
+	expectStatus(t, call(h, "POST", "/events/_bulk", `{"docs":[{"_id":"now","at":"`+at(time.Second)+`"}]}`), http.StatusOK)
 
 	find := func(where string) []string {
 		t.Helper()
 
-		rec := call(h, "POST", "/v1/c/events/find", `{"where":`+where+`,"sort":{"at":1}}`)
+		rec := call(h, "POST", "/events/_search", `{"query":`+where+`,"sort":{"at":1}}`)
 
 		expectStatus(t, rec, http.StatusOK)
 
@@ -42,13 +42,13 @@ func TestDateMathRoute(t *testing.T) {
 		t.Fatalf("now-7d..now-1h = %v", got)
 	}
 
-	rec := call(h, "POST", "/v1/c/events/find", `{"where":{"at":{"$gte":"now-1h"}}}`)
+	rec := call(h, "POST", "/events/_search", `{"query":{"at":{"$gte":"now-1h"}}}`)
 
 	if got := rec.Header().Get("X-Ndb-Plan"); got != "index:at" {
 		t.Fatalf("plan = %s", got)
 	}
 
-	rec = call(h, "POST", "/v1/c/events/find", `{"where":{"at":{"$gte":"now-1x"}}}`)
+	rec = call(h, "POST", "/events/_search", `{"query":{"at":{"$gte":"now-1x"}}}`)
 
 	expectStatus(t, rec, http.StatusBadRequest)
 
@@ -56,20 +56,20 @@ func TestDateMathRoute(t *testing.T) {
 		t.Fatalf("code = %s", got)
 	}
 
-	rec = call(h, "POST", "/v1/c/events/aggregate", `{"pipeline":[{"$match":{"at":{"$gte":"now-1d"}}},{"$group":{"_id":null,"n":{"$count":{}}}}]}`)
+	rec = call(h, "POST", "/events/_aggregate", `{"pipeline":[{"$match":{"at":{"$gte":"now-1d"}}},{"$group":{"_id":null,"n":{"$count":{}}}}]}`)
 
 	if got := strings.TrimSpace(rec.Body.String()); got != `{"_id":null,"n":3}` {
 		t.Fatalf("aggregate = %s", got)
 	}
 
-	rec = call(h, "POST", "/v1/c/events/delete?many=true", `{"at":{"$lt":"now-7d"}}`)
+	rec = call(h, "POST", "/events/_delete_by_query", `{"query":{"at":{"$lt":"now-7d"}},"many":true}`)
 
 	if got := strings.TrimSpace(rec.Body.String()); got != `{"deleted":1}` {
 		t.Fatalf("delete = %s", got)
 	}
 
 	// Pages over a time window: each row once.
-	if got := ids(walk(t, h, "/v1/c/events/find", `{"where":{"at":{"$gte":"now-1d"}},"sort":{"at":-1},"limit":1}`)); !slices.Equal(got, []string{"now", "hour", "day"}) {
+	if got := ids(walk(t, h, "/events/_search", `{"query":{"at":{"$gte":"now-1d"}},"sort":{"at":-1},"limit":1}`)); !slices.Equal(got, []string{"now", "hour", "day"}) {
 		t.Fatalf("pages = %v", got)
 	}
 }
@@ -84,18 +84,18 @@ func TestElemMatchRoute(t *testing.T) {
 		{"_id":"o4","tags":[5,15]}
 	]`
 
-	expectStatus(t, call(h, "PUT", "/v1/c/orders", `{"indexes":["items.sku"]}`), http.StatusOK)
-	expectStatus(t, call(h, "POST", "/v1/c/orders/insert", `{"insert":`+docs+`}`), http.StatusOK)
+	expectStatus(t, call(h, "PUT", "/orders", `{"indexes":["items.sku"]}`), http.StatusOK)
+	expectStatus(t, call(h, "POST", "/orders/_bulk", `{"docs":`+docs+`}`), http.StatusOK)
 
 	for _, sealed := range []bool{false, true} {
 		if sealed {
-			expectStatus(t, call(h, "POST", "/v1/c/orders/compact", ``), http.StatusOK)
+			expectStatus(t, call(h, "POST", "/orders/_compact", ``), http.StatusOK)
 		}
 
 		find := func(where string) []string {
 			t.Helper()
 
-			rec := call(h, "POST", "/v1/c/orders/find", `{"where":`+where+`}`)
+			rec := call(h, "POST", "/orders/_search", `{"query":`+where+`}`)
 
 			expectStatus(t, rec, http.StatusOK)
 
@@ -121,12 +121,12 @@ func TestElemMatchRoute(t *testing.T) {
 			t.Fatalf("sealed=%v: with an index condition = %v", sealed, got)
 		}
 
-		if plan := call(h, "POST", "/v1/c/orders/find", `{"where":`+where+`}`).Header().Get("X-Ndb-Plan"); plan != "index:items.sku" {
+		if plan := call(h, "POST", "/orders/_search", `{"query":`+where+`}`).Header().Get("X-Ndb-Plan"); plan != "index:items.sku" {
 			t.Fatalf("sealed=%v: plan = %s", sealed, plan)
 		}
 	}
 
-	rec := call(h, "POST", "/v1/c/orders/update?many=true", `{"items.sku":"a","items":{"$elemMatch":{"sku":"a","qty":1}},"$set":{"flag":true}}`)
+	rec := call(h, "POST", "/orders/_update_by_query", `{"query":{"items.sku":"a","items":{"$elemMatch":{"sku":"a","qty":1}}},"update":{"$set":{"flag":true}},"many":true}`)
 
 	if got := strings.TrimSpace(rec.Body.String()); !strings.Contains(got, `"matched":1`) {
 		t.Fatalf("update = %s", got)

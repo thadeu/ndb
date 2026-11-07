@@ -21,7 +21,7 @@ import (
 
 var (
 	writeOperators  = []string{"$set", "$setOnInsert", "$unset", "$inc", "$push", "$pull", "$min", "$max"}
-	filterOperators = []string{"$and", "$or", "$nor"}
+	filterOperators = []string{"$and", "$or", "$nor", "$not"}
 )
 
 // fieldOp is one operator applied to one field path.
@@ -32,6 +32,36 @@ type fieldOp struct {
 
 	// pull is the element test of $pull.
 	pull func(elem any) bool
+}
+
+// JoinUpdate checks the two parts of an update body of the API, {"query":
+// {...}, "update": {...}}, and joins them into the one object that Update
+// reads: the write operators belong in update only, the filter in query
+// only.
+func JoinUpdate(q, update map[string]any) (map[string]any, error) {
+	if len(update) == 0 {
+		return nil, errf("no_update", "update needs a write operator (%s)", strings.Join(writeOperators, ", "))
+	}
+
+	out := make(map[string]any, len(q)+len(update))
+
+	for k, v := range update {
+		if !slices.Contains(writeOperators, k) {
+			return nil, errf("unknown_operator", "%s is not a write operator; a filter goes in query", k)
+		}
+
+		out[k] = v
+	}
+
+	for k, v := range q {
+		if slices.Contains(writeOperators, k) {
+			return nil, errf("unknown_operator", "%s is a write operator; it goes in update, not in query", k)
+		}
+
+		out[k] = v
+	}
+
+	return out, nil
 }
 
 // splitBody separates the filter keys from the write operators of a decoded

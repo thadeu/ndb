@@ -77,7 +77,7 @@ func TestParseInvalid(t *testing.T) {
 		"bad project":         `{"pipeline":[{"$group":{"_id":null}},{"$project":{"a":1,"b":0}}]}`,
 		"empty project":       `{"pipeline":[{"$group":{"_id":null}},{"$project":{}}]}`,
 		"negative limit":      `{"pipeline":[{"$group":{"_id":null}}],"limit":-1}`,
-		"unknown top key":     `{"pipeline":[{"$group":{"_id":null}}],"where":{}}`,
+		"unknown top key":     `{"pipeline":[{"$group":{"_id":null}}],"query":{}}`,
 		"after not string":    `{"pipeline":[{"$group":{"_id":null}}],"after":1}`,
 	}
 

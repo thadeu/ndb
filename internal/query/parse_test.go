@@ -10,16 +10,16 @@ func TestParseInvalid(t *testing.T) {
 	cases := map[string]string{
 		"not json":            `{`,
 		"unknown key":         `{"wher": {}}`,
-		"where not object":    `{"where": 5}`,
-		"unknown operator":    `{"where": {"a": {"$foo": "x"}}}`,
-		"mixed operator":      `{"where": {"a": {"$gt": 1, "b": 2}}}`,
-		"in not array":        `{"where": {"a": {"$in": 1}}}`,
-		"exists not bool":     `{"where": {"a": {"$exists": 1}}}`,
-		"and empty":           `{"where": {"$and": []}}`,
-		"and not objects":     `{"where": {"$or": [1]}}`,
-		"nor empty":           `{"where": {"$nor": []}}`,
-		"unknown top op":      `{"where": {"$elemMatch": {}}}`,
-		"not not object":      `{"where": {"a": {"$not": 5}}}`,
+		"where not object":    `{"query": 5}`,
+		"unknown operator":    `{"query": {"a": {"$foo": "x"}}}`,
+		"mixed operator":      `{"query": {"a": {"$gt": 1, "b": 2}}}`,
+		"in not array":        `{"query": {"a": {"$in": 1}}}`,
+		"exists not bool":     `{"query": {"a": {"$exists": 1}}}`,
+		"and empty":           `{"query": {"$and": []}}`,
+		"and not objects":     `{"query": {"$or": [1]}}`,
+		"nor empty":           `{"query": {"$nor": []}}`,
+		"unknown top op":      `{"query": {"$elemMatch": {}}}`,
+		"not not object":      `{"query": {"a": {"$not": 5}}}`,
 		"sort bad direction":  `{"sort": {"a": 2}}`,
 		"sort not object":     `{"sort": ["a"]}`,
 		"negative limit":      `{"limit": -1}`,
@@ -27,11 +27,11 @@ func TestParseInvalid(t *testing.T) {
 		"limit not number":    `{"limit": "5"}`,
 		"fields not strings":  `{"fields": [1]}`,
 		"count not bool":      `{"count": 1}`,
-		"empty path":          `{"where": {"a..b": 1}}`,
-		"gt with array":       `{"where": {"a": {"$gt": [1]}}}`,
+		"empty path":          `{"query": {"a..b": 1}}`,
+		"gt with array":       `{"query": {"a": {"$gt": [1]}}}`,
 		"after not string":    `{"after": 5}`,
 		"snapshot not bool":   `{"snapshot": "yes"}`,
-		"eq operand missing":  `{"where": {"a": {"$eq": }}}`,
+		"eq operand missing":  `{"query": {"a": {"$eq": }}}`,
 		"sort empty path":     `{"sort": {"": 1}}`,
 		"fields empty string": `{"fields": [""]}`,
 	}
@@ -51,7 +51,7 @@ func TestParseInvalid(t *testing.T) {
 }
 
 func TestParseFields(t *testing.T) {
-	q, err := query.Parse([]byte(`{"where":{"a":1},"fields":["a","b.c"],"sort":{"z":-1,"a":1},"limit":5,"skip":2,"after":"x","count":true,"snapshot":true}`), query.Options{})
+	q, err := query.Parse([]byte(`{"query":{"a":1},"fields":["a","b.c"],"sort":{"z":-1,"a":1},"limit":5,"skip":2,"after":"x","count":true,"snapshot":true}`), query.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,10 +73,10 @@ func TestParseEmptyBody(t *testing.T) {
 
 func FuzzParse(f *testing.F) {
 	for _, s := range []string{
-		`{}`, `{"where":{"a":{"$in":[1,2]}}}`, `{"where":{"$or":[{"a":1},{"b":{"$not":{"$gt":2}}}]},"sort":{"a":1}}`,
-		`{"limit":3,"after":"abc"}`, `{"where":{"a.b":{"$exists":false}}}`,
-		`{"where":{"a":{"$regex":"^ab+","$options":"i"}}}`, `{"where":{"a":{"$not":{"$regex":"[a-z]+","$options":"msx"}}}}`,
-		`{"where":{"a":{"$regex":"(?P<n>x)|\\d{2,}"}}}`, `{"where":{"a":{"$options":"i"}}}`,
+		`{}`, `{"query":{"a":{"$in":[1,2]}}}`, `{"query":{"$or":[{"a":1},{"b":{"$not":{"$gt":2}}}]},"sort":{"a":1}}`,
+		`{"limit":3,"after":"abc"}`, `{"query":{"a.b":{"$exists":false}}}`,
+		`{"query":{"a":{"$regex":"^ab+","$options":"i"}}}`, `{"query":{"a":{"$not":{"$regex":"[a-z]+","$options":"msx"}}}}`,
+		`{"query":{"a":{"$regex":"(?P<n>x)|\\d{2,}"}}}`, `{"query":{"a":{"$options":"i"}}}`,
 	} {
 		f.Add([]byte(s))
 	}

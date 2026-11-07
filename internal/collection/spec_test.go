@@ -68,9 +68,9 @@ func (e *specEngine) Do(ctx context.Context, name string, step spec.Step) ([]jso
 	c := e.cols[name]
 
 	switch step.Op {
-	case "insert":
+	case "bulk":
 		var body struct {
-			Insert []json.RawMessage `json:"insert"`
+			Insert []json.RawMessage `json:"docs"`
 		}
 
 		if err := json.Unmarshal(step.Body, &body); err != nil {
@@ -102,7 +102,7 @@ func (e *specEngine) Do(ctx context.Context, name string, step spec.Step) ([]jso
 		page, err := c.Aggregate(ctx, p)
 
 		return page.Rows, specErr(err)
-	case "find":
+	case "search":
 		if err := e.settle(c); err != nil {
 			return nil, err
 		}

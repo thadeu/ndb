@@ -60,18 +60,18 @@ func TestRegexInvalid(t *testing.T) {
 	long := strings.Repeat("a", 1025)
 
 	bodies := []string{
-		`{"where":{"a":{"$regex":"("}}}`,
-		`{"where":{"a":{"$regex":"(?=x)"}}}`,
-		`{"where":{"a":{"$regex":"(a)\\1"}}}`,
-		`{"where":{"a":{"$regex":5}}}`,
-		`{"where":{"a":{"$regex":null}}}`,
-		`{"where":{"a":{"$regex":"a","$options":"q"}}}`,
-		`{"where":{"a":{"$regex":"a","$options":"g"}}}`,
-		`{"where":{"a":{"$regex":"a","$options":5}}}`,
-		`{"where":{"a":{"$options":"i"}}}`,
-		`{"where":{"a":{"$not":{"$options":"i"}}}}`,
-		`{"where":{"a":{"$regex":"` + long + `"}}}`,
-		`{"where":{"a":{"$regex":"a","$options":"x"},"b":{"$regex":"[a"}}}`,
+		`{"query":{"a":{"$regex":"("}}}`,
+		`{"query":{"a":{"$regex":"(?=x)"}}}`,
+		`{"query":{"a":{"$regex":"(a)\\1"}}}`,
+		`{"query":{"a":{"$regex":5}}}`,
+		`{"query":{"a":{"$regex":null}}}`,
+		`{"query":{"a":{"$regex":"a","$options":"q"}}}`,
+		`{"query":{"a":{"$regex":"a","$options":"g"}}}`,
+		`{"query":{"a":{"$regex":"a","$options":5}}}`,
+		`{"query":{"a":{"$options":"i"}}}`,
+		`{"query":{"a":{"$not":{"$options":"i"}}}}`,
+		`{"query":{"a":{"$regex":"` + long + `"}}}`,
+		`{"query":{"a":{"$regex":"a","$options":"x"},"b":{"$regex":"[a"}}}`,
 	}
 
 	for _, b := range bodies {
@@ -87,7 +87,7 @@ func TestRegexInvalid(t *testing.T) {
 }
 
 func TestRegexInvalidCarriesRE2Message(t *testing.T) {
-	_, err := query.Parse([]byte(`{"where":{"a":{"$regex":"(ab"}}}`), query.Options{})
+	_, err := query.Parse([]byte(`{"query":{"a":{"$regex":"(ab"}}}`), query.Options{})
 	if err == nil || !strings.Contains(err.Error(), "missing closing )") {
 		t.Fatalf("error %v", err)
 	}
@@ -96,7 +96,7 @@ func TestRegexInvalidCarriesRE2Message(t *testing.T) {
 func TestRegexLimitBoundary(t *testing.T) {
 	ok := strings.Repeat("a", 1024)
 
-	if _, err := query.Parse([]byte(`{"where":{"a":{"$regex":"`+ok+`"}}}`), query.Options{}); err != nil {
+	if _, err := query.Parse([]byte(`{"query":{"a":{"$regex":"`+ok+`"}}}`), query.Options{}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -124,7 +124,7 @@ func TestRegexIndexableConds(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		q, err := query.Parse([]byte(`{"where":`+c.where+`}`), query.Options{TimeField: "at"})
+		q, err := query.Parse([]byte(`{"query":`+c.where+`}`), query.Options{TimeField: "at"})
 		if err != nil {
 			t.Fatalf("%s: %v", c.where, err)
 		}
@@ -142,7 +142,7 @@ func TestRegexIndexableConds(t *testing.T) {
 }
 
 func TestRegexPrefixHighByte(t *testing.T) {
-	q, err := query.Parse([]byte("{\"where\":{\"a\":{\"$regex\":\"^\\u00ff\"}}}"), query.Options{})
+	q, err := query.Parse([]byte("{\"query\":{\"a\":{\"$regex\":\"^\\u00ff\"}}}"), query.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestRegexPrefixHighByte(t *testing.T) {
 }
 
 func TestRegexColsAgreeWithMatch(t *testing.T) {
-	q, err := query.Parse([]byte(`{"where":{"a":{"$regex":"^b","$options":"i"},"n":{"$regex":"1"}}}`), query.Options{})
+	q, err := query.Parse([]byte(`{"query":{"a":{"$regex":"^b","$options":"i"},"n":{"$regex":"1"}}}`), query.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

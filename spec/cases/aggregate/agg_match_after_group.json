@@ -11,9 +11,9 @@
     },
     "writes": [
       {
-        "op": "insert",
+        "op": "bulk",
         "body": {
-          "insert": [
+          "docs": [
             {
               "_id": "c1",
               "status": "answered",

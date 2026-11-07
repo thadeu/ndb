@@ -27,8 +27,8 @@ type partBytes struct {
 	Meta     int64 `json:"meta"`
 }
 
-// statsBody is the answer of GET /v1/c/{coll}/stats and one element of
-// GET /v1/stats.
+// statsBody is the answer of GET /{coll}/_stats and one element of
+// GET /_stats.
 type statsBody struct {
 	Name        string            `json:"name"`
 	Write       catalog.WriteMode `json:"write"`
@@ -69,7 +69,7 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	writeJSON(w, http.StatusOK, collectionStats(st, du))
 }
 
-// globalStats is GET /v1/stats: every collection plus totals, the shared
+// globalStats is GET /_stats: every collection plus totals, the shared
 // files and the daemon identity.
 func (s *Server) globalStats(w http.ResponseWriter, _ *http.Request, db *engine.DB) {
 	cols := []statsBody{}
@@ -127,7 +127,7 @@ func sharedUsage(dataDir string) diskusage.Parts {
 	return u.Shared
 }
 
-// size is GET /v1/size: the same disk scan as "ndb size".
+// size is GET /_size: the same disk scan as "ndb size".
 func (s *Server) size(w http.ResponseWriter, _ *http.Request, db *engine.DB) {
 	u, err := diskusage.Scan(db.Dir())
 	if err != nil {
@@ -143,7 +143,7 @@ func (s *Server) size(w http.ResponseWriter, _ *http.Request, db *engine.DB) {
 	writeJSON(w, http.StatusOK, u)
 }
 
-// getCollection is GET /v1/c/{coll}: the catalog definition and the state of
+// getCollection is GET /{coll}: the catalog definition and the state of
 // each index, in the shape of the PUT answer.
 func (s *Server) getCollection(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
@@ -168,7 +168,7 @@ func (s *Server) getCollection(w http.ResponseWriter, r *http.Request, db *engin
 	})
 }
 
-// compact is POST /v1/c/{coll}/compact: seal, then merge every segment now.
+// compact is POST /{coll}/_compact: seal, then merge every segment now.
 func (s *Server) compact(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
 
@@ -205,7 +205,7 @@ type quarantineBody struct {
 	Truncated bool   `json:"truncated,omitempty"`
 }
 
-// quarantine is GET /v1/c/{coll}/quarantine?limit=N: the last N bad lines of
+// quarantine is GET /{coll}/_quarantine?limit=N: the last N bad lines of
 // a direct collection (default 100, at most 1000), oldest first. An
 // engine-mode collection has none.
 func (s *Server) quarantine(w http.ResponseWriter, r *http.Request, db *engine.DB) {
@@ -278,7 +278,7 @@ func cutLine(s string, max int) (string, bool) {
 	return s[:cut], true
 }
 
-// truncate is POST /v1/c/{coll}/truncate?confirm={coll}: remove every
+// truncate is POST /{coll}/_truncate?confirm={coll}: remove every
 // document, keep the definition and the indexes.
 func (s *Server) truncate(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
@@ -292,7 +292,7 @@ func (s *Server) truncate(w http.ResponseWriter, r *http.Request, db *engine.DB)
 	writeJSON(w, http.StatusOK, map[string]any{"collection": name, "truncated": true})
 }
 
-// drop is DELETE /v1/c/{coll}?confirm={coll}: remove the collection, its
+// drop is DELETE /{coll}?confirm={coll}: remove the collection, its
 // definition and the positions of its watch consumers.
 func (s *Server) drop(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")

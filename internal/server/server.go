@@ -32,7 +32,7 @@ type Server struct {
 	// blobLimit is the largest blob in bytes (0 = DefaultBlobLimit).
 	blobLimit int64
 
-	// version is what /v1/stats reports; started is when New ran.
+	// version is what /_stats reports; started is when New ran.
 	version string
 	started time.Time
 
@@ -61,7 +61,7 @@ func (s *Server) SetToken(token string) {
 	s.token = []byte(token)
 }
 
-// SetVersion is the daemon version that GET /v1/stats reports.
+// SetVersion is the daemon version that GET /_stats reports.
 func (s *Server) SetVersion(v string) {
 	s.version = v
 }
@@ -93,39 +93,46 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 func (s *Server) routes() http.Handler {
-	mux := http.NewServeMux()
+	rt := &router{
+		system: map[string][]route{
+			"_health":      {{"GET", s.health}},
+			"_metrics":     {{"GET", s.metricsPage}},
+			"_collections": {{"GET", s.ready(s.list)}},
+			"_stats":       {{"GET", s.ready(s.globalStats)}},
+			"_size":        {{"GET", s.ready(s.size)}},
+			"_backup":      {{"POST", s.ready(s.backup)}},
+			"_blobs":       {{"POST", s.ready(s.putBlob)}},
+			"_blobs/{}":    {{"GET", s.ready(s.getBlob)}},
+		},
+		coll: map[string][]route{
+			"": {
+				{"PUT", s.ready(s.ensure)},
+				{"GET", s.readyOr(s.getCollection, s.listPattern)},
+				{"DELETE", s.ready(s.drop)},
+			},
+			"_truncate":        {{"POST", s.ready(s.truncate)}},
+			"_indexes/{}":      {{"PUT", s.ready(s.ensureIndex)}, {"DELETE", s.ready(s.dropIndex)}},
+			"_stats":           {{"GET", s.ready(s.stats)}},
+			"_compact":         {{"POST", s.ready(s.compact)}},
+			"_quarantine":      {{"GET", s.ready(s.quarantine)}},
+			"_doc":             {{"POST", s.ready(s.insertOne)}},
+			"_bulk":            {{"POST", s.ready(s.bulk)}},
+			"_doc/{}":          {{"GET", s.ready(s.get)}, {"DELETE", s.ready(s.removeID)}},
+			"_update/{}":       {{"POST", s.ready(s.updateID)}},
+			"_expire/{}":       {{"POST", s.ready(s.expire)}},
+			"_persist/{}":      {{"POST", s.ready(s.persist)}},
+			"_ttl/{}":          {{"GET", s.ready(s.ttl)}},
+			"_search":          {{"POST", s.readyOr(s.find, s.findPattern)}},
+			"_count":           {{"POST", s.readyOr(s.countDocs, s.countPattern)}},
+			"_aggregate":       {{"POST", s.readyOr(s.aggregate, s.aggregatePattern)}},
+			"_update_by_query": {{"POST", s.ready(s.update)}},
+			"_delete_by_query": {{"POST", s.ready(s.remove)}},
+			"_watch":           {{"POST", s.ready(s.watch)}},
+			"_ack":             {{"POST", s.ready(s.ack)}},
+		},
+	}
 
-	mux.HandleFunc("POST /v1/c/{coll}/find", s.readyOr(s.find, s.findPattern))
-	mux.HandleFunc("POST /v1/c/{coll}/aggregate", s.readyOr(s.aggregate, s.aggregatePattern))
-	mux.HandleFunc("POST /v1/c/{coll}/insert", s.ready(s.insert))
-	mux.HandleFunc("POST /v1/c/{coll}/update", s.ready(s.update))
-	mux.HandleFunc("POST /v1/c/{coll}/delete", s.ready(s.remove))
-	mux.HandleFunc("POST /v1/c/{coll}/expire", s.ready(s.expire))
-	mux.HandleFunc("POST /v1/c/{coll}/persist", s.ready(s.persist))
-	mux.HandleFunc("POST /v1/c/{coll}/watch", s.ready(s.watch))
-	mux.HandleFunc("POST /v1/c/{coll}/ack", s.ready(s.ack))
-	mux.HandleFunc("PUT /v1/c/{coll}", s.ready(s.ensure))
-	mux.HandleFunc("GET /v1/c/{coll}/{id}", s.ready(s.get))
-	mux.HandleFunc("POST /v1/c/{coll}/{id}/update", s.ready(s.updateID))
-	mux.HandleFunc("DELETE /v1/c/{coll}/{id}", s.ready(s.removeID))
-	mux.HandleFunc("GET /v1/c/{coll}/{id}/ttl", s.ready(s.ttl))
-	mux.HandleFunc("GET /v1/c", s.ready(s.list))
-	mux.HandleFunc("DELETE /v1/c/{coll}/indexes/{field}", s.ready(s.dropIndex))
-	mux.HandleFunc("GET /v1/c/{coll}", s.readyOr(s.getCollection, s.listPattern))
-	mux.HandleFunc("GET /v1/c/{coll}/stats", s.ready(s.stats))
-	mux.HandleFunc("POST /v1/c/{coll}/compact", s.ready(s.compact))
-	mux.HandleFunc("POST /v1/c/{coll}/truncate", s.ready(s.truncate))
-	mux.HandleFunc("DELETE /v1/c/{coll}", s.ready(s.drop))
-	mux.HandleFunc("GET /v1/c/{coll}/quarantine", s.ready(s.quarantine))
-	mux.HandleFunc("GET /v1/stats", s.ready(s.globalStats))
-	mux.HandleFunc("GET /v1/size", s.ready(s.size))
-	mux.HandleFunc("PUT /v1/blobs", s.ready(s.putBlob))
-	mux.HandleFunc("GET /v1/blobs/{ref}", s.ready(s.getBlob))
-	mux.HandleFunc("POST /v1/backup", s.ready(s.backup))
-	mux.HandleFunc("GET /health", s.health)
-	mux.HandleFunc("GET /metrics", s.metricsPage)
-
-	return s.count(mux)
+	return s.count(rt)
 }
 
 type handler func(http.ResponseWriter, *http.Request, *engine.DB)

@@ -10,7 +10,7 @@ import (
 	"github.com/thadeu/ndb/internal/engine"
 )
 
-// DefaultBlobLimit is the largest blob that PUT /v1/blobs accepts.
+// DefaultBlobLimit is the largest blob that POST /_blobs accepts.
 const DefaultBlobLimit = 1 << 30
 
 // SetBlobLimit sets the largest accepted blob, in bytes (0 = default 1 GiB).

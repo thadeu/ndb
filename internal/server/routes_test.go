@@ -3,6 +3,7 @@ package server_test
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -12,8 +13,8 @@ func seedTwo(t *testing.T) http.Handler {
 
 	_, h := newHandler(t)
 
-	expectStatus(t, call(h, "PUT", "/v1/c/posts", `{"unique":["slug"]}`), http.StatusOK)
-	expectStatus(t, call(h, "POST", "/v1/c/posts/insert", `{"insert":[{"_id":"p1","slug":"a","n":1},{"_id":"p2","slug":"b","n":2}]}`), http.StatusOK)
+	expectStatus(t, call(h, "PUT", "/posts", `{"unique":["slug"]}`), http.StatusOK)
+	expectStatus(t, call(h, "POST", "/posts/_bulk", `{"docs":[{"_id":"p1","slug":"a","n":1},{"_id":"p2","slug":"b","n":2}]}`), http.StatusOK)
 
 	return h
 }
@@ -33,7 +34,7 @@ func decodeMap(t *testing.T, body string) map[string]any {
 func TestDefinitionWithIDIsCatalogInvalid(t *testing.T) {
 	_, h := newHandler(t)
 
-	rec := call(h, "PUT", "/v1/c/calls", `{"id":"call_id"}`)
+	rec := call(h, "PUT", "/calls", `{"id":"call_id"}`)
 
 	expectStatus(t, rec, http.StatusBadRequest)
 
@@ -49,7 +50,7 @@ func TestDefinitionWithIDIsCatalogInvalid(t *testing.T) {
 func TestInsertWithAndWithoutID(t *testing.T) {
 	_, h := newHandler(t)
 
-	rec := call(h, "POST", "/v1/c/posts/insert", `{"insert":[{"_id":"mine","n":1},{"n":2}]}`)
+	rec := call(h, "POST", "/posts/_bulk", `{"docs":[{"_id":"mine","n":1},{"n":2}]}`)
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -60,7 +61,7 @@ func TestInsertWithAndWithoutID(t *testing.T) {
 		t.Fatalf("results = %v", res)
 	}
 
-	rec = call(h, "GET", "/v1/c/posts/"+generated, "")
+	rec = call(h, "GET", "/posts/_doc/"+generated, "")
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -68,13 +69,13 @@ func TestInsertWithAndWithoutID(t *testing.T) {
 		t.Fatalf("doc = %v", doc)
 	}
 
-	expectStatus(t, call(h, "POST", "/v1/c/posts/insert", `{"insert":[{"_id":""}]}`), http.StatusBadRequest)
+	expectStatus(t, call(h, "POST", "/posts/_bulk", `{"docs":[{"_id":""}]}`), http.StatusBadRequest)
 }
 
 func TestGetByID(t *testing.T) {
 	h := seedTwo(t)
 
-	rec := call(h, "GET", "/v1/c/posts/p2", "")
+	rec := call(h, "GET", "/posts/_doc/p2", "")
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -82,7 +83,7 @@ func TestGetByID(t *testing.T) {
 		t.Fatalf("doc = %v", doc)
 	}
 
-	rec = call(h, "GET", "/v1/c/posts/nope", "")
+	rec = call(h, "GET", "/posts/_doc/nope", "")
 
 	expectStatus(t, rec, http.StatusNotFound)
 
@@ -94,7 +95,7 @@ func TestGetByID(t *testing.T) {
 func TestUpdateByID(t *testing.T) {
 	h := seedTwo(t)
 
-	rec := call(h, "POST", "/v1/c/posts/p1/update", `{"$inc":{"n":5}}`)
+	rec := call(h, "POST", "/posts/_update/p1", `{"update":{"$inc":{"n":5}}}`)
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -105,7 +106,7 @@ func TestUpdateByID(t *testing.T) {
 		t.Fatalf("out = %v", out)
 	}
 
-	rec = call(h, "POST", "/v1/c/posts/p1/update", `{"_v":1,"$set":{"n":0}}`)
+	rec = call(h, "POST", "/posts/_update/p1", `{"query":{"_v":1},"update":{"$set":{"n":0}}}`)
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -113,7 +114,7 @@ func TestUpdateByID(t *testing.T) {
 		t.Fatalf("a stale _v guard must not match: %v", out)
 	}
 
-	rec = call(h, "POST", "/v1/c/posts/p1/update", `{"n":{"$gt":100},"$set":{"x":1}}`)
+	rec = call(h, "POST", "/posts/_update/p1", `{"query":{"n":{"$gt":100}},"update":{"$set":{"x":1}}}`)
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -121,11 +122,11 @@ func TestUpdateByID(t *testing.T) {
 		t.Fatalf("a failed guard must not match: %v", out)
 	}
 
-	rec = call(h, "POST", "/v1/c/posts/p1/update", `{"_id":"p2","$set":{"x":1}}`)
+	rec = call(h, "POST", "/posts/_update/p1", `{"query":{"_id":"p2"},"update":{"$set":{"x":1}}}`)
 
 	expectStatus(t, rec, http.StatusBadRequest)
 
-	rec = call(h, "POST", "/v1/c/posts/p1/update", `{"n":1}`)
+	rec = call(h, "POST", "/posts/_update/p1", `{"query":{"n":1},"update":{}}`)
 
 	expectStatus(t, rec, http.StatusBadRequest)
 
@@ -137,9 +138,9 @@ func TestUpdateByID(t *testing.T) {
 func TestUpdateByIDUpsertAndExpire(t *testing.T) {
 	_, h := newHandler(t)
 
-	expectStatus(t, call(h, "PUT", "/v1/c/sessions", `{"expires_field":"exp"}`), http.StatusOK)
+	expectStatus(t, call(h, "PUT", "/sessions", `{"expires_field":"exp"}`), http.StatusOK)
 
-	rec := call(h, "POST", "/v1/c/sessions/s1/update?upsert=true&expire_in=1h", `{"$set":{"user":"u"}}`)
+	rec := call(h, "POST", "/sessions/_update/s1", `{"update":{"$set":{"user":"u"}},"upsert":true,"expire_in":"1h"}`)
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -149,7 +150,7 @@ func TestUpdateByIDUpsertAndExpire(t *testing.T) {
 		t.Fatalf("doc = %v", doc)
 	}
 
-	rec = call(h, "POST", "/v1/c/sessions/nope/update", `{"$set":{"user":"u"}}`)
+	rec = call(h, "POST", "/sessions/_update/nope", `{"update":{"$set":{"user":"u"}}}`)
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -161,7 +162,7 @@ func TestUpdateByIDUpsertAndExpire(t *testing.T) {
 func TestDeleteByID(t *testing.T) {
 	h := seedTwo(t)
 
-	rec := call(h, "DELETE", "/v1/c/posts/p1", "")
+	rec := call(h, "DELETE", "/posts/_doc/p1", "")
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -169,23 +170,23 @@ func TestDeleteByID(t *testing.T) {
 		t.Fatalf("out = %v", out)
 	}
 
-	rec = call(h, "DELETE", "/v1/c/posts/p1", "")
+	rec = call(h, "DELETE", "/posts/_doc/p1", "")
 
 	if out := decodeMap(t, rec.Body.String()); out["deleted"] != float64(0) {
 		t.Fatalf("out = %v", out)
 	}
 
-	expectStatus(t, call(h, "GET", "/v1/c/posts/p1", ""), http.StatusNotFound)
-	expectStatus(t, call(h, "GET", "/v1/c/posts/p2", ""), http.StatusOK)
+	expectStatus(t, call(h, "GET", "/posts/_doc/p1", ""), http.StatusNotFound)
+	expectStatus(t, call(h, "GET", "/posts/_doc/p2", ""), http.StatusOK)
 }
 
 func TestTTLByIDRoute(t *testing.T) {
 	_, h := newHandler(t)
 
-	expectStatus(t, call(h, "PUT", "/v1/c/sessions", `{"expires_field":"exp"}`), http.StatusOK)
-	expectStatus(t, call(h, "POST", "/v1/c/sessions/insert", `{"insert":[{"_id":"s1"}],"expire_in":"1h"}`), http.StatusOK)
+	expectStatus(t, call(h, "PUT", "/sessions", `{"expires_field":"exp"}`), http.StatusOK)
+	expectStatus(t, call(h, "POST", "/sessions/_bulk", `{"docs":[{"_id":"s1"}],"expire_in":"1h"}`), http.StatusOK)
 
-	rec := call(h, "GET", "/v1/c/sessions/s1/ttl", "")
+	rec := call(h, "GET", "/sessions/_ttl/s1", "")
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -193,32 +194,29 @@ func TestTTLByIDRoute(t *testing.T) {
 		t.Fatalf("out = %v", out)
 	}
 
-	expectStatus(t, call(h, "GET", "/v1/c/sessions/ttl/s1", ""), http.StatusNotFound)
+	expectStatus(t, call(h, "GET", "/sessions/ttl/s1", ""), http.StatusNotFound)
 }
 
-func TestFixedRoutesWinOverAnID(t *testing.T) {
+func TestIDsNeverCollideWithRoutes(t *testing.T) {
 	_, h := newHandler(t)
 
-	expectStatus(t, call(h, "PUT", "/v1/c/x", `{}`), http.StatusOK)
-	expectStatus(t, call(h, "POST", "/v1/c/x/insert", `{"insert":[{"_id":"stats"},{"_id":"quarantine"},{"_id":"find"}]}`), http.StatusOK)
+	ids := []string{"stats", "_search", "find", "a/b"}
 
-	rec := call(h, "GET", "/v1/c/x/stats", "")
+	expectStatus(t, call(h, "POST", "/x/_bulk", `{"docs":[{"_id":"stats"},{"_id":"_search"},{"_id":"find"},{"_id":"a/b"}]}`), http.StatusOK)
 
-	expectStatus(t, rec, http.StatusOK)
+	for _, id := range ids {
+		rec := call(h, "GET", "/x/_doc/"+url.PathEscape(id), "")
 
-	if out := decodeMap(t, rec.Body.String()); out["rows"] == nil && out["name"] == nil && out["write"] == nil {
-		t.Fatalf("stats must answer, not the document: %v", out)
+		expectStatus(t, rec, http.StatusOK)
+
+		if doc := decodeMap(t, rec.Body.String()); doc["_id"] != id {
+			t.Fatalf("%s: got %v", id, doc)
+		}
 	}
+
+	rec := call(h, "GET", "/x/_stats", "")
 
 	if doc := decodeMap(t, rec.Body.String()); doc["_id"] != nil {
-		t.Fatalf("GET /stats returned a document: %v", doc)
-	}
-
-	rec = call(h, "POST", "/v1/c/x/find", `{"where":{}}`)
-
-	expectStatus(t, rec, http.StatusOK)
-
-	if lines := strings.Count(strings.TrimSpace(rec.Body.String()), "\n") + 1; lines != 3 {
-		t.Fatalf("find must run as find: %q", rec.Body.String())
+		t.Fatalf("GET /x/_stats returned a document: %v", doc)
 	}
 }

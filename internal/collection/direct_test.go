@@ -149,7 +149,7 @@ func TestDirectQueryUsesIndexAndSeesTombstones(t *testing.T) {
 
 	waitDirectReady(t, d)
 
-	q, err := d.ParseQuery([]byte(`{"where":{"status":"answered"}}`))
+	q, err := d.ParseQuery([]byte(`{"query":{"status":"answered"}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +245,7 @@ func TestDirectLineWithoutIDHasNoIDAndIsNotAddressable(t *testing.T) {
 		t.Fatal("the fallback key must not answer Get")
 	}
 
-	q, err := d.ParseQuery([]byte(`{"where":{"n":1}}`))
+	q, err := d.ParseQuery([]byte(`{"query":{"n":1}}`))
 	if err != nil {
 		t.Fatal(err)
 	}

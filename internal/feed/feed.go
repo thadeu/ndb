@@ -17,7 +17,7 @@ type Event struct {
 	Pos string          `json:"pos"`
 	Op  string          `json:"op"`
 	ID  string          `json:"_id,omitempty"`
-	V   uint64          `json:"v,omitempty"`
+	V   uint64          `json:"_v,omitempty"`
 	Doc json.RawMessage `json:"doc,omitempty"`
 
 	// Expired is set on the del of a document that expired (TTL sweeper).

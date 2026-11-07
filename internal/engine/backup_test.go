@@ -167,7 +167,7 @@ func TestOfflineRestoreGivesSameResults(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	query := []byte(`{"where":{"n":{"$gte":3}},"sort":{"k":1},"limit":1000}`)
+	query := []byte(`{"query":{"n":{"$gte":3}},"sort":{"k":1},"limit":1000}`)
 
 	want, err := col.Find(ctx, query)
 	if err != nil {

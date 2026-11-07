@@ -103,10 +103,10 @@ func TestQueryWhereAndProjection(t *testing.T) {
 		`{"_id":"p3","status":"published","n":3}`,
 	)
 
-	eq(t, ids(t, rq(t, c, `{"where":{"status":"published","n":{"$gt":2}}}`)), []string{"p3"})
+	eq(t, ids(t, rq(t, c, `{"query":{"status":"published","n":{"$gt":2}}}`)), []string{"p3"})
 	eq(t, ids(t, rq(t, c, `{}`)), []string{"p1", "p2", "p3"})
 
-	p := rq(t, c, `{"where":{"_id":"p1"},"fields":["status","meta.b"]}`)
+	p := rq(t, c, `{"query":{"_id":"p1"},"fields":["status","meta.b"]}`)
 
 	if string(p.Rows[0]) != `{"meta":{"b":2},"status":"draft"}` {
 		t.Fatalf("projection = %s", p.Rows[0])
@@ -134,7 +134,7 @@ func TestQueryCountAndSkipLimit(t *testing.T) {
 		seed(t, c, fmt.Sprintf(`{"_id":"p%02d","n":%d}`, i, i))
 	}
 
-	p := rq(t, c, `{"where":{"n":{"$gte":3}},"sort":{"n":1},"skip":2,"limit":3,"count":true}`)
+	p := rq(t, c, `{"query":{"n":{"$gte":3}},"sort":{"n":1},"skip":2,"limit":3,"count":true}`)
 
 	eq(t, ids(t, p), []string{"p05", "p06", "p07"})
 
@@ -269,11 +269,11 @@ func TestCursorMismatchAndInvalid(t *testing.T) {
 
 	seed(t, c, `{"_id":"a","n":1}`, `{"_id":"b","n":2}`)
 
-	next := rq(t, c, `{"where":{"n":{"$gt":0}},"sort":{"n":1},"limit":1}`).Next
+	next := rq(t, c, `{"query":{"n":{"$gt":0}},"sort":{"n":1},"limit":1}`).Next
 
 	for name, body := range map[string]string{
-		"different where": fmt.Sprintf(`{"where":{"n":{"$gt":1}},"sort":{"n":1},"after":%q}`, next),
-		"different sort":  fmt.Sprintf(`{"where":{"n":{"$gt":0}},"sort":{"n":-1},"after":%q}`, next),
+		"different where": fmt.Sprintf(`{"query":{"n":{"$gt":1}},"sort":{"n":1},"after":%q}`, next),
+		"different sort":  fmt.Sprintf(`{"query":{"n":{"$gt":0}},"sort":{"n":-1},"after":%q}`, next),
 	} {
 		if got := code(rqErr(t, c, body)); got != "cursor_mismatch" {
 			t.Fatalf("%s: got %s", name, got)
@@ -284,7 +284,7 @@ func TestCursorMismatchAndInvalid(t *testing.T) {
 		t.Fatalf("got %s", got)
 	}
 
-	eq(t, ids(t, rq(t, c, fmt.Sprintf(`{"where":{"n":{"$gt":0}},"sort":{"n":1},"after":%q,"limit":10}`, next))), []string{"b"})
+	eq(t, ids(t, rq(t, c, fmt.Sprintf(`{"query":{"n":{"$gt":0}},"sort":{"n":1},"after":%q,"limit":10}`, next))), []string{"b"})
 }
 
 func TestSnapshotCursorIgnoresLaterWrites(t *testing.T) {
@@ -384,7 +384,7 @@ func TestQueryTimeField(t *testing.T) {
 		`{"_id":"c","at":"2026-11-04T11:00:00Z"}`,
 	)
 
-	eq(t, ids(t, rq(t, c, `{"where":{"at":{"$lt":"2026-11-04T12:00:00Z"}},"sort":{"at":1}}`, "at")), []string{"c"})
+	eq(t, ids(t, rq(t, c, `{"query":{"at":{"$lt":"2026-11-04T12:00:00Z"}},"sort":{"at":1}}`, "at")), []string{"c"})
 	eq(t, ids(t, rq(t, c, `{"sort":{"at":1}}`, "at")), []string{"c", "b", "a"})
 }
 
@@ -397,25 +397,25 @@ func TestIndexPlanAndInLookups(t *testing.T) {
 
 	waitReady(t, c)
 
-	p := rq(t, c, `{"where":{"_id_ref":{"$in":["p1","p2","nope"]}},"sort":{"_id":1}}`)
+	p := rq(t, c, `{"query":{"_id_ref":{"$in":["p1","p2","nope"]}},"sort":{"_id":1}}`)
 
 	if len(p.Rows) != 6 || p.Plan != "index:_id_ref" || p.Examined != 6 {
 		t.Fatalf("rows %d plan %s examined %d", len(p.Rows), p.Plan, p.Examined)
 	}
 
-	if p := rq(t, c, `{"where":{"_id":{"$in":["c1","c2"]}}}`); p.Plan != "id" || p.Examined != 2 {
+	if p := rq(t, c, `{"query":{"_id":{"$in":["c1","c2"]}}}`); p.Plan != "id" || p.Examined != 2 {
 		t.Fatalf("plan %s examined %d", p.Plan, p.Examined)
 	}
 
-	if p := rq(t, c, `{"where":{"n":{"$gte":10,"$lt":15}}}`); p.Plan != "index:n" || len(p.Rows) != 5 || p.Examined != 5 {
+	if p := rq(t, c, `{"query":{"n":{"$gte":10,"$lt":15}}}`); p.Plan != "index:n" || len(p.Rows) != 5 || p.Examined != 5 {
 		t.Fatalf("plan %s rows %d examined %d", p.Plan, len(p.Rows), p.Examined)
 	}
 
-	if p := rq(t, c, `{"where":{"tags":"t3","n":{"$lt":50}}}`); p.Plan != "index:tags" || len(p.Rows) != 7 {
+	if p := rq(t, c, `{"query":{"tags":"t3","n":{"$lt":50}}}`); p.Plan != "index:tags" || len(p.Rows) != 7 {
 		t.Fatalf("plan %s rows %d", p.Plan, len(p.Rows))
 	}
 
-	if p := rq(t, c, `{"where":{"n":{"$ne":3}}}`); p.Plan != "scan" || p.Examined != 300 {
+	if p := rq(t, c, `{"query":{"n":{"$ne":3}}}`); p.Plan != "scan" || p.Examined != 300 {
 		t.Fatalf("plan %s examined %d", p.Plan, p.Examined)
 	}
 }
@@ -430,10 +430,10 @@ func TestIndexFollowsUpdatesDeletesAndArrays(t *testing.T) {
 	c.UpdateByID(ctx, "c", collection.Change{Set: map[string]any{"status": "new"}}, 0)
 	c.DeleteByID(ctx, "b")
 
-	eq(t, ids(t, rq(t, c, `{"where":{"tags":"y"}}`)), nil)
-	eq(t, ids(t, rq(t, c, `{"where":{"tags":"z"}}`)), []string{"a"})
-	eq(t, ids(t, rq(t, c, `{"where":{"status":"new"}}`)), []string{"a", "c"})
-	eq(t, ids(t, rq(t, c, `{"where":{"status":"old"}}`)), nil)
+	eq(t, ids(t, rq(t, c, `{"query":{"tags":"y"}}`)), nil)
+	eq(t, ids(t, rq(t, c, `{"query":{"tags":"z"}}`)), []string{"a"})
+	eq(t, ids(t, rq(t, c, `{"query":{"status":"new"}}`)), []string{"a", "c"})
+	eq(t, ids(t, rq(t, c, `{"query":{"status":"old"}}`)), nil)
 }
 
 func waitReady(t *testing.T, c *collection.Collection) {
@@ -487,7 +487,7 @@ func TestIndexBuildIsCorrectWhileBuilding(t *testing.T) {
 		t.Fatalf("%+v", infos)
 	}
 
-	p := rq(t, c, `{"where":{"g":3}}`)
+	p := rq(t, c, `{"query":{"g":3}}`)
 
 	if p.Plan != "scan" || len(p.Rows) != 300 {
 		t.Fatalf("while building: plan %s rows %d", p.Plan, len(p.Rows))
@@ -500,11 +500,11 @@ func TestIndexBuildIsCorrectWhileBuilding(t *testing.T) {
 	close(gate)
 	waitReady(t, c)
 
-	if p := rq(t, c, `{"where":{"g":3}}`); p.Plan != "index:g" || len(p.Rows) != 299 {
+	if p := rq(t, c, `{"query":{"g":3}}`); p.Plan != "index:g" || len(p.Rows) != 299 {
 		t.Fatalf("after build: plan %s rows %d", p.Plan, len(p.Rows))
 	}
 
-	if p := rq(t, c, `{"where":{"g":4}}`); len(p.Rows) != 301 {
+	if p := rq(t, c, `{"query":{"g":4}}`); len(p.Rows) != 301 {
 		t.Fatalf("moved doc: %d", len(p.Rows))
 	}
 
@@ -528,13 +528,13 @@ func TestIndexBuildRestart(t *testing.T) {
 
 	c2 := open(t, dir, def)
 
-	if got := len(rq(t, c2, `{"where":{"g":1}}`).Rows); got != 500 {
+	if got := len(rq(t, c2, `{"query":{"g":1}}`).Rows); got != 500 {
 		t.Fatalf("right after restart (building or ready): %d", got)
 	}
 
 	waitReady(t, c2)
 
-	if p := rq(t, c2, `{"where":{"g":1}}`); p.Plan != "index:g" || len(p.Rows) != 500 {
+	if p := rq(t, c2, `{"query":{"g":1}}`); p.Plan != "index:g" || len(p.Rows) != 500 {
 		t.Fatalf("plan %s rows %d", p.Plan, len(p.Rows))
 	}
 }

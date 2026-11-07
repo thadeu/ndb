@@ -558,7 +558,7 @@ func TestCompactWhileReadingAndWriting(t *testing.T) {
 			default:
 			}
 
-			q, _ := c.ParseQuery([]byte(`{"where":{"n":{"$gte":0}}}`))
+			q, _ := c.ParseQuery([]byte(`{"query":{"n":{"$gte":0}}}`))
 
 			page, err := c.Query(ctx, q)
 			if err != nil || len(page.Rows) != 60 {

@@ -94,6 +94,10 @@ func (c *apiClient) call(method, path string, body []byte) (reply, error) {
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, method, c.base+path, bytes.NewReader(body))
+	if err == nil {
+		// Rows as NDJSON, one per line: the tables and -json read them so.
+		req.Header.Set("Accept", "application/x-ndjson")
+	}
 	if err != nil {
 		return reply{}, err
 	}
@@ -215,7 +219,7 @@ func (c *apiClient) alive() bool {
 
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/health", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/_health", nil)
 	if err != nil {
 		return false
 	}

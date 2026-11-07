@@ -25,7 +25,7 @@ func compileStage(name string, arg json.RawMessage) (stage, error) {
 
 	switch name {
 	case "$match":
-		return st, st.parseQuery("where", arg)
+		return st, st.parseQuery("query", arg)
 	case "$sort":
 		return st, st.parseQuery("sort", arg)
 	case "$limit", "$skip":

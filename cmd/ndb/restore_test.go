@@ -146,7 +146,7 @@ func checkRich(t *testing.T, dir string, withBlobs bool) {
 		t.Error("u3 was deleted before the backup")
 	}
 
-	page, err := users.Find(ctx, []byte(`{"where":{"age":99}}`))
+	page, err := users.Find(ctx, []byte(`{"query":{"age":99}}`))
 	if err != nil || len(page.Rows) != 1 || !strings.Contains(string(page.Rows[0]), `"u2"`) {
 		t.Errorf("index query: %v %v", page.Rows, err)
 	}

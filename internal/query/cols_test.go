@@ -8,7 +8,7 @@ import (
 )
 
 func TestParseExplainFlag(t *testing.T) {
-	q, err := query.Parse([]byte(`{"where":{"a":1},"explain":true}`), query.Options{})
+	q, err := query.Parse([]byte(`{"query":{"a":1},"explain":true}`), query.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestParseExplainFlag(t *testing.T) {
 }
 
 func TestPathsAreTheWhereFields(t *testing.T) {
-	q, err := query.Parse([]byte(`{"where":{"status":"x","n":{"$gt":1},"deep.a":2,"$or":[{"status":"y"}]}}`), query.Options{})
+	q, err := query.Parse([]byte(`{"query":{"status":"x","n":{"$gt":1},"deep.a":2,"$or":[{"status":"y"}]}}`), query.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,12 +51,12 @@ func TestMatchColsAgreesWithMatch(t *testing.T) {
 	}
 
 	bodies := []string{
-		`{"where":{"status":"closed"}}`,
-		`{"where":{"n":{"$gte":5,"$lt":10}}}`,
-		`{"where":{"status":{"$in":["open","x"]},"n":{"$ne":10}}}`,
-		`{"where":{"$or":[{"status":"open"},{"n":3}]}}`,
-		`{"where":{"$not":{"status":"closed"}}}`,
-		`{"where":{"tags":"b"}}`,
+		`{"query":{"status":"closed"}}`,
+		`{"query":{"n":{"$gte":5,"$lt":10}}}`,
+		`{"query":{"status":{"$in":["open","x"]},"n":{"$ne":10}}}`,
+		`{"query":{"$or":[{"status":"open"},{"n":3}]}}`,
+		`{"query":{"$not":{"status":"closed"}}}`,
+		`{"query":{"tags":"b"}}`,
 	}
 
 	for _, body := range bodies {

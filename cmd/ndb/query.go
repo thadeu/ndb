@@ -17,7 +17,7 @@ import (
 // previewRows is how many rows decide the columns of the table.
 const previewRows = 200
 
-// runQuery is "ndb query <collection> '<where>'": find or aggregate on a
+// runQuery is "ndb query <collection> '<query>'": _search or _aggregate on a
 // running daemon. Rows come as a table, or as NDJSON with -json.
 func runQuery(args []string) error {
 	return query(args, os.Stdout)
@@ -38,7 +38,7 @@ func query(args []string, out io.Writer) error {
 		return err
 	}
 
-	usage := errors.New(`usage: ndb query <collection> ['<where-json>'] [-sort JSON] [-fields a,b] [-limit N] [-json]
+	usage := errors.New(`usage: ndb query <collection> ['<query-json>'] [-sort JSON] [-fields a,b] [-limit N] [-json]
        ndb query <collection> -aggregate '<pipeline-json>' [-json]`)
 
 	if len(pos) < 1 || len(pos) > 2 {
@@ -76,13 +76,13 @@ func query(args []string, out io.Writer) error {
 	return nil
 }
 
-// queryRequest builds the path and body of find or aggregate.
+// queryRequest builds the path and body of _search or _aggregate.
 func queryRequest(pos []string, sortSpec, fields string, limit int, pipeline string) (string, []byte, error) {
-	base := "/v1/c/" + url.PathEscape(pos[0])
+	base := "/" + url.PathEscape(pos[0])
 
 	if pipeline != "" {
 		if len(pos) == 2 || sortSpec != "" || fields != "" || limit != 0 {
-			return "", nil, errors.New("-aggregate takes the pipeline only: put where, sort and limit inside it")
+			return "", nil, errors.New("-aggregate takes the pipeline only: put $match, $sort and $limit inside it")
 		}
 
 		raw, err := validJSON("-aggregate", pipeline, '[')
@@ -92,18 +92,18 @@ func queryRequest(pos []string, sortSpec, fields string, limit int, pipeline str
 
 		body, err := json.Marshal(map[string]json.RawMessage{"pipeline": raw})
 
-		return base + "/aggregate", body, err
+		return base + "/_aggregate", body, err
 	}
 
 	req := map[string]any{}
 
 	if len(pos) == 2 {
-		raw, err := validJSON("where", pos[1], '{')
+		raw, err := validJSON("query", pos[1], '{')
 		if err != nil {
 			return "", nil, err
 		}
 
-		req["where"] = raw
+		req["query"] = raw
 	}
 
 	if sortSpec != "" {
@@ -125,7 +125,7 @@ func queryRequest(pos []string, sortSpec, fields string, limit int, pipeline str
 
 	body, err := json.Marshal(req)
 
-	return base + "/find", body, err
+	return base + "/_search", body, err
 }
 
 // validJSON checks that s is JSON of the kind open ('{' or '[').

@@ -89,16 +89,16 @@ func TestPlannerChoosesIDIndexOrScan(t *testing.T) {
 		body string
 		plan string
 	}{
-		{`{"where":{"_id":"d1"}}`, "id"},
-		{`{"where":{"_id":{"$in":["d1","d2"]}}}`, "id"},
-		{`{"where":{"status":"open"}}`, "index:status"},
-		{`{"where":{"status":{"$gt":"a"}}}`, "index:status"},
-		{`{"where":{"$or":[{"status":"open"},{"status":"closed"}]}}`, "scan"},
-		{`{"where":{"n":{"$gt":1}}}`, "scan"},
-		{`{"where":{"status":{"$regex":"^op"}}}`, "index:status"},
-		{`{"where":{"status":{"$regex":"^OP","$options":"i"}}}`, "scan"},
-		{`{"where":{"status":{"$regex":"pen"}}}`, "scan"},
-		{`{"where":{"status":{"$not":{"$regex":"^op"}}}}`, "scan"},
+		{`{"query":{"_id":"d1"}}`, "id"},
+		{`{"query":{"_id":{"$in":["d1","d2"]}}}`, "id"},
+		{`{"query":{"status":"open"}}`, "index:status"},
+		{`{"query":{"status":{"$gt":"a"}}}`, "index:status"},
+		{`{"query":{"$or":[{"status":"open"},{"status":"closed"}]}}`, "scan"},
+		{`{"query":{"n":{"$gt":1}}}`, "scan"},
+		{`{"query":{"status":{"$regex":"^op"}}}`, "index:status"},
+		{`{"query":{"status":{"$regex":"^OP","$options":"i"}}}`, "scan"},
+		{`{"query":{"status":{"$regex":"pen"}}}`, "scan"},
+		{`{"query":{"status":{"$not":{"$regex":"^op"}}}}`, "scan"},
 	}
 
 	for _, tc := range cases {
@@ -111,7 +111,7 @@ func TestPlannerChoosesIDIndexOrScan(t *testing.T) {
 		}
 	}
 
-	if p := rq(t, c, `{"where":{"_id":"d1"}}`); p.Explain != nil {
+	if p := rq(t, c, `{"query":{"_id":"d1"}}`); p.Explain != nil {
 		t.Fatal("explain must be nil unless requested")
 	}
 }
@@ -132,7 +132,7 @@ func TestPruningSkipsSegmentsAndRowGroups(t *testing.T) {
 		return fmt.Sprintf(`{"_id":"c%d","status":"a","n":%d}`, i, 4000+i)
 	}))
 
-	e := explainOf(t, c, `{"where":{"n":{"$gte":5500}}}`)
+	e := explainOf(t, c, `{"query":{"n":{"$gte":5500}}}`)
 
 	if e.SegmentsRead != 1 || e.SegmentsSkipped != 2 {
 		t.Fatalf("segments read %d skipped %d", e.SegmentsRead, e.SegmentsSkipped)
@@ -166,7 +166,7 @@ func TestBloomSkipsOnEquality(t *testing.T) {
 
 	c.DropIndex("status")
 
-	e := explainOf(t, c, `{"where":{"status":"m"}}`)
+	e := explainOf(t, c, `{"query":{"status":"m"}}`)
 
 	if e.Plan != "scan" || e.RowsMatched != 750 {
 		t.Fatalf("plan %s matched %d", e.Plan, e.RowsMatched)
@@ -232,29 +232,29 @@ func mixedDoc(i int) string {
 
 var diffQueries = []string{
 	`{}`,
-	`{"where":{"status":"s1"}}`,
-	`{"where":{"n":{"$gte":100,"$lt":300}}}`,
-	`{"where":{"n":"str6"}}`,
-	`{"where":{"n":{"$gt":"str"}}}`,
-	`{"where":{"n":{"$exists":false}}}`,
-	`{"where":{"n":{"$exists":true},"status":{"$ne":"s0"}}}`,
-	`{"where":{"n":7.5}}`,
-	`{"where":{"n":{"$in":[3,"str6",7.5]}}}`,
-	`{"where":{"n":null}}`,
-	`{"where":{"tags":"t2"}}`,
-	`{"where":{"tags":["t1","t2"]}}`,
-	`{"where":{"empty":[]}}`,
-	`{"where":{"meta.k":1}}`,
-	`{"where":{"meta":{"k":2}}}`,
-	`{"where":{"items.sku":"a"}}`,
-	`{"where":{"meta2":{}}}`,
-	`{"where":{"$or":[{"status":"s2"},{"n":3}]}}`,
-	`{"where":{"$not":{"status":"s1"}}}`,
-	`{"where":{"n":{"$gt":50}},"sort":{"n":-1,"status":1},"limit":7}`,
+	`{"query":{"status":"s1"}}`,
+	`{"query":{"n":{"$gte":100,"$lt":300}}}`,
+	`{"query":{"n":"str6"}}`,
+	`{"query":{"n":{"$gt":"str"}}}`,
+	`{"query":{"n":{"$exists":false}}}`,
+	`{"query":{"n":{"$exists":true},"status":{"$ne":"s0"}}}`,
+	`{"query":{"n":7.5}}`,
+	`{"query":{"n":{"$in":[3,"str6",7.5]}}}`,
+	`{"query":{"n":null}}`,
+	`{"query":{"tags":"t2"}}`,
+	`{"query":{"tags":["t1","t2"]}}`,
+	`{"query":{"empty":[]}}`,
+	`{"query":{"meta.k":1}}`,
+	`{"query":{"meta":{"k":2}}}`,
+	`{"query":{"items.sku":"a"}}`,
+	`{"query":{"meta2":{}}}`,
+	`{"query":{"$or":[{"status":"s2"},{"n":3}]}}`,
+	`{"query":{"$not":{"status":"s1"}}}`,
+	`{"query":{"n":{"$gt":50}},"sort":{"n":-1,"status":1},"limit":7}`,
 	`{"sort":{"status":1,"n":-1},"limit":10,"skip":3}`,
-	`{"where":{"status":"s3"},"fields":["status","meta.k"],"count":true}`,
-	`{"where":{"at":{"$gte":"2026-02-01T00:00:00Z"}},"sort":{"at":-1},"limit":9}`,
-	`{"where":{"status":"s9"}}`,
+	`{"query":{"status":"s3"},"fields":["status","meta.k"],"count":true}`,
+	`{"query":{"at":{"$gte":"2026-02-01T00:00:00Z"}},"sort":{"at":-1},"limit":9}`,
+	`{"query":{"status":"s9"}}`,
 }
 
 // sameAnswers checks every query on both collections, including the pages
@@ -312,7 +312,7 @@ func TestColumnScanEqualsRowEvaluator(t *testing.T) {
 
 	sameAnswers(t, ref, sealed, diffQueries)
 
-	e := explainOf(t, sealed, `{"where":{"status":"s1"}}`)
+	e := explainOf(t, sealed, `{"query":{"status":"s1"}}`)
 
 	if e.Plan != "scan" || e.RawFetched != e.RowsMatched || e.RowsRead <= e.RowsMatched {
 		t.Fatalf("column scan must fetch raw only for matches: %+v", e)
@@ -395,7 +395,7 @@ func TestColumnScanFetchesRawOnlyForMatches(t *testing.T) {
 
 	c.DropIndex("status")
 
-	e := explainOf(t, c, `{"where":{"status":"s1"}}`)
+	e := explainOf(t, c, `{"query":{"status":"s1"}}`)
 
 	if e.RowsRead != 1200 || e.RowsMatched != 400 {
 		t.Fatalf("rows read %d matched %d", e.RowsRead, e.RowsMatched)
@@ -411,8 +411,8 @@ func TestIDCacheCountsHits(t *testing.T) {
 
 	seed(t, c, `{"_id":"d1","n":1}`, `{"_id":"d2","n":2}`)
 
-	first := explainOf(t, c, `{"where":{"_id":"d1"}}`)
-	second := explainOf(t, c, `{"where":{"_id":"d1"}}`)
+	first := explainOf(t, c, `{"query":{"_id":"d1"}}`)
+	second := explainOf(t, c, `{"query":{"_id":"d1"}}`)
 
 	if first.CacheHits != 0 || second.CacheHits != 1 {
 		t.Fatalf("cache hits first %d second %d", first.CacheHits, second.CacheHits)
@@ -422,7 +422,7 @@ func TestIDCacheCountsHits(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	after := explainOf(t, c, `{"where":{"_id":"d1"}}`)
+	after := explainOf(t, c, `{"query":{"_id":"d1"}}`)
 
 	if after.CacheHits != 0 {
 		t.Fatalf("an updated document must not hit the cache: %d", after.CacheHits)
@@ -486,9 +486,9 @@ func TestCursorWalkOverSegmentsEqualsMemtable(t *testing.T) {
 	bulk(t, sealed, docs[350:])
 
 	for _, body := range []string{
-		`{"where":{"n":{"$gte":20}},"sort":{"n":-1,"status":1},"limit":6}`,
+		`{"query":{"n":{"$gte":20}},"sort":{"n":-1,"status":1},"limit":6}`,
 		`{"sort":{"status":1,"n":1},"limit":11}`,
-		`{"where":{"status":"s2"},"limit":5,"snapshot":true}`,
+		`{"query":{"status":"s2"},"limit":5,"snapshot":true}`,
 	} {
 		want := walkPages(t, ref, body)
 		got := walkPages(t, sealed, body)
@@ -504,7 +504,7 @@ func TestScanFindsExplicitNullInAllNullGroup(t *testing.T) {
 
 	sealBatch(t, c, []string{`{"_id":"a","x":null}`, `{"_id":"b","x":null}`})
 
-	if got := rq(t, c, `{"where":{"x":null}}`).Rows; len(got) != 2 {
+	if got := rq(t, c, `{"query":{"x":null}}`).Rows; len(got) != 2 {
 		t.Fatalf("x:null over a sealed all-null group: %d rows, want 2", len(got))
 	}
 }
@@ -517,7 +517,7 @@ func TestScanFindsExplicitNullInNullRowGroupOfNumberColumn(t *testing.T) {
 
 	sealBatch(t, c, docs)
 
-	if got := rq(t, c, `{"where":{"x":null}}`).Rows; len(got) != 1024 {
+	if got := rq(t, c, `{"query":{"x":null}}`).Rows; len(got) != 1024 {
 		t.Fatalf("x:null: %d rows, want 1024", len(got))
 	}
 }
@@ -529,7 +529,7 @@ func TestQueryWithZeroScanWorkersDoesNotHang(t *testing.T) {
 
 	done := make(chan int, 1)
 
-	go func() { done <- len(rq(t, c, `{"where":{}}`).Rows) }()
+	go func() { done <- len(rq(t, c, `{"query":{}}`).Rows) }()
 
 	select {
 	case n := <-done:
@@ -557,7 +557,7 @@ func TestVersionsFlagReturnsSnapshotVersion(t *testing.T) {
 
 	bulk(t, c, []string{`{"_id":"tail"}`})
 
-	rows := rq(t, c, `{"where":{},"sort":{"_id":1},"versions":true}`).Rows
+	rows := rq(t, c, `{"query":{},"sort":{"_id":1},"versions":true}`).Rows
 	got := map[string]float64{}
 
 	for _, r := range rows {
@@ -576,7 +576,7 @@ func TestVersionsFlagReturnsSnapshotVersion(t *testing.T) {
 		t.Fatalf("versions = %v, want %v", got, want)
 	}
 
-	plain := rq(t, c, `{"where":{"_id":"tail"}}`).Rows
+	plain := rq(t, c, `{"query":{"_id":"tail"}}`).Rows
 
 	if strings.Contains(string(plain[0]), `"_v"`) {
 		t.Fatalf("_v without the flag: %s", plain[0])
@@ -595,19 +595,19 @@ func TestRegexPrefixPrunesSegments(t *testing.T) {
 		}))
 	}
 
-	anchored := explainOf(t, c, `{"where":{"name":{"$regex":"^b-"}}}`)
+	anchored := explainOf(t, c, `{"query":{"name":{"$regex":"^b-"}}}`)
 
 	if anchored.SegmentsRead != 1 || anchored.SegmentsSkipped != 2 || anchored.RowsMatched != 2000 {
 		t.Fatalf("anchored: %+v", anchored)
 	}
 
-	open := explainOf(t, c, `{"where":{"name":{"$regex":"b-"}}}`)
+	open := explainOf(t, c, `{"query":{"name":{"$regex":"b-"}}}`)
 
 	if open.SegmentsSkipped != 0 || open.RowsMatched != 2000 {
 		t.Fatalf("unanchored: %+v", open)
 	}
 
-	folded := explainOf(t, c, `{"where":{"name":{"$regex":"^B-","$options":"i"}}}`)
+	folded := explainOf(t, c, `{"query":{"name":{"$regex":"^B-","$options":"i"}}}`)
 
 	if folded.SegmentsSkipped != 0 || folded.RowsMatched != 2000 {
 		t.Fatalf("case folded: %+v", folded)

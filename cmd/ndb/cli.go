@@ -120,18 +120,20 @@ Usage:
   ndb drop <collection>         remove the collection, its definition and watch consumers
   ndb health                    exit 0 when the daemon is ready (for container health checks)
   ndb get <coll> <_id>          one document by _id
-  ndb update <coll> '<json>'    atomic update by filter: the JSON mixes the filter and the
-                                write operators ($set $unset $inc $push $pull $min $max)
-  ndb update <coll> <_id> '<ops json>'
-                                the same update on one document; extra filter keys are guards
-  ndb delete <coll> '<json>'    delete the documents the JSON filter matches
+  ndb update <coll> '<query>' '<update>'
+                                atomic update by query; update holds the write operators
+                                ($set $setOnInsert $unset $inc $push $pull $min $max)
+  ndb update <coll> <_id> '<update>'
+                                the same update on one document
+  ndb delete <coll> '<query>'   delete the documents the query matches
   ndb delete <coll> <_id>       delete one document by _id
   ndb expire <coll> <_id> <dur> the document expires <dur> from now (30m, 1h, 3600)
   ndb persist <coll> <_id>      remove the expiry of a document
   ndb ttl <coll> <_id>          time left of a document (-1 = never expires)
   ndb quarantine <collection>   bad lines of a direct collection (file, offset, reason)
-  ndb query <collection> ['<where-json>']
-                                find rows; -aggregate '<pipeline-json>' aggregates
+  ndb query <collection> ['<query-json>']
+                                search rows; -aggregate '<pipeline-json>' aggregates;
+                                a pattern (logs-2026-*) reads many collections
   ndb version                   print the version (also: ndb -version)
   ndb help                      print this text
 

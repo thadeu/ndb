@@ -104,7 +104,7 @@ type collStats struct {
 func TestGlobalStatsListsEveryCollectionWithTotals(t *testing.T) {
 	h := adminHandler(t)
 
-	rec := call(h, "GET", "/v1/stats", "")
+	rec := call(h, "GET", "/_stats", "")
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -154,7 +154,7 @@ func TestGlobalStatsListsEveryCollectionWithTotals(t *testing.T) {
 func TestCollectionStatsKeepsOldFieldsAndAddsTheNewOnes(t *testing.T) {
 	h := adminHandler(t)
 
-	rec := call(h, "GET", "/v1/c/posts/stats", "")
+	rec := call(h, "GET", "/posts/_stats", "")
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -170,13 +170,13 @@ func TestCollectionStatsKeepsOldFieldsAndAddsTheNewOnes(t *testing.T) {
 		t.Fatalf("new fields: %s", rec.Body.String())
 	}
 
-	expectStatus(t, call(h, "GET", "/v1/c/nope/stats", ""), http.StatusNotFound)
+	expectStatus(t, call(h, "GET", "/nope/_stats", ""), http.StatusNotFound)
 }
 
 func TestSizeReportsPartsPerCollectionAndTotals(t *testing.T) {
 	h := adminHandler(t)
 
-	rec := call(h, "GET", "/v1/size", "")
+	rec := call(h, "GET", "/_size", "")
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -210,7 +210,7 @@ func TestSizeReportsPartsPerCollectionAndTotals(t *testing.T) {
 func TestGetCollectionReturnsTheDefinition(t *testing.T) {
 	h := adminHandler(t)
 
-	rec := call(h, "GET", "/v1/c/calls", "")
+	rec := call(h, "GET", "/calls", "")
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -232,7 +232,7 @@ func TestGetCollectionReturnsTheDefinition(t *testing.T) {
 		t.Fatalf("indexes = %s", rec.Body.String())
 	}
 
-	rec = call(h, "GET", "/v1/c/nope", "")
+	rec = call(h, "GET", "/nope", "")
 
 	expectStatus(t, rec, http.StatusNotFound)
 
@@ -244,7 +244,7 @@ func TestGetCollectionReturnsTheDefinition(t *testing.T) {
 func TestCompactEndpointMergesSegments(t *testing.T) {
 	h := adminHandler(t)
 
-	rec := call(h, "POST", "/v1/c/posts/compact", "")
+	rec := call(h, "POST", "/posts/_compact", "")
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -270,7 +270,7 @@ func TestCompactEndpointMergesSegments(t *testing.T) {
 func TestCompactEndpointRefusesDirectAndUnknownCollections(t *testing.T) {
 	h := adminHandler(t)
 
-	rec := call(h, "POST", "/v1/c/calls/compact", "")
+	rec := call(h, "POST", "/calls/_compact", "")
 
 	expectStatus(t, rec, http.StatusBadRequest)
 
@@ -278,13 +278,13 @@ func TestCompactEndpointRefusesDirectAndUnknownCollections(t *testing.T) {
 		t.Fatalf("code = %q", code)
 	}
 
-	expectStatus(t, call(h, "POST", "/v1/c/nope/compact", ""), http.StatusNotFound)
+	expectStatus(t, call(h, "POST", "/nope/_compact", ""), http.StatusNotFound)
 }
 
 func TestQuarantineEndpointListsBadLinesOfADirectCollection(t *testing.T) {
 	h := adminHandler(t)
 
-	rec := call(h, "GET", "/v1/c/calls/quarantine?limit=5", "")
+	rec := call(h, "GET", "/calls/_quarantine?limit=5", "")
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -316,7 +316,7 @@ func TestQuarantineEndpointListsBadLinesOfADirectCollection(t *testing.T) {
 func TestQuarantineEndpointEngineModeIsEmptyAndLimitIsChecked(t *testing.T) {
 	h := adminHandler(t)
 
-	rec := call(h, "GET", "/v1/c/posts/quarantine", "")
+	rec := call(h, "GET", "/posts/_quarantine", "")
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -325,10 +325,10 @@ func TestQuarantineEndpointEngineModeIsEmptyAndLimitIsChecked(t *testing.T) {
 	}
 
 	for _, bad := range []string{"limit=abc", "limit=-1", "limit=0"} {
-		expectStatus(t, call(h, "GET", "/v1/c/calls/quarantine?"+bad, ""), http.StatusBadRequest)
+		expectStatus(t, call(h, "GET", "/calls/_quarantine?"+bad, ""), http.StatusBadRequest)
 	}
 
-	expectStatus(t, call(h, "GET", "/v1/c/nope/quarantine", ""), http.StatusNotFound)
+	expectStatus(t, call(h, "GET", "/nope/_quarantine", ""), http.StatusNotFound)
 }
 
 func TestQuarantineLineIsCutAtTwoKiB(t *testing.T) {
@@ -361,7 +361,7 @@ func TestQuarantineLineIsCutAtTwoKiB(t *testing.T) {
 
 	srv.Attach(db)
 
-	rec := call(srv.Handler(), "GET", "/v1/c/calls/quarantine", "")
+	rec := call(srv.Handler(), "GET", "/calls/_quarantine", "")
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -383,11 +383,11 @@ func TestNewEndpointsKeepTheTokenRules(t *testing.T) {
 	unix, tcp, addr := tokenServer(t, "s3cret")
 
 	for _, c := range []struct{ method, path string }{
-		{"GET", "/v1/stats"},
-		{"GET", "/v1/size"},
-		{"GET", "/v1/c/x"},
-		{"GET", "/v1/c/x/quarantine"},
-		{"POST", "/v1/c/x/compact"},
+		{"GET", "/_stats"},
+		{"GET", "/_size"},
+		{"GET", "/x"},
+		{"GET", "/x/_quarantine"},
+		{"POST", "/x/_compact"},
 	} {
 		req, _ := http.NewRequest(c.method, "http://"+addr+c.path, nil)
 
@@ -403,7 +403,7 @@ func TestNewEndpointsKeepTheTokenRules(t *testing.T) {
 		}
 	}
 
-	resp, body := do(t, unix, "GET", "/v1/stats", "", nil)
+	resp, body := do(t, unix, "GET", "/_stats", "", nil)
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("unix without token: %d %s", resp.StatusCode, body)

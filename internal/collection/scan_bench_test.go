@@ -76,7 +76,7 @@ func insertChunks(b *testing.B, c *collection.Collection, lines [][]byte) {
 // first three segments and most of the fourth.
 func BenchmarkScanPruned(b *testing.B) {
 	c, cut := benchScanCollection(b)
-	body := fmt.Sprintf(`{"where":{"ts":{"$gte":%q}}}`, cut.Format(time.RFC3339))
+	body := fmt.Sprintf(`{"query":{"ts":{"$gte":%q}}}`, cut.Format(time.RFC3339))
 
 	benchFind(b, c, body)
 }
@@ -85,7 +85,7 @@ func BenchmarkScanPruned(b *testing.B) {
 // does not prune, so every row group is read.
 func BenchmarkScanUnpruned(b *testing.B) {
 	c, cut := benchScanCollection(b)
-	body := fmt.Sprintf(`{"where":{"$or":[{"ts":{"$gte":%q}},{"_id":"none"}]}}`, cut.Format(time.RFC3339))
+	body := fmt.Sprintf(`{"query":{"$or":[{"ts":{"$gte":%q}},{"_id":"none"}]}}`, cut.Format(time.RFC3339))
 
 	benchFind(b, c, body)
 }

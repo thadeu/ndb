@@ -8,9 +8,9 @@
     },
     "writes": [
       {
-        "op": "insert",
+        "op": "bulk",
         "body": {
-          "insert": [
+          "docs": [
             {
               "_id": "past",
               "exp": "2020-01-01T00:00:00Z"

@@ -58,7 +58,7 @@ func compact(args []string, out io.Writer) error {
 
 	var rep compactReport
 
-	if err := c.post("/v1/c/"+url.PathEscape(pos[0])+"/compact", nil, &rep); err != nil {
+	if err := c.post("/"+url.PathEscape(pos[0])+"/_compact", nil, &rep); err != nil {
 		return err
 	}
 

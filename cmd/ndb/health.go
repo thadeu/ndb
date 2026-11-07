@@ -34,7 +34,7 @@ func health(args []string, out io.Writer) error {
 		return err
 	}
 
-	if _, err := c.call("GET", "/health", nil); err != nil {
+	if _, err := c.call("GET", "/_health", nil); err != nil {
 		return fmt.Errorf("health: %w", err)
 	}
 

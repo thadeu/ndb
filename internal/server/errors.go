@@ -87,12 +87,14 @@ func codeOf(err error) string {
 
 func statusOf(code string) int {
 	switch code {
-	case "not_found", "unknown_collection":
+	case "not_found", "unknown_collection", "unknown_route":
 		return http.StatusNotFound
 	case "duplicate_id", "unique_violation", "catalog_conflict", "direct_collection":
 		return http.StatusConflict
 	case "request_too_large", "line_too_large":
 		return http.StatusRequestEntityTooLarge
+	case "method_not_allowed":
+		return http.StatusMethodNotAllowed
 	case "unauthorized":
 		return http.StatusUnauthorized
 	case "forbidden":
@@ -152,6 +154,15 @@ func decode(body []byte, v any) error {
 	}
 
 	return nil
+}
+
+// decodeOptional is decode, but an empty body leaves v as it is.
+func decodeOptional(body []byte, v any) error {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return nil
+	}
+
+	return decode(body, v)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

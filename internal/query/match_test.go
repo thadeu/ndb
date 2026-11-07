@@ -22,7 +22,7 @@ func decode(t *testing.T, s string) map[string]any {
 func match(t *testing.T, where, doc string) bool {
 	t.Helper()
 
-	q, err := query.Parse([]byte(`{"where":`+where+`}`), query.Options{TimeField: "at"})
+	q, err := query.Parse([]byte(`{"query":`+where+`}`), query.Options{TimeField: "at"})
 	if err != nil {
 		t.Fatalf("%s: %v", where, err)
 	}
@@ -211,7 +211,7 @@ func TestCompareTypeOrder(t *testing.T) {
 }
 
 func TestIndexable(t *testing.T) {
-	q, err := query.Parse([]byte(`{"where":{"a":1,"b":{"$in":[1,2]},"c":{"$gt":3,"$ne":4},"d":[1],"$or":[{"e":1}],"$and":[{"f":"x"}]}}`), query.Options{})
+	q, err := query.Parse([]byte(`{"query":{"a":1,"b":{"$in":[1,2]},"c":{"$gt":3,"$ne":4},"d":[1],"$or":[{"e":1}],"$and":[{"f":"x"}]}}`), query.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

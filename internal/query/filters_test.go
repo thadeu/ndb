@@ -20,7 +20,7 @@ func parseAt(t *testing.T, body string, now time.Time) (*query.Query, error) {
 func matchAt(t *testing.T, where, doc string) bool {
 	t.Helper()
 
-	q, err := parseAt(t, `{"where":`+where+`}`, fixedNow)
+	q, err := parseAt(t, `{"query":`+where+`}`, fixedNow)
 	if err != nil {
 		t.Fatalf("%s: %v", where, err)
 	}
@@ -75,7 +75,7 @@ func TestDateMath(t *testing.T) {
 
 func TestDateMathErrors(t *testing.T) {
 	for _, expr := range []string{"now-7x", "now--1d", "now-d", "now-1", "now/", "now/dd", "now/x", "nowish"} {
-		_, err := parseAt(t, `{"where":{"at":{"$gte":"`+expr+`"}}}`, fixedNow)
+		_, err := parseAt(t, `{"query":{"at":{"$gte":"`+expr+`"}}}`, fixedNow)
 
 		var qe *query.Error
 		if !errors.As(err, &qe) || qe.Code() != "invalid_query" {
@@ -85,7 +85,7 @@ func TestDateMathErrors(t *testing.T) {
 }
 
 func TestDateMathIsIndexable(t *testing.T) {
-	q, err := parseAt(t, `{"where":{"at":{"$gte":"now-1h"}}}`, fixedNow)
+	q, err := parseAt(t, `{"query":{"at":{"$gte":"now-1h"}}}`, fixedNow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestDateMathIsIndexable(t *testing.T) {
 }
 
 func TestCursorKeepsNow(t *testing.T) {
-	body := `{"where":{"at":{"$gte":"now-1h"}},"sort":{"at":1}}`
+	body := `{"query":{"at":{"$gte":"now-1h"}},"sort":{"at":1}}`
 
 	first, err := parseAt(t, body, fixedNow)
 	if err != nil {
@@ -108,7 +108,7 @@ func TestCursorKeepsNow(t *testing.T) {
 	tok := first.EncodeCursor(query.Pos{Keys: []query.Value{{}}, ID: "x"}, "")
 
 	later := fixedNow.Add(10 * time.Minute)
-	next, err := parseAt(t, `{"where":{"at":{"$gte":"now-1h"}},"sort":{"at":1},"after":"`+tok+`"}`, later)
+	next, err := parseAt(t, `{"query":{"at":{"$gte":"now-1h"}},"sort":{"at":1},"after":"`+tok+`"}`, later)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,14 +157,14 @@ func TestElemMatchErrors(t *testing.T) {
 		`{"items":{"$gt":1,"$elemMatch":{"sku":"a"}}}`,
 		`{"items":{"$elemMatch":{"$bad":1}}}`,
 	} {
-		if _, err := query.Parse([]byte(`{"where":`+where+`}`), query.Options{}); err == nil {
+		if _, err := query.Parse([]byte(`{"query":`+where+`}`), query.Options{}); err == nil {
 			t.Errorf("%s: want an error", where)
 		}
 	}
 }
 
 func TestElemMatchNeedsDoc(t *testing.T) {
-	q, err := query.Parse([]byte(`{"where":{"status":"a","items":{"$elemMatch":{"sku":"a"}}}}`), query.Options{})
+	q, err := query.Parse([]byte(`{"query":{"status":"a","items":{"$elemMatch":{"sku":"a"}}}}`), query.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

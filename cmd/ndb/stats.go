@@ -61,7 +61,7 @@ type statsReport struct {
 	SharedBytes   int64             `json:"shared_bytes"`
 }
 
-// runStats is "ndb stats". It asks the daemon (GET /v1/stats). With -data-dir,
+// runStats is "ndb stats". It asks the daemon (GET /_stats). With -data-dir,
 // or when no daemon answers, it reads the data dir: sizes and file counts
 // only, because rows, indexes and quarantine live in the daemon.
 func runStats(args []string) error {
@@ -107,7 +107,7 @@ func collectStats(t target) (statsReport, error) {
 
 	rep := statsReport{Source: t.source}
 
-	if err := t.client.get("/v1/stats", &rep); err != nil {
+	if err := t.client.get("/_stats", &rep); err != nil {
 		return rep, err
 	}
 

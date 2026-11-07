@@ -23,10 +23,10 @@ type deleteReport struct {
 	Deleted int `json:"deleted"`
 }
 
-// runUpdate is "ndb update <collection> '<json>'": the JSON mixes the filter
-// and the write operators, like the body of POST /v1/c/{coll}/update. With an
-// _id as second argument, "ndb update <collection> <_id> '<ops json>'" updates
-// that one document.
+// runUpdate is "ndb update <collection> '<query>' '<update>'": the atomic
+// update of POST /{coll}/_update_by_query. With an _id as second argument,
+// "ndb update <collection> <_id> '<update>'" updates that one document
+// (POST /{coll}/_update/{id}).
 func runUpdate(args []string) error {
 	return update(args, os.Stdout)
 }
@@ -35,7 +35,7 @@ func update(args []string, out io.Writer) error {
 	fl := flag.NewFlagSet("ndb update", flag.ContinueOnError)
 
 	cf := addConnFlags(fl)
-	many := fl.Bool("many", false, "update every match (the filter needs the id or an indexed field)")
+	many := fl.Bool("many", false, "update every match (the query needs the id or an indexed field)")
 	upsert := fl.Bool("upsert", false, "create the document when nothing matches")
 	expireIn := fl.String("expire-in", "", "set the expiry to now + duration (30m, 1h, 3600)")
 
@@ -44,7 +44,24 @@ func update(args []string, out io.Writer) error {
 		return err
 	}
 
-	path, body, err := updateTarget(pos)
+	path, req, err := updateTarget(pos)
+	if err != nil {
+		return err
+	}
+
+	if *many && !byID(pos) {
+		req["many"] = true
+	}
+
+	if *upsert {
+		req["upsert"] = true
+	}
+
+	if *expireIn != "" {
+		req["expire_in"] = durationArg(*expireIn)
+	}
+
+	body, err := json.Marshal(req)
 	if err != nil {
 		return err
 	}
@@ -54,18 +71,9 @@ func update(args []string, out io.Writer) error {
 		return err
 	}
 
-	q := url.Values{}
-
-	setFlag(q, "many", *many && !byID(pos))
-	setFlag(q, "upsert", *upsert)
-
-	if *expireIn != "" {
-		q.Set("expire_in", *expireIn)
-	}
-
 	var rep updateReport
 
-	if err := c.post(path+encodeQuery(q), body, &rep); err != nil {
+	if err := c.post(path, body, &rep); err != nil {
 		return err
 	}
 
@@ -84,29 +92,39 @@ func byID(pos []string) bool {
 	return len(pos) >= 2 && !strings.HasPrefix(strings.TrimSpace(pos[1]), "{")
 }
 
-// updateTarget is the path and the body of an update, in the filter form or
+// updateTarget is the path and the body of an update, in the query form or
 // in the _id form.
-func updateTarget(pos []string) (string, []byte, error) {
-	switch {
-	case len(pos) == 3 && byID(pos):
-		return "/v1/c/" + url.PathEscape(pos[0]) + "/" + url.PathEscape(pos[1]) + "/update", []byte(pos[2]), nil
-	case len(pos) == 2 && !byID(pos):
-		return "/v1/c/" + url.PathEscape(pos[0]) + "/update", []byte(pos[1]), nil
+func updateTarget(pos []string) (string, map[string]any, error) {
+	usage := errors.New(`usage: ndb update <collection> '<query json>' '<update json>' | <_id> '<update json>' [--many] [--upsert] [--expire-in 60s] [-url u] [-json]`)
+
+	if len(pos) != 3 {
+		return "", nil, usage
 	}
 
-	return "", nil, errors.New(`usage: ndb update <collection> '<json>' | <_id> '<ops json>' [--many] [--upsert] [--expire-in 60s] [-url u] [-json]`)
-}
-
-func encodeQuery(q url.Values) string {
-	if len(q) == 0 {
-		return ""
+	update, err := validJSON("update", pos[2], '{')
+	if err != nil {
+		return "", nil, err
 	}
 
-	return "?" + q.Encode()
+	if byID(pos) {
+		return docPath(pos[0], "_update", pos[1]), map[string]any{"update": update}, nil
+	}
+
+	q, err := validJSON("query", pos[1], '{')
+	if err != nil {
+		return "", nil, err
+	}
+
+	return "/" + url.PathEscape(pos[0]) + "/_update_by_query", map[string]any{"query": q, "update": update}, nil
 }
 
-// runDelete is "ndb delete <collection> '<json>'": the JSON is a filter. A
-// plain _id instead of the JSON deletes that one document.
+// docPath is /{coll}/{action}/{id}.
+func docPath(coll, action, id string) string {
+	return "/" + url.PathEscape(coll) + "/" + action + "/" + url.PathEscape(id)
+}
+
+// runDelete is "ndb delete <collection> '<query>'"; a plain _id instead of
+// the JSON deletes that one document.
 func runDelete(args []string) error {
 	return remove(args, os.Stdout)
 }
@@ -115,7 +133,7 @@ func remove(args []string, out io.Writer) error {
 	fl := flag.NewFlagSet("ndb delete", flag.ContinueOnError)
 
 	cf := addConnFlags(fl)
-	many := fl.Bool("many", false, "delete every match (the filter needs the id or an indexed field)")
+	many := fl.Bool("many", false, "delete every match (the query needs the id or an indexed field)")
 
 	pos, err := parseInterspersed(fl, args)
 	if err != nil {
@@ -123,7 +141,7 @@ func remove(args []string, out io.Writer) error {
 	}
 
 	if len(pos) != 2 {
-		return errors.New(`usage: ndb delete <collection> '<json>' | <_id> [--many] [-url u] [-json]`)
+		return errors.New(`usage: ndb delete <collection> '<query json>' | <_id> [--many] [-url u] [-json]`)
 	}
 
 	c, err := ttlClient(cf, fl, "delete")
@@ -131,16 +149,19 @@ func remove(args []string, out io.Writer) error {
 		return err
 	}
 
-	q := url.Values{}
-
-	setFlag(q, "many", *many)
-
 	var rep deleteReport
 
 	if byID(pos) {
-		err = c.del("/v1/c/"+url.PathEscape(pos[0])+"/"+url.PathEscape(pos[1]), &rep)
+		err = c.del(docPath(pos[0], "_doc", pos[1]), &rep)
 	} else {
-		err = c.post(writePath(pos[0], "delete", q), []byte(pos[1]), &rep)
+		var q json.RawMessage
+
+		if q, err = validJSON("query", pos[1], '{'); err != nil {
+			return err
+		}
+
+		body, _ := json.Marshal(map[string]any{"query": q, "many": *many})
+		err = c.post("/"+url.PathEscape(pos[0])+"/_delete_by_query", body, &rep)
 	}
 
 	if err != nil {
@@ -156,20 +177,4 @@ func remove(args []string, out io.Writer) error {
 	tb.Render(out, styleFor(out))
 
 	return nil
-}
-
-func setFlag(q url.Values, name string, on bool) {
-	if on {
-		q.Set(name, "true")
-	}
-}
-
-func writePath(coll, op string, q url.Values) string {
-	path := "/v1/c/" + url.PathEscape(coll) + "/" + op
-
-	if len(q) > 0 {
-		path += "?" + q.Encode()
-	}
-
-	return path
 }

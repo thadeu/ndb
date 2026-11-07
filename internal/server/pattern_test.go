@@ -24,11 +24,11 @@ func seedLogs(t *testing.T) http.Handler {
 	}
 
 	for name, docs := range seed {
-		expectStatus(t, call(h, "POST", "/v1/c/"+name+"/insert", `{"insert":`+docs+`}`), http.StatusOK)
+		expectStatus(t, call(h, "POST", "/"+name+"/_bulk", `{"docs":`+docs+`}`), http.StatusOK)
 	}
 
 	// One partition on segments, the others in the memtable.
-	expectStatus(t, call(h, "POST", "/v1/c/logs-2026-10/compact", ``), http.StatusOK)
+	expectStatus(t, call(h, "POST", "/logs-2026-10/_compact", ``), http.StatusOK)
 
 	return h
 }
@@ -100,7 +100,7 @@ func walk(t *testing.T, h http.Handler, path, body string) []patternRow {
 func TestPatternFindSorted(t *testing.T) {
 	h := seedLogs(t)
 
-	rec := call(h, "POST", "/v1/c/logs-2026-*/find", `{"sort":{"at":-1},"count":true}`)
+	rec := call(h, "POST", "/logs-2026-*/_search", `{"sort":{"at":-1},"count":true}`)
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -131,7 +131,7 @@ func TestPatternFindSorted(t *testing.T) {
 	}
 
 	for _, limit := range []string{"1", "2", "3"} {
-		got := ids(walk(t, h, "/v1/c/logs-2026-*/find", `{"sort":{"at":-1},"limit":`+limit+`}`))
+		got := ids(walk(t, h, "/logs-2026-*/_search", `{"sort":{"at":-1},"limit":`+limit+`}`))
 
 		if !slices.Equal(got, want) {
 			t.Fatalf("limit %s pages = %v, want %v", limit, got, want)
@@ -140,7 +140,7 @@ func TestPatternFindSorted(t *testing.T) {
 
 	asc := []string{"a1", "b1", "c1", "a2", "b2", "a3", "b3"}
 
-	if got := ids(walk(t, h, "/v1/c/logs-2026-*/find", `{"sort":{"at":1},"limit":2}`)); !slices.Equal(got, asc) {
+	if got := ids(walk(t, h, "/logs-2026-*/_search", `{"sort":{"at":1},"limit":2}`)); !slices.Equal(got, asc) {
 		t.Fatalf("asc pages = %v, want %v", got, asc)
 	}
 }
@@ -150,13 +150,13 @@ func TestPatternFindUnsorted(t *testing.T) {
 
 	want := []string{"a1", "a2", "a3", "b1", "b2", "b3", "c1"}
 
-	if got := ids(walk(t, h, "/v1/c/logs-2026-*/find", `{"limit":2}`)); !slices.Equal(got, want) {
+	if got := ids(walk(t, h, "/logs-2026-*/_search", `{"limit":2}`)); !slices.Equal(got, want) {
 		t.Fatalf("pages = %v, want %v", got, want)
 	}
 
-	rec := call(h, "POST", "/v1/c/logs-2026-*/find", `{"limit":2,"count":true}`)
+	rec := call(h, "POST", "/logs-2026-*/_search", `{"limit":2,"count":true}`)
 	next := rec.Header().Get("X-Ndb-Next")
-	rec = call(h, "POST", "/v1/c/logs-2026-*/find", `{"limit":2,"count":true,"after":"`+next+`"}`)
+	rec = call(h, "POST", "/logs-2026-*/_search", `{"limit":2,"count":true,"after":"`+next+`"}`)
 
 	if got := rec.Header().Get("X-Ndb-Total"); got != "7" {
 		t.Fatalf("total on page 2 = %s", got)
@@ -166,7 +166,7 @@ func TestPatternFindUnsorted(t *testing.T) {
 func TestPatternFindWhere(t *testing.T) {
 	h := seedLogs(t)
 
-	rec := call(h, "POST", "/v1/c/logs-*/find", `{"where":{"lvl":"error"},"sort":{"at":1},"fields":["at"]}`)
+	rec := call(h, "POST", "/logs-*/_search", `{"query":{"lvl":"error"},"sort":{"at":1},"fields":["at"]}`)
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -181,7 +181,7 @@ func TestPatternFindWhere(t *testing.T) {
 	}
 
 	// logs-* also matches logs-archive: a plain prefix.
-	rec = call(h, "POST", "/v1/c/logs-*/find", `{"where":{"at":9}}`)
+	rec = call(h, "POST", "/logs-*/_search", `{"query":{"at":9}}`)
 
 	if rows := rowsOf(t, rec.Body.String()); len(rows) != 1 || rows[0].Coll != "logs-archive" {
 		t.Fatalf("rows = %+v", rows)
@@ -191,7 +191,7 @@ func TestPatternFindWhere(t *testing.T) {
 func TestPatternAggregate(t *testing.T) {
 	h := seedLogs(t)
 
-	rec := call(h, "POST", "/v1/c/logs-2026-*/aggregate", `{"pipeline":[{"$group":{"_id":"$lvl","n":{"$count":{}},"sum":{"$sum":"$at"}}}]}`)
+	rec := call(h, "POST", "/logs-2026-*/_aggregate", `{"pipeline":[{"$group":{"_id":"$lvl","n":{"$count":{}},"sum":{"$sum":"$at"}}}]}`)
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -205,7 +205,7 @@ func TestPatternAggregate(t *testing.T) {
 func TestPatternNoMatch(t *testing.T) {
 	h := seedLogs(t)
 
-	rec := call(h, "POST", "/v1/c/logs-2025-*/find", `{"count":true}`)
+	rec := call(h, "POST", "/logs-2025-*/_search", `{"count":true}`)
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -213,14 +213,14 @@ func TestPatternNoMatch(t *testing.T) {
 		t.Fatalf("body = %q, total = %q", rec.Body.String(), rec.Header().Get("X-Ndb-Total"))
 	}
 
-	expectStatus(t, call(h, "POST", "/v1/c/logs-2025-*/aggregate", `{"pipeline":[{"$group":{"_id":"$lvl"}}]}`), http.StatusOK)
-	expectStatus(t, call(h, "POST", "/v1/c/logs-2025-*/find", `{"bad":1}`), http.StatusBadRequest)
+	expectStatus(t, call(h, "POST", "/logs-2025-*/_aggregate", `{"pipeline":[{"$group":{"_id":"$lvl"}}]}`), http.StatusOK)
+	expectStatus(t, call(h, "POST", "/logs-2025-*/_search", `{"bad":1}`), http.StatusBadRequest)
 }
 
 func TestPatternList(t *testing.T) {
 	h := seedLogs(t)
 
-	rec := call(h, "GET", "/v1/c/logs-2026-*", ``)
+	rec := call(h, "GET", "/logs-2026-*", ``)
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -228,7 +228,7 @@ func TestPatternList(t *testing.T) {
 		t.Fatalf("body = %s", got)
 	}
 
-	rec = call(h, "GET", "/v1/c/nope-*", ``)
+	rec = call(h, "GET", "/nope-*", ``)
 
 	if got := strings.TrimSpace(rec.Body.String()); got != `{"collections":[]}` {
 		t.Fatalf("body = %s", got)
@@ -239,13 +239,13 @@ func TestPatternErrors(t *testing.T) {
 	h := seedLogs(t)
 
 	for _, c := range []struct{ method, path, body string }{
-		{"POST", "/v1/c/logs-*/insert", `{"insert":[{"a":1}]}`},
-		{"POST", "/v1/c/logs-*/update", `{"lvl":"info","$set":{"x":1}}`},
-		{"POST", "/v1/c/logs-*/delete", `{"lvl":"info"}`},
-		{"POST", "/v1/c/logs-*/truncate?confirm=logs-*", ``},
-		{"DELETE", "/v1/c/logs-*?confirm=logs-*", ``},
-		{"PUT", "/v1/c/logs-*", `{}`},
-		{"POST", "/v1/c/logs-*/watch", `{}`},
+		{"POST", "/logs-*/_bulk", `{"docs":[{"a":1}]}`},
+		{"POST", "/logs-*/_update_by_query", `{"query":{"lvl":"info"},"update":{"$set":{"x":1}}}`},
+		{"POST", "/logs-*/_delete_by_query", `{"query":{"lvl":"info"}}`},
+		{"POST", "/logs-*/_truncate?confirm=logs-*", ``},
+		{"DELETE", "/logs-*?confirm=logs-*", ``},
+		{"PUT", "/logs-*", `{}`},
+		{"POST", "/logs-*/_watch", `{}`},
 	} {
 		rec := call(h, c.method, c.path, c.body)
 
@@ -257,7 +257,7 @@ func TestPatternErrors(t *testing.T) {
 	}
 
 	for _, p := range []string{"*", "lo*gs", "logs-**", "Logs-*"} {
-		rec := call(h, "POST", "/v1/c/"+p+"/find", `{}`)
+		rec := call(h, "POST", "/"+p+"/_search", `{}`)
 
 		expectStatus(t, rec, http.StatusBadRequest)
 
@@ -266,10 +266,10 @@ func TestPatternErrors(t *testing.T) {
 		}
 	}
 
-	rec := call(h, "POST", "/v1/c/logs-2026-*/find", `{"limit":1}`)
+	rec := call(h, "POST", "/logs-2026-*/_search", `{"limit":1}`)
 	next := rec.Header().Get("X-Ndb-Next")
 
-	for _, path := range []string{"/v1/c/logs-*/find", "/v1/c/logs-2026-10/find"} {
+	for _, path := range []string{"/logs-*/_search", "/logs-2026-10/_search"} {
 		rec = call(h, "POST", path, `{"limit":1,"after":"`+next+`"}`)
 
 		if got := errorCode(t, rec); got != "cursor_mismatch" {
@@ -277,7 +277,7 @@ func TestPatternErrors(t *testing.T) {
 		}
 	}
 
-	rec = call(h, "POST", "/v1/c/logs-*/find", `{"snapshot":true}`)
+	rec = call(h, "POST", "/logs-*/_search", `{"snapshot":true}`)
 
 	if got := errorCode(t, rec); got != "invalid_query" {
 		t.Fatalf("snapshot: code = %s", got)

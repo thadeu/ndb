@@ -87,19 +87,18 @@ func (e *httpEngine) EnsureCollection(ctx context.Context, name string, def json
 		def = json.RawMessage(`{}`)
 	}
 
-	_, err := e.send(ctx, "PUT", "/v1/c/"+name, def)
+	_, err := e.send(ctx, "PUT", "/"+name, def)
 
 	return err
 }
 
 func (e *httpEngine) Do(ctx context.Context, collection string, step spec.Step) ([]json.RawMessage, error) {
-	path := "/v1/c/" + collection + "/" + step.Op
-
-	return e.send(ctx, "POST", path, step.Body)
+	return e.send(ctx, "POST", "/"+collection+"/_"+step.Op, step.Body)
 }
 
-// send returns the NDJSON lines of a 2xx answer, or a CodeError built from
-// the error body.
+// send returns the rows of a 2xx answer (a JSON array for _search and
+// _aggregate, an object for a write), or a CodeError built from the error
+// body.
 func (e *httpEngine) send(ctx context.Context, method, path string, body []byte) ([]json.RawMessage, error) {
 	req, err := http.NewRequestWithContext(ctx, method, "http://ndb"+path, strings.NewReader(string(body)))
 	if err != nil {
@@ -134,10 +133,8 @@ func (e *httpEngine) send(ctx context.Context, method, path string, body []byte)
 
 	var rows []json.RawMessage
 
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.TrimSpace(line) != "" {
-			rows = append(rows, json.RawMessage(line))
-		}
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return []json.RawMessage{data}, nil
 	}
 
 	return rows, nil

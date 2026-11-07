@@ -84,7 +84,7 @@ func (db *DB) WatchWhere(name, consumer, from string, where []byte) (feed.Stream
 func (db *DB) watchFilter(name string, where []byte) (*query.Query, error) {
 	def, _ := db.cat.Get(name)
 
-	body := append(append([]byte(`{"where":`), where...), '}')
+	body := append(append([]byte(`{"query":`), where...), '}')
 
 	return query.Parse(body, query.Options{TimeField: def.Time, ExpiresField: def.ExpiresField})
 }

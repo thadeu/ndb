@@ -9,7 +9,7 @@ import (
 func TestTruncateRoute(t *testing.T) {
 	h := seedTwo(t)
 
-	rec := call(h, "POST", "/v1/c/posts/truncate", ``)
+	rec := call(h, "POST", "/posts/_truncate", ``)
 
 	expectStatus(t, rec, http.StatusBadRequest)
 
@@ -17,10 +17,10 @@ func TestTruncateRoute(t *testing.T) {
 		t.Fatalf("code = %q", got)
 	}
 
-	expectStatus(t, call(h, "POST", "/v1/c/posts/truncate?confirm=other", ``), http.StatusBadRequest)
-	expectStatus(t, call(h, "POST", "/v1/c/nope/truncate?confirm=nope", ``), http.StatusNotFound)
+	expectStatus(t, call(h, "POST", "/posts/_truncate?confirm=other", ``), http.StatusBadRequest)
+	expectStatus(t, call(h, "POST", "/nope/_truncate?confirm=nope", ``), http.StatusNotFound)
 
-	rec = call(h, "POST", "/v1/c/posts/truncate?confirm=posts", ``)
+	rec = call(h, "POST", "/posts/_truncate?confirm=posts", ``)
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -28,13 +28,13 @@ func TestTruncateRoute(t *testing.T) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 
-	rec = call(h, "POST", "/v1/c/posts/find", `{}`)
+	rec = call(h, "POST", "/posts/_search", `{}`)
 
 	if strings.TrimSpace(rec.Body.String()) != "" {
 		t.Fatalf("find after truncate = %q", rec.Body.String())
 	}
 
-	rec = call(h, "GET", "/v1/c/posts", ``)
+	rec = call(h, "GET", "/posts", ``)
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -46,9 +46,9 @@ func TestTruncateRoute(t *testing.T) {
 func TestDropRoute(t *testing.T) {
 	h := seedTwo(t)
 
-	expectStatus(t, call(h, "DELETE", "/v1/c/posts", ``), http.StatusBadRequest)
+	expectStatus(t, call(h, "DELETE", "/posts", ``), http.StatusBadRequest)
 
-	rec := call(h, "DELETE", "/v1/c/posts?confirm=posts", ``)
+	rec := call(h, "DELETE", "/posts?confirm=posts", ``)
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -56,6 +56,6 @@ func TestDropRoute(t *testing.T) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 
-	expectStatus(t, call(h, "GET", "/v1/c/posts", ``), http.StatusNotFound)
-	expectStatus(t, call(h, "DELETE", "/v1/c/posts?confirm=posts", ``), http.StatusNotFound)
+	expectStatus(t, call(h, "GET", "/posts", ``), http.StatusNotFound)
+	expectStatus(t, call(h, "DELETE", "/posts?confirm=posts", ``), http.StatusNotFound)
 }

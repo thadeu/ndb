@@ -64,7 +64,7 @@ type Cond struct {
 	Vals []Value
 }
 
-var topKeys = []string{"where", "fields", "sort", "limit", "skip", "after", "count", "snapshot", "explain", "versions"}
+var topKeys = []string{"query", "fields", "sort", "limit", "skip", "after", "count", "snapshot", "explain", "versions"}
 
 // Parse validates a find body. An empty body is an empty query.
 func Parse(body []byte, opts Options) (*Query, error) {
@@ -88,7 +88,7 @@ func Parse(body []byte, opts Options) (*Query, error) {
 
 	q.now = cursorNow(top["after"])
 
-	if err := q.parseWhere(top["where"]); err != nil {
+	if err := q.parseWhere(top["query"]); err != nil {
 		return nil, err
 	}
 
@@ -162,12 +162,12 @@ func (q *Query) parseWhere(raw json.RawMessage) error {
 	dec.UseNumber()
 
 	if err := dec.Decode(&v); err != nil {
-		return invalid("where: %v", err)
+		return invalid("query: %v", err)
 	}
 
 	m, ok := v.(map[string]any)
 	if !ok {
-		return invalid("where must be an object")
+		return invalid("query must be an object")
 	}
 
 	node, err := q.compileWhere(m)

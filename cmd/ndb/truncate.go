@@ -60,13 +60,13 @@ func swapCommand(verb string, args []string, in io.Reader, out io.Writer) error 
 		return fmt.Errorf("%s: %w", verb, err)
 	}
 
-	path := "/v1/c/" + url.PathEscape(name)
+	path := "/" + url.PathEscape(name)
 	query := "?confirm=" + url.QueryEscape(name)
 
 	var rep map[string]any
 
 	if verb == "truncate" {
-		err = c.post(path+"/truncate"+query, nil, &rep)
+		err = c.post(path+"/_truncate"+query, nil, &rep)
 	} else {
 		err = c.del(path+query, &rep)
 	}

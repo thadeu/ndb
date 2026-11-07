@@ -7,9 +7,9 @@
     },
     "writes": [
       {
-        "op": "insert",
+        "op": "bulk",
         "body": {
-          "insert": [
+          "docs": [
             {
               "_id": "p1",
               "status": "draft",
@@ -51,9 +51,9 @@
     ]
   },
   "request": {
-    "op": "find",
+    "op": "search",
     "body": {
-      "where": {
+      "query": {
         "_id": "p1"
       },
       "fields": [

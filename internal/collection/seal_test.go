@@ -110,10 +110,10 @@ func remove(t *testing.T, c *collection.Collection, id string) {
 
 var probes = []string{
 	`{}`,
-	`{"where":{"status":"s1"}}`,
-	`{"where":{"n":{"$gte":10,"$lt":30}},"sort":{"n":-1},"limit":7,"skip":2}`,
-	`{"where":{"_id":{"$in":["c0001","c0100","c9999"]}}}`,
-	`{"where":{"status":"s2"},"fields":["_id"],"count":true}`,
+	`{"query":{"status":"s1"}}`,
+	`{"query":{"n":{"$gte":10,"$lt":30}},"sort":{"n":-1},"limit":7,"skip":2}`,
+	`{"query":{"_id":{"$in":["c0001","c0100","c9999"]}}}`,
+	`{"query":{"status":"s2"},"fields":["_id"],"count":true}`,
 }
 
 // rowsOf returns the rows of every probe query, in order, as JSON text.
@@ -522,7 +522,7 @@ func TestIndexAfterSealAndRestartUsesSealedRows(t *testing.T) {
 
 	waitFor(t, func() bool { return c.Indexes()[0].State == "ready" })
 
-	q, _ := c.ParseQuery([]byte(`{"where":{"status":"s1"},"count":true}`))
+	q, _ := c.ParseQuery([]byte(`{"query":{"status":"s1"},"count":true}`))
 
 	page, err := c.Query(context.Background(), q)
 	if err != nil {

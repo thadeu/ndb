@@ -91,7 +91,7 @@ func TestTruncateKeepsDefinitionAndIndexes(t *testing.T) {
 		t.Fatal("unique must hold after truncate")
 	}
 
-	page, err := col.Find(ctx, []byte(`{"where":{"n":1},"explain":true}`))
+	page, err := col.Find(ctx, []byte(`{"query":{"n":1},"explain":true}`))
 	if err != nil || len(page.Rows) != 1 || page.Plan != "index:n" {
 		t.Fatalf("find by index: rows=%d plan=%q err=%v", len(page.Rows), page.Plan, err)
 	}

@@ -104,7 +104,7 @@ func (e *watchEnv) insert(coll string, from, to int) {
 	e.t.Helper()
 
 	for i := from; i <= to; i++ {
-		resp := e.post(context.Background(), "/v1/c/"+coll+"/insert", fmt.Sprintf(`{"insert":[{"_id":"p%d","n":%d}]}`, i, i))
+		resp := e.post(context.Background(), "/"+coll+"/_bulk", fmt.Sprintf(`{"docs":[{"_id":"p%d","n":%d}]}`, i, i))
 
 		io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
@@ -123,7 +123,7 @@ type lineReader struct {
 func (e *watchEnv) watch(ctx context.Context, coll, body string) (*lineReader, *http.Response) {
 	e.t.Helper()
 
-	resp := e.post(ctx, "/v1/c/"+coll+"/watch", body)
+	resp := e.post(ctx, "/"+coll+"/_watch", body)
 
 	return &lineReader{t: e.t, sc: bufio.NewScanner(resp.Body)}, resp
 }
@@ -157,7 +157,7 @@ func (r *lineReader) next() map[string]any {
 func (e *watchEnv) ack(coll, consumer, pos string) int {
 	e.t.Helper()
 
-	resp := e.post(context.Background(), "/v1/c/"+coll+"/ack", fmt.Sprintf(`{"consumer":%q,"pos":%q}`, consumer, pos))
+	resp := e.post(context.Background(), "/"+coll+"/_ack", fmt.Sprintf(`{"consumer":%q,"pos":%q}`, consumer, pos))
 
 	defer resp.Body.Close()
 
@@ -185,7 +185,7 @@ func TestWatchStreamsHistoryThenLiveAndAckResumes(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		third = r.next()
 
-		if third["_id"] != fmt.Sprintf("p%d", i) || third["op"] != "put" || third["v"] != float64(1) {
+		if third["_id"] != fmt.Sprintf("p%d", i) || third["op"] != "put" || third["_v"] != float64(1) {
 			t.Fatalf("event %d = %v", i, third)
 		}
 
@@ -351,12 +351,12 @@ func TestWatchAndAckErrors(t *testing.T) {
 		status     int
 		code       string
 	}{
-		{"/v1/c/posts/watch", `{}`, 400, "invalid_request"},
-		{"/v1/c/posts/watch", `{"consumer":"c","from":"later"}`, 400, "invalid_request"},
-		{"/v1/c/posts/watch", `{"consumer":"c","limit":-1}`, 400, "invalid_request"},
-		{"/v1/c/nope/watch", `{"consumer":"c"}`, 404, "unknown_collection"},
-		{"/v1/c/posts/ack", `{"consumer":"c","pos":"garbage"}`, 400, "invalid_position"},
-		{"/v1/c/posts/ack", `{"pos":"e1.1"}`, 400, "invalid_request"},
+		{"/posts/_watch", `{}`, 400, "invalid_request"},
+		{"/posts/_watch", `{"consumer":"c","from":"later"}`, 400, "invalid_request"},
+		{"/posts/_watch", `{"consumer":"c","limit":-1}`, 400, "invalid_request"},
+		{"/nope/_watch", `{"consumer":"c"}`, 404, "unknown_collection"},
+		{"/posts/_ack", `{"consumer":"c","pos":"garbage"}`, 400, "invalid_position"},
+		{"/posts/_ack", `{"pos":"e1.1"}`, 400, "invalid_request"},
 	}
 
 	for _, c := range cases {
@@ -389,7 +389,7 @@ func TestWatchDirectModeOverHTTP(t *testing.T) {
 
 	def := fmt.Sprintf(`{"write":"direct","path":%q}`, in+"/*.ndjson")
 
-	req, _ := http.NewRequest("PUT", "http://ndb/v1/c/calls", strings.NewReader(def))
+	req, _ := http.NewRequest("PUT", "http://ndb/calls", strings.NewReader(def))
 
 	resp, err := env.client.Do(req)
 	if err != nil || resp.StatusCode != 200 {
@@ -432,7 +432,7 @@ func TestWatchWhereFiltersEventsAndMovesTheCursor(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	r, resp := env.watch(ctx, "posts", `{"consumer":"relay","where":{"n":{"$gte":4}}}`)
+	r, resp := env.watch(ctx, "posts", `{"consumer":"relay","query":{"n":{"$gte":4}}}`)
 
 	for _, id := range []string{"p4", "p5"} {
 		if ev := r.next(); ev["_id"] != id {
@@ -443,7 +443,7 @@ func TestWatchWhereFiltersEventsAndMovesTheCursor(t *testing.T) {
 	cancel()
 	resp.Body.Close()
 
-	r, resp = env.watch(context.Background(), "posts", `{"consumer":"other","where":{"n":{"$gt":100}},"limit":1}`)
+	r, resp = env.watch(context.Background(), "posts", `{"consumer":"other","query":{"n":{"$gt":100}},"limit":1}`)
 
 	defer resp.Body.Close()
 
@@ -458,10 +458,10 @@ func TestWatchWhereRejectsABadFilter(t *testing.T) {
 	env.insert("posts", 1, 1)
 
 	for _, body := range []string{
-		`{"consumer":"c","where":{"n":{"$bogus":1}}}`,
-		`{"consumer":"c","where":"n=1"}`,
+		`{"consumer":"c","query":{"n":{"$bogus":1}}}`,
+		`{"consumer":"c","query":"n=1"}`,
 	} {
-		resp := env.post(context.Background(), "/v1/c/posts/watch", body)
+		resp := env.post(context.Background(), "/posts/_watch", body)
 
 		var out map[string]map[string]string
 

@@ -9,9 +9,9 @@
     },
     "writes": [
       {
-        "op": "insert",
+        "op": "bulk",
         "body": {
-          "insert": [
+          "docs": [
             {
               "_id": "old",
               "at": "2020-01-01T00:00:00Z"
@@ -29,9 +29,9 @@
     ]
   },
   "request": {
-    "op": "find",
+    "op": "search",
     "body": {
-      "where": {}
+      "query": {}
     }
   },
   "expect": {

@@ -93,7 +93,7 @@ func BenchmarkQueryByIDWhere(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		q, _ := query.Parse(fmt.Appendf(nil, `{"where":{"_id":"c%d"}}`, i*7919%n), query.Options{})
+		q, _ := query.Parse(fmt.Appendf(nil, `{"query":{"_id":"c%d"}}`, i*7919%n), query.Options{})
 		start := time.Now()
 
 		if _, err := c.Query(ctx, q); err != nil {
@@ -114,7 +114,7 @@ func BenchmarkQueryIndexed100(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		q, _ := query.Parse(fmt.Appendf(nil, `{"where":{"ref":"r%d"}}`, i*31%groups), query.Options{})
+		q, _ := query.Parse(fmt.Appendf(nil, `{"query":{"ref":"r%d"}}`, i*31%groups), query.Options{})
 		start := time.Now()
 
 		p, err := c.Query(ctx, q)

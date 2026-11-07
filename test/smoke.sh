@@ -45,70 +45,74 @@ expect() {
 pid=$!
 
 for _ in $(seq 1 100); do
-	if [[ "$(curl -s -o /dev/null -w '%{http_code}' --unix-socket "$sock" http://ndb/health 2>/dev/null || true)" == "200" ]]; then
+	if [[ "$(curl -s -o /dev/null -w '%{http_code}' --unix-socket "$sock" http://ndb/_health 2>/dev/null || true)" == "200" ]]; then
 		break
 	fi
 
 	sleep 0.1
 done
 
-call GET /health >/dev/null
+call GET /_health >/dev/null
 expect 200 "$(cat "$tmp/status")"
 
-call PUT /v1/c/old '{"id":"post_id"}' >/dev/null
+call PUT /old '{"id":"post_id"}' >/dev/null
 expect 400 "$(cat "$tmp/status")"
 [[ "$(cat "$tmp/body")" == *'catalog_invalid'* ]] || fail "the id setting must be catalog_invalid: $(cat "$tmp/body")"
 
-call PUT /v1/c/posts '{"indexes":["status"]}' >/dev/null
+call PUT /posts '{"indexes":["status"]}' >/dev/null
 expect 200 "$(cat "$tmp/status")"
 
-call POST /v1/c/posts/insert '{"insert":[{"_id":"p1","status":"draft"},{"_id":"p2","status":"live"},{"status":"auto"}]}' >/dev/null
+call POST /posts/_bulk '{"docs":[{"_id":"p1","status":"draft"},{"_id":"p2","status":"live"},{"status":"auto"}]}' >/dev/null
 expect 200 "$(cat "$tmp/status")"
 [[ "$(cat "$tmp/body")" == *'"_id":"p1"'* ]] || fail "insert did not return p1: $(cat "$tmp/body")"
 
-call POST /v1/c/posts/find '{"where":{"status":"live"}}' >/dev/null
+call POST /posts/_search '{"query":{"status":"live"}}' >/dev/null
 expect 200 "$(cat "$tmp/status")"
 [[ "$(cat "$tmp/body")" == *'"p2"'* ]] || fail "find did not return p2"
 
-call GET /v1/c/posts/p1 >/dev/null
+call GET /posts/_doc/p1 >/dev/null
 expect 200 "$(cat "$tmp/status")"
 [[ "$(cat "$tmp/body")" == *'"_id":"p1"'* && "$(cat "$tmp/body")" == *'"_v":1'* ]] || fail "get p1: $(cat "$tmp/body")"
 
-call GET /v1/c/posts/nope >/dev/null
+call GET /posts/_doc/nope >/dev/null
 expect 404 "$(cat "$tmp/status")"
 
-call POST /v1/c/posts/update '{"_id":"p1","_v":1,"$set":{"status":"live"}}' >/dev/null
+call POST /posts/_update_by_query '{"query":{"_id":"p1","_v":1},"update":{"$set":{"status":"live"}}}' >/dev/null
 expect 200 "$(cat "$tmp/status")"
 [[ "$(cat "$tmp/body")" == *'"matched":1'* ]] || fail "update did not match: $(cat "$tmp/body")"
 
-call POST /v1/c/posts/update '{"_id":"p1","_v":1,"$set":{"status":"gone"}}' >/dev/null
+call POST /posts/_update_by_query '{"query":{"_id":"p1","_v":1},"update":{"$set":{"status":"gone"}}}' >/dev/null
 expect 200 "$(cat "$tmp/status")"
 [[ "$(cat "$tmp/body")" == *'"matched":0'* ]] || fail "stale update matched: $(cat "$tmp/body")"
 
-call POST /v1/c/posts/p1/update '{"_v":2,"$set":{"status":"by-id"}}' >/dev/null
+call POST /posts/_update/p1 '{"query":{"_v":2},"update":{"$set":{"status":"by-id"}}}' >/dev/null
 expect 200 "$(cat "$tmp/status")"
 [[ "$(cat "$tmp/body")" == *'"matched":1'* ]] || fail "update by id did not match: $(cat "$tmp/body")"
 
-call DELETE /v1/c/posts/p2 >/dev/null
+call DELETE /posts/_doc/p2 >/dev/null
 expect 200 "$(cat "$tmp/status")"
 [[ "$(cat "$tmp/body")" == *'"deleted":1'* ]] || fail "delete by id: $(cat "$tmp/body")"
 
-call GET /v1/c/posts/stats >/dev/null
+call GET /posts/_stats >/dev/null
 expect 200 "$(cat "$tmp/status")"
 [[ "$(cat "$tmp/body")" == *'"rows":2'* ]] || fail "stats: want 2 rows after delete: $(cat "$tmp/body")"
 
-call DELETE /v1/c/posts/indexes/status >/dev/null
+call DELETE /posts/_indexes/status >/dev/null
 expect 200 "$(cat "$tmp/status")"
 
-call GET /v1/c >/dev/null
+call GET /_collections >/dev/null
 expect 200 "$(cat "$tmp/status")"
 [[ "$(cat "$tmp/body")" == *'"posts"'* ]] || fail "catalog list misses posts"
 
-call POST /v1/c/nope/find '{}' >/dev/null
+call POST /nope/_search '{}' >/dev/null
 expect 404 "$(cat "$tmp/status")"
 [[ "$(cat "$tmp/body")" == *'unknown_collection'* ]] || fail "unknown collection: wrong code"
 
-call GET /metrics >/dev/null
+call GET /v1/c >/dev/null
+expect 404 "$(cat "$tmp/status")"
+[[ "$(cat "$tmp/body")" == *'unknown_route'* ]] || fail "old route: want unknown_route"
+
+call GET /_metrics >/dev/null
 expect 200 "$(cat "$tmp/status")"
 [[ "$(cat "$tmp/body")" == *'ndb_requests_total'* ]] || fail "metrics: no ndb_requests_total"
 

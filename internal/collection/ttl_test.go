@@ -399,7 +399,7 @@ func TestFindByIDHidesExpiredDocs(t *testing.T) {
 		t.Fatal("a doc without expiry must be found")
 	}
 
-	if n := countOf(t, c, `{"where":{"_id":"a"}}`); n != 0 {
+	if n := countOf(t, c, `{"query":{"_id":"a"}}`); n != 0 {
 		t.Fatalf("find by id plan returned %d rows", n)
 	}
 }

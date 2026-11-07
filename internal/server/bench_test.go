@@ -50,7 +50,7 @@ func BenchmarkFindByIDInProcess(b *testing.B) {
 	seedBench(b, db)
 
 	col, _ := db.Get("bench")
-	body := []byte(`{"where":{"k":"d500"}}`)
+	body := []byte(`{"query":{"k":"d500"}}`)
 
 	b.ResetTimer()
 
@@ -68,12 +68,12 @@ func BenchmarkFindByIDUnixSocket(b *testing.B) {
 
 	seedViaHTTP(b, client)
 
-	body := []byte(`{"where":{"k":"d500"}}`)
+	body := []byte(`{"query":{"k":"d500"}}`)
 
 	b.ResetTimer()
 
 	for range b.N {
-		resp, err := client.Post("http://ndb/v1/c/bench/find", "application/json", bytes.NewReader(body))
+		resp, err := client.Post("http://ndb/bench/_search", "application/json", bytes.NewReader(body))
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -93,16 +93,16 @@ func BenchmarkFindByIDUnixSocket(b *testing.B) {
 func seedViaHTTP(b *testing.B, client *http.Client) {
 	b.Helper()
 
-	req, _ := http.NewRequest("PUT", "http://ndb/v1/c/bench", bytes.NewReader([]byte(`{}`)))
+	req, _ := http.NewRequest("PUT", "http://ndb/bench", bytes.NewReader([]byte(`{}`)))
 
 	if _, err := client.Do(req); err != nil {
 		b.Fatal(err)
 	}
 
 	for i := range benchDocs {
-		body := fmt.Appendf(nil, `{"insert":[{"k":"d%d","n":%d}]}`, i, i)
+		body := fmt.Appendf(nil, `{"docs":[{"k":"d%d","n":%d}]}`, i, i)
 
-		resp, err := client.Post("http://ndb/v1/c/bench/insert", "application/json", bytes.NewReader(body))
+		resp, err := client.Post("http://ndb/bench/_bulk", "application/json", bytes.NewReader(body))
 		if err != nil {
 			b.Fatal(err)
 		}

@@ -35,8 +35,12 @@ func call(h http.Handler, method, path, body string) *httptest.ResponseRecorder 
 	return callCtx(context.Background(), h, method, path, body)
 }
 
+// callCtx sends one request. Rows come as NDJSON, one row per line, which
+// the tests read line by line; format_test.go covers the JSON default.
 func callCtx(ctx context.Context, h http.Handler, method, path, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequestWithContext(ctx, method, path, strings.NewReader(body))
+	req.Header.Set("Accept", "application/x-ndjson")
+
 	rec := httptest.NewRecorder()
 
 	h.ServeHTTP(rec, req)
@@ -76,7 +80,7 @@ func expectStatus(t *testing.T, rec *httptest.ResponseRecorder, want int) {
 func TestHealthWaitsForRecovery(t *testing.T) {
 	srv := server.New()
 
-	expectStatus(t, call(srv.Handler(), "GET", "/health", ""), http.StatusServiceUnavailable)
+	expectStatus(t, call(srv.Handler(), "GET", "/_health", ""), http.StatusServiceUnavailable)
 
 	db, err := engine.Open(config.Config{DataDir: t.TempDir()}, slog.Default())
 	if err != nil {
@@ -87,13 +91,13 @@ func TestHealthWaitsForRecovery(t *testing.T) {
 
 	srv.Attach(db)
 
-	expectStatus(t, call(srv.Handler(), "GET", "/health", ""), http.StatusOK)
+	expectStatus(t, call(srv.Handler(), "GET", "/_health", ""), http.StatusOK)
 }
 
 func TestErrorBodyHasCodeAndMessage(t *testing.T) {
 	_, h := newHandler(t)
 
-	rec := call(h, "POST", "/v1/c/nope/find", `{}`)
+	rec := call(h, "POST", "/nope/_search", `{}`)
 
 	expectStatus(t, rec, http.StatusNotFound)
 
@@ -109,10 +113,10 @@ func TestErrorBodyHasCodeAndMessage(t *testing.T) {
 func TestStaleVersionMatchesNothing(t *testing.T) {
 	_, h := newHandler(t)
 
-	call(h, "PUT", "/v1/c/posts", `{}`)
-	call(h, "POST", "/v1/c/posts/insert", `{"insert":[{"_id":"p1","n":1}]}`)
+	call(h, "PUT", "/posts", `{}`)
+	call(h, "POST", "/posts/_bulk", `{"docs":[{"_id":"p1","n":1}]}`)
 
-	rec := call(h, "POST", "/v1/c/posts/update", `{"_id":"p1","_v":9,"$set":{"n":2}}`)
+	rec := call(h, "POST", "/posts/_update_by_query", `{"query":{"_id":"p1","_v":9},"update":{"$set":{"n":2}}}`)
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -120,7 +124,7 @@ func TestStaleVersionMatchesNothing(t *testing.T) {
 		t.Fatalf("body = %v", got)
 	}
 
-	rec = call(h, "POST", "/v1/c/posts/update", `{"_id":"p1","_v":1,"$set":{"n":2}}`)
+	rec = call(h, "POST", "/posts/_update_by_query", `{"query":{"_id":"p1","_v":1},"update":{"$set":{"n":2}}}`)
 
 	got := jsonBody(t, rec)
 	doc, _ := got["doc"].(map[string]any)
@@ -133,25 +137,22 @@ func TestStaleVersionMatchesNothing(t *testing.T) {
 func TestUpdateContractErrorsAre400(t *testing.T) {
 	_, h := newHandler(t)
 
-	call(h, "PUT", "/v1/c/posts", `{}`)
-	call(h, "POST", "/v1/c/posts/insert", `{"insert":[{"_id":"p1","n":1}]}`)
+	call(h, "PUT", "/posts", `{}`)
+	call(h, "POST", "/posts/_bulk", `{"docs":[{"_id":"p1","n":1}]}`)
 
 	cases := map[string]string{
-		`{"_id":"p1","$rename":{"a":"b"}}`:           "unknown_operator",
-		`{"_id":"p1","n":1}`:                         "no_update",
-		`{"_id":"p1","$set":{"n":1},"$inc":{"n":1}}`: "conflicting_update",
-		`{"_id":"p1","$set":{"$n":1}}`:               "invalid_field",
-		`{"n":1,"$set":{"a":1}}`:                     "unindexed_many",
+		`{"query":{"_id":"p1"},"update":{"$rename":{"a":"b"}}}`:           "unknown_operator",
+		`{"query":{"_id":"p1"},"update":{}}`:                              "no_update",
+		`{"query":{"_id":"p1","$set":{"n":2}},"update":{"$inc":{"n":1}}}`: "unknown_operator",
+		`{"query":{"_id":"p1"},"update":{"$set":{"n":1},"$inc":{"n":1}}}`: "conflicting_update",
+		`{"query":{"_id":"p1"},"update":{"$set":{"$n":1}}}`:               "invalid_field",
+		`{"query":{"n":1},"update":{"$set":{"a":1}},"many":true}`:         "unindexed_many",
+		`{"query":{},"update":{"$set":{"a":1}}}`:                          "empty_filter",
+		`{"_id":"p1","$set":{"n":1}}`:                                     "invalid_request",
 	}
 
 	for body, want := range cases {
-		path := "/v1/c/posts/update"
-
-		if want == "unindexed_many" {
-			path += "?many=true"
-		}
-
-		rec := call(h, "POST", path, body)
+		rec := call(h, "POST", "/posts/_update_by_query", body)
 
 		expectStatus(t, rec, http.StatusBadRequest)
 
@@ -164,30 +165,30 @@ func TestUpdateContractErrorsAre400(t *testing.T) {
 func TestUpdateManyUpsertAndDeleteOptions(t *testing.T) {
 	_, h := newHandler(t)
 
-	call(h, "PUT", "/v1/c/posts", `{"indexes":["g"]}`)
-	call(h, "POST", "/v1/c/posts/insert", `{"insert":[{"_id":"a","g":1},{"_id":"b","g":1},{"_id":"c","g":2}]}`)
+	call(h, "PUT", "/posts", `{"indexes":["g"]}`)
+	call(h, "POST", "/posts/_bulk", `{"docs":[{"_id":"a","g":1},{"_id":"b","g":1},{"_id":"c","g":2}]}`)
 
-	rec := call(h, "POST", "/v1/c/posts/update?many=true", `{"g":1,"$set":{"done":true}}`)
+	rec := call(h, "POST", "/posts/_update_by_query", `{"query":{"g":1},"update":{"$set":{"done":true}},"many":true}`)
 
 	if got := jsonBody(t, rec); got["matched"] != 2.0 || got["modified"] != 2.0 || got["doc"] != nil {
 		t.Fatalf("many body = %v", got)
 	}
 
-	rec = call(h, "POST", "/v1/c/posts/update?upsert=true", `{"_id":"z","$inc":{"n":1}}`)
+	rec = call(h, "POST", "/posts/_update_by_query", `{"query":{"_id":"z"},"update":{"$inc":{"n":1}},"upsert":true}`)
 
 	if got := jsonBody(t, rec); got["matched"] != 0.0 || got["modified"] != 1.0 || got["doc"] == nil {
 		t.Fatalf("upsert body = %v", got)
 	}
 
-	expectStatus(t, call(h, "POST", "/v1/c/posts/update?many=maybe", `{"g":1,"$set":{"a":1}}`), http.StatusBadRequest)
+	expectStatus(t, call(h, "POST", "/posts/_update_by_query", `{"query":{"g":1},"update":{"$set":{"a":1}},"many":"maybe"}`), http.StatusBadRequest)
 
-	rec = call(h, "POST", "/v1/c/posts/delete?many=true", `{"g":1}`)
+	rec = call(h, "POST", "/posts/_delete_by_query", `{"query":{"g":1},"many":true}`)
 
 	if got := jsonBody(t, rec); got["deleted"] != 2.0 {
 		t.Fatalf("delete body = %v", got)
 	}
 
-	rec = call(h, "POST", "/v1/c/posts/delete", `{"_id":"nope"}`)
+	rec = call(h, "POST", "/posts/_delete_by_query", `{"query":{"_id":"nope"}}`)
 
 	if got := jsonBody(t, rec); got["deleted"] != 0.0 {
 		t.Fatalf("delete none body = %v", got)
@@ -197,10 +198,10 @@ func TestUpdateManyUpsertAndDeleteOptions(t *testing.T) {
 func TestBodyOverMaxLineSizeIs413(t *testing.T) {
 	_, h := newHandler(t)
 
-	call(h, "PUT", "/v1/c/posts", `{"max_line_size":256}`)
+	call(h, "PUT", "/posts", `{"max_line_size":256}`)
 
-	big := `{"insert":[{"_id":"p1","text":"` + strings.Repeat("x", 1024) + `"}]}`
-	rec := call(h, "POST", "/v1/c/posts/insert", big)
+	big := `{"docs":[{"_id":"p1","text":"` + strings.Repeat("x", 1024) + `"}]}`
+	rec := call(h, "POST", "/posts/_bulk", big)
 
 	expectStatus(t, rec, http.StatusRequestEntityTooLarge)
 
@@ -212,13 +213,13 @@ func TestBodyOverMaxLineSizeIs413(t *testing.T) {
 func TestClientCancelStopsTheQuery(t *testing.T) {
 	_, h := newHandler(t)
 
-	call(h, "PUT", "/v1/c/posts", `{}`)
-	call(h, "POST", "/v1/c/posts/insert", `{"insert":[{"_id":"p1"}]}`)
+	call(h, "PUT", "/posts", `{}`)
+	call(h, "POST", "/posts/_bulk", `{"docs":[{"_id":"p1"}]}`)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	rec := callCtx(ctx, h, "POST", "/v1/c/posts/find", `{}`)
+	rec := callCtx(ctx, h, "POST", "/posts/_search", `{}`)
 
 	if rec.Code != server.StatusClientClosed {
 		t.Fatalf("status = %d, want %d (client closed)", rec.Code, server.StatusClientClosed)
@@ -232,10 +233,10 @@ func TestClientCancelStopsTheQuery(t *testing.T) {
 func TestFindStreamsNDJSONWithMetadataHeaders(t *testing.T) {
 	_, h := newHandler(t)
 
-	call(h, "PUT", "/v1/c/posts", `{}`)
-	call(h, "POST", "/v1/c/posts/insert", `{"insert":[{"_id":"p1","n":1},{"_id":"p2","n":2},{"_id":"p3","n":3}]}`)
+	call(h, "PUT", "/posts", `{}`)
+	call(h, "POST", "/posts/_bulk", `{"docs":[{"_id":"p1","n":1},{"_id":"p2","n":2},{"_id":"p3","n":3}]}`)
 
-	rec := call(h, "POST", "/v1/c/posts/find", `{"sort":{"n":1},"limit":2,"count":true}`)
+	rec := call(h, "POST", "/posts/_search", `{"sort":{"n":1},"limit":2,"count":true}`)
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -265,10 +266,10 @@ func TestFindStreamsNDJSONWithMetadataHeaders(t *testing.T) {
 func TestFindExplainHeader(t *testing.T) {
 	_, h := newHandler(t)
 
-	call(h, "PUT", "/v1/c/posts", `{}`)
-	call(h, "POST", "/v1/c/posts/insert", `{"insert":[{"_id":"p1","n":1},{"_id":"p2","n":2}]}`)
+	call(h, "PUT", "/posts", `{}`)
+	call(h, "POST", "/posts/_bulk", `{"docs":[{"_id":"p1","n":1},{"_id":"p2","n":2}]}`)
 
-	rec := call(h, "POST", "/v1/c/posts/find", `{"where":{"_id":"p2"},"explain":true}`)
+	rec := call(h, "POST", "/posts/_search", `{"query":{"_id":"p2"},"explain":true}`)
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -285,7 +286,7 @@ func TestFindExplainHeader(t *testing.T) {
 		t.Fatalf("explain = %+v", ex)
 	}
 
-	if rec := call(h, "POST", "/v1/c/posts/find", `{"where":{"_id":"p2"}}`); rec.Header().Get("X-Ndb-Explain") != "" {
+	if rec := call(h, "POST", "/posts/_search", `{"query":{"_id":"p2"}}`); rec.Header().Get("X-Ndb-Explain") != "" {
 		t.Fatal("X-Ndb-Explain must be absent without explain")
 	}
 }
@@ -293,27 +294,27 @@ func TestFindExplainHeader(t *testing.T) {
 func TestInsertUpdateDeleteRoundTrip(t *testing.T) {
 	_, h := newHandler(t)
 
-	call(h, "PUT", "/v1/c/posts", `{}`)
+	call(h, "PUT", "/posts", `{}`)
 
-	rec := call(h, "POST", "/v1/c/posts/insert", `{"insert":[{"_id":"p1","status":"draft"}]}`)
-
-	expectStatus(t, rec, http.StatusOK)
-
-	rec = call(h, "POST", "/v1/c/posts/update", `{"_id":"p1","_v":1,"$set":{"status":"live"}}`)
+	rec := call(h, "POST", "/posts/_bulk", `{"docs":[{"_id":"p1","status":"draft"}]}`)
 
 	expectStatus(t, rec, http.StatusOK)
 
-	rec = call(h, "POST", "/v1/c/posts/find", `{"where":{"status":"live"}}`)
+	rec = call(h, "POST", "/posts/_update_by_query", `{"query":{"_id":"p1","_v":1},"update":{"$set":{"status":"live"}}}`)
+
+	expectStatus(t, rec, http.StatusOK)
+
+	rec = call(h, "POST", "/posts/_search", `{"query":{"status":"live"}}`)
 
 	if !strings.Contains(rec.Body.String(), `"p1"`) {
 		t.Fatalf("updated row not found: %s", rec.Body.String())
 	}
 
-	rec = call(h, "POST", "/v1/c/posts/delete", `{"_id":"p1"}`)
+	rec = call(h, "POST", "/posts/_delete_by_query", `{"query":{"_id":"p1"}}`)
 
 	expectStatus(t, rec, http.StatusOK)
 
-	rec = call(h, "POST", "/v1/c/posts/find", `{}`)
+	rec = call(h, "POST", "/posts/_search", `{}`)
 
 	if strings.TrimSpace(rec.Body.String()) != "" {
 		t.Fatalf("deleted row still returned: %s", rec.Body.String())
@@ -323,7 +324,7 @@ func TestInsertUpdateDeleteRoundTrip(t *testing.T) {
 func TestEnsureReturnsDefinitionAndIndexStates(t *testing.T) {
 	_, h := newHandler(t)
 
-	rec := call(h, "PUT", "/v1/c/calls", `{"indexes":["status"]}`)
+	rec := call(h, "PUT", "/calls", `{"indexes":["status"]}`)
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -349,9 +350,9 @@ func TestEnsureReturnsDefinitionAndIndexStates(t *testing.T) {
 func TestEnsureConflictIs409(t *testing.T) {
 	_, h := newHandler(t)
 
-	call(h, "PUT", "/v1/c/calls", `{"time":"at"}`)
+	call(h, "PUT", "/calls", `{"time":"at"}`)
 
-	rec := call(h, "PUT", "/v1/c/calls", `{"time":"ts"}`)
+	rec := call(h, "PUT", "/calls", `{"time":"ts"}`)
 
 	expectStatus(t, rec, http.StatusConflict)
 
@@ -363,9 +364,9 @@ func TestEnsureConflictIs409(t *testing.T) {
 func TestListStatsAndDropIndex(t *testing.T) {
 	_, h := newHandler(t)
 
-	call(h, "PUT", "/v1/c/calls", `{"indexes":["status","dnis"]}`)
+	call(h, "PUT", "/calls", `{"indexes":["status","dnis"]}`)
 
-	rec := call(h, "GET", "/v1/c", "")
+	rec := call(h, "GET", "/_collections", "")
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -373,7 +374,7 @@ func TestListStatsAndDropIndex(t *testing.T) {
 		t.Fatalf("catalog list misses calls: %s", rec.Body.String())
 	}
 
-	rec = call(h, "GET", "/v1/c/calls/stats", "")
+	rec = call(h, "GET", "/calls/_stats", "")
 
 	expectStatus(t, rec, http.StatusOK)
 
@@ -381,11 +382,11 @@ func TestListStatsAndDropIndex(t *testing.T) {
 		t.Fatalf("stats: %s", rec.Body.String())
 	}
 
-	rec = call(h, "DELETE", "/v1/c/calls/indexes/dnis", "")
+	rec = call(h, "DELETE", "/calls/_indexes/dnis", "")
 
 	expectStatus(t, rec, http.StatusOK)
 
-	rec = call(h, "GET", "/v1/c/calls/stats", "")
+	rec = call(h, "GET", "/calls/_stats", "")
 
 	if strings.Contains(rec.Body.String(), `"field":"dnis"`) {
 		t.Fatalf("dropped index still in stats: %s", rec.Body.String())
@@ -395,11 +396,11 @@ func TestListStatsAndDropIndex(t *testing.T) {
 func TestInsertIntoUnknownCollectionCreatesIt(t *testing.T) {
 	_, h := newHandler(t)
 
-	rec := call(h, "POST", "/v1/c/logs/insert", `{"insert":[{"_id":"a","msg":"hi"}]}`)
+	rec := call(h, "POST", "/logs/_bulk", `{"docs":[{"_id":"a","msg":"hi"}]}`)
 
 	expectStatus(t, rec, http.StatusOK)
 
-	rec = call(h, "GET", "/v1/c", "")
+	rec = call(h, "GET", "/_collections", "")
 
 	if !strings.Contains(rec.Body.String(), `"logs"`) {
 		t.Fatalf("implicit collection not listed: %s", rec.Body.String())
@@ -409,9 +410,9 @@ func TestInsertIntoUnknownCollectionCreatesIt(t *testing.T) {
 func TestMetricsExposesBasicCounters(t *testing.T) {
 	_, h := newHandler(t)
 
-	call(h, "POST", "/v1/c/nope/find", `{}`)
+	call(h, "POST", "/nope/_search", `{}`)
 
-	rec := call(h, "GET", "/metrics", "")
+	rec := call(h, "GET", "/_metrics", "")
 
 	expectStatus(t, rec, http.StatusOK)
 

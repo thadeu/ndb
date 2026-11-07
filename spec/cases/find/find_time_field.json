@@ -8,9 +8,9 @@
     },
     "writes": [
       {
-        "op": "insert",
+        "op": "bulk",
         "body": {
-          "insert": [
+          "docs": [
             {
               "_id": "a",
               "at": "2026-11-04T10:00:00-03:00"
@@ -29,9 +29,9 @@
     ]
   },
   "request": {
-    "op": "find",
+    "op": "search",
     "body": {
-      "where": {
+      "query": {
         "at": {
           "$lt": "2026-11-04T12:00:00Z"
         }

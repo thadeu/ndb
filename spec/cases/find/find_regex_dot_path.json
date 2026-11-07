@@ -7,9 +7,9 @@
     },
     "writes": [
       {
-        "op": "insert",
+        "op": "bulk",
         "body": {
-          "insert": [
+          "docs": [
             {
               "_id": "p1",
               "title": "Alpha release",
@@ -67,9 +67,9 @@
     ]
   },
   "request": {
-    "op": "find",
+    "op": "search",
     "body": {
-      "where": {
+      "query": {
         "meta.city": {
           "$regex": "^rio",
           "$options": "i"

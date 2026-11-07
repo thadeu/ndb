@@ -32,7 +32,7 @@ func get(args []string, out io.Writer) error {
 		return err
 	}
 
-	r, err := c.call("GET", "/v1/c/"+url.PathEscape(pos[0])+"/"+url.PathEscape(pos[1]), nil)
+	r, err := c.call("GET", "/"+url.PathEscape(pos[0])+"/_doc/"+url.PathEscape(pos[1]), nil)
 	if err != nil {
 		return err
 	}
