@@ -106,6 +106,13 @@ type Collection struct {
 
 	head *state
 
+	// staged counts the records staged in head that are not applied to
+	// durable yet. Writer goroutine only.
+	staged int
+
+	// maxLine is max_line_size: a WAL record is never longer.
+	maxLine int
+
 	// unsynced holds applied records that are not fsync'd yet (relaxed
 	// mode); watchers see them only after the fsync. Writer goroutine only.
 	unsynced []wal.Record
@@ -201,6 +208,8 @@ func Open(cfg Config) (*Collection, error) {
 	if maxLine == 0 {
 		maxLine = defaultMaxLine
 	}
+
+	c.maxLine = maxLine
 
 	var from recovery.Position
 
@@ -408,6 +417,8 @@ func (c *Collection) prepare(req any) (writer.Prepared, error) {
 	}
 
 	stage := func() {
+		c.staged++
+
 		for _, op := range ops {
 			c.head.apply(op)
 		}
@@ -494,6 +505,8 @@ func current(v *view, id string) (*entry, error) {
 
 // applied runs in the writer goroutine after fsync.
 func (c *Collection) applied(rec wal.Record) {
+	c.staged--
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

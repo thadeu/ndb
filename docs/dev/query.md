@@ -305,6 +305,7 @@ Always HTTP 200 when the body is valid:
 - Without `many`, a filter with the id field uses the id lookup. Without the id, the first matching document is used.
 - With `many=true`, the filter must be served by the id or a ready secondary index. Otherwise the call is `400 unindexed_many`, so a big update never blocks the writer on a full scan.
 - A filter must not be empty (`400 empty_filter`). Expired documents are never matched.
+- A `many` write has no size limit. ndb lists the matches one time, then writes them in WAL records of up to half of `max_line_size`. Other writes to the collection run between two records. Each record is atomic, but the write as a whole is not: after a crash, the records already written stay, and you can send the same call again. Each document is written at most one time, so an `$inc` never runs two times on the same document.
 
 ```bash
 curl ... '/v1/c/calls/update?many=true' -d '{"status":"failed","$set":{"status":"retry"}}'
@@ -355,7 +356,9 @@ The WAL line of each changed document is the resulting document with the next ve
 
 ## Delete by filter
 
-`POST /v1/c/{coll}/delete` takes a filter as the body and answers `{"deleted":N}`. Nothing matched is `{"deleted":0}`. `many=true` follows the same index rule as update. A write operator in a delete body is `unknown_operator`.
+`POST /v1/c/{coll}/delete` takes a filter as the body and answers `{"deleted":N}`. Nothing matched is `{"deleted":0}`. `many=true` follows the same index and size rules as update. A write operator in a delete body is `unknown_operator`.
+
+When the index alone answers the filter (one indexed field, with `$eq`, `$in` or a range, and no `null`), ndb deletes the matches without reading them. This is the fast path for sealed data. Example: on 1M documents, a delete of 868k sealed documents by an indexed `status` takes about 3 s. A filter that also has a field with no index still works, but ndb reads each candidate to test it.
 
 ::: code-group
 

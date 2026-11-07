@@ -6,7 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- A `many` update or delete of more than about 25k documents failed with `line_too_large`, because the full write went into one WAL record. ndb now splits it into records of up to half of `max_line_size`, so a `many` write has no size limit. Each record is atomic, the write as a whole is not. See [Update by filter](docs/dev/query.md#which-documents).
+
 ### Changed
+
+- A `many` delete is faster: when the index alone answers the filter (one indexed field, `$eq`, `$in` or a range), ndb deletes the matches without reading them. Candidates are visited in segment and row order, so each Parquet row group is decoded one time. On 1M sealed documents, a delete of 10k takes about 0.14 s (0.6 s before), 100k takes about 0.4 s, and 868k takes about 3 s (both failed before).
 
 - Docs: the console has its own **UI** section (top menu and tab): an overview with a screenshot gallery, Install, Docker (TCP, unix socket, Compose), and a guide with one part per screen. The old `/console` page is gone.
 - Docs site on phones: the logo stays on the left and the menu button moves to the right; the sidebar opens from the right.

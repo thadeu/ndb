@@ -57,12 +57,15 @@ type updateReq struct {
 	opts      UpdateOpts
 	at        time.Time
 	out       *UpdateResult
+
+	// cur is the candidate list of a many update, across its records.
+	cur *manyCursor
 }
 
 type deleteReq struct {
 	filter *query.Query
 	many   bool
-	out    *int
+	cur    *manyCursor
 }
 
 // Update applies the write operators of body to the documents that its
@@ -115,9 +118,28 @@ func (c *Collection) update(ctx context.Context, top map[string]any, opts Update
 		req.at = c.clock().Add(opts.ExpireIn)
 	}
 
-	_, _, err = c.w.Commit(ctx, req)
-	if err != nil && !errors.Is(err, errNoWrite) {
-		return UpdateResult{}, err
+	if opts.Many {
+		req.cur = &manyCursor{}
+
+		if err := c.list(req.cur, filter); err != nil {
+			return UpdateResult{}, err
+		}
+	}
+
+	for {
+		_, _, err = c.w.Commit(ctx, req)
+
+		if errors.Is(err, errNoWrite) {
+			break
+		}
+
+		if err != nil {
+			return UpdateResult{}, err
+		}
+
+		if !opts.Many || req.cur.done() {
+			break
+		}
 	}
 
 	if opts.Many {
@@ -148,14 +170,33 @@ func (c *Collection) deleteTop(ctx context.Context, top map[string]any, many boo
 		return 0, err
 	}
 
-	deleted := new(int)
+	req := deleteReq{filter: filter, many: many, cur: &manyCursor{}}
 
-	_, _, err = c.w.Commit(ctx, deleteReq{filter: filter, many: many, out: deleted})
-	if err != nil && !errors.Is(err, errNoWrite) {
-		return 0, err
+	if many {
+		if err := c.list(req.cur, filter); err != nil {
+			return 0, err
+		}
 	}
 
-	return *deleted, nil
+	deleted := 0
+
+	for {
+		_, ops, err := c.w.Commit(ctx, req)
+
+		if errors.Is(err, errNoWrite) {
+			return deleted, nil
+		}
+
+		if err != nil {
+			return deleted, err
+		}
+
+		deleted += len(ops)
+
+		if !many || req.cur.done() {
+			return deleted, nil
+		}
+	}
 }
 
 // DeleteID removes the document with this _id, and returns how many (0 or 1).
@@ -187,45 +228,21 @@ func (c *Collection) prepareUpdate(v *view, r updateReq) ([]wal.Op, error) {
 		return nil, err
 	}
 
-	ids, err := c.candidates(v, r.filter, r.opts.Many)
+	var ops []wal.Op
+
+	if r.opts.Many {
+		ops, err = c.updateMany(v, r, vq)
+	} else {
+		ops, err = c.updateOne(v, r, vq)
+	}
+
 	if err != nil {
 		return nil, err
 	}
 
-	var ops []wal.Op
+	last := !r.opts.Many || r.cur.done()
 
-	for id := range ids {
-		cur, ok := v.get(id)
-		if !ok {
-			continue
-		}
-
-		m, raw, ok, err := matchEntry(cur, r.filter, vq)
-		if err != nil {
-			return nil, err
-		}
-
-		if !ok {
-			continue
-		}
-
-		r.out.Matched++
-
-		op, err := c.writeMatch(v, id, cur, m, raw, r)
-		if err != nil {
-			return nil, err
-		}
-
-		if op != nil {
-			ops = append(ops, *op)
-		}
-
-		if !r.opts.Many {
-			break
-		}
-	}
-
-	if r.out.Matched == 0 && r.opts.Upsert {
+	if r.out.Matched == 0 && r.opts.Upsert && last {
 		return c.prepareUpsert(v, r)
 	}
 
@@ -234,6 +251,74 @@ func (c *Collection) prepareUpdate(v *view, r updateReq) ([]wal.Op, error) {
 	}
 
 	return ops, nil
+}
+
+// updateOne writes the first match: the id, an index, or a scan of head.
+func (c *Collection) updateOne(v *view, r updateReq, vq *query.Query) ([]wal.Op, error) {
+	ids, err := c.candidates(v, r.filter)
+	if err != nil {
+		return nil, err
+	}
+
+	for id := range ids {
+		op, matched, err := c.updateMatch(v, id, r, vq)
+		if err != nil {
+			return nil, err
+		}
+
+		if !matched {
+			continue
+		}
+
+		if op == nil {
+			return nil, nil
+		}
+
+		return []wal.Op{*op}, nil
+	}
+
+	return nil, nil
+}
+
+// updateMany writes the next candidates of the list, up to one record.
+func (c *Collection) updateMany(v *view, r updateReq, vq *query.Query) ([]wal.Op, error) {
+	var ops []wal.Op
+
+	size := 0
+
+	for ; !r.cur.done() && !c.full(ops, size); r.cur.pos++ {
+		op, _, err := c.updateMatch(v, r.cur.cands[r.cur.pos].id, r, vq)
+		if err != nil {
+			return nil, err
+		}
+
+		if op != nil {
+			ops = append(ops, *op)
+			size += opCost(*op)
+		}
+	}
+
+	return ops, nil
+}
+
+// updateMatch tests one candidate and writes it when it matches. The op is
+// nil when it does not match, or when the operators change nothing.
+func (c *Collection) updateMatch(v *view, id string, r updateReq, vq *query.Query) (*wal.Op, bool, error) {
+	cur, ok := v.get(id)
+	if !ok {
+		return nil, false, nil
+	}
+
+	m, raw, ok, err := matchEntry(cur, r.filter, vq)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+
+	r.out.Matched++
+
+	op, err := c.writeMatch(v, id, cur, m, raw, r)
+
+	return op, true, err
 }
 
 // writeMatch applies the operators to one matched document. It returns nil
@@ -390,12 +475,31 @@ func (c *Collection) prepareDelete(v *view, r deleteReq) ([]wal.Op, error) {
 		return nil, err
 	}
 
-	ids, err := c.candidates(v, r.filter, r.many)
+	var ops []wal.Op
+
+	if r.many {
+		ops, err = c.deleteMany(v, r, vq)
+	} else {
+		ops, err = c.deleteOne(v, r, vq)
+	}
+
 	if err != nil {
 		return nil, err
 	}
 
-	var ops []wal.Op
+	if len(ops) == 0 {
+		return nil, errNoWrite
+	}
+
+	return ops, nil
+}
+
+// deleteOne deletes the first match: the id, an index, or a scan of head.
+func (c *Collection) deleteOne(v *view, r deleteReq, vq *query.Query) ([]wal.Op, error) {
+	ids, err := c.candidates(v, r.filter)
+	if err != nil {
+		return nil, err
+	}
 
 	for id := range ids {
 		cur, ok := v.get(id)
@@ -408,28 +512,56 @@ func (c *Collection) prepareDelete(v *view, r deleteReq) ([]wal.Op, error) {
 			return nil, err
 		}
 
+		if ok {
+			return []wal.Op{deleteOp(v, id, cur)}, nil
+		}
+	}
+
+	return nil, nil
+}
+
+// deleteMany deletes the next candidates of the list, up to one record. A
+// candidate of an exact list that did not change is deleted without being
+// read, which matters most for sealed documents.
+func (c *Collection) deleteMany(v *view, r deleteReq, vq *query.Query) ([]wal.Op, error) {
+	var ops []wal.Op
+
+	size := 0
+
+	for ; !r.cur.done() && !c.full(ops, size); r.cur.pos++ {
+		cd := r.cur.cands[r.cur.pos]
+
+		cur, ok := v.get(cd.id)
 		if !ok {
 			continue
 		}
 
-		op := wal.Op{Kind: wal.Del, ID: id, V: cur.v + 1}
+		if !c.skipRead(r.cur, cd, vq) {
+			_, _, ok, err := matchEntry(cur, r.filter, vq)
+			if err != nil {
+				return nil, err
+			}
 
-		v.apply(op)
+			if !ok {
+				continue
+			}
+		}
+
+		op := deleteOp(v, cd.id, cur)
 
 		ops = append(ops, op)
-
-		if !r.many {
-			break
-		}
-	}
-
-	*r.out = len(ops)
-
-	if len(ops) == 0 {
-		return nil, errNoWrite
+		size += opCost(op)
 	}
 
 	return ops, nil
+}
+
+func deleteOp(v *view, id string, cur *entry) wal.Op {
+	op := wal.Op{Kind: wal.Del, ID: id, V: cur.v + 1}
+
+	v.apply(op)
+
+	return op
 }
 
 // matchEntry decodes the entry and tests the filter on it, with the version
@@ -462,7 +594,7 @@ func matchEntry(e *entry, filter, vq *query.Query) (map[string]any, json.RawMess
 
 // candidates is the ids to test, in the order of the plan. See the notes at
 // the top of this file.
-func (c *Collection) candidates(v *view, q *query.Query, many bool) (iter.Seq[string], error) {
+func (c *Collection) candidates(v *view, q *query.Query) (iter.Seq[string], error) {
 	conds := q.Indexable()
 
 	if ids, ok := c.idValues(conds); ok {
@@ -481,10 +613,6 @@ func (c *Collection) candidates(v *view, q *query.Query, many bool) (iter.Seq[st
 		}
 
 		return slices.Values(ids), nil
-	}
-
-	if many {
-		return nil, errf("unindexed_many", "many needs the id or an indexed field in the filter")
 	}
 
 	return func(yield func(string) bool) {

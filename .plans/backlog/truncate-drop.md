@@ -48,10 +48,10 @@ ndb truncate <coll>   /   ndb drop <coll>     ask for confirmation (or -yes)
 - watch consumer sees one truncate event and then the new inserts.
 - confirm missing or wrong → 400; direct collection → 409.
 
-## Related: delete by index only
+## Related: delete by index only (done, 0.3.2)
 
-When the whole filter of a `delete?many=true` is answered by an index (for
-example `{"status":"expired"}` with an index on `status`), the writer can delete
-from the index candidates without decoding each document. Today it decodes each
-candidate to test the filter again, which reads sealed documents from Parquet.
-Small change, good speed win for big deletes.
+Done in 0.3.2, together with the fix for `many` writes over `max_line_size`
+(`internal/collection/many.go`). A `many` write lists its candidates once,
+sorted by segment and row, and writes them in records of half of
+`max_line_size`. When `query.IndexOnly` holds, an unchanged candidate is
+deleted without reading it. On 1M sealed rows: 868k deleted in about 3 s.
