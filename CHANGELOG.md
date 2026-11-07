@@ -13,6 +13,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Date math on the time field: `{"at": {"$gte": "now-7d/d"}}`, with `+N`/`-N` in `s m h d w M y` and rounding with `/unit` (UTC). It resolves to a time value, so indexes and zone maps work. A `find` cursor keeps the `now` of its first page. See [Date math](docs/dev/query.md#date-math).
 - `$elemMatch`: one element of an array matches the whole inner filter (field keys for objects, operators for scalars). See [Array elements](docs/dev/query.md#array-elements).
 - SDKs: Go `ndb.ElemMatch`; TypeScript `$elemMatch` in `Where`. Date math strings work in every SDK as is.
+- SDKs, queries built elsewhere (a search form, a saved search), sent as is: Go `ndb.Raw(map)`, `ndb.RawJSON([]byte)` and `Coll.Find(ctx, body)` (one page: rows, next, total); TypeScript `whereRaw(obj)` and `model.find(body)`; Rails `where_raw(hash)` (no Array-to-`$in` convention) and `Model.search(body)` (records, next cursor, total).
 - SDKs: Go `ndb.Pattern[T](db, "logs-*")` and the `ndb:"_coll"` field; Ruby `ndb.find("logs-*", ...)`; Rails `self.collection_name = "logs-*"` and `record.source_collection`; TypeScript `db.model('logs-*', schema)` and `row._coll`.
 
 ## [0.3.3] - 2026-11-07

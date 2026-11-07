@@ -188,6 +188,22 @@ rows, err := calls.
 - `First(ctx)` returns the first row, or `ErrNotFound`.
 - The SDK has no explain call. To see the plan counters, send `"explain": true` in a raw `find` request and read the `X-Ndb-Explain` header. See the query language doc.
 
+### Queries built elsewhere
+
+For a search form or a saved search, take the JSON as is. `ndb.RawJSON` (or `ndb.Raw` with a map) is a `Filter` that mixes with the others; `Find` takes a whole find body and returns one page.
+
+```go
+form, err := ndb.RawJSON([]byte(`{"status":{"$in":["answered","failed"]},"ts":{"$gte":"now-7d"}}`))
+rows, err := calls.Where(form, ndb.Eq("dnis", "1000")).Sort(ndb.Desc("ts")).All(ctx)
+
+page, err := calls.Find(ctx, []byte(`{"where":{"status":"answered"},"sort":{"ts":-1},"limit":50,"count":true}`))
+page.Rows   // []Call
+page.Next   // cursor for {"after": ...}; "" on the last page
+page.Total  // with "count": true
+```
+
+Rows decode like any other query. The daemon validates the JSON (`invalid_query`), but it takes any field: for a public form, keep an allowlist of fields and operators, cap `limit`, and ask for an indexed field or a time window, as you would before sending a form to Elasticsearch `_search`.
+
 ### Collection patterns
 
 `ndb.Pattern[T]` reads every collection whose name starts with a prefix (see [Collection patterns](../query.md#collection-patterns)). It declares nothing; writes fail with `pattern_read_only`. A field tagged `ndb:"_coll"` gets the name of the collection of each row, and is never sent on writes.

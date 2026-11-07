@@ -10,6 +10,8 @@ import type {
   ExpireResult,
   Fields,
   Filter,
+  FindBody,
+  FindResult,
   Input,
   InsertOptions,
   Row,
@@ -200,6 +202,10 @@ export class Model<F extends Fields> {
     return this.query().where(w)
   }
 
+  whereRaw(w: Record<string, unknown>): Query<F> {
+    return this.query().whereRaw(w)
+  }
+
   not(w: Where<F>): Query<F> {
     return this.query().not(w)
   }
@@ -246,6 +252,22 @@ export class Model<F extends Fields> {
 
   iterate(): AsyncGenerator<Row<F>> {
     return this.query().iterate()
+  }
+
+  // Runs a find with a whole body built elsewhere, such as from a search
+  // form: { where, sort, limit, after, count }. The body is sent as is (the
+  // daemon validates it); rows are decoded like the rows of where().
+  async find(body: FindBody): Promise<FindResult<Row<F>>> {
+    await this.ready()
+
+    const res = await this.db.transport.stream('POST', this.path('find'), { ...body, versions: true })
+    const rows: Row<F>[] = []
+
+    for await (const raw of res.rows()) {
+      rows.push(this.decode(raw as Record<string, unknown>) as Row<F>)
+    }
+
+    return { rows, next: res.header('x-ndb-next') ?? '', total: Number(res.header('x-ndb-total') ?? 0) }
   }
 
   async aggregate<R = Record<string, unknown>>(

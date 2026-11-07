@@ -1,6 +1,11 @@
 package ndb
 
-import "maps"
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"maps"
+)
 
 // Filter is one condition of a Where. The filters of one Where are ANDed.
 // A Filter only holds JSON for the daemon; it does no matching itself.
@@ -102,6 +107,43 @@ func Or(filters ...Filter) Filter {
 // Not matches when f does not match.
 func Not(f Filter) Filter {
 	return Filter{doc: map[string]any{"$not": f.doc}}
+}
+
+// Raw is a where object built elsewhere, such as from a search form:
+// Raw(map[string]any{"status": map[string]any{"$in": []any{"a", "b"}}}). It
+// is sent as is; the daemon validates it. It combines with other filters
+// like any Filter.
+func Raw(where map[string]any) Filter {
+	return Filter{doc: where}
+}
+
+// RawJSON is Raw from JSON text: `{"status":"answered","at":{"$gte":"now-7d"}}`.
+// Numbers keep their exact text. It fails when where is not a JSON object.
+func RawJSON(where []byte) (Filter, error) {
+	doc, err := decodeObject(where)
+	if err != nil {
+		return Filter{}, fmt.Errorf("ndb: raw where: %w", err)
+	}
+
+	return Filter{doc: doc}, nil
+}
+
+// decodeObject reads a JSON object; numbers stay json.Number.
+func decodeObject(raw []byte) (map[string]any, error) {
+	var doc map[string]any
+
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+
+	if err := dec.Decode(&doc); err != nil {
+		return nil, err
+	}
+
+	if doc == nil {
+		return nil, fmt.Errorf("not a JSON object")
+	}
+
+	return doc, nil
 }
 
 // ElemMatch matches when one element of the array field matches every

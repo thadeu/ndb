@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"iter"
 	"strconv"
 )
@@ -271,4 +272,62 @@ func (q *Query[T]) rows(ctx context.Context, body findBody) iter.Seq2[T, error] 
 			}
 		}
 	}
+}
+
+// FindResult is one page of a Find. Next is empty on the last page. Total is
+// set only when the body has "count": true.
+type FindResult[T any] struct {
+	Rows  []T
+	Next  string
+	Total int
+}
+
+// Find runs a find with a whole body built elsewhere, such as from a search
+// form: {"where": {...}, "sort": {...}, "limit": 50, "after": "...",
+// "count": true}. The body is sent as is (the daemon validates it), with
+// "versions" added when T has a version field. Rows decode into T.
+func (c *Coll[T]) Find(ctx context.Context, body []byte) (*FindResult[T], error) {
+	doc, err := decodeObject(body)
+	if err != nil {
+		return nil, fmt.Errorf("ndb: find body: %w", err)
+	}
+
+	if c.schema.version != "" {
+		doc["versions"] = true
+	}
+
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.db.find(ctx, c.name, raw)
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+
+	res := &FindResult[T]{Rows: []T{}, Next: resp.Header.Get("X-Ndb-Next")}
+
+	if total := resp.Header.Get("X-Ndb-Total"); total != "" {
+		if res.Total, err = strconv.Atoi(total); err != nil {
+			return nil, fmt.Errorf("ndb: bad X-Ndb-Total %q", total)
+		}
+	}
+
+	for row, err := range ndjsonRows(resp.Body) {
+		if err != nil {
+			return nil, err
+		}
+
+		v, err := c.decode(row)
+		if err != nil {
+			return nil, err
+		}
+
+		res.Rows = append(res.Rows, v)
+	}
+
+	return res, nil
 }

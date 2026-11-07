@@ -28,6 +28,15 @@ module Ndb
       add_clause(Conditions.equality(attrs))
     end
 
+    # A where Hash built elsewhere, such as from a search form, sent as is:
+    # no Rails conventions (an Array stays an Array, not $in). The daemon
+    # validates it. ANDed with the other clauses.
+    def where_raw(where)
+      raise ArgumentError, "where_raw takes a Hash, got #{where.class}" unless where.is_a?(Hash)
+
+      add_clause(Conditions.json_value(where))
+    end
+
     def or(other)
       clauses = [Conditions.combine(values[:where]), Conditions.combine(other.values[:where])]
 

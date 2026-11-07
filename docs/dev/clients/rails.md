@@ -224,6 +224,22 @@ Call.where(caller: { "$regex" => "^55" })   # a String: no `m`, and a literal ^p
 
 A Regexp is a scan filter. For a prefix search that uses the index, pass the String form. See the [`ndb` README](https://github.com/thadeu/ndb/blob/main/sdk/ruby/README.md) for the full mapping.
 
+### Queries built elsewhere
+
+For a search form or a saved search, take the JSON as is. `where_raw` takes a where Hash and chains like `where`, without the Rails conventions: an Array stays an Array (equal to the whole array), where `where(tags: [...])` means `$in`. `search` takes a whole find body.
+
+```ruby
+form = JSON.parse(params[:q])
+Call.where_raw(form).where(dnis: "1000").order(ts: :desc).limit(50)
+
+page = Call.search("where" => form, "sort" => { "ts" => -1 }, "limit" => 50, "count" => true)
+page.records      # Call records, with their version
+page.next_cursor  # for "after"; nil on the last page
+page.total        # with "count" => true
+```
+
+Rows decode like any other query. The daemon validates the JSON (`invalid_query`), but it takes any field: for a public form, keep an allowlist of fields and operators, cap `limit`, and ask for an indexed field or a time window, as you would before sending a form to Elasticsearch `_search`.
+
 ### Collection patterns
 
 A model whose `collection_name` is a [collection pattern](../query.md#collection-patterns) reads every matched collection. It declares nothing at boot, and its writes raise `Ndb::Error` with code `pattern_read_only`. `record.source_collection` is the collection a record came from.

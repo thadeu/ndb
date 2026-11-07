@@ -18,9 +18,12 @@ module Ndb
 
     attribute :_id, :string
 
+    # The answer of Model.search.
+    SearchResult = Struct.new(:records, :next_cursor, :total)
+
     class << self
       QUERY_METHODS = %i[
-        where order limit offset page after group find find_by find_by! first count pluck exists?
+        where where_raw order limit offset page after group find find_by find_by! first count pluck exists?
         find_each in_batches sum average minimum maximum to_a each destroy_all delete_all
       ].freeze
 
@@ -34,6 +37,19 @@ module Ndb
 
       def all
         Relation.new(self)
+      end
+
+      # Runs a find with a whole body built elsewhere, such as from a search
+      # form: { "where" => {...}, "sort" => {...}, "limit" => 50, "after" =>
+      # token, "count" => true }. The body is sent as is (the daemon
+      # validates it). Returns the records, the next cursor (nil on the last
+      # page) and the total (with "count" => true).
+      def search(body)
+        raise ArgumentError, "search takes a Hash, got #{body.class}" unless body.is_a?(Hash)
+
+        page = ndb_find(body.transform_keys(&:to_s))
+
+        SearchResult.new(page.rows.map { |row| instantiate(row) }, page.next_cursor, page.total)
       end
 
       # Finds the record with these attributes, or builds an unsaved one.

@@ -170,6 +170,25 @@ export interface AggregateOptions {
   count?: boolean
 }
 
+// The whole body of a find, built elsewhere (a search form, a saved search).
+// It is sent as is; the daemon validates it.
+export interface FindBody {
+  where?: Record<string, unknown>
+  fields?: string[]
+  sort?: Record<string, 1 | -1>
+  limit?: number
+  skip?: number
+  after?: string
+  count?: boolean
+}
+
+// One page of a find. next is '' on the last page; total is set with count.
+export interface FindResult<R> {
+  rows: R[]
+  next: string
+  total: number
+}
+
 export interface AggregateResult<R = Record<string, unknown>> {
   rows: R[]
   next: string

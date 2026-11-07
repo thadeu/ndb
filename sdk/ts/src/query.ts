@@ -23,6 +23,13 @@ export class Query<F extends Fields, R = Row<F>> implements PromiseLike<R[]> {
     return this.with({ clauses: [...this.state.clauses, toWhere(w) as Record<string, unknown>] })
   }
 
+  // A where object built elsewhere, such as from a search form. It is not
+  // type-checked and is sent as is; the daemon validates it. It is ANDed
+  // with the other clauses.
+  whereRaw(w: Record<string, unknown>): Query<F, R> {
+    return this.with({ clauses: [...this.state.clauses, w] })
+  }
+
   not(w: Where<F>): Query<F, R> {
     return this.with({ clauses: [...this.state.clauses, { $not: toWhere(w) }] })
   }

@@ -162,6 +162,22 @@ const rows = await calls
 - `first()` returns the first row, or `null`.
 - The model has the same shortcuts: `calls.where(...)`, `calls.sort(...)`, `calls.all()`, `calls.count()`.
 
+### Queries built elsewhere
+
+For a search form or a saved search, take the JSON as is. `whereRaw` takes an untyped where and chains like `where`; `find` takes a whole find body and returns one page.
+
+```ts
+const form = JSON.parse(input) as Record<string, unknown>
+const rows = await calls.whereRaw(form).where({ dnis: '1000' }).sort({ ts: -1 }).all()
+
+const page = await calls.find({ where: { status: 'answered' }, sort: { ts: -1 }, limit: 50, count: true })
+page.rows   // Row[], decoded like where()
+page.next   // cursor for { after }; '' on the last page
+page.total  // with count: true
+```
+
+Rows decode like any other query. The daemon validates the JSON (`invalid_query`), but it takes any field: for a public form, keep an allowlist of fields and operators, cap `limit`, and ask for an indexed field or a time window, as you would before sending a form to Elasticsearch `_search`.
+
 ### Collection patterns
 
 A model named with a [collection pattern](../query.md#collection-patterns) reads every matched collection. It sends no `PUT`, and its writes reject with code `pattern_read_only`. Each row has `_coll`, the name of its collection.
