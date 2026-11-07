@@ -34,14 +34,14 @@ func run(ctx context.Context) error {
 	}
 
 	// #region connect
-	db, err := ndb.Open(addr) // NDB_TOKEN is read by the SDK
+	db, err := ndb.Connect(addr) // NDB_TOKEN is read by the SDK
 	if err != nil {
 		return err
 	}
 
 	defer db.Close()
 
-	users, err := ndb.Collection[User](ctx, db, "users")
+	users, err := ndb.Collection[User](db, "users")
 	if err != nil {
 		return err
 	}
@@ -49,16 +49,16 @@ func run(ctx context.Context) error {
 	// #endregion connect
 
 	for _, id := range []string{"u1", "u2"} {
-		if _, err := users.DeleteID(ctx, id); err != nil {
+		if _, err := users.Delete(ctx, id); err != nil {
 			return err
 		}
 	}
 
 	// #region insert
-	results, err := users.Insert(ctx,
-		User{ID: "u1", Email: "ada@example.com", Plan: "free"},
-		User{ID: "u2", Email: "grace@example.com", Plan: "free"},
-	)
+	results, err := users.InsertMany(ctx, []User{
+		{ID: "u1", Email: "ada@example.com", Plan: "free"},
+		{ID: "u2", Email: "grace@example.com", Plan: "free"},
+	})
 	if err != nil {
 		return err
 	}
@@ -76,7 +76,7 @@ func run(ctx context.Context) error {
 	// #endregion get
 
 	// #region update
-	saved, err := users.UpdateID(ctx, "u1", ndb.Ops{"$set": {"plan": "pro"}}, ndb.Guard(ndb.Eq("_v", ada.Version)))
+	saved, err := users.Update(ctx, "u1", ndb.Ops{"$set": {"plan": "pro"}}, ndb.Guard(ndb.Eq("_v", ada.Version)))
 	if err != nil {
 		return err
 	}
@@ -85,7 +85,7 @@ func run(ctx context.Context) error {
 	// #endregion update
 
 	// #region conflict
-	stale, err := users.UpdateID(ctx, "u1", ndb.Ops{"$set": {"plan": "team"}}, ndb.Guard(ndb.Eq("_v", ada.Version)))
+	stale, err := users.Update(ctx, "u1", ndb.Ops{"$set": {"plan": "team"}}, ndb.Guard(ndb.Eq("_v", ada.Version)))
 	if err != nil {
 		return err
 	}
@@ -98,7 +98,7 @@ func run(ctx context.Context) error {
 			return err
 		}
 
-		retried, err := users.UpdateID(ctx, "u1", ndb.Ops{"$set": {"plan": "team"}}, ndb.Guard(ndb.Eq("_v", fresh.Version)))
+		retried, err := users.Update(ctx, "u1", ndb.Ops{"$set": {"plan": "team"}}, ndb.Guard(ndb.Eq("_v", fresh.Version)))
 		if err != nil {
 			return err
 		}
@@ -108,7 +108,7 @@ func run(ctx context.Context) error {
 	// #endregion conflict
 
 	// #region delete
-	if _, err := users.DeleteID(ctx, "u2"); err != nil {
+	if _, err := users.Delete(ctx, "u2"); err != nil {
 		return err
 	}
 
@@ -116,12 +116,12 @@ func run(ctx context.Context) error {
 	// #endregion delete
 
 	// #region count
-	total, err := users.Where().Count(ctx)
+	total, err := users.Count(ctx)
 	if err != nil {
 		return err
 	}
 
-	onTeam, err := users.Where(ndb.Eq("plan", "team")).Count(ctx)
+	onTeam, err := users.Count(ctx, ndb.Eq("plan", "team"))
 	if err != nil {
 		return err
 	}

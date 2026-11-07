@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Shared by every curl.sh. Reads NDB_URL and NDB_TOKEN, like the SDKs do.
 #
-#   ndb POST /v1/c/users/find '{"where":{"plan":"pro"}}'   prints the answer
-#   ndb_status POST /v1/c/users/delete '{...}'              prints only the HTTP status
-#   ndb_header X-Ndb-Next POST /v1/c/users/find '{...}'     prints one response header
+#   ndb POST /users/_search '{"query":{"plan":"pro"}}'      prints the answer
+#   ndb_status POST /users/_doc '{...}'                     prints only the HTTP status
+#   ndb_header X-Ndb-Next POST /users/_search '{...}'       prints one response header
 #
 # unix:///path is sent with --unix-socket. tcp://host:port is plain HTTP, and
 # NDB_TOKEN becomes a bearer token (the unix socket never needs one).

@@ -37,19 +37,19 @@ func run(ctx context.Context) error {
 		addr = "unix:///tmp/ndb-examples.sock"
 	}
 
-	db, err := ndb.Open(addr)
+	db, err := ndb.Connect(addr)
 	if err != nil {
 		return err
 	}
 
 	defer db.Close()
 
-	outbox, err := ndb.Collection[Event](ctx, db, "outbox")
+	outbox, err := ndb.Collection[Event](db, "outbox")
 	if err != nil {
 		return err
 	}
 
-	receipts, err := ndb.Collection[Receipt](ctx, db, "receipts")
+	receipts, err := ndb.Collection[Receipt](db, "receipts")
 	if err != nil {
 		return err
 	}
@@ -73,9 +73,9 @@ func run(ctx context.Context) error {
 	// #endregion produce
 
 	// #region consume
-	paid := ndb.WatchWhere(ndb.Eq("topic", "invoice.paid"))
+	paid := ndb.WatchQuery(ndb.Eq("topic", "invoice.paid"))
 
-	fmt.Println("consumer billing, run 1 (where topic = invoice.paid):")
+	fmt.Println("consumer billing, run 1 (query topic = invoice.paid):")
 
 	for ev, err := range outbox.Watch(ctx, "billing", paid, ndb.Limit(2)) {
 		if err != nil {
@@ -125,7 +125,7 @@ func run(ctx context.Context) error {
 	}
 	// #endregion restart
 
-	total, err := receipts.Where().Count(ctx)
+	total, err := receipts.Count(ctx)
 	if err != nil {
 		return err
 	}
@@ -151,11 +151,11 @@ func reset(ctx context.Context, outbox *ndb.Coll[Event], receipts *ndb.Coll[Rece
 	for i := 1; i <= 5; i++ {
 		id := fmt.Sprintf("evt-%d", i)
 
-		if _, err := outbox.DeleteID(ctx, id); err != nil {
+		if _, err := outbox.Delete(ctx, id); err != nil {
 			return err
 		}
 
-		if _, err := receipts.DeleteID(ctx, id); err != nil {
+		if _, err := receipts.Delete(ctx, id); err != nil {
 			return err
 		}
 	}

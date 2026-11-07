@@ -3,7 +3,7 @@ import { connect } from '@thadeu/ndb'
 
 const ndb = connect(process.env.NDB_URL ?? 'unix:///tmp/ndb-examples.sock')
 
-const orders = ndb.model('orders', {
+const orders = ndb.collection('orders', {
   time: 'created_at',
   fields: {
     created_at: { type: 'date' },
@@ -68,7 +68,7 @@ for (const row of byStatus.rows) {
 // #endregion by-status
 
 // #region count
-const big = await orders.where({ status: 'paid', amount: { $gte: 100 } }).count()
+const big = await orders.count({ status: 'paid', amount: { $gte: 100 } })
 
 console.log(`paid orders of 100 or more: ${big}`)
 // #endregion count

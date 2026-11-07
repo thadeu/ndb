@@ -4,7 +4,7 @@ import { connect } from '@thadeu/ndb'
 const ndb = connect(process.env.NDB_URL ?? 'unix:///tmp/ndb-examples.sock')
 
 // #region schema
-const sessions = ndb.model('sessions', {
+const sessions = ndb.collection('sessions', {
   time: 'created_at',
   expires: 'expires_at',
   fields: {

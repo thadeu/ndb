@@ -9,14 +9,14 @@ set -euo pipefail
 # The work of the consumer. The receipt id is the event id, so a second delivery of
 # the same event fails with duplicate_id (409) and the work is not done twice.
 charge() {
-	[[ "$(ndb_status POST /v1/c/receipts/insert "{\"insert\":[{\"_id\":\"$1\",\"done_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}]}")" == "200" ]]
+	[[ "$(ndb_status POST /receipts/_doc "{\"_id\":\"$1\",\"done_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}")" == "200" ]]
 }
 # endregion work
 
 # Make the example repeatable: remove what an earlier run left.
 for i in 1 2 3 4 5; do
-	ndb DELETE "/v1/c/outbox/evt-$i" >/dev/null
-	ndb DELETE "/v1/c/receipts/evt-$i" >/dev/null
+	ndb DELETE "/outbox/_doc/evt-$i" >/dev/null
+	ndb DELETE "/receipts/_doc/evt-$i" >/dev/null
 done
 
 # region produce
@@ -25,20 +25,20 @@ i=0
 for topic in invoice.paid user.signup invoice.paid user.signup invoice.paid; do
 	i=$((i + 1))
 
-	ndb POST /v1/c/outbox/insert "{\"insert\":[{\"_id\":\"evt-$i\",\"topic\":\"$topic\",\"created_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}]}" >/dev/null
+	ndb POST /outbox/_doc "{\"_id\":\"evt-$i\",\"topic\":\"$topic\",\"created_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" >/dev/null
 
 	echo "produce evt-$i $topic"
 done
 # endregion produce
 
 ack() {
-	ndb POST /v1/c/outbox/ack "{\"consumer\":\"billing\",\"pos\":\"$1\"}" >/dev/null
+	ndb POST /outbox/_ack "{\"consumer\":\"billing\",\"pos\":\"$1\"}" >/dev/null
 }
 
 # region consume
-watch='{"consumer":"billing","limit":2,"where":{"topic":"invoice.paid"}}'
+watch='{"consumer":"billing","limit":2,"query":{"topic":"invoice.paid"}}'
 
-echo "consumer billing, run 1 (where topic = invoice.paid):"
+echo "consumer billing, run 1 (query topic = invoice.paid):"
 
 while read -r pos id; do
 	charge "$id" || true
@@ -52,7 +52,7 @@ while read -r pos id; do
 	ack "$pos"
 
 	echo "  $id charged, acked"
-done < <(ndb POST /v1/c/outbox/watch "$watch" | jq -r 'select(.pos) | "\(.pos) \(._id)"')
+done < <(ndb POST /outbox/_watch "$watch" | jq -r 'select(.pos) | "\(.pos) \(._id)"')
 # endregion consume
 
 # region restart
@@ -66,7 +66,7 @@ while read -r pos id; do
 	fi
 
 	ack "$pos"
-done < <(ndb POST /v1/c/outbox/watch "$watch" | jq -r 'select(.pos) | "\(.pos) \(._id)"')
+done < <(ndb POST /outbox/_watch "$watch" | jq -r 'select(.pos) | "\(.pos) \(._id)"')
 # endregion restart
 
-echo "receipts: $(ndb_header X-Ndb-Total POST /v1/c/receipts/find '{"count":true,"limit":1}') (one per invoice, none twice)"
+echo "receipts: $(ndb POST /receipts/_count '{}' | jq -r '.count') (one per invoice, none twice)"

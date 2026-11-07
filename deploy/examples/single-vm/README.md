@@ -35,7 +35,7 @@ Query it from the host with a curl container that mounts the socket volume:
 
 ```bash
 docker run --rm --user 1000:65532 -v ndb-single-vm_ndb-run:/run/ndb curlimages/curl \
-  --unix-socket /run/ndb/ndb.sock -s http://ndb/v1/c/visits/stats
+  --unix-socket /run/ndb/ndb.sock -s http://ndb/visits/_stats
 ```
 
 The ndb image has no shell and no curl, so a separate container is used. It must run in group 65532 to open the socket. The volume name is `<project>_ndb-run`; the project is `ndb-single-vm`.

@@ -10,4 +10,4 @@ payment paths ($regex): 2
 pages (limit 5): 5, 5, 2
 append: cli wrote one line
 the new line is in the collection
-it has no _id, so it has no /{_id} routes: _id is ""
+it has no _id, so it has no _doc/{id} routes: _id is ""

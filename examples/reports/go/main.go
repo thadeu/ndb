@@ -31,14 +31,14 @@ func run(ctx context.Context) error {
 		addr = "unix:///tmp/ndb-examples.sock"
 	}
 
-	db, err := ndb.Open(addr)
+	db, err := ndb.Connect(addr)
 	if err != nil {
 		return err
 	}
 
 	defer db.Close()
 
-	orders, err := ndb.Collection[Order](ctx, db, "orders")
+	orders, err := ndb.Collection[Order](db, "orders")
 	if err != nil {
 		return err
 	}
@@ -47,7 +47,7 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	total, err := orders.Where().Count(ctx)
+	total, err := orders.Count(ctx)
 	if err != nil {
 		return err
 	}
@@ -97,7 +97,7 @@ func run(ctx context.Context) error {
 	// #endregion by-status
 
 	// #region count
-	big, err := orders.Where(ndb.Eq("status", "paid"), ndb.Gte("amount", 100)).Count(ctx)
+	big, err := orders.Count(ctx, ndb.Eq("status", "paid"), ndb.Gte("amount", 100))
 	if err != nil {
 		return err
 	}
@@ -110,7 +110,7 @@ func run(ctx context.Context) error {
 
 // seed inserts the twelve orders once. A second run finds them and does nothing.
 func seed(ctx context.Context, orders *ndb.Coll[Order]) error {
-	existing, err := orders.Where().Count(ctx)
+	existing, err := orders.Count(ctx)
 	if err != nil {
 		return err
 	}
@@ -125,20 +125,20 @@ func seed(ctx context.Context, orders *ndb.Coll[Order]) error {
 		return t
 	}
 
-	_, err = orders.Insert(ctx,
-		Order{ID: "o01", CreatedAt: at("09:05:00"), Status: "paid", Amount: 50},
-		Order{ID: "o02", CreatedAt: at("09:20:00"), Status: "paid", Amount: 70},
-		Order{ID: "o03", CreatedAt: at("09:45:00"), Status: "refunded", Amount: 30},
-		Order{ID: "o04", CreatedAt: at("10:02:00"), Status: "paid", Amount: 120},
-		Order{ID: "o05", CreatedAt: at("10:15:00"), Status: "paid", Amount: 80},
-		Order{ID: "o06", CreatedAt: at("10:30:00"), Status: "pending", Amount: 60},
-		Order{ID: "o07", CreatedAt: at("10:55:00"), Status: "paid", Amount: 160},
-		Order{ID: "o08", CreatedAt: at("11:05:00"), Status: "paid", Amount: 40},
-		Order{ID: "o09", CreatedAt: at("11:25:00"), Status: "refunded", Amount: 90},
-		Order{ID: "o10", CreatedAt: at("11:40:00"), Status: "paid", Amount: 60},
-		Order{ID: "o11", CreatedAt: at("11:50:00"), Status: "pending", Amount: 20},
-		Order{ID: "o12", CreatedAt: at("11:59:00"), Status: "paid", Amount: 110},
-	)
+	_, err = orders.InsertMany(ctx, []Order{
+		{ID: "o01", CreatedAt: at("09:05:00"), Status: "paid", Amount: 50},
+		{ID: "o02", CreatedAt: at("09:20:00"), Status: "paid", Amount: 70},
+		{ID: "o03", CreatedAt: at("09:45:00"), Status: "refunded", Amount: 30},
+		{ID: "o04", CreatedAt: at("10:02:00"), Status: "paid", Amount: 120},
+		{ID: "o05", CreatedAt: at("10:15:00"), Status: "paid", Amount: 80},
+		{ID: "o06", CreatedAt: at("10:30:00"), Status: "pending", Amount: 60},
+		{ID: "o07", CreatedAt: at("10:55:00"), Status: "paid", Amount: 160},
+		{ID: "o08", CreatedAt: at("11:05:00"), Status: "paid", Amount: 40},
+		{ID: "o09", CreatedAt: at("11:25:00"), Status: "refunded", Amount: 90},
+		{ID: "o10", CreatedAt: at("11:40:00"), Status: "paid", Amount: 60},
+		{ID: "o11", CreatedAt: at("11:50:00"), Status: "pending", Amount: 20},
+		{ID: "o12", CreatedAt: at("11:59:00"), Status: "paid", Amount: 110},
+	})
 
 	return err
 }

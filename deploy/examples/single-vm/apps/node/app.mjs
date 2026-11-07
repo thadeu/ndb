@@ -12,7 +12,7 @@ const POD = hostname()
 
 const db = connect(process.env.NDB_URL ?? 'unix:///run/ndb/ndb.sock')
 
-const visits = db.model('visits', {
+const visits = db.collection('visits', {
   time: 'ts',
   fields: {
     app: { type: 'string', index: true },
@@ -38,7 +38,7 @@ for (;;) {
   try {
     await record()
 
-    const mine = await visits.where({ app: APP }).count()
+    const mine = await visits.count({ app: APP })
     const all = await visits.count()
 
     console.warn(`${APP} visits: ${mine}, all apps: ${all}`)

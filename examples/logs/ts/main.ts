@@ -5,7 +5,7 @@ import { connect } from '@thadeu/ndb'
 
 const ndb = connect(process.env.NDB_URL ?? 'unix:///tmp/ndb-examples.sock')
 
-const logs = ndb.model('app_logs', {
+const logs = ndb.collection('app_logs', {
   time: 'ts',
   fields: {
     ts: { type: 'date' },
@@ -32,12 +32,12 @@ async function waitFor(ready: () => Promise<boolean>) {
   }
 }
 
-await waitFor(async () => (await logs.where(history).count()) === 12)
+await waitFor(async () => (await logs.count(history)) === 12)
 
 console.log('history: 12 lines from 2 files')
 
 // #region filter
-const failures = await logs.where(history).where({ level: 'error' }).sort({ ts: -1 })
+const failures = await logs.query(history).query({ level: 'error' }).sort({ ts: -1 })
 
 console.log('errors, newest first:')
 
@@ -45,20 +45,20 @@ for (const l of failures) {
   console.log(`  ${l.ts.toISOString().slice(11, 19)} ${l.app.padEnd(6)} ${l.msg}`)
 }
 
-const slow = await logs.where(history).where({ ms: { $gte: 800 } }).count()
+const slow = await logs.query(history).query({ ms: { $gte: 800 } }).count()
 
 console.log(`slow (ms >= 800): ${slow}`)
 // #endregion filter
 
 // #region regex
-const payments = await logs.where(history).where({ path: { $regex: '^/api/v[0-9]+/payments' } }).count()
+const payments = await logs.query(history).query({ path: { $regex: '^/api/v[0-9]+/payments' } }).count()
 
 console.log(`payment paths ($regex): ${payments}`)
 // #endregion regex
 
 // #region cursor
 const pages: number[] = []
-let query = logs.where(history).sort({ ts: 1 }).limit(5)
+let query = logs.query(history).sort({ ts: 1 }).limit(5)
 
 for (;;) {
   const rows = await query
@@ -83,13 +83,13 @@ execFileSync(new URL('../append.sh', import.meta.url).pathname, ['cli', '3003', 
 
 console.log('append: cli wrote one line')
 
-await waitFor(async () => (await logs.where({ msg }).count()) === 1)
+await waitFor(async () => (await logs.count({ msg })) === 1)
 
 console.log('the new line is in the collection')
 
-const added = await logs.where({ msg }).first()
+const added = await logs.query({ msg }).first()
 
-console.log(`it has no _id, so it has no /{_id} routes: _id is "${added?._id ?? ''}"`)
+console.log(`it has no _id, so it has no _doc/{id} routes: _id is "${added?._id ?? ''}"`)
 // #endregion append
 
 await ndb.close()

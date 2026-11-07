@@ -21,8 +21,8 @@ healthy() {
 	local args=(-fsS -o /dev/null)
 
 	case "$NDB_URL" in
-	unix://*) args+=(--unix-socket "${NDB_URL#unix://}" http://ndb/health) ;;
-	tcp://*) args+=(http://"${NDB_URL#tcp://}"/health) ;;
+	unix://*) args+=(--unix-socket "${NDB_URL#unix://}" http://ndb/_health) ;;
+	tcp://*) args+=(http://"${NDB_URL#tcp://}"/_health) ;;
 	esac
 
 	if [[ -n "${NDB_TOKEN:-}" ]]; then

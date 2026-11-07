@@ -5,22 +5,22 @@ set -euo pipefail
 . "$(dirname "$0")/../lib/ndb.sh"
 
 # region declare
-ndb PUT /v1/c/sessions '{"time":"created_at","expires_field":"expires_at"}' >/dev/null
+ndb PUT /sessions '{"time":"created_at","expires_field":"expires_at"}' >/dev/null
 # endregion declare
 
 for id in s-short s-long s-keep; do
-	ndb DELETE "/v1/c/sessions/$id" >/dev/null
+	ndb DELETE "/sessions/_doc/$id" >/dev/null
 done
 
 ttl() {
-	ndb GET "/v1/c/sessions/$1/ttl" | jq -r '.ttl'
+	ndb GET "/sessions/_ttl/$1" | jq -r '.ttl'
 }
 
 # region insert
 now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-ndb POST /v1/c/sessions/insert "{\"insert\":[{\"_id\":\"s-short\",\"created_at\":\"$now\"}],\"expire_in\":2}" >/dev/null
-ndb POST /v1/c/sessions/insert "{\"insert\":[{\"_id\":\"s-long\",\"created_at\":\"$now\"},{\"_id\":\"s-keep\",\"created_at\":\"$now\"}],\"expire_in\":\"1h\"}" >/dev/null
+ndb POST /sessions/_bulk "{\"docs\":[{\"_id\":\"s-short\",\"created_at\":\"$now\"}],\"expire_in\":2}" >/dev/null
+ndb POST /sessions/_bulk "{\"docs\":[{\"_id\":\"s-long\",\"created_at\":\"$now\"},{\"_id\":\"s-keep\",\"created_at\":\"$now\"}],\"expire_in\":\"1h\"}" >/dev/null
 
 echo "insert s-short (expire_in 2s), s-long and s-keep (expire_in 1h)"
 # endregion insert
@@ -30,13 +30,13 @@ echo "ttl s-short: $(ttl s-short)s, s-long: $(ttl s-long)s"
 # endregion ttl
 
 # region extend
-ndb POST /v1/c/sessions/expire '{"_id":"s-long","in":"30m"}' >/dev/null
+ndb POST /sessions/_expire/s-long '{"in":"30m"}' >/dev/null
 
 echo "expire s-long 30m -> ttl $(ttl s-long)s"
 # endregion extend
 
 # region persist
-ndb POST /v1/c/sessions/persist '{"_id":"s-keep"}' >/dev/null
+ndb POST /sessions/_persist/s-keep >/dev/null
 
 if [[ "$(ttl s-keep)" == "-1" ]]; then
 	echo "persist s-keep -> ttl -1 (never expires)"
@@ -47,11 +47,11 @@ echo "waiting 3s..."
 sleep 3
 
 # region after
-alive=$(ndb POST /v1/c/sessions/find '{}' | jq -r '._id' | paste -sd, - | sed 's/,/, /g')
+alive=$(ndb POST /sessions/_search '{}' | jq -r 'map(._id) | join(", ")')
 
-echo "live sessions: $(ndb_header X-Ndb-Total POST /v1/c/sessions/find '{"count":true,"limit":1}') ($alive)"
+echo "live sessions: $(ndb POST /sessions/_count '{}' | jq -r '.count') ($alive)"
 
-if [[ "$(ndb_status GET /v1/c/sessions/s-short/ttl)" == "404" ]]; then
+if [[ "$(ndb_status GET /sessions/_ttl/s-short)" == "404" ]]; then
 	echo "ttl s-short: gone"
 fi
 # endregion after

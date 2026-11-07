@@ -32,7 +32,7 @@ ndb runs on the db VM. Apps on other VMs reach it over TCP, inside a WireGuard t
 Check from the apps VM:
 
 ```bash
-curl -s -H "Authorization: Bearer $NDB_TOKEN" http://ndb.internal:7070/health
+curl -s -H "Authorization: Bearer $NDB_TOKEN" http://ndb.internal:7070/_health
 ```
 
 Without the header the answer is `401 unauthorized`.
@@ -47,7 +47,7 @@ chown ndb:ndb /etc/ndb/token && chmod 600 /etc/ndb/token
 systemctl edit ndb     # ExecStart=... -token-file /etc/ndb/token
 ```
 
-The SDKs read `NDB_URL` and `NDB_TOKEN` by themselves (Go, Ruby and TypeScript), so the sample apps need no token code. To set them in code: Ruby `Ndb::Client.new(token:)`, Go `ndb.Open(addr, ndb.WithToken(t))`, TypeScript `connect(addr, { token })`.
+The SDKs read `NDB_URL` and `NDB_TOKEN` by themselves (Go, Ruby and TypeScript), so the sample apps need no token code. To set them in code: Ruby `Ndb.connect(addr, token:)`, Go `ndb.Connect(addr, ndb.WithToken(t))`, TypeScript `connect(addr, { token })`.
 
 ## Rules
 

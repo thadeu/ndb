@@ -3,7 +3,7 @@ produce evt-2 user.signup
 produce evt-3 invoice.paid
 produce evt-4 user.signup
 produce evt-5 invoice.paid
-consumer billing, run 1 (where topic = invoice.paid):
+consumer billing, run 1 (query topic = invoice.paid):
   evt-1 charged, acked
   evt-3 charged, crash before ack
 consumer billing, run 2 (restart, resumes after the last ack):

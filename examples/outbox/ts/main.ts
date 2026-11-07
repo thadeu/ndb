@@ -4,7 +4,7 @@ import { connect, DuplicateIdError } from '@thadeu/ndb'
 
 const ndb = connect(process.env.NDB_URL ?? 'unix:///tmp/ndb-examples.sock')
 
-const outbox = ndb.model('outbox', {
+const outbox = ndb.collection('outbox', {
   time: 'created_at',
   fields: {
     topic: { type: 'string', index: true },
@@ -12,7 +12,7 @@ const outbox = ndb.model('outbox', {
   },
 })
 
-const receipts = ndb.model('receipts', {
+const receipts = ndb.collection('receipts', {
   fields: {
     done_at: { type: 'date' },
   },
@@ -38,8 +38,8 @@ async function charge(eventId: string): Promise<boolean> {
 
 // Make the example repeatable: remove what an earlier run left.
 for (let i = 1; i <= 5; i++) {
-  for (const model of [outbox, receipts]) {
-    await model.delete(`evt-${i}`)
+  for (const coll of [outbox, receipts]) {
+    await coll.delete(`evt-${i}`)
   }
 }
 
@@ -58,9 +58,9 @@ for (const [i, topic] of topics.entries()) {
 // #region consume
 const paid = { topic: 'invoice.paid' }
 
-console.log('consumer billing, run 1 (where topic = invoice.paid):')
+console.log('consumer billing, run 1 (query topic = invoice.paid):')
 
-for await (const ev of outbox.watch('billing', { where: paid, limit: 2 })) {
+for await (const ev of outbox.watch('billing', { query: paid, limit: 2 })) {
   await charge(ev._id)
 
   if (ev._id === 'evt-3') {
@@ -78,7 +78,7 @@ for await (const ev of outbox.watch('billing', { where: paid, limit: 2 })) {
 // #region restart
 console.log('consumer billing, run 2 (restart, resumes after the last ack):')
 
-for await (const ev of outbox.watch('billing', { where: paid, limit: 2 })) {
+for await (const ev of outbox.watch('billing', { query: paid, limit: 2 })) {
   if (await charge(ev._id)) {
     console.log(`  ${ev._id} charged, acked`)
   } else {

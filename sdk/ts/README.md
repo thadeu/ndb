@@ -2,11 +2,11 @@
 
 <img src="https://raw.githubusercontent.com/thadeu/ndb/main/brand/png/lockup-on-light.png" width="220">
 
-TypeScript client for [ndb](https://github.com/thadeu/ndb), an NDJSON query daemon. Typed models, a chainable query builder, aggregate and watch. The client builds JSON. The daemon decides what every query means.
+TypeScript client for [ndb](https://github.com/thadeu/ndb), an NDJSON query daemon. Typed collections, a chainable query builder, aggregate, watch and blobs. The client builds JSON. The daemon decides what every query means.
 
 Node 24 or newer. ESM and CJS. One runtime dependency (`undici`).
 
-Docs: [client guide](https://github.com/thadeu/ndb/blob/main/docs/dev/clients.md#typescript-package-thadeundb), [query language](https://github.com/thadeu/ndb/blob/main/docs/dev/query.md), [HTTP API](https://github.com/thadeu/ndb/blob/main/docs/dev/http-api.md).
+Docs: [client guide](https://github.com/thadeu/ndb/blob/main/docs/dev/clients.md#typescript-package-thadeundb), [query language](https://github.com/thadeu/ndb/blob/main/docs/dev/query.md), [HTTP API](https://github.com/thadeu/ndb/blob/main/docs/dev/http.md).
 
 ## Install
 
@@ -36,7 +36,7 @@ const fromEnv = connect()
 // Retry for up to 5 s while the daemon starts or recovers.
 const patient = connect('unix:///run/ndb/ndb.sock', { readyTimeout: 5000 })
 
-await ndb.health()
+await ndb.health() // resolves when the daemon is ready (GET /_health)
 await ndb.close()
 ```
 
@@ -47,10 +47,10 @@ await ndb.close()
 - The pool has up to 16 connections. There is no setting for it.
 - `new Ndb(addr, opts)` does the same as `connect`.
 
-## Define a model
+## Define a collection
 
 ```ts
-const calls = ndb.model('calls', {
+const calls = ndb.collection('calls', {
   time: 'at',
   fields: {
     status: { type: 'string', index: true },
@@ -66,50 +66,55 @@ const calls = ndb.model('calls', {
 - Field options: `index`, `unique`, `optional`.
 - `_id` is the primary key of every document. It is not a schema field: leave it out on insert and the daemon makes a UUIDv7 (or use `newId()`). For a natural key (email, SKU), keep `_id` and mark that field `unique`.
 - `time` is the collection time field. Used by zone maps and `$dateTrunc`.
-- The model declares its collection on first use (`ensure_collection`). You can call `await calls.ready()` to do it at once.
+- The collection is declared on first use (`PUT /calls`). You can call `await calls.ready()` to do it at once.
+- A name that ends with `*` is a collection pattern: `ndb.collection('logs-2026-*', schema)` reads every collection whose name starts with `logs-2026-`. It declares nothing, and a write throws with code `pattern_read_only`. Each row has `_coll`, the name of its collection.
 - Types come from the schema. Rows have the schema fields, `_id` and `_v`, the document version. A `date` field is a `Date` in rows. Input takes `Date` values and ISO strings in filters.
 - `expires` is the `date` field that holds when a document expires. It turns on `expireIn`, `expire`, `persist` and `ttl` (below).
-- The client has no `ttl` catalog option and no blob API. Use the HTTP API for those.
+- The client has no `ttl` catalog option. Use the HTTP API for it.
 
-## Insert, find, update, delete
+## Insert, get, update, delete
 
 ```ts
-// Insert one or many. All documents go in one transaction.
-const results = await calls.insert([
-  { _id: 'c1', status: 'answered', caller: 'a', duration: 30, at: new Date() },
-  { _id: 'c2', status: 'failed', caller: 'b', at: new Date() },
-])
-// results: [{ _id: 'c1', v: 1 }, ...]
+// One document (POST /calls/_doc): { _id, _v }.
+const one = await calls.insert({ _id: 'c1', status: 'answered', caller: 'a', duration: 30, at: new Date() })
 
-// Get by _id (GET /v1/c/calls/c1). Returns null when missing.
+// Many in one transaction, all or nothing (POST /calls/_bulk): an array.
+const results = await calls.insert([
+  { _id: 'c2', status: 'failed', caller: 'b', at: new Date() },
+  { _id: 'c3', status: 'failed', caller: 'c', at: new Date() },
+])
+// results: [{ _id: 'c2', _v: 1 }, { _id: 'c3', _v: 1 }]
+
+// Get by _id (GET /calls/_doc/c1). Returns null when missing.
 const row = await calls.get('c1')
 
-// Atomic update by filter: filter first, then the write operators.
-// _v in the filter is an optimistic lock.
-const res = await calls.update({ _id: 'c1', _v: row!._v }, { $set: { status: 'done' }, $unset: { duration: true } })
+// Atomic update by _id (POST /calls/_update/c1). guard adds conditions on
+// the same document: a _v guard is an optimistic lock.
+const res = await calls.update('c1', { $set: { status: 'done' }, $unset: { duration: true } }, { guard: { _v: row!._v } })
 // res: { matched, modified, doc } (doc is the new row with _v; absent for many)
 
-// A string is an _id (POST /{_id}/update). The same guard rules apply.
-await calls.update('c1', { $inc: { duration: 1 } })
-
 // A guarded decrement: exactly one of two racing calls wins.
-await stock.update({ _id: 'a', qty: { $gte: 1 } }, { $inc: { qty: -1 } })
+await stock.update('a', { $inc: { qty: -1 } }, { guard: { qty: { $gte: 1 } } })
 
-// Every match (the filter needs _id or an indexed field), or create it.
-await calls.update({ status: 'failed' }, { $set: { status: 'retry' } }, { many: true })
+// Create the document with this _id when it is missing.
 await calls.update('c9', { $inc: { duration: 1 } }, { upsert: true })
 
-// Delete by _id or by filter: { deleted }.
+// Atomic update by query (POST /calls/_update_by_query): the first match, or
+// every match with many (the query needs _id or an indexed field).
+await calls.updateBy({ status: 'failed' }, { $set: { status: 'retry' } }, { many: true })
+
+// Delete by _id (DELETE /calls/_doc/c2), or by query: { deleted }.
 await calls.delete('c2')
-await calls.delete({ status: 'failed' }, { many: true })
+await calls.deleteBy({ status: 'failed' }, { many: true })
 ```
 
 - Operators: `$set`, `$setOnInsert` (like `$set`, but only when an upsert creates the document), `$unset`, `$inc`, `$push` (with `{ $each: [...] }`), `$pull`, `$min`, `$max`. Field names can be dot paths.
 - Nothing matched is not an error: `matched` is 0 (for example when `_v` is stale, so read again and retry). `modified` is 0 when the operators leave the document as it is.
-- `many` needs `_id` or an indexed field in the filter, and does not apply to an `_id` string. `upsert` creates the document from the equality fields of the filter (or with that `_id`).
+- `update` takes `guard`, `upsert` (creates the document with that `_id`) and `expireIn`. `updateBy` takes `many`, `upsert` (creates the document from the equality fields of the query) and `expireIn`. `deleteBy` takes `many`.
+- `many` needs `_id` or an indexed field in the query. An empty query is refused (`empty_filter`).
 - A key of the operators without `$` throws `InvalidUpdateError` before anything is sent. The daemon contract errors (`unknown_operator`, `no_update`, `conflicting_update`, `invalid_field`, `unindexed_many`, `empty_filter`) are `InvalidUpdateError` too.
 
-An insert with a duplicate `_id` throws `DuplicateIdError`. A duplicate `unique` value throws `UniqueViolationError`. An empty or non-string `_id` fails with code `invalid_id`.
+An insert with a duplicate `_id` throws `DuplicateIdError` (a `_bulk` insert then writes nothing). A duplicate `unique` value throws `UniqueViolationError`. An empty or non-string `_id` fails with code `invalid_id`.
 
 ### Truncate and drop
 
@@ -119,12 +124,12 @@ await calls.drop()     // the collection, its definition and its watch consumers
 ```
 
 - Both take the same time for 10 or 10 million documents. Watch consumers get one event with `op: 'truncate'` (`_id` is `''`), then the new changes.
-- After `drop()`, the next call on the model declares the collection again. A collection declared in `ndb.yml` comes back, empty, when the daemon restarts.
+- After `drop()`, the next call on the collection declares it again. A collection declared in `ndb.yml` comes back, empty, when the daemon restarts.
 
 ### Expiry (TTL like Redis)
 
 ```ts
-const sessions = db.model('sessions', {
+const sessions = ndb.collection('sessions', {
   expires: 'exp',
   fields: { exp: { type: 'date', optional: true } },
 })
@@ -132,7 +137,7 @@ const sessions = db.model('sessions', {
 await sessions.insert({ _id: 's1' }, { expireIn: '1h' }) // or 3600; all docs of the call
 await sessions.update('s1', { $set: { user: 'u' } }, { expireIn: '30m' })
 
-const { v, expiresAt } = await sessions.expire('s1', '30m') // EXPIRE
+const { _v, expiresAt } = await sessions.expire('s1', '30m') // EXPIRE
 await sessions.expireAt('s1', new Date(Date.now() + 3_600_000))
 await sessions.ttl('s1') // seconds left, -1 = never expires, null = missing or expired
 await sessions.persist('s1') // PERSIST
@@ -144,12 +149,12 @@ await sessions.persist('s1') // PERSIST
 
 ## Query
 
-A query is lazy and immutable. It is also thenable: `await` runs it.
+A query is lazy and immutable (`POST /{coll}/_search`). It is also thenable: `await` runs it.
 
 ```ts
 const rows = await calls
-  .where({ status: 'answered', duration: { $gte: 30 } })
-  .where({ caller: { $in: ['a', 'b'] } })
+  .query({ status: 'answered', duration: { $gte: 30 } })
+  .query({ caller: { $in: ['a', 'b'] } })
   .not({ caller: 'zzz' })
   .or({ duration: { $lt: 5 } }, { 'meta.agent.id': 7 })
   .sort({ at: -1, _id: 1 })
@@ -158,18 +163,37 @@ const rows = await calls
   .skip(100)
 ```
 
-- Operators: `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$exists`. Several `where` calls are ANDed. Dot paths work on `json` fields.
+- Operators: `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$exists`. Several `query` calls are ANDed. Dot paths work on `json` fields.
 - `$regex` (with `$options` `i`, `m`, `s`, `x`) uses Go RE2: no backreferences, no look-around. Pass a string, or a `RegExp` (`{ name: /^al/i }` or `{ name: { $regex: /^al/i } }`). Only the `i`, `m` and `s` flags are accepted; any other flag (`g`, `y`, `u`, ...) throws `InvalidQueryError` before the request. An anchored prefix such as `^abc` can use an index.
 - The order of the `sort` keys is the order of the sort. The id is always the last key.
 - `fields(...)` returns only these fields. The rows are `Partial`.
 - `page(n, size)` sets `skip` and `limit` for page `n` (from 1).
 - `first()` returns the first row, or `null`.
-- The model has the same shortcuts: `calls.where(...)`, `calls.sort(...)`, `calls.all()`, `calls.count()`.
+- The collection has the same shortcuts: `calls.query(...)`, `calls.sort(...)`, `calls.all()`, `calls.first()`, `calls.count(...)`, `calls.each()`.
+
+### A query built elsewhere
+
+A query from a search form or a saved search is not type-checked. `rawQuery` sends it as is (the daemon validates it), ANDed with the other clauses:
+
+```ts
+const rows = await calls.rawQuery({ status: 'answered', at: { $gte: 'now-7d' } }).limit(50)
+```
+
+For a whole search body (`query`, `sort`, `limit`, `after`, `count`), use `search`. It answers one page:
+
+```ts
+const page = await calls.search({ query: { status: 'answered' }, sort: { at: -1 }, limit: 50, count: true })
+
+page.rows  // decoded like the rows of query()
+page.next  // cursor for the next page ('' on the last one)
+page.total // with count: true
+```
 
 ### Count
 
 ```ts
-const answered = await calls.where({ status: 'answered' }).count()
+const answered = await calls.count({ status: 'answered' }) // POST /calls/_count
+const failed = await calls.query({ status: 'failed' }).count()
 const total = await calls.count()
 ```
 
@@ -178,19 +202,19 @@ const total = await calls.count()
 Offset pages get slower as `skip` grows. Use a cursor for deep pages.
 
 ```ts
-const q = calls.where({ status: 'answered' }).sort({ _id: 1 }).limit(100)
+const q = calls.query({ status: 'answered' }).sort({ _id: 1 }).limit(100)
 const page = await q
 const token = q.nextCursor // '' on the last page
 
-const next = await calls.where({ status: 'answered' }).sort({ _id: 1 }).limit(100).after(token)
+const next = await calls.query({ status: 'answered' }).sort({ _id: 1 }).limit(100).after(token)
 ```
 
-A token works only with the same `where` and `sort`. Another query shape throws `CursorError`.
+A token works only with the same query and `sort`. Another query shape throws `CursorError`.
 
-To walk every row, use `iterate()`. It follows the cursor, with `limit` as the batch size:
+To walk every row, use `each()`. It follows the cursor, with `limit` as the batch size:
 
 ```ts
-for await (const row of calls.where({ status: 'answered' }).sort({ _id: 1 }).limit(500).iterate()) {
+for await (const row of calls.query({ status: 'answered' }).sort({ _id: 1 }).limit(500).each()) {
   console.log(row._id)
 }
 ```
@@ -200,7 +224,7 @@ for await (const row of calls.where({ status: 'answered' }).sort({ _id: 1 }).lim
 There is no explain method. Send `explain: true` in a raw request and read the header:
 
 ```ts
-const res = await ndb.stream('POST', calls.path('find'), { where: { status: 'failed' }, explain: true, limit: 1 })
+const res = await ndb.stream('POST', calls.path('_search'), { query: { status: 'failed' }, explain: true, limit: 1 })
 
 console.log(res.header('x-ndb-plan'))    // 'index:status'
 console.log(res.header('x-ndb-explain')) // JSON string with the counters
@@ -237,7 +261,7 @@ Options: `limit`, `skip`, `after`, `count`. Pass a type to type the rows: `calls
 
 ## Watch
 
-A watch streams the changes of a model to a named consumer. First it sends the events after the last ack. Then it sends new events as they happen.
+A watch streams the changes of a collection to a named consumer. First it sends the events after the last ack. Then it sends new events as they happen.
 
 ```ts
 import { HistoryTruncatedError, WatchLaggedError } from '@thadeu/ndb'
@@ -245,8 +269,8 @@ import { HistoryTruncatedError, WatchLaggedError } from '@thadeu/ndb'
 const controller = new AbortController()
 
 try {
-  for await (const ev of calls.watch('relay', { where: { status: 'answered' }, signal: controller.signal })) {
-    // ev: { consumer, pos, op: 'put' | 'del' | 'truncate', _id, v, doc }
+  for await (const ev of calls.watch('relay', { query: { status: 'answered' }, signal: controller.signal })) {
+    // ev: { consumer, pos, op: 'put' | 'del' | 'truncate', _id, _v, doc }
     await handle(ev)
 
     await calls.ack(ev)
@@ -262,11 +286,36 @@ try {
 }
 ```
 
-- Options: `from: 'now'` (a new consumer starts at the end), `limit` (stop after n events), `where` (same filters as a query), `signal` (an `AbortSignal` that stops the stream).
-- A delete event has `doc: undefined`. With `where`, a delete is sent only if the same stream saw an earlier matching put of that id.
+- Options: `from: 'now'` (a new consumer starts at the end), `limit` (stop after n events), `query` (same filters as a query), `signal` (an `AbortSignal` that stops the stream).
+- A delete event has `doc: undefined`. With `query`, a delete is sent only if the same stream saw an earlier matching put of that id.
 - Delivery is at least once. After a restart an event can come again, so make the work safe to repeat.
-- `ack` stores the position. The next `watch` with the same consumer name starts after it.
+- `ack(ev)` stores the position (`POST /{coll}/_ack`). The next `watch` with the same consumer name starts after it.
 - `HistoryTruncatedError` means the WAL files for the position were deleted (`wal_retention`).
+
+## Blobs
+
+Large values live in the blob store. A document keeps only a reference. The same content always gives the same reference.
+
+```ts
+const blob = await ndb.putBlob(bytes, 'audio/wav') // POST /_blobs: { $blob, size, type }
+
+await calls.update('c1', { $set: { recording: blob } })
+
+const data = await ndb.getBlob(blob) // GET /_blobs/{ref}: a Uint8Array
+```
+
+## Admin
+
+```ts
+await calls.stats()              // rows, indexes, files, bytes (GET /calls/_stats)
+await calls.compact()            // merge every segment now (POST /calls/_compact)
+await calls.ensureIndex('caller') // built in the background (PUT /calls/_indexes/caller); the indexed fields
+await calls.dropIndex('caller')
+
+await ndb.collections() // one definition per collection (GET /_collections)
+await ndb.stats()       // every collection, totals, version, uptime (GET /_stats)
+await ndb.size()        // disk use per collection and part (GET /_size)
+```
 
 ## Errors
 
@@ -284,7 +333,7 @@ Daemon errors are `NdbError` or a subclass. They have `code` (the daemon code) a
 | `HistoryTruncatedError` | `history_truncated` |
 | `TtlError` | `ttl_not_enabled`, `ttl_derived` |
 | `InvalidUpdateError` | `unknown_operator`, `no_update`, `conflicting_update`, `invalid_field`, `unindexed_many`, `empty_filter`, `invalid_update` |
-| `NdbError` | every other code: `not_ready`, `catalog_conflict`, `catalog_invalid`, `direct_collection`, `invalid_request`, `group_limit_exceeded`, `request_too_large`, `line_too_large`, `closed`, `invalid_position`, `http_status`, ... |
+| `NdbError` | every other code: `not_ready`, `catalog_conflict`, `catalog_invalid`, `direct_collection`, `invalid_request`, `group_limit_exceeded`, `request_too_large`, `line_too_large`, `closed`, `invalid_position`, `confirm_required`, `unknown_route`, `pattern_read_only`, `http_status`, ... |
 
 ```ts
 import { NdbError } from '@thadeu/ndb'
@@ -302,7 +351,7 @@ try {
 
 ## Testing
 
-The tests of this package (vitest) build the daemon from the repository (`go build ./cmd/ndb`) in a global setup. They start it on a temp unix socket and a free TCP port, wait for `GET /health` to return 200, and stop it at the end. To do the same by hand:
+The tests of this package (vitest) build the daemon from the repository (`go build ./cmd/ndb`) in a global setup. They start it on a temp unix socket and a free TCP port, wait for `GET /_health` to return 200, and stop it at the end. To do the same by hand:
 
 ```sh
 ndb -config /nonexistent.yml -data-dir "$(mktemp -d)" -unix /tmp/ndb-test.sock -tcp 127.0.0.1:7070

@@ -6,7 +6,7 @@ ActiveModel layer for [ndb](https://github.com/thadeu/ndb), an NDJSON query daem
 
 No Rails, or no models? Use the gem `ndb` alone: it has no runtime dependency.
 
-Docs: [client guide](https://github.com/thadeu/ndb/blob/main/docs/dev/clients.md), [query language](https://github.com/thadeu/ndb/blob/main/docs/dev/query.md), [HTTP API](https://github.com/thadeu/ndb/blob/main/docs/dev/http-api.md).
+Docs: [client guide](https://github.com/thadeu/ndb/blob/main/docs/dev/clients.md), [query language](https://github.com/thadeu/ndb/blob/main/docs/dev/query.md), [HTTP API](https://github.com/thadeu/ndb/blob/main/docs/dev/http.md).
 
 ## Install
 
@@ -213,7 +213,25 @@ Call.where(status: "failed").exists?
 - The order of the `order` keys is the order of the sort. The id is always the last key.
 - `page(n).per(size)` sets offset paging. The default page size is 25.
 - `pluck` asks the daemon for only those fields.
-- There is no `explain` on a relation. Use the client: `Ndb::Rails.client.find(coll, "where" => {...}, "explain" => true)` returns a `Page` with `plan` (the `X-Ndb-Plan` header: `id`, `index:<field>`, `scan`, `snapshot`) and `examined`.
+- There is no `explain` on a relation. Use the client: `Ndb::Rails.client.search(Call.collection_name, "query" => {...}, "explain" => true)` returns a `Page` with `plan` (the `X-Ndb-Plan` header: `id`, `index:<field>`, `scan`, `snapshot`) and `examined`.
+
+### A query built elsewhere
+
+A query from a search form or a saved search goes to `where_raw`. Its Hash is sent as it is, with no Rails conventions (an Array stays an Array, not `$in`), ANDed with the other clauses:
+
+```ruby
+Call.where_raw("status" => "answered", "at" => { "$gte" => "now-7d" }).order(at: :desc).limit(50).to_a
+```
+
+For a whole search body, use `Model.search`. The filter goes in `"query"`:
+
+```ruby
+result = Call.search("query" => { "status" => "answered" }, "sort" => { "at" => -1 }, "limit" => 50, "count" => true)
+
+result.records       # Call instances
+result.next_cursor   # nil on the last page
+result.total         # with "count" => true
+```
 
 ### Regular expressions
 
@@ -289,7 +307,7 @@ page = Ndb::Rails.client.aggregate(Call.collection_name,
 
 page.rows         # array of Hash
 page.total        # with count: true
-page.next_cursor  # nil on the last page
+page.next         # the cursor of the next page, nil on the last one
 ```
 
 `$dateTrunc` units are `minute`, `hour`, `day`, `week` and `month`. Optional `"timezone"`: a name such as `"Europe/Rome"`.
@@ -302,8 +320,8 @@ A watch streams the changes of a collection to a named consumer: first the event
 client = Ndb::Rails.client
 
 begin
-  client.watch(Call.collection_name, "relay", where: { status: "answered" }) do |event|
-    # event has "pos", "op" ("put", "del" or "truncate"), "_id", "v" and "doc"
+  client.watch(Call.collection_name, "relay", query: { status: "answered" }) do |event|
+    # event has "pos", "op" ("put", "del" or "truncate"), "_id", "_v" and "doc"
     handle(event)
 
     client.ack(Call.collection_name, "relay", event["pos"])
@@ -315,7 +333,7 @@ rescue Ndb::HistoryTruncated
 end
 ```
 
-- `where:` takes the same conditions as `where` on a model (Hash and Range). Only matching events come. A delete event has no `"doc"`; it is sent only if this stream saw an earlier matching put of that id.
+- `query:` takes the same conditions as `where` on a model (Hash and Range). Only matching events come. A delete event has no `"doc"`; it is sent only if this stream saw an earlier matching put of that id.
 - `from: "now"` starts a new consumer at the end. `limit: n` ends the stream after n events.
 - Without a block, `watch` returns an Enumerator.
 - Delivery is at least once. After a restart an event can come again, so make the work safe to repeat.
@@ -376,7 +394,7 @@ rescue Ndb::RecordNotUnique => e
 
 ## Testing
 
-The tests of this gem build the daemon from the repository (`go build ./cmd/ndb`), start it on a short temp unix socket (macOS allows 104 bytes), wait for `GET /health` to return 200, and stop it at exit. To do the same by hand:
+The tests of this gem build the daemon from the repository (`go build ./cmd/ndb`), start it on a short temp unix socket (macOS allows 104 bytes), wait for `GET /_health` to return 200, and stop it at exit. To do the same by hand:
 
 ```sh
 ndb -config /nonexistent.yml -data-dir "$(mktemp -d)" -unix /tmp/ndb-test.sock

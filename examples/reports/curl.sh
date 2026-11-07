@@ -5,8 +5,8 @@ set -euo pipefail
 . "$(dirname "$0")/../lib/ndb.sh"
 
 # Seed the twelve orders once. A second run finds them and does nothing.
-if [[ "$(ndb_header X-Ndb-Total POST /v1/c/orders/find '{"count":true,"limit":1}')" == "0" ]]; then
-	ndb POST /v1/c/orders/insert '{"insert":[
+if [[ "$(ndb POST /orders/_count '{}' | jq -r '.count')" == "0" ]]; then
+	ndb POST /orders/_bulk '{"docs":[
 	  {"_id":"o01","created_at":"2026-11-01T09:05:00Z","status":"paid","amount":50},
 	  {"_id":"o02","created_at":"2026-11-01T09:20:00Z","status":"paid","amount":70},
 	  {"_id":"o03","created_at":"2026-11-01T09:45:00Z","status":"refunded","amount":30},
@@ -22,12 +22,12 @@ if [[ "$(ndb_header X-Ndb-Total POST /v1/c/orders/find '{"count":true,"limit":1}
 	]}' >/dev/null
 fi
 
-echo "orders: $(ndb_header X-Ndb-Total POST /v1/c/orders/find '{"count":true,"limit":1}')"
+echo "orders: $(ndb POST /orders/_count '{}' | jq -r '.count')"
 
 # region hourly
 echo "paid orders per hour, best revenue first:"
 
-ndb POST /v1/c/orders/aggregate '{"pipeline":[
+ndb POST /orders/_aggregate '{"pipeline":[
   {"$match":{"status":"paid"}},
   {"$group":{
     "_id":{"$dateTrunc":{"date":"$created_at","unit":"hour"}},
@@ -36,20 +36,20 @@ ndb POST /v1/c/orders/aggregate '{"pipeline":[
     "avg_ticket":{"$avg":"$amount"}
   }},
   {"$sort":{"revenue":-1}}
-]}' | jq -r '"  \(._id) orders=\(.orders) revenue=\(.revenue) avg=\(.avg_ticket)"'
+]}' | jq -r '.[] | "  \(._id) orders=\(.orders) revenue=\(.revenue) avg=\(.avg_ticket)"'
 # endregion hourly
 
 # region by-status
 echo "by status:"
 
-ndb POST /v1/c/orders/aggregate '{"pipeline":[
+ndb POST /orders/_aggregate '{"pipeline":[
   {"$group":{"_id":"$status","orders":{"$count":{}},"revenue":{"$sum":"$amount"}}},
   {"$sort":{"_id":1}}
-]}' | jq -r '"  \(._id + "        " | .[0:8]) orders=\(.orders) revenue=\(.revenue)"'
+]}' | jq -r '.[] | "  \(._id + "        " | .[0:8]) orders=\(.orders) revenue=\(.revenue)"'
 # endregion by-status
 
 # region count
-big=$(ndb_header X-Ndb-Total POST /v1/c/orders/find '{"where":{"status":"paid","amount":{"$gte":100}},"count":true,"limit":1}')
+big=$(ndb POST /orders/_count '{"query":{"status":"paid","amount":{"$gte":100}}}' | jq -r '.count')
 
 echo "paid orders of 100 or more: $big"
 # endregion count

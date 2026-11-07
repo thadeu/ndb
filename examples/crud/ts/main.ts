@@ -4,7 +4,7 @@ import { connect } from '@thadeu/ndb'
 // #region connect
 const ndb = connect(process.env.NDB_URL ?? 'unix:///tmp/ndb-examples.sock') // NDB_TOKEN is read by the SDK
 
-const users = ndb.model('users', {
+const users = ndb.collection('users', {
   fields: {
     email: { type: 'string', unique: true },
     plan: { type: 'string', index: true },
@@ -22,7 +22,7 @@ const results = await users.insert([
   { _id: 'u2', email: 'grace@example.com', plan: 'free' },
 ])
 
-console.log(`insert u1, u2 -> v${results[0]?.v}, v${results[1]?.v}`)
+console.log(`insert u1, u2 -> v${results[0]?._v}, v${results[1]?._v}`)
 // #endregion insert
 
 // #region get
@@ -32,19 +32,19 @@ console.log(`get u1: ${ada?.email} plan=${ada?.plan} v${ada?._v}`)
 // #endregion get
 
 // #region update
-const saved = await users.update({ _id: 'u1', _v: ada?._v }, { $set: { plan: 'pro' } })
+const saved = await users.update('u1', { $set: { plan: 'pro' } }, { guard: { _v: ada?._v } })
 
 console.log(`update u1 plan=pro (_v ${ada?._v}) -> v${saved.doc?._v}`)
 // #endregion update
 
 // #region conflict
-const stale = await users.update({ _id: 'u1', _v: ada?._v }, { $set: { plan: 'team' } })
+const stale = await users.update('u1', { $set: { plan: 'team' } }, { guard: { _v: ada?._v } })
 
 if (stale.matched === 0) {
   console.log(`update u1 plan=team (_v ${ada?._v}) -> matched 0`)
 
   const fresh = await users.get('u1')
-  const retried = await users.update({ _id: 'u1', _v: fresh?._v }, { $set: { plan: 'team' } })
+  const retried = await users.update('u1', { $set: { plan: 'team' } }, { guard: { _v: fresh?._v } })
 
   console.log(`reload u1: v${fresh?._v}, retry with _v ${fresh?._v} -> v${retried.doc?._v}`)
 }
@@ -58,7 +58,7 @@ console.log('delete u2')
 
 // #region count
 const total = await users.count()
-const onTeam = await users.where({ plan: 'team' }).count()
+const onTeam = await users.count({ plan: 'team' })
 
 console.log(`count: ${total} user(s), ${onTeam} on plan team`)
 // #endregion count

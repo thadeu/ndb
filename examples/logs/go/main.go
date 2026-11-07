@@ -41,14 +41,14 @@ func run(ctx context.Context) error {
 		addr = "unix:///tmp/ndb-examples.sock"
 	}
 
-	db, err := ndb.Open(addr)
+	db, err := ndb.Connect(addr)
 	if err != nil {
 		return err
 	}
 
 	defer db.Close()
 
-	logs, err := ndb.Collection[Line](ctx, db, "app_logs")
+	logs, err := ndb.Collection[Line](db, "app_logs")
 	if err != nil {
 		return err
 	}
@@ -56,7 +56,7 @@ func run(ctx context.Context) error {
 	history := ndb.Lt("ts", time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC))
 
 	if err := waitFor(func() (bool, error) {
-		n, err := logs.Where(history).Count(ctx)
+		n, err := logs.Count(ctx, history)
 
 		return n == 12, err
 	}); err != nil {
@@ -66,7 +66,7 @@ func run(ctx context.Context) error {
 	fmt.Println("history: 12 lines from 2 files")
 
 	// #region filter
-	failures, err := logs.Where(history, ndb.Eq("level", "error")).Sort(ndb.Desc("ts")).All(ctx)
+	failures, err := logs.Query(history, ndb.Eq("level", "error")).Sort(ndb.Desc("ts")).All(ctx)
 	if err != nil {
 		return err
 	}
@@ -77,7 +77,7 @@ func run(ctx context.Context) error {
 		fmt.Printf("  %s %-6s %s\n", l.TS.Format("15:04:05"), l.App, l.Msg)
 	}
 
-	slow, err := logs.Where(history, ndb.Gte("ms", 800)).Count(ctx)
+	slow, err := logs.Count(ctx, history, ndb.Gte("ms", 800))
 	if err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func run(ctx context.Context) error {
 	// #endregion filter
 
 	// #region regex
-	payments, err := logs.Where(history, ndb.Regex("path", "^/api/v[0-9]+/payments")).Count(ctx)
+	payments, err := logs.Count(ctx, history, ndb.Regex("path", "^/api/v[0-9]+/payments"))
 	if err != nil {
 		return err
 	}
@@ -97,7 +97,7 @@ func run(ctx context.Context) error {
 	// #region cursor
 	var pages []string
 
-	query := logs.Where(history).Sort(ndb.Asc("ts")).Limit(5)
+	query := logs.Query(history).Sort(ndb.Asc("ts")).Limit(5)
 
 	for {
 		rows, err := query.All(ctx)
@@ -113,7 +113,7 @@ func run(ctx context.Context) error {
 			break
 		}
 
-		query = logs.Where(history).Sort(ndb.Asc("ts")).Limit(5).After(cursor)
+		query = logs.Query(history).Sort(ndb.Asc("ts")).Limit(5).After(cursor)
 	}
 
 	fmt.Printf("pages (limit 5): %s\n", strings.Join(pages, ", "))
@@ -130,7 +130,7 @@ func run(ctx context.Context) error {
 	fmt.Println("append: cli wrote one line")
 
 	if err := waitFor(func() (bool, error) {
-		n, err := logs.Where(ndb.Eq("msg", msg)).Count(ctx)
+		n, err := logs.Count(ctx, ndb.Eq("msg", msg))
 
 		return n == 1, err
 	}); err != nil {
@@ -139,12 +139,12 @@ func run(ctx context.Context) error {
 
 	fmt.Println("the new line is in the collection")
 
-	added, err := logs.Where(ndb.Eq("msg", msg)).First(ctx)
+	added, err := logs.Query(ndb.Eq("msg", msg)).First(ctx)
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("it has no _id, so it has no /{_id} routes: _id is %q\n", added.ID)
+	fmt.Printf("it has no _id, so it has no _doc/{id} routes: _id is %q\n", added.ID)
 	// #endregion append
 
 	return nil

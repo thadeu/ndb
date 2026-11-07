@@ -35,20 +35,20 @@ func run(ctx context.Context) error {
 		addr = "unix:///tmp/ndb-examples.sock"
 	}
 
-	db, err := ndb.Open(addr)
+	db, err := ndb.Connect(addr)
 	if err != nil {
 		return err
 	}
 
 	defer db.Close()
 
-	sessions, err := ndb.Collection[Session](ctx, db, "sessions")
+	sessions, err := ndb.Collection[Session](db, "sessions")
 	if err != nil {
 		return err
 	}
 
 	for _, id := range []string{"s-short", "s-long", "s-keep"} {
-		if _, err := sessions.DeleteID(ctx, id); err != nil {
+		if _, err := sessions.Delete(ctx, id); err != nil {
 			return err
 		}
 	}
@@ -56,12 +56,12 @@ func run(ctx context.Context) error {
 	// #region insert
 	now := time.Now().UTC()
 
-	_, err = sessions.InsertWith(ctx, []Session{{ID: "s-short", CreatedAt: now}}, ndb.ExpireIn(2*time.Second))
+	_, err = sessions.Insert(ctx, Session{ID: "s-short", CreatedAt: now}, ndb.ExpireIn(2*time.Second))
 	if err != nil {
 		return err
 	}
 
-	_, err = sessions.InsertWith(ctx, []Session{{ID: "s-long", CreatedAt: now}, {ID: "s-keep", CreatedAt: now}}, ndb.ExpireIn(time.Hour))
+	_, err = sessions.InsertMany(ctx, []Session{{ID: "s-long", CreatedAt: now}, {ID: "s-keep", CreatedAt: now}}, ndb.ExpireIn(time.Hour))
 	if err != nil {
 		return err
 	}
@@ -115,7 +115,7 @@ func run(ctx context.Context) error {
 	time.Sleep(3 * time.Second)
 
 	// #region after
-	alive, err := sessions.Where().All(ctx)
+	alive, err := sessions.Query().All(ctx)
 	if err != nil {
 		return err
 	}

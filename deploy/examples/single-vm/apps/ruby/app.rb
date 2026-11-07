@@ -16,19 +16,17 @@ $stdout.sync = true
 APP = "ruby"
 POD = Socket.gethostname
 
-ndb = Ndb::Client.new(url: ENV.fetch("NDB_URL", "unix:///run/ndb/ndb.sock"))
+ndb = Ndb.connect(ENV.fetch("NDB_URL", "unix:///run/ndb/ndb.sock"))
 
-def count(ndb, where = {})
-  ndb.find("visits", where: where, count: true, limit: 1, fields: ["_id"]).total
-end
+visits = ndb.collection("visits", indexes: ["app"], time: "ts")
 
-def record(ndb)
+def record(visits)
   dir = ENV["NDB_DIRECT_DIR"]
   id = "#{APP}-#{POD}-#{SecureRandom.hex(6)}"
   ts = Time.now.utc
 
   if dir.nil? || dir.empty?
-    ndb.insert("visits", [{ _id: id, app: APP, pod: POD, ts: ts.iso8601(6) }])
+    visits.insert(_id: id, app: APP, pod: POD, ts: ts.iso8601(6))
   else
     line = { _id: id, app: APP, pod: POD, ts: ts.iso8601(6) }.to_json
 
@@ -38,10 +36,9 @@ end
 
 loop do
   begin
-    ndb.ensure_collection("visits", indexes: ["app"], time: "ts")
-    record(ndb)
+    record(visits)
 
-    puts "#{APP} visits: #{count(ndb, app: APP)}, all apps: #{count(ndb)}"
+    puts "#{APP} visits: #{visits.count(app: APP)}, all apps: #{visits.count}"
   rescue Ndb::Error, SystemCallError => e
     puts "waiting for ndb: #{e.message}"
   end

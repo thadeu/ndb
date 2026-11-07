@@ -29,7 +29,7 @@ type Visit struct {
 func main() {
 	addr := env("NDB_URL", "unix:///run/ndb/ndb.sock")
 
-	db, err := ndb.Open(addr)
+	db, err := ndb.Connect(addr)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -39,7 +39,12 @@ func main() {
 	ctx := context.Background()
 	pod, _ := os.Hostname()
 
-	visits := waitFor(ctx, db)
+	visits, err := ndb.Collection[Visit](db, "visits")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	waitFor(ctx, db)
 
 	for {
 		v := Visit{ID: fmt.Sprintf("%s-%s-%d", app, pod, time.Now().UnixNano()), App: app, Pod: pod, TS: time.Now().UTC()}
@@ -55,11 +60,11 @@ func main() {
 }
 
 // waitFor retries until the daemon is up: the apps may start before ndb.
-func waitFor(ctx context.Context, db *ndb.DB) *ndb.Coll[Visit] {
+func waitFor(ctx context.Context, db *ndb.DB) {
 	for {
-		visits, err := ndb.Collection[Visit](ctx, db, "visits")
+		err := db.Health(ctx)
 		if err == nil {
-			return visits
+			return
 		}
 
 		log.Printf("waiting for ndb: %v", err)
@@ -95,14 +100,14 @@ func record(ctx context.Context, visits *ndb.Coll[Visit], v Visit) error {
 }
 
 func report(ctx context.Context, visits *ndb.Coll[Visit]) {
-	mine, err := visits.Where(ndb.Eq("app", app)).Count(ctx)
+	mine, err := visits.Count(ctx, ndb.Eq("app", app))
 	if err != nil {
 		log.Printf("count: %v", err)
 
 		return
 	}
 
-	all, err := visits.Where().Count(ctx)
+	all, err := visits.Count(ctx)
 	if err != nil {
 		log.Printf("count: %v", err)
 

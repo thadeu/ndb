@@ -3,13 +3,13 @@
 # Reports with aggregate: $match, $group by hour with $dateTrunc, $sum, $avg, $sort, and a filtered count.
 require "ndb"
 
-ndb = Ndb::Client.new(url: ENV.fetch("NDB_URL", "unix:///tmp/ndb-examples.sock"))
+ndb = Ndb.connect(ENV.fetch("NDB_URL", "unix:///tmp/ndb-examples.sock"))
 
-ndb.ensure_collection("orders", time: "created_at", indexes: ["status"])
+orders = ndb.collection("orders", time: "created_at", indexes: ["status"])
 
 # Seed the twelve orders once. A second run finds them and does nothing.
-def seed(ndb)
-  return if ndb.find("orders", count: true, limit: 1).total.positive?
+def seed(orders)
+  return if orders.count.positive?
 
   rows = [
     ["o01", "09:05:00", "paid", 50], ["o02", "09:20:00", "paid", 70], ["o03", "09:45:00", "refunded", 30],
@@ -18,17 +18,17 @@ def seed(ndb)
     ["o10", "11:40:00", "paid", 60], ["o11", "11:50:00", "pending", 20], ["o12", "11:59:00", "paid", 110]
   ]
 
-  ndb.insert("orders", rows.map do |id, clock, status, amount|
+  orders.insert(rows.map do |id, clock, status, amount|
     { _id: id, created_at: "2026-11-01T#{clock}Z", status: status, amount: amount }
   end)
 end
 
-seed(ndb)
+seed(orders)
 
-puts "orders: #{ndb.find('orders', count: true, limit: 1).total}"
+puts "orders: #{orders.count}"
 
 # region hourly
-per_hour = ndb.aggregate("orders", pipeline: [
+per_hour = orders.aggregate([
   { "$match" => { "status" => "paid" } },
   { "$group" => {
     "_id" => { "$dateTrunc" => { "date" => "$created_at", "unit" => "hour" } },
@@ -47,7 +47,7 @@ end
 # endregion hourly
 
 # region by-status
-by_status = ndb.aggregate("orders", pipeline: [
+by_status = orders.aggregate([
   { "$group" => {
     "_id" => "$status",
     "orders" => { "$count" => {} },
@@ -64,7 +64,7 @@ end
 # endregion by-status
 
 # region count
-big = ndb.find("orders", where: { status: "paid", amount: { "$gte" => 100 } }, count: true, limit: 1).total
+big = orders.count(status: "paid", amount: 100..)
 
 puts "paid orders of 100 or more: #{big}"
 # endregion count
