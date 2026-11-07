@@ -180,10 +180,11 @@ export interface WatchOptions<F extends Fields = Fields> {
   where?: Where<F>
 }
 
+// op "truncate": every document before this event is gone; _id is "".
 export interface WatchEvent<R> {
   consumer: string
   pos: string
-  op: 'put' | 'del'
+  op: 'put' | 'del' | 'truncate'
   _id: string
   v: number
   doc: R | undefined

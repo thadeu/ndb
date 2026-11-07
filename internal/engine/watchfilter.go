@@ -86,6 +86,12 @@ func (f *filterStream) flush() {
 }
 
 func (f *filterStream) matches(ev feed.Event) bool {
+	if ev.Op == "truncate" {
+		clear(f.known)
+
+		return true
+	}
+
 	if ev.Op == "del" {
 		ok := f.known[ev.ID]
 

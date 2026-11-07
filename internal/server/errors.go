@@ -72,6 +72,8 @@ func codeOf(err error) string {
 		return "direct_collection"
 	case errors.Is(err, engine.ErrNotSupported):
 		return "not_supported"
+	case errors.Is(err, engine.ErrConfirm):
+		return "confirm_required"
 	case errors.Is(err, wal.ErrLineTooLarge):
 		return "line_too_large"
 	case errors.Is(err, writer.ErrClosed):

@@ -194,3 +194,25 @@ func TestExpiredDeleteRoundTrips(t *testing.T) {
 		t.Fatalf("a plain delete must not carry _exp: %s", plain)
 	}
 }
+
+func TestTruncateMarker(t *testing.T) {
+	rec := wal.Record{Tx: 41, TS: time.Unix(0, 0).UTC(), Ops: []wal.Op{{Kind: wal.Trunc}}}
+
+	line, err := wal.Encode(nil, rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := wal.Decode(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.Tx != 41 || !got.IsTruncate() {
+		t.Fatalf("got %+v", got)
+	}
+
+	if (wal.Record{Ops: []wal.Op{{Kind: wal.Del, ID: "a"}}}).IsTruncate() {
+		t.Fatal("a del is not a truncate marker")
+	}
+}

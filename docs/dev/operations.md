@@ -113,6 +113,27 @@ If an `fsync` fails, the daemon exits on purpose, and recovery gives the right s
 - **Freeing disk after expiry:** deleting an expired document does not shrink the files. Compaction removes it from the segments, and only `wal_retention` removes it from the WAL, so a TTL collection should set `wal_retention` (for example `1d`). See [configuration.md](configuration.md#freeing-disk).
 - Disk use: watch the size of `data_dir`, and `ndb_segments`.
 
+### Truncate and drop
+
+Collections split by time (`calls_2026_11`, `logs_2026_w45`) are emptied or removed whole when their period ends. A `delete` cannot do that: an empty filter is `empty_filter`, and it writes one tombstone for each document.
+
+| | Truncate | Drop |
+|---|---|---|
+| Documents | removed | removed |
+| Definition and indexes | kept | removed |
+| Watch consumers | kept; each gets one `truncate` event | removed |
+| HTTP | `POST /v1/c/{coll}/truncate?confirm={coll}` | `DELETE /v1/c/{coll}?confirm={coll}` |
+| CLI | `ndb truncate <coll>` | `ndb drop <coll>` |
+| Go, Ruby, Rails, TS | `Truncate(ctx)`, `truncate(coll)`, `Model.truncate!`, `truncate()` | `Drop(ctx)`, `drop(coll)`, `Model.drop!`, `drop()` |
+
+- **Cost:** both take a few ms for 10 or 10 million documents. ndb swaps the collection dir: the old dir goes to `<data_dir>/trash/`, and a background job deletes it. The disk space returns when that job ends.
+- **Other calls:** calls on the collection that are running finish first. New calls wait for the swap (a few ms); they do not fail. A backup or a blob GC that is running finishes before the swap, so it sees the collection before or after it, never half.
+- **Watch:** a truncate writes one marker in the new WAL, with the next tx. A consumer gets one `truncate` event and then the new changes, however far behind it was. Open streams end; the consumer reconnects from its last ack.
+- **Crash:** a crash during a truncate leaves the collection as it was before or after it. The next start finishes or removes `<name>~new`, and empties `trash/`.
+- **`ndb.yml`:** a collection declared there comes back, empty, at the next start after a drop. Remove it from `ndb.yml` too.
+- **Direct mode:** both are refused (`409 direct_collection`). The files belong to the app.
+- **Downgrade:** a WAL with a truncate marker cannot be read by ndb 0.3.2 or older.
+
 ### Quarantine (direct mode)
 
 In direct mode, a line that is not a JSON object, has a bad id, or is over `max_line_size` is not applied. ndb writes it to `<data_dir>/collections/<name>/quarantine/<name>.ndjson` and goes on. It never stops on a bad line.

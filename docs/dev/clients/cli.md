@@ -15,6 +15,8 @@ The `ndb` binary is the daemon and the CLI. `ndb` with only flags still runs the
 | `ndb size` | Disk usage per collection and per part. |
 | `ndb collections [name]` | The catalog, or the definition of one collection. |
 | `ndb compact <collection>` | Seal and merge the segments now. |
+| `ndb truncate <collection>` | Remove every document; keep the definition and indexes. Asks you to type the name, or `-yes`. |
+| `ndb drop <collection>` | Remove the collection, its definition and its watch consumers. Asks you to type the name, or `-yes`. |
 | `ndb quarantine <collection>` | The bad lines of a direct collection. |
 | `ndb query <collection> ['<where>']` | Find rows (`-aggregate` for a pipeline). |
 | `ndb get <collection> <_id>` | One document by `_id`. |
@@ -127,6 +129,21 @@ Offline (`-data-dir`, or no daemon) the table shows `-` for rows, mode, quaranti
 │ calls │ direct │ call_id │ -    │ status  │ -   │ -         │ /tmp/ndbd/logs/*.ndjson │
 │ posts │ engine │ post_id │ -    │ author  │ -   │ -         │ -                       │
 └───────┴────────┴─────────┴──────┴─────────┴─────┴───────────┴─────────────────────────┘
+```
+
+## truncate and drop
+
+`ndb truncate <collection> [-yes] [-json]` calls `POST /v1/c/{coll}/truncate`, and `ndb drop <collection> [-yes] [-json]` calls `DELETE /v1/c/{coll}`. See [Truncate and drop](../operations.md#truncate-and-drop).
+
+Without `-yes`, the command asks you to type the collection name. When stdin is not a terminal (a script, CI), it stops and asks for `-yes`.
+
+```
+$ ndb truncate calls_2026_10
+This will truncate "calls_2026_10". Type the collection name to confirm: calls_2026_10
+calls_2026_10: truncated
+
+$ ndb drop calls_2026_09 -yes
+calls_2026_09: dropped
 ```
 
 ## compact

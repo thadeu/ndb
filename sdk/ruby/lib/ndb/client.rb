@@ -145,6 +145,20 @@ module Ndb
       json(post(coll, "ack", consumer: consumer, pos: pos))
     end
 
+    # Removes every document of the collection and keeps its definition and
+    # indexes. The cost does not depend on the number of documents. Watch
+    # consumers get one event with op "truncate". {"collection", "truncated"}
+    def truncate(coll)
+      json(request("POST", "#{path(coll)}/truncate?confirm=#{confirm(coll)}", nil))
+    end
+
+    # Removes the collection: its documents, its definition and the positions
+    # of its watch consumers. A collection declared in ndb.yml comes back,
+    # empty, when the daemon restarts. {"collection", "dropped"}
+    def drop(coll)
+      json(request("DELETE", "#{path(coll)}?confirm=#{confirm(coll)}", nil))
+    end
+
     def ensure_collection(coll, definition = {})
       json(request("PUT", path(coll), definition))
     end
@@ -199,6 +213,10 @@ module Ndb
 
     def path(coll)
       "/v1/c/#{URI.encode_www_form_component(coll).gsub('+', '%20')}"
+    end
+
+    def confirm(coll)
+      URI.encode_www_form_component(coll)
     end
 
     def id_path(coll, id)

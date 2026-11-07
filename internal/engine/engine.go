@@ -59,6 +59,15 @@ type DB struct {
 	// mu guards cols. Opening a collection (recovery) runs under it.
 	mu   sync.RWMutex
 	cols map[string]*Collection
+
+	// swap is held for writing by Truncate and Drop, and for reading by the
+	// work that reads the files of many collections (backup, blob GC), so
+	// that work sees a collection before or after the swap, never half.
+	swap sync.RWMutex
+
+	// trashWait waits for the background delete of truncated and dropped
+	// collection dirs.
+	trashWait sync.WaitGroup
 }
 
 // Open takes the lock on cfg.DataDir, opens the catalog, declares the
@@ -112,6 +121,14 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		cols:       map[string]*Collection{},
 	}
 
+	if err := db.finishSwaps(); err != nil {
+		db.Close()
+
+		return nil, err
+	}
+
+	db.emptyTrash()
+
 	if err := cfg.Apply(cat); err != nil {
 		db.Close()
 
@@ -134,6 +151,7 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 func (db *DB) Close() error {
 	db.cancel()
 	db.gcWait.Wait()
+	db.trashWait.Wait()
 
 	db.mu.Lock()
 	defer db.mu.Unlock()

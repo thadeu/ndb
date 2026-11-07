@@ -45,6 +45,10 @@ type engineFeed struct {
 
 	// last is the last tx that Applied published; guarded by the hub lock.
 	last uint64
+
+	// trunc is the tx of the truncate marker that starts the WAL (0 when
+	// there is none). Set at open, before any stream.
+	trunc uint64
 }
 
 type enginePos struct {
@@ -89,6 +93,15 @@ func (f *engineFeed) publish(rec wal.Record) {
 	f.hub.Publish(rec, func() { f.last = rec.Tx })
 }
 
+// LastTx is the last tx that the collection committed and published.
+func (c *Collection) LastTx() uint64 {
+	var last uint64
+
+	c.feed.hub.Subscribe(1, func() { last = c.feed.last }).Close()
+
+	return last
+}
+
 // Feed is the change feed of the collection.
 func (c *Collection) Feed() feed.Source {
 	return c.feed
@@ -127,6 +140,12 @@ func (f *engineFeed) Open(start string) (feed.Stream, error) {
 	from, err := parseEnginePos(start)
 	if err != nil {
 		return nil, err
+	}
+
+	// Every change before a truncate is gone, so a consumer from before it
+	// starts at the marker: one truncate event, then the new changes.
+	if f.trunc > 0 && from.tx < f.trunc {
+		from = enginePos{tx: f.trunc - 1, n: nowOps}
 	}
 
 	unpin, err := f.pinHistory(from)

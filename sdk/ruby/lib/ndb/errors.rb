@@ -52,6 +52,9 @@ module Ndb
   # consumer cannot resume from its position and must start over.
   class HistoryTruncated < Error; end
 
+  # truncate or drop without the collection name as confirm.
+  class ConfirmRequired < Error; end
+
   # The daemon error code -> the Ruby class.
   CODE_TO_ERROR = {
     "unauthorized" => Unauthorized,
@@ -77,7 +80,8 @@ module Ndb
     "conflicting_update" => ConflictingUpdate,
     "invalid_field" => InvalidField,
     "unindexed_many" => UnindexedMany,
-    "empty_filter" => EmptyFilter
+    "empty_filter" => EmptyFilter,
+    "confirm_required" => ConfirmRequired
   }.freeze
 
   def self.error_for(code, message, status)

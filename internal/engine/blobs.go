@@ -60,6 +60,9 @@ func (db *DB) compacted(iter.Seq[[]byte]) {
 
 // liveBlobs reads every live document and collects its blob hashes.
 func (db *DB) liveBlobs(ctx context.Context) (iter.Seq[string], error) {
+	db.swap.RLock()
+	defer db.swap.RUnlock()
+
 	db.mu.RLock()
 
 	cols := make([]*Collection, 0, len(db.cols))

@@ -5,7 +5,9 @@
 //     of the log: an unacked commit. The file is truncated there.
 //   - a bad line in an older, sealed segment is real corruption: stop with
 //     ErrCorruptSealed. Never drop sealed data in silence.
-//   - tx numbers must grow by one; a gap is corruption.
+//   - tx numbers must grow by one; a gap is corruption. A truncate marker
+//     may jump: it is the first record of a truncated collection, and its
+//     tx follows the last tx before the truncate.
 package recovery
 
 import (
@@ -112,7 +114,7 @@ func replaySegment(cfg Config, seg segFile, start int64, last bool, res *Result,
 			return truncate(cfg, seg, off, res)
 		}
 
-		if rec.Tx != res.LastTx+1 {
+		if rec.Tx != res.LastTx+1 && !(rec.IsTruncate() && rec.Tx > res.LastTx) {
 			return fmt.Errorf("%w: %s offset %d: tx %d after %d", ErrTxGap, seg.path, off, rec.Tx, res.LastTx)
 		}
 

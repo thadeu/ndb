@@ -35,6 +35,9 @@ import (
 // restored daemon rebuilds them. Direct-mode collections keep their data in
 // the apps' own files; only their definition is saved.
 func (db *DB) Backup(ctx context.Context, w io.Writer, opts backup.Options) error {
+	db.swap.RLock()
+	defer db.swap.RUnlock()
+
 	defs := db.cat.List()
 
 	entries, err := db.cursors.All()

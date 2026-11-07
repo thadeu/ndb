@@ -29,6 +29,7 @@ export type ErrorCode =
   | 'invalid_field'
   | 'unindexed_many'
   | 'empty_filter'
+  | 'confirm_required'
   | 'invalid_update'
   | 'http_status'
   | (string & {})

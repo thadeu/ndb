@@ -226,6 +226,12 @@ func Open(cfg Config) (*Collection, error) {
 	}
 
 	res, err := recovery.Replay(recovery.Config{FS: cfg.FS, Dir: cfg.Dir, MaxLine: maxLine, From: from}, func(rec wal.Record) {
+		if rec.IsTruncate() {
+			c.feed.trunc = rec.Tx
+
+			return
+		}
+
 		for _, op := range rec.Ops {
 			c.head.apply(op)
 			c.applyDurable(op, rec.Tx)
@@ -288,6 +294,10 @@ func Open(cfg Config) (*Collection, error) {
 }
 
 func (c *Collection) Close() error {
+	if c.feed != nil {
+		defer c.feed.hub.CloseAll()
+	}
+
 	c.stopSweeper()
 	c.rd.close()
 	c.stopSealer()

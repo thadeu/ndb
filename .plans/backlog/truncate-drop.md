@@ -1,6 +1,8 @@
 # Truncate and drop (backlog)
 
-> Decision (2026-11-06): important, after the `_id` work (0.1.3). Not started.
+> Decision (2026-11-06): important, after the `_id` work (0.1.3).
+> Done (2026-11-07): built as a swap of the collection dir, see
+> `internal/engine/truncate.go` and docs/dev/operations.md#truncate-and-drop.
 
 ## Why
 

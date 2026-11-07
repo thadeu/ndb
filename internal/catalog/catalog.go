@@ -219,6 +219,23 @@ func (c *Catalog) DropIndex(name, field string) (Def, error) {
 	return d, c.save(d)
 }
 
+// Delete removes the definition of name. An unknown name is not an error.
+func (c *Catalog) Delete(name string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	err := c.db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucket).Delete([]byte(name))
+	})
+	if err != nil {
+		return err
+	}
+
+	delete(c.defs, name)
+
+	return nil
+}
+
 // Put stores a definition exactly as given, with no merge and no default.
 // A restore uses it to rebuild the catalog from a backup.
 func (c *Catalog) Put(d Def) error {

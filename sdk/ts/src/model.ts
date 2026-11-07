@@ -103,6 +103,26 @@ export class Model<F extends Fields> {
     return this.db.transport.request<DeleteResult>('POST', this.path('delete') + writeQuery({ many: opts.many }), toWhere(filter))
   }
 
+  // Removes every document of the collection and keeps its definition and
+  // indexes. The cost does not depend on the number of documents. Watch
+  // consumers get one event with op "truncate".
+  async truncate(): Promise<void> {
+    await this.ready()
+    await this.db.transport.request('POST', this.path('truncate') + this.confirm())
+  }
+
+  // Removes the collection: its documents, its definition and the positions
+  // of its watch consumers. The next call on the model declares it again.
+  async drop(): Promise<void> {
+    await this.db.transport.request('DELETE', this.path() + this.confirm())
+
+    this.ensured = undefined
+  }
+
+  private confirm(): string {
+    return `?confirm=${encodeURIComponent(this.name)}`
+  }
+
   // Makes a document expire, like EXPIRE in Redis: seconds or "30m". It throws
   // NotFoundError for a missing or expired document, and TtlError when the
   // schema has no expires field.

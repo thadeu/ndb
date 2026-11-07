@@ -517,3 +517,39 @@ func TestHealthCommand(t *testing.T) {
 		t.Fatal("health on a missing socket must fail")
 	}
 }
+
+func TestTruncateAndDropCommands(t *testing.T) {
+	dir := seedMixed(t, t.TempDir())
+	sock, _ := startDaemon(t, dir)
+
+	base := []string{"-config", "none.yml", "-url", "unix://" + sock}
+
+	var out strings.Builder
+
+	err := swapCommand("truncate", append([]string{"posts"}, base...), strings.NewReader("posts\n"), &out)
+	if err == nil || !strings.Contains(err.Error(), "-yes") {
+		t.Fatalf("no terminal, no -yes: err = %v", err)
+	}
+
+	got := runCmd(t, func(a []string, o *strings.Builder) error { return swapCommand("truncate", a, nil, o) }, append([]string{"posts", "-yes"}, base...)...)
+
+	if got != "posts: truncated\n" {
+		t.Fatalf("truncate output = %q", got)
+	}
+
+	err = swapCommand("truncate", append([]string{"calls", "-yes"}, base...), nil, &out)
+	if err == nil || !strings.Contains(err.Error(), "direct_collection") {
+		t.Fatalf("direct truncate: err = %v", err)
+	}
+
+	got = runCmd(t, func(a []string, o *strings.Builder) error { return swapCommand("drop", a, nil, o) }, append([]string{"posts", "-yes", "-json"}, base...)...)
+
+	if !strings.Contains(got, `"dropped": true`) && !strings.Contains(got, `"dropped":true`) {
+		t.Fatalf("drop output = %q", got)
+	}
+
+	err = swapCommand("drop", append([]string{"posts", "-yes"}, base...), nil, &out)
+	if err == nil || !strings.Contains(err.Error(), "unknown_collection") {
+		t.Fatalf("drop again: err = %v", err)
+	}
+}

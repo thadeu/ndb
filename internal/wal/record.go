@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/crc32"
+	"slices"
 	"strconv"
 	"time"
 	"unicode/utf8"
@@ -20,7 +21,17 @@ type OpKind string
 const (
 	Put OpKind = "put"
 	Del OpKind = "del"
+
+	// Trunc is the truncate marker: the first record of a collection that
+	// was truncated. Its tx follows the last tx before the truncate, so
+	// watch positions go on; it has no id and no document.
+	Trunc OpKind = "truncate"
 )
+
+// IsTruncate tells if rec is a truncate marker.
+func (rec Record) IsTruncate() bool {
+	return len(rec.Ops) == 1 && rec.Ops[0].Kind == Trunc
+}
 
 // Op is one document change inside a transaction.
 type Op struct {
@@ -109,6 +120,12 @@ func appendOps(dst []byte, ops []Op) ([]byte, error) {
 }
 
 func appendOpFields(dst []byte, op Op) ([]byte, error) {
+	if op.Kind == Trunc {
+		dst = append(dst, `"_op":"truncate","_id":"","_v":0`...)
+
+		return dst, nil
+	}
+
 	if op.ID == "" || !utf8.ValidString(op.ID) {
 		return dst, errors.New("wal: op needs a valid UTF-8 id")
 	}
@@ -209,11 +226,15 @@ func Decode(line []byte) (Record, error) {
 	}
 
 	for _, o := range w.Ops {
-		if o.ID == nil || (o.Op != Put && o.Op != Del) {
+		if o.ID == nil || (o.Op != Put && o.Op != Del && o.Op != Trunc) {
 			return Record{}, ErrCorrupt
 		}
 
 		rec.Ops = append(rec.Ops, Op{Kind: o.Op, ID: *o.ID, V: o.V, Doc: o.Doc, Exp: o.Exp})
+	}
+
+	if len(rec.Ops) > 1 && slices.ContainsFunc(rec.Ops, func(op Op) bool { return op.Kind == Trunc }) {
+		return Record{}, ErrCorrupt
 	}
 
 	return rec, nil

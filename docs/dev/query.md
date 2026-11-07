@@ -356,7 +356,7 @@ The WAL line of each changed document is the resulting document with the next ve
 
 ## Delete by filter
 
-`POST /v1/c/{coll}/delete` takes a filter as the body and answers `{"deleted":N}`. Nothing matched is `{"deleted":0}`. `many=true` follows the same index and size rules as update. A write operator in a delete body is `unknown_operator`.
+`POST /v1/c/{coll}/delete` takes a filter as the body and answers `{"deleted":N}`. Nothing matched is `{"deleted":0}`. `many=true` follows the same index and size rules as update. A write operator in a delete body is `unknown_operator`. To remove every document of a collection, use [truncate](operations.md#truncate-and-drop): an empty filter is `empty_filter`.
 
 When the index alone answers the filter (one indexed field, with `$eq`, `$in` or a range, and no `null`), ndb deletes the matches without reading them. This is the fast path for sealed data. Example: on 1M documents, a delete of 868k sealed documents by an indexed `status` takes about 3 s. A filter that also has a field with no index still works, but ndb reads each candidate to test it.
 

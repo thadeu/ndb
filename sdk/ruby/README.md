@@ -103,6 +103,16 @@ ndb.delete("calls", { status: "failed" }, many: true)
 - The contract errors are `Ndb::UnknownOperator`, `NoUpdate`, `ConflictingUpdate`, `InvalidField`, `UnindexedMany` and `EmptyFilter`, all under `Ndb::InvalidUpdate`.
 - A duplicate `_id` raises `Ndb::UniqueViolation` (code `duplicate_id`). A broken unique field raises it too (code `unique_violation`).
 
+### Truncate and drop
+
+```ruby
+ndb.truncate("calls")   # every document goes; the definition and indexes stay => {"collection" => "calls", "truncated" => true}
+ndb.drop("calls")       # the collection, its definition and its watch consumers go
+```
+
+- Both take the same time for 10 or 10 million documents. Watch consumers get one event with `"op" => "truncate"` (no `_id`), then the new changes.
+- A direct-mode collection raises `Ndb::ReadOnlyCollection`. A collection declared in `ndb.yml` comes back, empty, when the daemon restarts after a drop.
+
 ## Expiry (TTL like Redis)
 
 The collection needs `expires_field`.
@@ -233,7 +243,7 @@ A watch streams the changes of a collection to a named consumer: first the event
 ```ruby
 begin
   ndb.watch("calls", "relay", where: { status: "failed" }) do |event|
-    # event has "pos", "op" ("put" or "del"), "_id", "v" and "doc"
+    # event has "pos", "op" ("put", "del" or "truncate"), "_id", "v" and "doc"
     handle(event)
 
     ndb.ack("calls", "relay", event["pos"])

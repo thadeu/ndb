@@ -114,6 +114,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/c/{coll}", s.ready(s.getCollection))
 	mux.HandleFunc("GET /v1/c/{coll}/stats", s.ready(s.stats))
 	mux.HandleFunc("POST /v1/c/{coll}/compact", s.ready(s.compact))
+	mux.HandleFunc("POST /v1/c/{coll}/truncate", s.ready(s.truncate))
+	mux.HandleFunc("DELETE /v1/c/{coll}", s.ready(s.drop))
 	mux.HandleFunc("GET /v1/c/{coll}/quarantine", s.ready(s.quarantine))
 	mux.HandleFunc("GET /v1/stats", s.ready(s.globalStats))
 	mux.HandleFunc("GET /v1/size", s.ready(s.size))

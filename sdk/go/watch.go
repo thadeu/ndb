@@ -14,9 +14,14 @@ type Op string
 const (
 	OpPut Op = "put"
 	OpDel Op = "del"
+
+	// OpTruncate: the collection was truncated; every document before this
+	// event is gone. ID is empty.
+	OpTruncate Op = "truncate"
 )
 
-// Event is one change of a collection. Doc is the zero value for OpDel.
+// Event is one change of a collection. Doc is the zero value for OpDel and
+// OpTruncate.
 // Pos is the position token that Ack sends back.
 type Event[T any] struct {
 	Consumer string

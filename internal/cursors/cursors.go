@@ -110,6 +110,24 @@ func (s *Store) List(coll string) ([]string, error) {
 	return out, err
 }
 
+// DeleteCollection removes the stored position of every consumer of the
+// collection.
+func (s *Store) DeleteCollection(coll string) error {
+	prefix := []byte(coll + "\x00")
+
+	return s.db.Update(func(tx *bolt.Tx) error {
+		c := tx.Bucket(bucket).Cursor()
+
+		for k, _ := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, _ = c.Seek(prefix) {
+			if err := c.Delete(); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+}
+
 // Entry is one stored position.
 type Entry struct {
 	Collection string

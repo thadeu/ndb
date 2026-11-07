@@ -68,6 +68,27 @@ module Ndb
         where(primary_key => ids).delete_all
       end
 
+      # Removes every document of the collection, with no callbacks, and
+      # keeps its definition and indexes. The cost does not depend on the
+      # number of documents. Watch consumers get one "truncate" event.
+      def truncate!
+        ensure_collection!
+
+        Rails.client.truncate(collection_name)
+
+        true
+      end
+
+      # Removes the collection: documents, definition and watch consumers.
+      # The next use of the model declares it again, empty.
+      def drop!
+        Rails.client.drop(collection_name)
+
+        @ensured_client = nil
+
+        true
+      end
+
       def collection_name
         @collection_name || model_name.plural
       end

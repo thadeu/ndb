@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Truncate and drop of a collection, for collections split by time. `POST /v1/c/{coll}/truncate?confirm={coll}` removes every document and keeps the definition and indexes; `DELETE /v1/c/{coll}?confirm={coll}` also removes the definition and the watch consumers. Both take a few ms for any size: ndb swaps the collection dir and deletes the old one in the background. Calls in flight finish first and new calls wait; backup and blob GC never see half a swap. A crash during a truncate is finished or rolled back at the next start. See [Truncate and drop](docs/dev/operations.md#truncate-and-drop).
+- Watch: a `truncate` event (no `_id`). Each consumer gets it one time after a truncate, then the new changes. Open streams of the collection end at a truncate or drop.
+- CLI: `ndb truncate <coll>` and `ndb drop <coll>` ask you to type the name, or take `-yes`.
+- SDKs: Go `Truncate`/`Drop` and `OpTruncate`, Ruby `truncate`/`drop` and `Ndb::ConfirmRequired`, Rails `Model.truncate!`/`Model.drop!`, TypeScript `truncate()`/`drop()` and the `'truncate'` op.
+- Error code `confirm_required` (400).
+
+### Changed
+
+- A WAL that holds a truncate marker cannot be read by ndb 0.3.2 or older.
+
 ## [0.3.2] - 2026-11-07
 
 ### Fixed

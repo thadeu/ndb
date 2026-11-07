@@ -3,7 +3,9 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/thadeu/ndb/internal/agg"
@@ -52,6 +54,30 @@ type Collection struct {
 
 	// wm holds the WAL writer metrics (engine mode only).
 	wm *metrics.Writer
+
+	// live guards eng, rd and wm against a truncate or a drop. Every call
+	// holds it for reading; Truncate and Drop hold it for writing, so they
+	// wait for the calls in flight, and new calls wait for the swap.
+	live    sync.RWMutex
+	dropped bool
+}
+
+// enter starts a call on the collection; leave ends it. A collection that
+// was dropped while the caller held it is unknown.
+func (c *Collection) enter() error {
+	c.live.RLock()
+
+	if c.dropped {
+		c.live.RUnlock()
+
+		return fmt.Errorf("%w: %s", catalog.ErrUnknown, c.name)
+	}
+
+	return nil
+}
+
+func (c *Collection) leave() {
+	c.live.RUnlock()
 }
 
 // Stats is the state of one collection.
@@ -72,6 +98,12 @@ type Stats struct {
 }
 
 func (c *Collection) Find(ctx context.Context, body []byte) (collection.Page, error) {
+	if err := c.enter(); err != nil {
+		return collection.Page{}, err
+	}
+
+	defer c.leave()
+
 	q, err := c.rd.ParseQuery(body)
 	if err != nil {
 		return collection.Page{}, err
@@ -82,6 +114,12 @@ func (c *Collection) Find(ctx context.Context, body []byte) (collection.Page, er
 
 // Aggregate runs the pipeline of an aggregate body (plan §10.2).
 func (c *Collection) Aggregate(ctx context.Context, body []byte) (collection.Page, error) {
+	if err := c.enter(); err != nil {
+		return collection.Page{}, err
+	}
+
+	defer c.leave()
+
 	p, err := c.rd.ParseAggregate(body)
 	if err != nil {
 		return collection.Page{}, err
@@ -91,6 +129,12 @@ func (c *Collection) Aggregate(ctx context.Context, body []byte) (collection.Pag
 }
 
 func (c *Collection) Insert(ctx context.Context, docs ...[]byte) ([]collection.Result, error) {
+	if err := c.enter(); err != nil {
+		return nil, err
+	}
+
+	defer c.leave()
+
 	if c.eng == nil {
 		return nil, ErrDirect
 	}
@@ -100,6 +144,12 @@ func (c *Collection) Insert(ctx context.Context, docs ...[]byte) ([]collection.R
 
 // Update is the atomic update by filter, see collection.Update.
 func (c *Collection) Update(ctx context.Context, body []byte, opts collection.UpdateOpts) (collection.UpdateResult, error) {
+	if err := c.enter(); err != nil {
+		return collection.UpdateResult{}, err
+	}
+
+	defer c.leave()
+
 	if c.eng == nil {
 		return collection.UpdateResult{}, ErrDirect
 	}
@@ -110,6 +160,12 @@ func (c *Collection) Update(ctx context.Context, body []byte, opts collection.Up
 // UpdateID is the atomic update of one document by _id, see
 // collection.UpdateID.
 func (c *Collection) UpdateID(ctx context.Context, id string, body []byte, opts collection.UpdateOpts) (collection.UpdateResult, error) {
+	if err := c.enter(); err != nil {
+		return collection.UpdateResult{}, err
+	}
+
+	defer c.leave()
+
 	if c.eng == nil {
 		return collection.UpdateResult{}, ErrDirect
 	}
@@ -119,6 +175,12 @@ func (c *Collection) UpdateID(ctx context.Context, id string, body []byte, opts 
 
 // DeleteID removes one document by _id and returns how many (0 or 1).
 func (c *Collection) DeleteID(ctx context.Context, id string) (int, error) {
+	if err := c.enter(); err != nil {
+		return 0, err
+	}
+
+	defer c.leave()
+
 	if c.eng == nil {
 		return 0, ErrDirect
 	}
@@ -128,6 +190,12 @@ func (c *Collection) DeleteID(ctx context.Context, id string) (int, error) {
 
 // Get returns one document by _id with its "_v", in both write modes.
 func (c *Collection) Get(id string) (collection.Doc, bool) {
+	if c.enter() != nil {
+		return collection.Doc{}, false
+	}
+
+	defer c.leave()
+
 	if c.eng == nil {
 		return c.mem.Get(id)
 	}
@@ -137,6 +205,12 @@ func (c *Collection) Get(id string) (collection.Doc, bool) {
 
 // InsertIn is Insert with every document expiring in d from now.
 func (c *Collection) InsertIn(ctx context.Context, d time.Duration, docs ...[]byte) ([]collection.Result, error) {
+	if err := c.enter(); err != nil {
+		return nil, err
+	}
+
+	defer c.leave()
+
 	if c.eng == nil {
 		return nil, ErrDirect
 	}
@@ -146,6 +220,12 @@ func (c *Collection) InsertIn(ctx context.Context, d time.Duration, docs ...[]by
 
 // Expire sets the expiry of a document (EXPIRE).
 func (c *Collection) Expire(ctx context.Context, id string, e collection.Expiry) (uint64, time.Time, error) {
+	if err := c.enter(); err != nil {
+		return 0, time.Time{}, err
+	}
+
+	defer c.leave()
+
 	if c.eng == nil {
 		return 0, time.Time{}, ErrDirect
 	}
@@ -155,6 +235,12 @@ func (c *Collection) Expire(ctx context.Context, id string, e collection.Expiry)
 
 // Persist removes the expiry of a document (PERSIST).
 func (c *Collection) Persist(ctx context.Context, id string) (uint64, error) {
+	if err := c.enter(); err != nil {
+		return 0, err
+	}
+
+	defer c.leave()
+
 	if c.eng == nil {
 		return 0, ErrDirect
 	}
@@ -164,6 +250,12 @@ func (c *Collection) Persist(ctx context.Context, id string) (uint64, error) {
 
 // TTL is the remaining life of a document. Direct mode is ErrNotSupported.
 func (c *Collection) TTL(id string) (collection.TTLInfo, error) {
+	if err := c.enter(); err != nil {
+		return collection.TTLInfo{}, err
+	}
+
+	defer c.leave()
+
 	if c.eng == nil {
 		return collection.TTLInfo{}, ErrNotSupported
 	}
@@ -173,6 +265,12 @@ func (c *Collection) TTL(id string) (collection.TTLInfo, error) {
 
 // Delete removes the documents that the filter matches, and returns how many.
 func (c *Collection) Delete(ctx context.Context, body []byte, many bool) (int, error) {
+	if err := c.enter(); err != nil {
+		return 0, err
+	}
+
+	defer c.leave()
+
 	if c.eng == nil {
 		return 0, ErrDirect
 	}
@@ -183,6 +281,12 @@ func (c *Collection) Delete(ctx context.Context, body []byte, many bool) (int, e
 // Seal writes the memtable of an engine-mode collection to a segment now.
 // The background sealer does this by size and age; direct mode does nothing.
 func (c *Collection) Seal() error {
+	if err := c.enter(); err != nil {
+		return err
+	}
+
+	defer c.leave()
+
 	if c.eng == nil {
 		return nil
 	}
@@ -194,6 +298,12 @@ func (c *Collection) Seal() error {
 // the stored watch cursors allow, and returns how many. The background
 // sealer does this every tick; direct mode has no WAL.
 func (c *Collection) TruncateWAL() (int, error) {
+	if err := c.enter(); err != nil {
+		return 0, err
+	}
+
+	defer c.leave()
+
 	if c.eng == nil {
 		return 0, nil
 	}
@@ -222,6 +332,12 @@ type CompactResult struct {
 // Compact seals the memtable, then merges every segment into one, now. The
 // background sealer does this by size and age. Direct mode is ErrNotSupported.
 func (c *Collection) Compact() (CompactResult, error) {
+	if err := c.enter(); err != nil {
+		return CompactResult{}, err
+	}
+
+	defer c.leave()
+
 	if c.eng == nil {
 		return CompactResult{}, ErrNotSupported
 	}
@@ -251,6 +367,12 @@ func (c *Collection) segmentSize() CompactSize {
 // could not apply, oldest first, and how many distinct lines it holds. An
 // engine-mode collection has none.
 func (c *Collection) Quarantine(limit int) ([]tailer.QuarantineRow, int, error) {
+	if err := c.enter(); err != nil {
+		return nil, 0, err
+	}
+
+	defer c.leave()
+
 	if c.tail == nil {
 		return nil, 0, nil
 	}
@@ -259,6 +381,9 @@ func (c *Collection) Quarantine(limit int) ([]tailer.QuarantineRow, int, error) 
 }
 
 func (c *Collection) Stats() Stats {
+	c.live.RLock()
+	defer c.live.RUnlock()
+
 	s := Stats{Name: c.name, Write: c.write, Rows: c.rd.Len(), Indexes: c.rd.Indexes()}
 
 	if c.tail != nil {

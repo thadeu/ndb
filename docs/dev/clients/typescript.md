@@ -107,6 +107,16 @@ await calls.delete({ status: 'failed' }, { many: true })
 
 An insert with a duplicate `_id` throws `DuplicateIdError`. A duplicate `unique` value throws `UniqueViolationError`. An empty or non-string `_id` fails with code `invalid_id`.
 
+### Truncate and drop
+
+```ts
+await calls.truncate() // every document goes; the definition and indexes stay
+await calls.drop()     // the collection, its definition and its watch consumers go
+```
+
+- Both take the same time for 10 or 10 million documents. Watch consumers get one event with `op: 'truncate'` (`_id` is `''`), then the new changes.
+- After `drop()`, the next call on the model declares the collection again. A collection declared in `ndb.yml` comes back, empty, when the daemon restarts.
+
 ### Expiry (TTL like Redis)
 
 ```ts
@@ -232,7 +242,7 @@ const controller = new AbortController()
 
 try {
   for await (const ev of calls.watch('relay', { where: { status: 'answered' }, signal: controller.signal })) {
-    // ev: { consumer, pos, op: 'put' | 'del', _id, v, doc }
+    // ev: { consumer, pos, op: 'put' | 'del' | 'truncate', _id, v, doc }
     await handle(ev)
 
     await calls.ack(ev)

@@ -39,6 +39,12 @@ func (db *DB) WatchWhere(name, consumer, from string, where []byte) (feed.Stream
 		return nil, err
 	}
 
+	if err := col.enter(); err != nil {
+		return nil, err
+	}
+
+	defer col.leave()
+
 	var filter *query.Query
 
 	if len(bytes.TrimSpace(where)) > 0 {
@@ -90,6 +96,12 @@ func (db *DB) Ack(name, consumer, pos string) error {
 	if err != nil {
 		return err
 	}
+
+	if err := col.enter(); err != nil {
+		return err
+	}
+
+	defer col.leave()
 
 	src := col.source()
 

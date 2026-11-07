@@ -11,11 +11,12 @@ import (
 )
 
 // Event is one change. Pos is an opaque token: the consumer sends it back
-// in ack. Doc is absent for a del.
+// in ack. Doc is absent for a del. A truncate event (op "truncate") has no
+// id: every document before it is gone.
 type Event struct {
 	Pos string          `json:"pos"`
 	Op  string          `json:"op"`
-	ID  string          `json:"_id"`
+	ID  string          `json:"_id,omitempty"`
 	V   uint64          `json:"v,omitempty"`
 	Doc json.RawMessage `json:"doc,omitempty"`
 
@@ -127,6 +128,18 @@ func (h *Hub[T]) Publish(v T, before func()) {
 			delete(h.subs, s)
 			close(s.C)
 		}
+	}
+}
+
+// CloseAll ends every subscriber, as if each one called Close: a stream
+// reads io.EOF and the client reconnects from its last ack.
+func (h *Hub[T]) CloseAll() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	for s := range h.subs {
+		delete(h.subs, s)
+		close(s.C)
 	}
 }
 

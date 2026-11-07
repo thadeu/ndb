@@ -141,7 +141,8 @@ Call.where(status: "retry").destroy_all  # loads and destroys each record with i
 
 - Every load asks for the version (`_v`). `save`, `update` and `destroy` put the id and `_v` in the filter of the write. If another writer changed the document first, the filter matches nothing and you get `Ndb::StaleObjectError` (code `stale_object`).
 - `find_or_create_by` is atomic. It checks validations and runs the `save` and `create` callbacks, then sends one upsert: the attributes you pass are the filter, and the other attributes go in `$setOnInsert`, so a writer that created the document first is never overwritten and you get that document. An invalid record is returned unsaved (the `!` form raises `Ndb::RecordInvalid`). Only the attributes you pass must be equality values.
-- `delete_all` and `destroy_all` on a model without a `where` are refused by the daemon (`Ndb::EmptyFilter`); `delete_all` needs the id or an indexed field in the `where`.
+- `delete_all` and `destroy_all` on a model without a `where` are refused by the daemon (`Ndb::EmptyFilter`); `delete_all` needs the id or an indexed field in the `where`. To empty the whole collection, use `Call.truncate!`.
+- `Call.truncate!` removes every document, with no callbacks, and keeps the definition and indexes. `Call.drop!` removes the collection, its definition and its watch consumers; the next use of the model declares it again. Both take the same time for 10 or 10 million documents, and watch consumers get one `"truncate"` event.
 - Setting an attribute to `nil` and saving removes the field from the document.
 - A duplicate id raises `RecordNotUnique` (code `duplicate_id`).
 - `persisted?`, `new_record?`, `destroyed?`, `id` and `version` work as in ActiveRecord.
@@ -302,7 +303,7 @@ client = Ndb::Rails.client
 
 begin
   client.watch(Call.collection_name, "relay", where: { status: "answered" }) do |event|
-    # event has "pos", "op" ("put" or "del"), "_id", "v" and "doc"
+    # event has "pos", "op" ("put", "del" or "truncate"), "_id", "v" and "doc"
     handle(event)
 
     client.ack(Call.collection_name, "relay", event["pos"])

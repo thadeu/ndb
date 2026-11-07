@@ -249,6 +249,34 @@ func (c *Coll[T]) Delete(ctx context.Context, filter Filter, opts ...Option) (in
 	return out.Deleted, nil
 }
 
+// Truncate removes every document of the collection and keeps its
+// definition and indexes. The cost does not depend on the number of
+// documents. Watch consumers get one OpTruncate event. A direct-mode
+// collection is ErrDirectCollection.
+func (c *Coll[T]) Truncate(ctx context.Context) error {
+	return c.swap(ctx, http.MethodPost, collPath(c.name)+"/truncate")
+}
+
+// Drop removes the collection: its documents, its definition and the
+// positions of its watch consumers. A collection declared in ndb.yml comes
+// back, empty, when the daemon restarts.
+func (c *Coll[T]) Drop(ctx context.Context) error {
+	return c.swap(ctx, http.MethodDelete, collPath(c.name))
+}
+
+// swap sends truncate or drop, with the collection name as the confirm
+// value that the daemon asks for.
+func (c *Coll[T]) swap(ctx context.Context, method, path string) error {
+	resp, err := c.db.do(ctx, method, path+"?confirm="+url.QueryEscape(c.name), nil)
+	if err != nil {
+		return err
+	}
+
+	discard(resp)
+
+	return nil
+}
+
 // updateBody merges the filter and the operators into the one body of the
 // update call. An operator key without "$" is a mistake that the daemon would
 // read as a filter key, so it is refused before anything is sent.

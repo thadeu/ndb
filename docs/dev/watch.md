@@ -87,11 +87,13 @@ In the SDKs: Go `ndb.FromNow()`, `ndb.Limit(n)`, `ndb.WatchWhere(...)`; Ruby `fr
 ```json
 {"pos":"e1.1","op":"put","_id":"c1","v":1,"doc":{"_id":"c1","status":"answered"}}
 {"pos":"e1.2","op":"del","_id":"c2","v":2}
+{"pos":"e3.1","op":"truncate"}
 {"heartbeat":true}
 {"error":{"code":"watch_lagged","message":"..."}}
 ```
 
-- `op` is `put` (an insert or an update) or `del`. A delete by the TTL sweeper has `"_expired": true`.
+- `op` is `put` (an insert or an update), `del`, or `truncate`. A delete by the TTL sweeper has `"_expired": true`.
+- `truncate` means the collection was [truncated](operations.md#truncate-and-drop): every document before this event is gone. It has no `_id`. Each consumer gets it one time, even one that was far behind, and then the new changes. A `where` filter never leaves it out.
 - `doc` of a `put` is the full new document. An [update with operators](query.md#update-by-filter) sends the resulting document, never the operators.
 - A delete has no document.
 - A heartbeat line comes after 15 s without events.
@@ -113,6 +115,7 @@ In the SDKs: Go `ndb.FromNow()`, `ndb.Limit(n)`, `ndb.WatchWhere(...)`; Ruby `fr
 - `watch_lagged` (an error line in the stream): the consumer was too slow. Reconnect. The stream resumes from the last ack.
 - `history_truncated` (HTTP 410): the WAL files that the watch must read were deleted by `wal_retention`. This happens with no saved position and `from: "beginning"`, or with a position before the oldest kept file. The stream never skips the gap in silence. Start from `now`, or rebuild from `find`. A saved position is safe: ndb keeps the file that holds it.
 - `invalid_position` (an error line): the saved position is not valid.
+- A truncate or a drop ends the open streams of the collection. Reconnect: after a truncate, the stream resumes from the last ack with the `truncate` event; after a drop, the collection is unknown (404).
 - The SDKs retry only the initial open of the stream, never in the middle. The Go stream ends when `ctx` is cancelled; the TypeScript stream ends with its `AbortSignal`.
 
 A full consumer is in the [outbox example](/examples/outbox).

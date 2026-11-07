@@ -19,6 +19,8 @@ var subcommands = map[string]func(args []string) error{
 
 	"collections": runCollections,
 	"compact":     runCompact,
+	"truncate":    runTruncate,
+	"drop":        runDrop,
 	"get":         runGet,
 	"health":      runHealth,
 	"update":      runUpdate,
@@ -114,6 +116,8 @@ Usage:
   ndb size                      disk usage per collection and per part
   ndb collections [name]        the catalog, or the definition of one collection
   ndb compact <collection>      seal and merge the segments now (engine mode)
+  ndb truncate <collection>     remove every document; keep the definition and indexes
+  ndb drop <collection>         remove the collection, its definition and watch consumers
   ndb health                    exit 0 when the daemon is ready (for container health checks)
   ndb get <coll> <_id>          one document by _id
   ndb update <coll> '<json>'    atomic update by filter: the JSON mixes the filter and the
@@ -135,7 +139,7 @@ Common flags:
   -config FILE      ndb.yml (default NDB_CONFIG, ./ndb.yml, then /etc/ndb/ndb.yml)
   -data-dir DIR     data dir (overrides ndb.yml)
 
-Talking to the daemon (backup, stats, size, collections, compact, health, get, update, delete, expire, persist, ttl, quarantine, query):
+Talking to the daemon (backup, stats, size, collections, compact, truncate, drop, health, get, update, delete, expire, persist, ttl, quarantine, query):
   -url unix:///sock|tcp://host:port   which daemon (default NDB_URL, then the
                                       unix socket of ndb.yml); NDB_TOKEN is the bearer token
   -json                               machine output (query: NDJSON rows)
@@ -148,6 +152,8 @@ Per command:
   quarantine  -limit N                last N bad lines (default 20, at most 1000)
   update      --many --upsert --expire-in DUR   (many needs the id or an indexed field)
   delete      --many
+  truncate    -yes                    do not ask to type the name (needed when stdin is not a terminal)
+  drop        -yes                    the same
   query       -sort JSON -fields a,b -limit N -aggregate JSON -ndjson
 
 Tables fit the terminal width (COLUMNS when there is no tty size), use ASCII

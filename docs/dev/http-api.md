@@ -25,6 +25,8 @@ Paths start with `/v1`. `/health` and `/metrics` have no version. Every data end
 | GET | `/v1/c/{coll}` | none | `{"definition","indexes"}` |
 | GET | `/v1/c/{coll}/stats` | none | rows, quarantined, index state, files and bytes |
 | POST | `/v1/c/{coll}/compact` | none | before and after segments and bytes |
+| POST | `/v1/c/{coll}/truncate?confirm={coll}` | none | `{"collection","truncated":true}` |
+| DELETE | `/v1/c/{coll}?confirm={coll}` | none | `{"collection","dropped":true}` |
 | GET | `/v1/c/{coll}/quarantine?limit=N` | none | the last N bad lines of a direct collection |
 | GET | `/v1/stats` | none | every collection, totals, version, uptime |
 | GET | `/v1/size` | none | disk usage per collection and per part |
@@ -70,7 +72,7 @@ curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/sessions/persist -d '{"_id"
 
 ## Stats, size and admin
 
-The CLI (`ndb stats`, `ndb size`, `ndb collections`, `ndb compact`, `ndb quarantine`) only calls these endpoints, so a web console can do the same. All of them follow the token rules above (TCP needs the bearer token).
+The CLI (`ndb stats`, `ndb size`, `ndb collections`, `ndb compact`, `ndb truncate`, `ndb drop`, `ndb quarantine`) only calls these endpoints, so a web console can do the same. All of them follow the token rules above (TCP needs the bearer token).
 
 `GET /v1/stats` has one element per collection, totals, and the files that belong to no collection:
 
@@ -96,6 +98,9 @@ The CLI (`ndb stats`, `ndb size`, `ndb collections`, `ndb compact`, `ndb quarant
 - `totals.bytes` includes `shared_bytes` (blobs, `cursors.bolt`, catalog and other files of the data dir).
 - `GET /v1/size` is the disk scan of `ndb size`: `{"data_dir","total","collections":[{"name","bytes":{"wal","segments","meta","blobs","cursors"},"total","wal_files","segment_files"}],"shared":{...}}`. It only stats files.
 - `POST /v1/c/{coll}/compact` seals the memtable, then merges every segment into one, and waits for the end: `{"collection","before":{"segments","bytes"},"after":{"segments","bytes"},"duration_ms"}`. A direct collection is `400 not_supported`. Compaction is also done by the sealer in the background; see [operations.md](operations.md#compaction-retention-and-ttl).
+- `POST /v1/c/{coll}/truncate?confirm={coll}` removes every document and keeps the definition and the indexes. `DELETE /v1/c/{coll}?confirm={coll}` drops the collection: its documents, its definition and the positions of its watch consumers. See [Truncate and drop](operations.md#truncate-and-drop).
+  - `confirm` must be the collection name, or the answer is `400 confirm_required`. A direct collection is `409 direct_collection`, and an unknown one is `404 unknown_collection`.
+  - Both take the same time for 10 or 10 million documents (a few ms). Calls on the collection that are running finish first; new calls wait for the swap, they do not fail.
 - `GET /v1/c/{coll}/quarantine?limit=N` returns `{"collection","total","rows":[{"ts","file","offset","error","line","truncated"}]}`: the last `limit` bad lines (default 100, at most 1000), oldest first. `total` is how many distinct lines the quarantine holds; a line that was quarantined again by a restart counts once. `line` is cut to 2 KiB. An engine-mode collection has no quarantine: `rows` is `[]`. A `limit` that is not a positive integer is `400 invalid_request`.
 
 ## watch and ack
@@ -128,6 +133,7 @@ The body is `{"error":{"code":"...","message":"..."}}`.
 | `unknown_operator`, `no_update`, `conflicting_update`, `invalid_field`, `unindexed_many`, `empty_filter` | 400 | The body of an update or delete breaks the [contract](query.md#contract-errors). |
 | `duplicate_id` | 409 | A document with this id exists. |
 | `unique_violation` | 409 | A `unique` field value exists. |
+| `confirm_required` | 400 | `truncate` or `drop` without `confirm` equal to the collection name. |
 | `catalog_conflict` | 409 | Two declarations of the collection disagree (`write`, `path`, `time`). |
 | `direct_collection` | 409 | Write call on a direct-mode collection. |
 | `catalog_invalid` | 400 | The collection definition is not valid (for example, it has `id`). |

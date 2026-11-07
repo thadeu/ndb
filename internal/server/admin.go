@@ -277,3 +277,31 @@ func cutLine(s string, max int) (string, bool) {
 
 	return s[:cut], true
 }
+
+// truncate is POST /v1/c/{coll}/truncate?confirm={coll}: remove every
+// document, keep the definition and the indexes.
+func (s *Server) truncate(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+	name := r.PathValue("coll")
+
+	if err := db.Truncate(name, r.URL.Query().Get("confirm")); err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"collection": name, "truncated": true})
+}
+
+// drop is DELETE /v1/c/{coll}?confirm={coll}: remove the collection, its
+// definition and the positions of its watch consumers.
+func (s *Server) drop(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+	name := r.PathValue("coll")
+
+	if err := db.Drop(name, r.URL.Query().Get("confirm")); err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"collection": name, "dropped": true})
+}

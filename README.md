@@ -87,7 +87,7 @@ The socket is `/run/ndb/ndb.sock`. Share the `/run/ndb` volume with your app con
 
 ## Download
 
-`curl -fsSL https://ndb.clowk.in/install.sh | bash` installs the latest release (`NDB_VERSION=0.1.0` pins one; `uninstall.sh` removes it). Each `v*` tag publishes static binaries (no CGO) for Linux amd64/arm64 and macOS arm64, with a `checksums.txt`, at [Releases](https://github.com/thadeu/ndb/releases). The binary also has a CLI: `ndb stats`, `ndb size`, `ndb collections`, `ndb query`, `ndb compact`, `ndb quarantine`, `ndb restore`, `ndb backup`, `ndb help` ([docs/dev/clients/cli.md](docs/dev/clients/cli.md)). A systemd unit is in [deploy/systemd/](deploy/systemd/). The image is `ghcr.io/thadeu/ndb`. Client SDKs: Go `github.com/thadeu/ndb/sdk/go`, Ruby gems `ndb` (plain client) and `ndb-rails` (Rails), npm `@thadeu/ndb`. See [CHANGELOG.md](CHANGELOG.md).
+`curl -fsSL https://ndb.clowk.in/install.sh | bash` installs the latest release (`NDB_VERSION=0.1.0` pins one; `uninstall.sh` removes it). Each `v*` tag publishes static binaries (no CGO) for Linux amd64/arm64 and macOS arm64, with a `checksums.txt`, at [Releases](https://github.com/thadeu/ndb/releases). The binary also has a CLI: `ndb stats`, `ndb size`, `ndb collections`, `ndb query`, `ndb compact`, `ndb truncate`, `ndb drop`, `ndb quarantine`, `ndb restore`, `ndb backup`, `ndb help` ([docs/dev/clients/cli.md](docs/dev/clients/cli.md)). A systemd unit is in [deploy/systemd/](deploy/systemd/). The image is `ghcr.io/thadeu/ndb`. Client SDKs: Go `github.com/thadeu/ndb/sdk/go`, Ruby gems `ndb` (plain client) and `ndb-rails` (Rails), npm `@thadeu/ndb`. See [CHANGELOG.md](CHANGELOG.md).
 
 ## UI (console)
 

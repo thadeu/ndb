@@ -121,6 +121,16 @@ deleted, err = calls.DeleteID(ctx, "c2")
 - `Filter` is one condition; join several with `ndb.And`. `ndb.Eq("_v", n)` matches the version.
 - `Insert` fails with `ErrDuplicateID` when the `_id` exists.
 
+### Truncate and drop
+
+```go
+err = calls.Truncate(ctx) // every document goes; the definition and indexes stay
+err = calls.Drop(ctx)     // the collection, its definition and its watch consumers go
+```
+
+- Both take the same time for 10 or 10 million documents. Watch consumers get one event with `ndb.OpTruncate` (no ID), then the new changes.
+- A direct-mode collection is `ErrDirectCollection`. A collection declared in `ndb.yml` comes back, empty, when the daemon restarts after a drop.
+
 ### Expiry (TTL like Redis)
 
 Tag one field `expires` (a `time.Time`). The daemon then expires documents one by one.
@@ -264,7 +274,7 @@ for ev, err := range calls.Watch(ctx, "relay", ndb.WatchWhere(ndb.Eq("status", "
 		return err
 	}
 
-	handle(ev.Op, ev.ID, ev.Doc) // ev.Op is ndb.OpPut or ndb.OpDel
+	handle(ev.Op, ev.ID, ev.Doc) // ev.Op is ndb.OpPut, ndb.OpDel or ndb.OpTruncate
 
 	if err := calls.Ack(ctx, ev); err != nil {
 		return err
