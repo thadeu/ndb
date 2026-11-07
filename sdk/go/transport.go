@@ -35,26 +35,26 @@ type DB struct {
 	ensured map[string]bool
 }
 
-// OpenOption tunes Open.
-type OpenOption func(*DB)
+// ConnectOption tunes Connect.
+type ConnectOption func(*DB)
 
-// WithToken sets the bearer token for the TCP listener. Without it Open
+// WithToken sets the bearer token for the TCP listener. Without it Connect
 // reads NDB_TOKEN. The token goes only in the Authorization header.
-func WithToken(token string) OpenOption {
+func WithToken(token string) ConnectOption {
 	return func(db *DB) { db.token = token }
 }
 
 // WithReadyTimeout sets how long a call retries while the daemon is not
 // ready (HTTP 503 not_ready, or the socket refuses or is missing). The
 // default is 10 s. Zero turns the retry off.
-func WithReadyTimeout(d time.Duration) OpenOption {
+func WithReadyTimeout(d time.Duration) ConnectOption {
 	return func(db *DB) { db.readyTimeout = d }
 }
 
-// Open returns a handle for addr: unix:///path/to/ndb.sock or
-// tcp://host:port. An empty addr reads NDB_URL. It does not connect; the
-// first call does.
-func Open(addr string, opts ...OpenOption) (*DB, error) {
+// Connect returns a handle for addr: unix:///path/to/ndb.sock or
+// tcp://host:port. An empty addr reads NDB_URL. It does not dial; the first
+// call does, and waits while the daemon starts (WithReadyTimeout).
+func Connect(addr string, opts ...ConnectOption) (*DB, error) {
 	if addr == "" {
 		addr = os.Getenv("NDB_URL")
 	}
@@ -150,7 +150,7 @@ func isIdempotent(method, path string) bool {
 		return true
 	}
 
-	for _, op := range []string{"/find", "/count", "/aggregate", "/get", "/stats"} {
+	for _, op := range []string{"/_search", "/_count", "/_aggregate"} {
 		if strings.HasSuffix(path, op) {
 			return true
 		}
@@ -189,6 +189,8 @@ func (db *DB) doOnce(ctx context.Context, method, path string, body []byte) (*ht
 	}
 
 	req.Header.Set("Content-Type", "application/json")
+	// Rows as NDJSON: the SDK reads them one by one (ndjsonRows).
+	req.Header.Set("Accept", "application/x-ndjson")
 
 	db.authorize(req)
 
@@ -211,12 +213,21 @@ func (db *DB) authorize(req *http.Request) {
 	}
 }
 
-func (db *DB) find(ctx context.Context, coll string, body []byte) (*http.Response, error) {
-	return db.do(ctx, http.MethodPost, collPath(coll)+"/find", body)
-}
+// decodeBody reads a JSON answer into out (nil: discard) and closes it.
+func decodeBody(resp *http.Response, out any) error {
+	if out == nil {
+		discard(resp)
 
-func (db *DB) aggregate(ctx context.Context, coll string, body []byte) (*http.Response, error) {
-	return db.do(ctx, http.MethodPost, collPath(coll)+"/aggregate", body)
+		return nil
+	}
+
+	defer resp.Body.Close()
+
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return fmt.Errorf("ndb: %s answer: %w", resp.Request.URL.Path, err)
+	}
+
+	return nil
 }
 
 // ndjsonRows yields each JSON value of r. A value cut short ends the stream
@@ -282,5 +293,5 @@ func discard(resp *http.Response) {
 }
 
 func collPath(coll string) string {
-	return "/v1/c/" + url.PathEscape(coll)
+	return "/" + url.PathEscape(coll)
 }

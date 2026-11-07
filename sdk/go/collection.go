@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"reflect"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -20,34 +18,36 @@ type Coll[T any] struct {
 	schema *schema
 }
 
-// Collection declares the collection name for T and returns it. The first
-// call for a name sends ensure_collection, with the time, unique and index
-// tags of T. Later calls for the same name on the same DB send nothing.
-func Collection[T any](ctx context.Context, db *DB, name string) (*Coll[T], error) {
+// Collection returns the collection name for documents of type T. It sends
+// nothing: the first call on the collection declares it (PUT /{coll}) with
+// the time, expires, unique and index tags of T, once per name and DB.
+//
+// A name with a "*" at the end is a collection pattern ("logs-2026-*"): it
+// reads every collection whose name starts with the prefix, declares
+// nothing, and its writes fail with pattern_read_only. Each row carries
+// "_coll", the name of its collection: map it with a field tagged
+// `ndb:"_coll"`.
+func Collection[T any](db *DB, name string) (*Coll[T], error) {
 	s, err := schemaOf(reflect.TypeFor[T]())
 	if err != nil {
-		return nil, err
-	}
-
-	if err := db.ensure(ctx, name, s); err != nil {
 		return nil, err
 	}
 
 	return &Coll[T]{db: db, name: name, schema: s}, nil
 }
 
-// Pattern reads every collection whose name starts with a prefix: pattern
-// is the prefix and one "*" at the end, like "logs-2026-*". It sends
-// nothing to the daemon. Only reads work (Where, All, Count, Aggregate);
-// writes fail with pattern_read_only. Each row carries "_coll", the name of
-// its collection: map it with a field tagged `ndb:"_coll"`.
-func Pattern[T any](db *DB, pattern string) (*Coll[T], error) {
-	s, err := schemaOf(reflect.TypeFor[T]())
-	if err != nil {
-		return nil, err
+// Name is the collection name (or pattern).
+func (c *Coll[T]) Name() string {
+	return c.name
+}
+
+// ready declares the collection on its first use.
+func (c *Coll[T]) ready(ctx context.Context) error {
+	if strings.Contains(c.name, "*") {
+		return nil
 	}
 
-	return &Coll[T]{db: db, name: pattern, schema: s}, nil
+	return c.db.ensure(ctx, c.name, c.schema)
 }
 
 // Result is the _id and version of a written document. An empty _id field is
@@ -55,16 +55,36 @@ func Pattern[T any](db *DB, pattern string) (*Coll[T], error) {
 // fails with ErrDuplicateID when an _id exists.
 type Result struct {
 	ID string `json:"_id"`
-	V  uint64 `json:"v"`
+	V  uint64 `json:"_v"`
 }
 
-// Insert writes docs in one transaction (all or nothing).
-func (c *Coll[T]) Insert(ctx context.Context, docs ...T) ([]Result, error) {
-	return c.InsertWith(ctx, docs)
+// Insert writes one document (POST /{coll}/_doc). With ExpireIn the
+// document expires d from now.
+func (c *Coll[T]) Insert(ctx context.Context, doc T, opts ...Option) (Result, error) {
+	o := newOptions(opts)
+
+	if o.expireIn > 0 {
+		res, err := c.InsertMany(ctx, []T{doc}, opts...)
+		if err != nil {
+			return Result{}, err
+		}
+
+		return res[0], nil
+	}
+
+	raw, err := c.schema.encode(doc)
+	if err != nil {
+		return Result{}, err
+	}
+
+	var out Result
+
+	return out, c.call(ctx, http.MethodPost, "_doc", raw, &out)
 }
 
-// InsertWith is Insert with options. ExpireIn applies to every document.
-func (c *Coll[T]) InsertWith(ctx context.Context, docs []T, opts ...Option) ([]Result, error) {
+// InsertMany writes docs in one transaction, all or nothing
+// (POST /{coll}/_bulk). ExpireIn applies to every document.
+func (c *Coll[T]) InsertMany(ctx context.Context, docs []T, opts ...Option) ([]Result, error) {
 	o := newOptions(opts)
 	rows := make([]json.RawMessage, len(docs))
 
@@ -77,48 +97,29 @@ func (c *Coll[T]) InsertWith(ctx context.Context, docs []T, opts ...Option) ([]R
 		rows[i] = raw
 	}
 
-	resp, err := c.post(ctx, "insert", insertBody{Insert: rows, ExpireIn: o.expireIn.seconds()})
+	body, err := json.Marshal(bulkBody{Docs: rows, ExpireIn: o.expireIn.seconds()})
 	if err != nil {
 		return nil, err
 	}
-
-	defer resp.Body.Close()
 
 	var out struct {
 		Results []Result `json:"results"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("ndb: insert response: %w", err)
-	}
-
-	return out.Results, nil
+	return out.Results, c.call(ctx, http.MethodPost, "_bulk", body, &out)
 }
 
 // Get returns the document with this _id, or ErrNotFound.
 func (c *Coll[T]) Get(ctx context.Context, id string) (T, error) {
-	resp, err := c.db.do(ctx, http.MethodGet, c.idPath(id), nil)
-	if err != nil {
+	var raw json.RawMessage
+
+	if err := c.call(ctx, http.MethodGet, docPath("_doc", id), nil, &raw); err != nil {
 		var zero T
 
 		return zero, err
 	}
 
-	defer resp.Body.Close()
-
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		var zero T
-
-		return zero, fmt.Errorf("ndb: get response: %w", err)
-	}
-
 	return c.decode(raw)
-}
-
-// idPath is the path of the routes of one document.
-func (c *Coll[T]) idPath(id string) string {
-	return collPath(c.name) + "/" + url.PathEscape(id)
 }
 
 // Ops are the write operators of an Update: $set, $setOnInsert, $unset, $inc, $push,
@@ -136,53 +137,43 @@ type UpdateResult[T any] struct {
 	Doc      *T
 }
 
-// Update is the atomic update by filter: the daemon matches the filter and
-// writes the operators in one step, against the newest state, so concurrent
-// updates never interleave. Nothing matched is not an error: Matched is 0.
+// Update applies ops to the document with this _id, in one atomic step
+// (POST /{coll}/_update/{id}). Nothing matched is not an error: Matched is
+// 0. Guard adds conditions on the same document, such as Guard(Eq("_v", 7)):
+// Matched is 0 when a guard fails. Upsert creates the document with this
+// _id. ExpireIn sets its expiry.
+func (c *Coll[T]) Update(ctx context.Context, id string, ops Ops, opts ...Option) (UpdateResult[T], error) {
+	o := newOptions(opts)
+
+	return c.runUpdate(ctx, docPath("_update", id), Filter{doc: o.guard}, ops, o, false)
+}
+
+// UpdateBy is the atomic update by query (POST /{coll}/_update_by_query):
+// the daemon matches the query and writes the operators in one step against
+// the newest state, so concurrent updates never interleave.
 //
-// A filter with _id finds one document by id; without it the update takes
-// the first match. UpdateID is the shorter form for one _id. Many updates every match, and needs the id
-// or an indexed field in the filter (ErrUnindexedMany). Upsert creates the
-// document from the equality fields of the filter when nothing matches.
-// A guard in the filter, such as Eq("_v", 7) or Gte("qty", 1), makes a
-// conditional write: Matched is 0 when the guard fails.
-func (c *Coll[T]) Update(ctx context.Context, filter Filter, ops Ops, opts ...Option) (UpdateResult[T], error) {
+// Without Many it updates the first match. Many updates every match and
+// needs the id or an indexed field in the query (ErrUnindexedMany). Upsert
+// creates the document from the equality fields of the query when nothing
+// matches. A condition in the query, such as Gte("qty", 1), makes a
+// conditional write.
+func (c *Coll[T]) UpdateBy(ctx context.Context, query Filter, ops Ops, opts ...Option) (UpdateResult[T], error) {
 	o := newOptions(opts)
 
-	return c.runUpdate(ctx, "update", filter, ops, o)
+	return c.runUpdate(ctx, "_update_by_query", query, ops, o, o.many)
 }
 
-// UpdateID is Update on the document with this _id (many does not apply).
-// Extra guards go in the Guard option, such as Guard(Eq("_v", 7)): Matched is
-// 0 when a guard fails. Upsert creates the document with this _id.
-func (c *Coll[T]) UpdateID(ctx context.Context, id string, ops Ops, opts ...Option) (UpdateResult[T], error) {
-	o := newOptions(opts)
-	o.many = false
+func (c *Coll[T]) runUpdate(ctx context.Context, path string, query Filter, ops Ops, o options, many bool) (UpdateResult[T], error) {
+	for k := range ops {
+		if !strings.HasPrefix(k, "$") {
+			return UpdateResult[T]{}, fmt.Errorf("ndb: update operator %q must start with $ (for example \"$set\")", k)
+		}
+	}
 
-	return c.runUpdate(ctx, url.PathEscape(id)+"/update", Filter{doc: o.guard}, ops, o)
-}
-
-func (c *Coll[T]) runUpdate(ctx context.Context, op string, filter Filter, ops Ops, o options) (UpdateResult[T], error) {
-	body, err := updateBody(filter, ops)
+	body, err := json.Marshal(updateBody{Query: query.doc, Update: ops, Many: many, Upsert: o.upsert, ExpireIn: o.expireIn.seconds()})
 	if err != nil {
 		return UpdateResult[T]{}, err
 	}
-
-	q := url.Values{}
-
-	o.addTo(q, "many", o.many)
-	o.addTo(q, "upsert", o.upsert)
-
-	if secs := o.expireIn.seconds(); secs != nil {
-		q.Set("expire_in", strconv.FormatFloat(*secs, 'f', -1, 64))
-	}
-
-	resp, err := c.postQuery(ctx, op, q, body)
-	if err != nil {
-		return UpdateResult[T]{}, err
-	}
-
-	defer resp.Body.Close()
 
 	var out struct {
 		Matched  int             `json:"matched"`
@@ -190,8 +181,8 @@ func (c *Coll[T]) runUpdate(ctx context.Context, op string, filter Filter, ops O
 		Doc      json.RawMessage `json:"doc"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return UpdateResult[T]{}, fmt.Errorf("ndb: update response: %w", err)
+	if err := c.call(ctx, http.MethodPost, path, body, &out); err != nil {
+		return UpdateResult[T]{}, err
 	}
 
 	res := UpdateResult[T]{Matched: out.Matched, Modified: out.Modified}
@@ -210,57 +201,32 @@ func (c *Coll[T]) runUpdate(ctx context.Context, op string, filter Filter, ops O
 	return res, nil
 }
 
-// DeleteID removes the document with this _id and returns how many it
+// Delete removes the document with this _id and returns how many it
 // removed (0 or 1).
-func (c *Coll[T]) DeleteID(ctx context.Context, id string) (int, error) {
-	resp, err := c.db.do(ctx, http.MethodDelete, c.idPath(id), nil)
-	if err != nil {
-		return 0, err
-	}
-
-	defer resp.Body.Close()
-
+func (c *Coll[T]) Delete(ctx context.Context, id string) (int, error) {
 	var out struct {
 		Deleted int `json:"deleted"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return 0, fmt.Errorf("ndb: delete response: %w", err)
-	}
-
-	return out.Deleted, nil
+	return out.Deleted, c.call(ctx, http.MethodDelete, docPath("_doc", id), nil, &out)
 }
 
-// Delete removes the document that the filter matches, or every match with
-// Many (same rule as Update), and returns how many it removed.
-func (c *Coll[T]) Delete(ctx context.Context, filter Filter, opts ...Option) (int, error) {
+// DeleteBy removes the first document that the query matches, or every
+// match with Many (same rule as UpdateBy), and returns how many
+// (POST /{coll}/_delete_by_query).
+func (c *Coll[T]) DeleteBy(ctx context.Context, query Filter, opts ...Option) (int, error) {
 	o := newOptions(opts)
 
-	body, err := json.Marshal(filter.doc)
+	body, err := json.Marshal(deleteBody{Query: query.doc, Many: o.many})
 	if err != nil {
 		return 0, err
 	}
-
-	q := url.Values{}
-
-	o.addTo(q, "many", o.many)
-
-	resp, err := c.postQuery(ctx, "delete", q, body)
-	if err != nil {
-		return 0, err
-	}
-
-	defer resp.Body.Close()
 
 	var out struct {
 		Deleted int `json:"deleted"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return 0, fmt.Errorf("ndb: delete response: %w", err)
-	}
-
-	return out.Deleted, nil
+	return out.Deleted, c.call(ctx, http.MethodPost, "_delete_by_query", body, &out)
 }
 
 // Truncate removes every document of the collection and keeps its
@@ -268,69 +234,101 @@ func (c *Coll[T]) Delete(ctx context.Context, filter Filter, opts ...Option) (in
 // documents. Watch consumers get one OpTruncate event. A direct-mode
 // collection is ErrDirectCollection.
 func (c *Coll[T]) Truncate(ctx context.Context) error {
-	return c.swap(ctx, http.MethodPost, collPath(c.name)+"/truncate")
+	return c.send(ctx, http.MethodPost, "_truncate?confirm="+url.QueryEscape(c.name), nil, nil)
 }
 
 // Drop removes the collection: its documents, its definition and the
-// positions of its watch consumers. A collection declared in ndb.yml comes
-// back, empty, when the daemon restarts.
+// positions of its watch consumers. The next call on c declares it again.
+// A collection declared in ndb.yml comes back, empty, when the daemon
+// restarts.
 func (c *Coll[T]) Drop(ctx context.Context) error {
-	return c.swap(ctx, http.MethodDelete, collPath(c.name))
+	err := c.send(ctx, http.MethodDelete, "?confirm="+url.QueryEscape(c.name), nil, nil)
+
+	c.db.forget(c.name)
+
+	return err
 }
 
-// swap sends truncate or drop, with the collection name as the confirm
-// value that the daemon asks for.
-func (c *Coll[T]) swap(ctx context.Context, method, path string) error {
-	resp, err := c.db.do(ctx, method, path+"?confirm="+url.QueryEscape(c.name), nil)
+// Stats is the state of the collection (GET /{coll}/_stats): rows, indexes,
+// files and bytes.
+func (c *Coll[T]) Stats(ctx context.Context) (map[string]any, error) {
+	var out map[string]any
+
+	return out, c.call(ctx, http.MethodGet, "_stats", nil, &out)
+}
+
+// Compact seals the memtable and merges every segment now
+// (POST /{coll}/_compact). It answers the segments and bytes before and
+// after.
+func (c *Coll[T]) Compact(ctx context.Context) (map[string]any, error) {
+	var out map[string]any
+
+	return out, c.call(ctx, http.MethodPost, "_compact", nil, &out)
+}
+
+// EnsureIndex adds a secondary index on field and builds it in the
+// background (PUT /{coll}/_indexes/{field}). It returns the indexed fields.
+func (c *Coll[T]) EnsureIndex(ctx context.Context, field string) ([]string, error) {
+	return c.index(ctx, http.MethodPut, field)
+}
+
+// DropIndex removes the index on field. It returns the indexed fields.
+func (c *Coll[T]) DropIndex(ctx context.Context, field string) ([]string, error) {
+	return c.index(ctx, http.MethodDelete, field)
+}
+
+func (c *Coll[T]) index(ctx context.Context, method, field string) ([]string, error) {
+	var out struct {
+		Indexes []string `json:"indexes"`
+	}
+
+	return out.Indexes, c.call(ctx, method, docPath("_indexes", field), nil, &out)
+}
+
+// call declares the collection on first use, then sends one request (see
+// send).
+func (c *Coll[T]) call(ctx context.Context, method, path string, body []byte, out any) error {
+	if err := c.ready(ctx); err != nil {
+		return err
+	}
+
+	return c.send(ctx, method, path, body, out)
+}
+
+// send sends one request to /{coll}/{path} and decodes the JSON answer into
+// out (nil: discard). Truncate and drop use it alone: they never declare.
+func (c *Coll[T]) send(ctx context.Context, method, path string, body []byte, out any) error {
+	target := collPath(c.name)
+
+	switch {
+	case path == "":
+	case strings.HasPrefix(path, "?"):
+		target += path
+	default:
+		target += "/" + path
+	}
+
+	resp, err := c.db.do(ctx, method, target, body)
 	if err != nil {
 		return err
 	}
 
-	discard(resp)
-
-	return nil
+	return decodeBody(resp, out)
 }
 
-// updateBody merges the filter and the operators into the one body of the
-// update call. An operator key without "$" is a mistake that the daemon would
-// read as a filter key, so it is refused before anything is sent.
-func updateBody(filter Filter, ops Ops) ([]byte, error) {
-	body := make(map[string]any, len(filter.doc)+len(ops))
-
-	for k, v := range filter.doc {
-		body[k] = v
-	}
-
-	for k, v := range ops {
-		if !strings.HasPrefix(k, "$") {
-			return nil, fmt.Errorf("ndb: update operator %q must start with $ (for example \"$set\")", k)
-		}
-
-		body[k] = v
-	}
-
-	return json.Marshal(body)
-}
-
-// postQuery is post with a query string (the options of an update).
-func (c *Coll[T]) postQuery(ctx context.Context, op string, q url.Values, body []byte) (*http.Response, error) {
-	path := collPath(c.name) + "/" + op
-
-	if len(q) > 0 {
-		path += "?" + q.Encode()
-	}
-
-	return c.db.do(ctx, http.MethodPost, path, body)
-}
-
-// post sends one write op of the collection, with v as the JSON body.
-func (c *Coll[T]) post(ctx context.Context, op string, v any) (*http.Response, error) {
-	body, err := json.Marshal(v)
-	if err != nil {
+// stream declares the collection on first use and sends one request whose
+// answer the caller reads (rows of _search and _aggregate).
+func (c *Coll[T]) stream(ctx context.Context, path string, body []byte) (*http.Response, error) {
+	if err := c.ready(ctx); err != nil {
 		return nil, err
 	}
 
-	return c.db.do(ctx, http.MethodPost, collPath(c.name)+"/"+op, body)
+	return c.db.do(ctx, http.MethodPost, collPath(c.name)+"/"+path, body)
+}
+
+// docPath is "{action}/{id}", with the id escaped.
+func docPath(action, id string) string {
+	return action + "/" + url.PathEscape(id)
 }
 
 func (c *Coll[T]) decode(raw json.RawMessage) (T, error) {
@@ -351,13 +349,6 @@ type options struct {
 	guard    map[string]any
 }
 
-// addTo sets name=true in q when on.
-func (o options) addTo(q url.Values, name string, on bool) {
-	if on {
-		q.Set(name, "true")
-	}
-}
-
 // ttlSecs is a duration in seconds for the wire. Zero is omitted.
 type ttlSecs float64
 
@@ -371,7 +362,7 @@ func (d ttlSecs) seconds() *float64 {
 	return &f
 }
 
-// Many makes Update or Delete work on every match. The filter needs the id
+// Many makes UpdateBy or DeleteBy work on every match. The filter needs the id
 // or an indexed field, or the call fails with ErrUnindexedMany.
 func Many() Option {
 	return func(o *options) {
@@ -379,15 +370,16 @@ func Many() Option {
 	}
 }
 
-// Guard adds filter keys to UpdateID: the update matches only when the
-// document also satisfies the filter.
+// Guard adds conditions to Update by _id: the update matches only when the
+// document also satisfies them.
 func Guard(f Filter) Option {
 	return func(o *options) {
 		o.guard = f.doc
 	}
 }
 
-// Upsert makes Update create the document when nothing matches.
+// Upsert makes Update or UpdateBy create the document when nothing
+// matches.
 func Upsert() Option {
 	return func(o *options) {
 		o.upsert = true
@@ -395,7 +387,8 @@ func Upsert() Option {
 }
 
 // ExpireIn makes the daemon set the expires field of the written documents
-// to now + d, in the same transaction (Insert and Update). It wins over a
+// to now + d, in the same transaction (Insert, InsertMany, Update,
+// UpdateBy). It wins over a
 // value of the field in the document or in the operators. The collection needs a field tagged
 // `expires`, or the call fails with ErrTTLNotEnabled.
 func ExpireIn(d time.Duration) Option {
@@ -438,6 +431,14 @@ func (db *DB) ensure(ctx context.Context, name string, s *schema) error {
 	return nil
 }
 
+// forget makes the next call on name declare it again (after a drop).
+func (db *DB) forget(name string) {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	delete(db.ensured, name)
+}
+
 // putCollection sends ensure_collection with a catalog JSON body.
 func (db *DB) putCollection(ctx context.Context, name string, catalog []byte) error {
 	resp, err := db.do(ctx, http.MethodPut, collPath(name), catalog)
@@ -457,12 +458,20 @@ type ensureBody struct {
 	Unique       []string `json:"unique,omitempty"`
 }
 
-type insertBody struct {
-	Insert   []json.RawMessage `json:"insert"`
+type bulkBody struct {
+	Docs     []json.RawMessage `json:"docs"`
 	ExpireIn *float64          `json:"expire_in,omitempty"`
 }
 
-type writeResult struct {
-	ID string `json:"_id"`
-	V  uint64 `json:"v"`
+type updateBody struct {
+	Query    map[string]any `json:"query,omitempty"`
+	Update   Ops            `json:"update"`
+	Many     bool           `json:"many,omitempty"`
+	Upsert   bool           `json:"upsert,omitempty"`
+	ExpireIn *float64       `json:"expire_in,omitempty"`
+}
+
+type deleteBody struct {
+	Query map[string]any `json:"query"`
+	Many  bool           `json:"many,omitempty"`
 }

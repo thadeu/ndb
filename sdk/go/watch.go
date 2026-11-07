@@ -50,13 +50,13 @@ func Limit(n int) WatchOption {
 	}
 }
 
-// WatchWhere delivers only the events whose document matches the filters
-// (ANDed, as in Where). A delete event has no document: it is delivered only
+// WatchQuery delivers only the events whose document matches the filters
+// (ANDed, as in Query). A delete event has no document: it is delivered only
 // when the same stream saw an earlier put of that id that matched. The stored
 // position of the consumer still moves over the events that are left out.
-func WatchWhere(filters ...Filter) WatchOption {
+func WatchQuery(filters ...Filter) WatchOption {
 	return func(b *watchBody) {
-		b.Where = whereOf(filters)
+		b.Query = queryOf(filters)
 	}
 }
 
@@ -64,7 +64,7 @@ type watchBody struct {
 	Consumer string         `json:"consumer"`
 	From     string         `json:"from,omitempty"`
 	Limit    int            `json:"limit,omitempty"`
-	Where    map[string]any `json:"where,omitempty"`
+	Query    map[string]any `json:"query,omitempty"`
 }
 
 type ackBody struct {
@@ -76,7 +76,7 @@ type watchLine struct {
 	Pos       string          `json:"pos"`
 	Op        Op              `json:"op"`
 	ID        string          `json:"_id"`
-	V         uint64          `json:"v"`
+	V         uint64          `json:"_v"`
 	Doc       json.RawMessage `json:"doc"`
 	Heartbeat bool            `json:"heartbeat"`
 	Error     *struct {
@@ -112,7 +112,7 @@ func (c *Coll[T]) Watch(ctx context.Context, consumer string, opts ...WatchOptio
 			return
 		}
 
-		resp, err := c.db.do(ctx, http.MethodPost, collPath(c.name)+"/watch", raw)
+		resp, err := c.stream(ctx, "_watch", raw)
 		if err != nil {
 			yield(zero, err)
 
@@ -181,12 +181,5 @@ func (c *Coll[T]) Ack(ctx context.Context, ev Event[T]) error {
 		return err
 	}
 
-	resp, err := c.db.do(ctx, http.MethodPost, collPath(c.name)+"/ack", raw)
-	if err != nil {
-		return err
-	}
-
-	discard(resp)
-
-	return nil
+	return c.call(ctx, http.MethodPost, "_ack", raw, nil)
 }

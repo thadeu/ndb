@@ -135,11 +135,11 @@ func runSharedCase(t *testing.T, db *DB, c sharedCase) {
 	}
 
 	for i, w := range c.writes {
-		if w.Op != "insert" {
+		if w.Op != "bulk" {
 			t.Fatalf("%s: setup op %q is not supported", c.file, w.Op)
 		}
 
-		resp, err := db.do(ctx, http.MethodPost, collPath(name)+"/"+w.Op, w.Body)
+		resp, err := db.do(ctx, http.MethodPost, collPath(name)+"/_"+w.Op, w.Body)
 		if err != nil {
 			t.Fatalf("%s: write %d: %v", c.file, i, err)
 		}
@@ -153,10 +153,8 @@ func runSharedCase(t *testing.T, db *DB, c sharedCase) {
 	)
 
 	switch c.request.Op {
-	case "find":
-		resp, err = db.find(ctx, name, c.request.Body)
-	case "aggregate":
-		resp, err = db.aggregate(ctx, name, c.request.Body)
+	case "search", "aggregate":
+		resp, err = db.do(ctx, http.MethodPost, collPath(name)+"/_"+c.request.Op, c.request.Body)
 	default:
 		t.Fatalf("%s: request op %q is not supported", c.file, c.request.Op)
 	}

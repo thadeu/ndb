@@ -32,7 +32,7 @@ func TestGetUpdateIDDeleteID(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, daemon.unix)
 
-	stock, err := Collection[Stock](ctx, db, newColl())
+	stock, err := Collection[Stock](db, newColl())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,26 +50,26 @@ func TestGetUpdateIDDeleteID(t *testing.T) {
 		t.Fatalf("get missing: %v", err)
 	}
 
-	res, err := stock.UpdateID(ctx, "a", Ops{"$inc": {"qty": -1}}, Guard(Gte("qty", 1)))
+	res, err := stock.Update(ctx, "a", Ops{"$inc": {"qty": -1}}, Guard(Gte("qty", 1)))
 	if err != nil || res.Modified != 1 || res.Doc.Qty != 2 {
 		t.Fatalf("update id: %+v, %v", res, err)
 	}
 
-	res, err = stock.UpdateID(ctx, "a", Ops{"$set": {"qty": 0}}, Guard(Gte("qty", 10)))
+	res, err = stock.Update(ctx, "a", Ops{"$set": {"qty": 0}}, Guard(Gte("qty", 10)))
 	if err != nil || res.Matched != 0 {
 		t.Fatalf("failed guard: %+v, %v", res, err)
 	}
 
-	res, err = stock.UpdateID(ctx, "z", Ops{"$set": {"qty": 7}}, Upsert())
+	res, err = stock.Update(ctx, "z", Ops{"$set": {"qty": 7}}, Upsert())
 	if err != nil || res.Modified != 1 || res.Doc.SKU != "z" {
 		t.Fatalf("upsert by id: %+v, %v", res, err)
 	}
 
-	if n, err := stock.DeleteID(ctx, "a"); err != nil || n != 1 {
+	if n, err := stock.Delete(ctx, "a"); err != nil || n != 1 {
 		t.Fatalf("delete id: %d, %v", n, err)
 	}
 
-	if n, err := stock.DeleteID(ctx, "a"); err != nil || n != 0 {
+	if n, err := stock.Delete(ctx, "a"); err != nil || n != 0 {
 		t.Fatalf("delete again: %d, %v", n, err)
 	}
 }

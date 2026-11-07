@@ -166,7 +166,7 @@ func freeAddr() (string, error) {
 
 // waitReady polls /health until the daemon has recovered.
 func waitReady(addr string) error {
-	db, err := Open(addr)
+	db, err := Connect(addr)
 	if err != nil {
 		return err
 	}
@@ -176,7 +176,7 @@ func waitReady(addr string) error {
 	var last error
 
 	for range 200 {
-		resp, err := db.do(context.Background(), http.MethodGet, "/health", nil)
+		resp, err := db.do(context.Background(), http.MethodGet, "/_health", nil)
 		if err == nil {
 			discard(resp)
 
@@ -191,10 +191,10 @@ func waitReady(addr string) error {
 	return last
 }
 
-func openTest(t *testing.T, addr string, opts ...OpenOption) *DB {
+func openTest(t *testing.T, addr string, opts ...ConnectOption) *DB {
 	t.Helper()
 
-	db, err := Open(addr, opts...)
+	db, err := Connect(addr, opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,9 +225,9 @@ func rawPut(t *testing.T, db *DB, name, catalog string) {
 func mustInsert(t *testing.T, db *DB, name, docs string) {
 	t.Helper()
 
-	body := []byte(`{"insert":` + docs + `}`)
+	body := []byte(`{"docs":` + docs + `}`)
 
-	resp, err := db.do(context.Background(), http.MethodPost, collPath(name)+"/insert", body)
+	resp, err := db.do(context.Background(), http.MethodPost, collPath(name)+"/_bulk", body)
 	if err != nil {
 		t.Fatal(err)
 	}

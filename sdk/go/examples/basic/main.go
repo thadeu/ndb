@@ -31,14 +31,14 @@ func main() {
 }
 
 func run(ctx context.Context, addr string) error {
-	db, err := ndb.Open(addr)
+	db, err := ndb.Connect(addr)
 	if err != nil {
 		return err
 	}
 
 	defer db.Close()
 
-	calls, err := ndb.Collection[Call](ctx, db, "calls")
+	calls, err := ndb.Collection[Call](db, "calls")
 	if err != nil {
 		return err
 	}
@@ -50,7 +50,7 @@ func run(ctx context.Context, addr string) error {
 		return err
 	}
 
-	answered, err := calls.Where(ndb.Eq("status", "answered")).Sort(ndb.Desc("ts")).Limit(10).All(ctx)
+	answered, err := calls.Query(ndb.Eq("status", "answered")).Sort(ndb.Desc("ts")).Limit(10).All(ctx)
 	if err != nil {
 		return err
 	}
@@ -59,7 +59,7 @@ func run(ctx context.Context, addr string) error {
 
 	byID := ndb.Eq("_id", id)
 
-	res, err := calls.Update(ctx, byID, ndb.Ops{"$set": {"status": "done"}})
+	res, err := calls.UpdateBy(ctx, byID, ndb.Ops{"$set": {"status": "done"}})
 	if err != nil {
 		return err
 	}
@@ -68,7 +68,7 @@ func run(ctx context.Context, addr string) error {
 
 	stale := ndb.And(byID, ndb.Eq("_v", 1))
 
-	res, err = calls.Update(ctx, stale, ndb.Ops{"$set": {"status": "stale"}})
+	res, err = calls.UpdateBy(ctx, stale, ndb.Ops{"$set": {"status": "stale"}})
 	if err != nil {
 		return err
 	}
@@ -77,7 +77,7 @@ func run(ctx context.Context, addr string) error {
 		fmt.Println("stale update matched nothing, as expected")
 	}
 
-	_, err = calls.Delete(ctx, byID)
+	_, err = calls.DeleteBy(ctx, byID)
 
 	return err
 }

@@ -47,9 +47,9 @@ func startTokenDaemon(t *testing.T) (unix, tcp string) {
 	return tokenDaemon.unix, tokenDaemon.tcp
 }
 
-// listCatalog sends GET /v1/c, the cheapest authenticated call.
+// listCatalog sends GET /_collections, the cheapest authenticated call.
 func listCatalog(db *DB) error {
-	resp, err := db.do(context.Background(), http.MethodGet, "/v1/c", nil)
+	resp, err := db.do(context.Background(), http.MethodGet, "/_collections", nil)
 	if err != nil {
 		return err
 	}
@@ -150,7 +150,7 @@ func TestOpenReadsNDBURL(t *testing.T) {
 
 	t.Setenv("NDB_URL", "")
 
-	if _, err := Open(""); err == nil {
+	if _, err := Connect(""); err == nil {
 		t.Fatal("no address and no NDB_URL: want an error")
 	}
 }

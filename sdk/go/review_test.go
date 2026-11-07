@@ -21,12 +21,12 @@ func TestInsertGeneratesIDAndReturnsResults(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, daemon.unix)
 
-	notes, err := Collection[Note](ctx, db, newColl())
+	notes, err := Collection[Note](db, newColl())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	res, err := notes.Insert(ctx, Note{Title: "a"}, Note{ID: "given", Title: "b"})
+	res, err := notes.InsertMany(ctx, []Note{{Title: "a"}, {ID: "given", Title: "b"}})
 	if err != nil {
 		t.Fatalf("insert with an empty generated id: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestIterWalksAllPages(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, daemon.unix)
 
-	notes, err := Collection[Note](ctx, db, newColl())
+	notes, err := Collection[Note](db, newColl())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestIterWalksAllPages(t *testing.T) {
 
 	seen := map[string]bool{}
 
-	for n, err := range notes.Where().Sort(Asc("_id")).Limit(10).Iter(ctx) {
+	for n, err := range notes.Query().Sort(Asc("_id")).Limit(10).Each(ctx) {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -103,7 +103,7 @@ func TestVersionFieldGuardsAnUpdate(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, daemon.unix)
 
-	col, err := Collection[Versioned](ctx, db, newColl())
+	col, err := Collection[Versioned](db, newColl())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,11 +119,11 @@ func TestVersionFieldGuardsAnUpdate(t *testing.T) {
 
 	guard := And(Eq("_id", "a"), Eq("_v", mine.V))
 
-	if res, err := col.Update(ctx, guard, Ops{"$set": {"status": "theirs"}}); err != nil || res.Matched != 1 {
+	if res, err := col.UpdateBy(ctx, guard, Ops{"$set": {"status": "theirs"}}); err != nil || res.Matched != 1 {
 		t.Fatalf("first update: %+v, %v", res, err)
 	}
 
-	if res, err := col.Update(ctx, guard, Ops{"$set": {"status": "mine"}}); err != nil || res.Matched != 0 {
+	if res, err := col.UpdateBy(ctx, guard, Ops{"$set": {"status": "mine"}}); err != nil || res.Matched != 0 {
 		t.Fatalf("stale update: want matched 0, got %+v, %v", res, err)
 	}
 

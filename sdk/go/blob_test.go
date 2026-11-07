@@ -62,7 +62,7 @@ func TestBlobFieldInADocument(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, daemon.unix)
 
-	recs, err := Collection[Recording](ctx, db, newColl())
+	recs, err := Collection[Recording](db, newColl())
 	if err != nil {
 		t.Fatal(err)
 	}

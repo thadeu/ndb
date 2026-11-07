@@ -19,67 +19,67 @@ func TestQueryBodyJSON(t *testing.T) {
 	}{
 		{
 			name:  "equality is a plain value",
-			build: func() *Query[Call] { return calls.Where(Eq("status", "answered")) },
-			want:  `{"where":{"status":"answered"}}`,
+			build: func() *Query[Call] { return calls.Query(Eq("status", "answered")) },
+			want:  `{"query":{"status":"answered"}}`,
 		},
 		{
 			name:  "two filters on different fields are one object",
-			build: func() *Query[Call] { return calls.Where(Eq("status", "a"), Gte("ts", "2026-11-01")) },
-			want:  `{"where":{"status":"a","ts":{"$gte":"2026-11-01"}}}`,
+			build: func() *Query[Call] { return calls.Query(Eq("status", "a"), Gte("ts", "2026-11-01")) },
+			want:  `{"query":{"status":"a","ts":{"$gte":"2026-11-01"}}}`,
 		},
 		{
 			name:  "two filters on one field become $and",
-			build: func() *Query[Call] { return calls.Where(Gt("duration", 1), Lt("duration", 5)) },
-			want:  `{"where":{"$and":[{"duration":{"$gt":1}},{"duration":{"$lt":5}}]}}`,
+			build: func() *Query[Call] { return calls.Query(Gt("duration", 1), Lt("duration", 5)) },
+			want:  `{"query":{"$and":[{"duration":{"$gt":1}},{"duration":{"$lt":5}}]}}`,
 		},
 		{
 			name:  "ne lte",
-			build: func() *Query[Call] { return calls.Where(Ne("status", "x"), Lte("n", 9)) },
-			want:  `{"where":{"n":{"$lte":9},"status":{"$ne":"x"}}}`,
+			build: func() *Query[Call] { return calls.Query(Ne("status", "x"), Lte("n", 9)) },
+			want:  `{"query":{"n":{"$lte":9},"status":{"$ne":"x"}}}`,
 		},
 		{
 			name:  "in",
-			build: func() *Query[Call] { return calls.Where(In("dnis", "1133", "1144")) },
-			want:  `{"where":{"dnis":{"$in":["1133","1144"]}}}`,
+			build: func() *Query[Call] { return calls.Query(In("dnis", "1133", "1144")) },
+			want:  `{"query":{"dnis":{"$in":["1133","1144"]}}}`,
 		},
 		{
 			name:  "exists false",
-			build: func() *Query[Call] { return calls.Where(Exists("dnis", false)) },
-			want:  `{"where":{"dnis":{"$exists":false}}}`,
+			build: func() *Query[Call] { return calls.Query(Exists("dnis", false)) },
+			want:  `{"query":{"dnis":{"$exists":false}}}`,
 		},
 		{
 			name:  "or",
-			build: func() *Query[Call] { return calls.Where(Or(Eq("a", 1), Eq("b", 2))) },
-			want:  `{"where":{"$or":[{"a":1},{"b":2}]}}`,
+			build: func() *Query[Call] { return calls.Query(Or(Eq("a", 1), Eq("b", 2))) },
+			want:  `{"query":{"$or":[{"a":1},{"b":2}]}}`,
 		},
 		{
 			name:  "not",
-			build: func() *Query[Call] { return calls.Where(Not(Eq("a", 1))) },
-			want:  `{"where":{"$not":{"a":1}}}`,
+			build: func() *Query[Call] { return calls.Query(Not(Eq("a", 1))) },
+			want:  `{"query":{"$not":{"a":1}}}`,
 		},
 		{
 			name:  "sort keeps the key order",
-			build: func() *Query[Call] { return calls.Where().Sort(Desc("ts"), Asc("_id")) },
+			build: func() *Query[Call] { return calls.Query().Sort(Desc("ts"), Asc("_id")) },
 			want:  `{"sort":{"ts":-1,"_id":1}}`,
 		},
 		{
 			name:  "limit and skip",
-			build: func() *Query[Call] { return calls.Where().Limit(50).Skip(100) },
+			build: func() *Query[Call] { return calls.Query().Limit(50).Skip(100) },
 			want:  `{"limit":50,"skip":100}`,
 		},
 		{
 			name:  "fields",
-			build: func() *Query[Call] { return calls.Where().Fields("status", "dnis") },
+			build: func() *Query[Call] { return calls.Query().Fields("status", "dnis") },
 			want:  `{"fields":["status","dnis"]}`,
 		},
 		{
 			name:  "page 3 of 50 is skip 100",
-			build: func() *Query[Call] { return calls.Where().Page(3, 50) },
+			build: func() *Query[Call] { return calls.Query().Page(3, 50) },
 			want:  `{"limit":50,"skip":100}`,
 		},
 		{
 			name:  "after",
-			build: func() *Query[Call] { return calls.Where().After("tok") },
+			build: func() *Query[Call] { return calls.Query().After("tok") },
 			want:  `{"after":"tok"}`,
 		},
 	}
@@ -105,7 +105,7 @@ func seedCalls(t *testing.T) *Coll[Call] {
 	ctx := context.Background()
 	db := openTest(t, daemon.unix)
 
-	calls, err := Collection[Call](ctx, db, newColl())
+	calls, err := Collection[Call](db, newColl())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func seedCalls(t *testing.T) *Coll[Call] {
 		{CallID: "c5", Status: "failed", DNIS: "1155", Duration: 5, TS: day(5)},
 	}
 
-	if _, err := calls.Insert(ctx, rows...); err != nil {
+	if _, err := calls.InsertMany(ctx, rows); err != nil {
 		t.Fatal(err)
 	}
 
@@ -148,13 +148,13 @@ func TestQueryFilters(t *testing.T) {
 		query *Query[Call]
 		want  []string
 	}{
-		{name: "eq", query: calls.Where(Eq("status", "answered")), want: []string{"c1", "c2", "c4"}},
-		{name: "or", query: calls.Where(Or(Eq("status", "missed"), Eq("status", "failed"))), want: []string{"c3", "c5"}},
-		{name: "not", query: calls.Where(Not(Eq("status", "answered"))), want: []string{"c3", "c5"}},
-		{name: "in", query: calls.Where(In("dnis", "1144", "1155")), want: []string{"c2", "c5"}},
-		{name: "two filters", query: calls.Where(Eq("dnis", "1133"), Gte("duration", 10)), want: []string{"c1", "c4"}},
-		{name: "two filters on one field", query: calls.Where(Gt("duration", 5), Lt("duration", 30)), want: []string{"c1", "c2"}},
-		{name: "exists", query: calls.Where(Exists("duration", true)), want: []string{"c1", "c2", "c3", "c4", "c5"}},
+		{name: "eq", query: calls.Query(Eq("status", "answered")), want: []string{"c1", "c2", "c4"}},
+		{name: "or", query: calls.Query(Or(Eq("status", "missed"), Eq("status", "failed"))), want: []string{"c3", "c5"}},
+		{name: "not", query: calls.Query(Not(Eq("status", "answered"))), want: []string{"c3", "c5"}},
+		{name: "in", query: calls.Query(In("dnis", "1144", "1155")), want: []string{"c2", "c5"}},
+		{name: "two filters", query: calls.Query(Eq("dnis", "1133"), Gte("duration", 10)), want: []string{"c1", "c4"}},
+		{name: "two filters on one field", query: calls.Query(Gt("duration", 5), Lt("duration", 30)), want: []string{"c1", "c2"}},
+		{name: "exists", query: calls.Query(Exists("duration", true)), want: []string{"c1", "c2", "c3", "c4", "c5"}},
 	}
 
 	for _, tc := range cases {
@@ -183,10 +183,10 @@ func TestRegexBodyJSON(t *testing.T) {
 		query *Query[Call]
 		want  string
 	}{
-		{"plain", calls.Where(Regex("status", "^an")), `{"where":{"status":{"$regex":"^an"}}}`},
-		{"options", calls.Where(Regex("status", "^an", IgnoreCase, DotAll)), `{"where":{"status":{"$options":"is","$regex":"^an"}}}`},
-		{"not", calls.Where(Not(Regex("status", "x"))), `{"where":{"$not":{"status":{"$regex":"x"}}}}`},
-		{"two on one field", calls.Where(Regex("a", "x"), Regex("a", "y")), `{"where":{"$and":[{"a":{"$regex":"x"}},{"a":{"$regex":"y"}}]}}`},
+		{"plain", calls.Query(Regex("status", "^an")), `{"query":{"status":{"$regex":"^an"}}}`},
+		{"options", calls.Query(Regex("status", "^an", IgnoreCase, DotAll)), `{"query":{"status":{"$options":"is","$regex":"^an"}}}`},
+		{"not", calls.Query(Not(Regex("status", "x"))), `{"query":{"$not":{"status":{"$regex":"x"}}}}`},
+		{"two on one field", calls.Query(Regex("a", "x"), Regex("a", "y")), `{"query":{"$and":[{"a":{"$regex":"x"}},{"a":{"$regex":"y"}}]}}`},
 	}
 
 	for _, tc := range cases {
@@ -210,12 +210,12 @@ func TestQueryRegex(t *testing.T) {
 		query *Query[Call]
 		want  []string
 	}{
-		{"prefix", calls.Where(Regex("status", "^an")), []string{"c1", "c2", "c4"}},
-		{"case sensitive", calls.Where(Regex("status", "^AN")), nil},
-		{"ignore case", calls.Where(Regex("status", "^AN", IgnoreCase)), []string{"c1", "c2", "c4"}},
-		{"not", calls.Where(Not(Regex("status", "^an"))), []string{"c3", "c5"}},
-		{"with another filter", calls.Where(Regex("dnis", "^11[34]"), Gte("duration", 10)), []string{"c1", "c2", "c4"}},
-		{"number field never matches", calls.Where(Regex("duration", "0")), nil},
+		{"prefix", calls.Query(Regex("status", "^an")), []string{"c1", "c2", "c4"}},
+		{"case sensitive", calls.Query(Regex("status", "^AN")), nil},
+		{"ignore case", calls.Query(Regex("status", "^AN", IgnoreCase)), []string{"c1", "c2", "c4"}},
+		{"not", calls.Query(Not(Regex("status", "^an"))), []string{"c3", "c5"}},
+		{"with another filter", calls.Query(Regex("dnis", "^11[34]"), Gte("duration", 10)), []string{"c1", "c2", "c4"}},
+		{"number field never matches", calls.Query(Regex("duration", "0")), nil},
 	}
 
 	for _, tc := range cases {
@@ -240,7 +240,7 @@ func TestQueryRegexInvalid(t *testing.T) {
 	calls := seedCalls(t)
 
 	for _, f := range []Filter{Regex("status", "("), Regex("status", "a(?=b)"), Regex("status", "a", RegexOption("g"))} {
-		if _, err := calls.Where(f).All(context.Background()); !errors.Is(err, ErrInvalidQuery) {
+		if _, err := calls.Query(f).All(context.Background()); !errors.Is(err, ErrInvalidQuery) {
 			t.Fatalf("got %v, want ErrInvalidQuery", err)
 		}
 	}
@@ -250,7 +250,7 @@ func TestQuerySortLimitSkipFields(t *testing.T) {
 	ctx := context.Background()
 	calls := seedCalls(t)
 
-	got, err := calls.Where().Sort(Desc("duration")).Limit(2).Skip(1).All(ctx)
+	got, err := calls.Query().Sort(Desc("duration")).Limit(2).Skip(1).All(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +259,7 @@ func TestQuerySortLimitSkipFields(t *testing.T) {
 		t.Fatalf("sort+limit+skip: got %v, want %v", ids(got), want)
 	}
 
-	fields, err := calls.Where(Eq("_id", "c3")).Fields("status").All(ctx)
+	fields, err := calls.Query(Eq("_id", "c3")).Fields("status").All(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func TestQueryFirstAndCount(t *testing.T) {
 	ctx := context.Background()
 	calls := seedCalls(t)
 
-	first, err := calls.Where(Eq("status", "missed")).First(ctx)
+	first, err := calls.Query(Eq("status", "missed")).First(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,11 +282,11 @@ func TestQueryFirstAndCount(t *testing.T) {
 		t.Fatalf("first: got %s, want c3", first.CallID)
 	}
 
-	if _, err := calls.Where(Eq("status", "none")).First(ctx); !errors.Is(err, ErrNotFound) {
+	if _, err := calls.Query(Eq("status", "none")).First(ctx); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("first with no row: want ErrNotFound, got %v", err)
 	}
 
-	total, err := calls.Where(Eq("status", "answered")).Count(ctx)
+	total, err := calls.Query(Eq("status", "answered")).Count(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +295,7 @@ func TestQueryFirstAndCount(t *testing.T) {
 		t.Fatalf("count: got %d, want 3", total)
 	}
 
-	total, err = calls.Where(Eq("status", "answered")).Limit(1).Count(ctx)
+	total, err = calls.Query(Eq("status", "answered")).Limit(1).Count(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +311,7 @@ func TestQueryIterStopsEarly(t *testing.T) {
 
 	var seen []string
 
-	for c, err := range calls.Where().Sort(Asc("_id")).Iter(ctx) {
+	for c, err := range calls.Query().Sort(Asc("_id")).Each(ctx) {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -332,7 +332,7 @@ func TestQueryPageAndCursor(t *testing.T) {
 	ctx := context.Background()
 	calls := seedCalls(t)
 
-	page, err := calls.Where().Sort(Asc("_id")).Page(2, 2).All(ctx)
+	page, err := calls.Query().Sort(Asc("_id")).Page(2, 2).All(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +346,7 @@ func TestQueryPageAndCursor(t *testing.T) {
 	cursor := ""
 
 	for range 10 {
-		q := calls.Where().Sort(Asc("_id")).Limit(2)
+		q := calls.Query().Sort(Asc("_id")).Limit(2)
 
 		if cursor != "" {
 			q.After(cursor)
@@ -375,13 +375,13 @@ func TestCursorBoundToQuery(t *testing.T) {
 	ctx := context.Background()
 	calls := seedCalls(t)
 
-	q := calls.Where().Sort(Asc("_id")).Limit(2)
+	q := calls.Query().Sort(Asc("_id")).Limit(2)
 
 	if _, err := q.All(ctx); err != nil {
 		t.Fatal(err)
 	}
 
-	other := calls.Where().Sort(Desc("_id")).Limit(2).After(q.NextCursor())
+	other := calls.Query().Sort(Desc("_id")).Limit(2).After(q.NextCursor())
 
 	if _, err := other.All(ctx); !errors.Is(err, ErrCursorMismatch) {
 		t.Fatalf("cursor for another sort: want ErrCursorMismatch, got %v", err)

@@ -23,24 +23,24 @@ func TestPattern(t *testing.T) {
 		{{ID: "a1", At: 1, Lvl: "info"}, {ID: "a2", At: 3, Lvl: "error"}},
 		{{ID: "b1", At: 2, Lvl: "error"}, {ID: "b2", At: 4, Lvl: "info"}},
 	} {
-		part, err := Collection[logLine](ctx, db, base+string(rune('1'+i)))
+		part, err := Collection[logLine](db, base+string(rune('1'+i)))
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		if _, err := part.Insert(ctx, docs...); err != nil {
+		if _, err := part.InsertMany(ctx, docs); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	logs, err := Pattern[logLine](db, base+"*")
+	logs, err := Collection[logLine](db, base+"*")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var got []string
 
-	for row, err := range logs.Where().Sort(Desc("at")).Limit(1).Iter(ctx) {
+	for row, err := range logs.Query().Sort(Desc("at")).Limit(1).Each(ctx) {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -54,7 +54,7 @@ func TestPattern(t *testing.T) {
 		t.Fatalf("rows = %v, want %v", got, want)
 	}
 
-	n, err := logs.Where(Eq("lvl", "error")).Count(ctx)
+	n, err := logs.Query(Eq("lvl", "error")).Count(ctx)
 	if err != nil || n != 2 {
 		t.Fatalf("count = %d, %v", n, err)
 	}

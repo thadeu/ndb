@@ -17,12 +17,12 @@ func TestExpireInInsertAndUpdate(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, daemon.unix)
 
-	sessions, err := Collection[Session](ctx, db, newColl())
+	sessions, err := Collection[Session](db, newColl())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := sessions.InsertWith(ctx, []Session{{ID: "a", User: "u1"}, {ID: "b"}}, ExpireIn(time.Hour)); err != nil {
+	if _, err := sessions.InsertMany(ctx, []Session{{ID: "a", User: "u1"}, {ID: "b"}}, ExpireIn(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -31,7 +31,7 @@ func TestExpireInInsertAndUpdate(t *testing.T) {
 		t.Fatalf("ttl a = %v %v %v", left, expires, err)
 	}
 
-	if _, err := sessions.Update(ctx, Eq("_id", "a"), Ops{"$set": {"user": "u2"}}, ExpireIn(30*time.Minute)); err != nil {
+	if _, err := sessions.UpdateBy(ctx, Eq("_id", "a"), Ops{"$set": {"user": "u2"}}, ExpireIn(30*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -45,7 +45,7 @@ func TestExpirePersistTTL(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, daemon.unix)
 
-	sessions, err := Collection[Session](ctx, db, newColl())
+	sessions, err := Collection[Session](db, newColl())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,12 +99,12 @@ func TestExpireWithoutExpiresField(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, daemon.unix)
 
-	calls, err := Collection[Call](ctx, db, newColl())
+	calls, err := Collection[Call](db, newColl())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := calls.InsertWith(ctx, []Call{{CallID: "c1"}}, ExpireIn(time.Hour)); !errors.Is(err, ErrTTLNotEnabled) {
+	if _, err := calls.InsertMany(ctx, []Call{{CallID: "c1"}}, ExpireIn(time.Hour)); !errors.Is(err, ErrTTLNotEnabled) {
 		t.Fatalf("insert expire_in = %v", err)
 	}
 

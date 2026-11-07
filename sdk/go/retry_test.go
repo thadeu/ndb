@@ -51,7 +51,7 @@ func TestRetryWaitsForDaemonToStart(t *testing.T) {
 		_ = cmd.Wait()
 	})
 
-	resp, err := db.do(context.Background(), http.MethodGet, "/health", nil)
+	resp, err := db.do(context.Background(), http.MethodGet, "/_health", nil)
 	if err != nil {
 		t.Fatalf("want success after the daemon starts: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestRetryDeadlineKeepsErrorClass(t *testing.T) {
 
 	db := openTest(t, "tcp://"+srv.Listener.Addr().String(), WithReadyTimeout(200*time.Millisecond))
 
-	_, err := db.do(context.Background(), http.MethodGet, "/health", nil)
+	_, err := db.do(context.Background(), http.MethodGet, "/_health", nil)
 	if !errors.Is(err, ErrNotReady) {
 		t.Fatalf("want ErrNotReady, got %v", err)
 	}
@@ -118,7 +118,7 @@ func TestRetryDisabledAndCancelled(t *testing.T) {
 
 	off := openTest(t, "tcp://"+srv.Listener.Addr().String(), WithReadyTimeout(0))
 
-	if _, err := off.do(context.Background(), http.MethodGet, "/health", nil); !errors.Is(err, ErrNotReady) {
+	if _, err := off.do(context.Background(), http.MethodGet, "/_health", nil); !errors.Is(err, ErrNotReady) {
 		t.Fatalf("want ErrNotReady, got %v", err)
 	}
 
@@ -132,7 +132,7 @@ func TestRetryDisabledAndCancelled(t *testing.T) {
 	defer cancel()
 
 	start := time.Now()
-	_, err := on.do(ctx, http.MethodGet, "/health", nil)
+	_, err := on.do(ctx, http.MethodGet, "/_health", nil)
 
 	if err == nil || time.Since(start) > 2*time.Second {
 		t.Fatalf("want a prompt error, got %v after %v", err, time.Since(start))
@@ -190,7 +190,7 @@ func TestRetryRepeatsReadDroppedAfterSend(t *testing.T) {
 	addr, conns := dropServer(t)
 	db := openTest(t, addr, WithReadyTimeout(400*time.Millisecond))
 
-	_, err := db.do(context.Background(), http.MethodPost, "/v1/c/x/find", []byte(`{}`))
+	_, err := db.do(context.Background(), http.MethodPost, "/x/_search", []byte(`{}`))
 	if err == nil {
 		t.Fatal("want an error")
 	}

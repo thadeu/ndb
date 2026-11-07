@@ -136,12 +136,21 @@ func TestCollectionEnsuresOnFirstUse(t *testing.T) {
 	db := openTest(t, daemon.unix)
 	name := newColl()
 
-	if _, err := Collection[Call](context.Background(), db, name); err != nil {
+	calls, err := Collection[Call](db, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if db.ensured[name] {
+		t.Fatal("Collection must send nothing")
+	}
+
+	if _, err := calls.Count(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
 	if !db.ensured[name] {
-		t.Fatal("collection was not marked as ensured")
+		t.Fatal("the first call did not declare the collection")
 	}
 
 	def := catalogDef(t, db, name)
@@ -161,7 +170,7 @@ func TestInsertGetUpdateDelete(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, daemon.unix)
 
-	calls, err := Collection[Call](ctx, db, newColl())
+	calls, err := Collection[Call](db, newColl())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +190,7 @@ func TestInsertGetUpdateDelete(t *testing.T) {
 		t.Fatalf("get: got %+v", got)
 	}
 
-	res, err := calls.Update(ctx, And(Eq("_id", "c1"), Eq("_v", 1)), Ops{"$set": {"status": "done"}})
+	res, err := calls.UpdateBy(ctx, And(Eq("_id", "c1"), Eq("_v", 1)), Ops{"$set": {"status": "done"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,12 +199,12 @@ func TestInsertGetUpdateDelete(t *testing.T) {
 		t.Fatalf("update: got %+v", res)
 	}
 
-	res, err = calls.Update(ctx, And(Eq("_id", "c1"), Eq("_v", 1)), Ops{"$set": {"status": "stale"}})
+	res, err = calls.UpdateBy(ctx, And(Eq("_id", "c1"), Eq("_v", 1)), Ops{"$set": {"status": "stale"}})
 	if err != nil || res.Matched != 0 || res.Doc != nil {
 		t.Fatalf("stale update: want matched 0, got %+v, %v", res, err)
 	}
 
-	if _, err := calls.Update(ctx, Eq("_id", "c1"), Ops{"$unset": {"duration": true}}); err != nil {
+	if _, err := calls.UpdateBy(ctx, Eq("_id", "c1"), Ops{"$unset": {"duration": true}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -208,7 +217,7 @@ func TestInsertGetUpdateDelete(t *testing.T) {
 		t.Fatalf("after update: got %+v, want status done and duration unset", got)
 	}
 
-	if n, err := calls.Delete(ctx, Eq("_id", "c1")); err != nil || n != 1 {
+	if n, err := calls.DeleteBy(ctx, Eq("_id", "c1")); err != nil || n != 1 {
 		t.Fatalf("delete: n=%d err=%v", n, err)
 	}
 
@@ -221,7 +230,7 @@ func TestInsertDuplicateID(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, daemon.unix)
 
-	calls, err := Collection[Call](ctx, db, newColl())
+	calls, err := Collection[Call](db, newColl())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +244,7 @@ func TestInsertDuplicateID(t *testing.T) {
 	}
 }
 
-// catalogEntry is one collection of GET /v1/c.
+// catalogEntry is one collection of GET /_collections.
 type catalogEntry struct {
 	Name    string   `json:"name"`
 	ID      string   `json:"id"`
@@ -243,11 +252,11 @@ type catalogEntry struct {
 	Indexes []string `json:"indexes"`
 }
 
-// catalogDef returns the definition of one collection from GET /v1/c.
+// catalogDef returns the definition of one collection from GET /_collections.
 func catalogDef(t *testing.T, db *DB, name string) catalogEntry {
 	t.Helper()
 
-	resp, err := db.do(context.Background(), http.MethodGet, "/v1/c", nil)
+	resp, err := db.do(context.Background(), http.MethodGet, "/_collections", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,48 +319,48 @@ func TestUpdateManyUpsertAndGuards(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, daemon.unix)
 
-	stock, err := Collection[Stock](ctx, db, newColl())
+	stock, err := Collection[Stock](db, newColl())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := stock.Insert(ctx, Stock{SKU: "a", Group: "g1", Qty: 1}, Stock{SKU: "b", Group: "g1", Qty: 1}, Stock{SKU: "c", Group: "g2", Qty: 1}); err != nil {
+	if _, err := stock.InsertMany(ctx, []Stock{{SKU: "a", Group: "g1", Qty: 1}, {SKU: "b", Group: "g1", Qty: 1}, {SKU: "c", Group: "g2", Qty: 1}}); err != nil {
 		t.Fatal(err)
 	}
 
-	res, err := stock.Update(ctx, Eq("grp", "g1"), Ops{"$inc": {"qty": 4}}, Many())
+	res, err := stock.UpdateBy(ctx, Eq("grp", "g1"), Ops{"$inc": {"qty": 4}}, Many())
 	if err != nil || res.Matched != 2 || res.Modified != 2 || res.Doc != nil {
 		t.Fatalf("many: %+v, %v", res, err)
 	}
 
 	guard := And(Eq("_id", "c"), Gte("qty", 1))
 
-	if res, err := stock.Update(ctx, guard, Ops{"$inc": {"qty": -1}}); err != nil || res.Modified != 1 || res.Doc.Qty != 0 {
+	if res, err := stock.UpdateBy(ctx, guard, Ops{"$inc": {"qty": -1}}); err != nil || res.Modified != 1 || res.Doc.Qty != 0 {
 		t.Fatalf("first decrement: %+v, %v", res, err)
 	}
 
-	if res, err := stock.Update(ctx, guard, Ops{"$inc": {"qty": -1}}); err != nil || res.Matched != 0 {
+	if res, err := stock.UpdateBy(ctx, guard, Ops{"$inc": {"qty": -1}}); err != nil || res.Matched != 0 {
 		t.Fatalf("second decrement: %+v, %v", res, err)
 	}
 
-	res, err = stock.Update(ctx, Eq("_id", "new"), Ops{"$inc": {"qty": 2}, "$push": {"Tags": "x"}}, Upsert())
+	res, err = stock.UpdateBy(ctx, Eq("_id", "new"), Ops{"$inc": {"qty": 2}, "$push": {"Tags": "x"}}, Upsert())
 	if err != nil || res.Matched != 0 || res.Modified != 1 || res.Doc.Qty != 2 || len(res.Doc.Tags) != 1 {
 		t.Fatalf("upsert: %+v, %v", res, err)
 	}
 
-	_, err = stock.Update(ctx, Eq("qty", 5), Ops{"$set": {"qty": 6}}, Many())
+	_, err = stock.UpdateBy(ctx, Eq("qty", 5), Ops{"$set": {"qty": 6}}, Many())
 
 	if !errors.Is(err, ErrUnindexedMany) {
 		t.Fatalf("unindexed many: %v", err)
 	}
 
-	_, err = stock.Update(ctx, Eq("_id", "a"), Ops{"$set": {"qty": 1}, "$inc": {"qty": 1}})
+	_, err = stock.UpdateBy(ctx, Eq("_id", "a"), Ops{"$set": {"qty": 1}, "$inc": {"qty": 1}})
 
 	if !errors.Is(err, ErrConflictingUpdate) {
 		t.Fatalf("conflict: %v", err)
 	}
 
-	if n, err := stock.Delete(ctx, Eq("grp", "g1"), Many()); err != nil || n != 2 {
+	if n, err := stock.DeleteBy(ctx, Eq("grp", "g1"), Many()); err != nil || n != 2 {
 		t.Fatalf("delete many: n=%d err=%v", n, err)
 	}
 }
@@ -360,12 +369,12 @@ func TestUpdateRejectsPlainOperatorKeysBeforeSending(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, daemon.unix)
 
-	stock, err := Collection[Stock](ctx, db, newColl())
+	stock, err := Collection[Stock](db, newColl())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = stock.Update(ctx, Eq("_id", "a"), Ops{"set": {"qty": 1}})
+	_, err = stock.UpdateBy(ctx, Eq("_id", "a"), Ops{"set": {"qty": 1}})
 
 	if err == nil || !strings.Contains(err.Error(), "must start with $") {
 		t.Fatalf("got %v", err)

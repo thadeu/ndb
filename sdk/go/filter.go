@@ -7,7 +7,7 @@ import (
 	"maps"
 )
 
-// Filter is one condition of a Where. The filters of one Where are ANDed.
+// Filter is one condition of a Query. The filters of one Query are ANDed.
 // A Filter only holds JSON for the daemon; it does no matching itself.
 type Filter struct {
 	doc map[string]any
@@ -93,10 +93,10 @@ func Regex(field, pattern string, opts ...RegexOption) Filter {
 	return Filter{doc: map[string]any{field: cond}}
 }
 
-// And matches when every filter matches. A Filter argument of Update or
-// Delete is one filter; use And to give it several conditions.
+// And matches when every filter matches. The query of UpdateBy or DeleteBy
+// is one filter; use And to give it several conditions.
 func And(filters ...Filter) Filter {
-	return Filter{doc: whereOf(filters)}
+	return Filter{doc: queryOf(filters)}
 }
 
 // Or matches when at least one of the filters matches.
@@ -109,20 +109,21 @@ func Not(f Filter) Filter {
 	return Filter{doc: map[string]any{"$not": f.doc}}
 }
 
-// Raw is a where object built elsewhere, such as from a search form:
-// Raw(map[string]any{"status": map[string]any{"$in": []any{"a", "b"}}}). It
-// is sent as is; the daemon validates it. It combines with other filters
-// like any Filter.
-func Raw(where map[string]any) Filter {
-	return Filter{doc: where}
+// RawQuery is a query object built elsewhere, such as from a search form:
+// RawQuery(map[string]any{"status": map[string]any{"$in": []any{"a", "b"}}}).
+// It is sent as is; the daemon validates it. It combines with other
+// filters like any Filter.
+func RawQuery(query map[string]any) Filter {
+	return Filter{doc: query}
 }
 
-// RawJSON is Raw from JSON text: `{"status":"answered","at":{"$gte":"now-7d"}}`.
-// Numbers keep their exact text. It fails when where is not a JSON object.
-func RawJSON(where []byte) (Filter, error) {
-	doc, err := decodeObject(where)
+// RawQueryJSON is RawQuery from JSON text:
+// `{"status":"answered","at":{"$gte":"now-7d"}}`. Numbers keep their exact
+// text. It fails when the text is not a JSON object.
+func RawQueryJSON(query []byte) (Filter, error) {
+	doc, err := decodeObject(query)
 	if err != nil {
-		return Filter{}, fmt.Errorf("ndb: raw where: %w", err)
+		return Filter{}, fmt.Errorf("ndb: raw query: %w", err)
 	}
 
 	return Filter{doc: doc}, nil
@@ -165,7 +166,7 @@ func ElemMatch(field string, filters ...Filter) Filter {
 		fields = append(fields, f)
 	}
 
-	maps.Copy(inner, whereOf(fields))
+	maps.Copy(inner, queryOf(fields))
 
 	return operator(field, "$elemMatch", inner)
 }
@@ -174,9 +175,9 @@ func operator(field, name string, v any) Filter {
 	return Filter{doc: map[string]any{field: map[string]any{name: v}}}
 }
 
-// whereOf joins the filters into one where object. One JSON object cannot
+// queryOf joins the filters into one query object. One JSON object cannot
 // hold two values for one key, so two filters on the same key use $and.
-func whereOf(filters []Filter) map[string]any {
+func queryOf(filters []Filter) map[string]any {
 	out := map[string]any{}
 
 	for _, f := range filters {

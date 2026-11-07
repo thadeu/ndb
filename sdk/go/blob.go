@@ -23,7 +23,7 @@ type Blob struct {
 // content always gives the same reference. contentType is kept in the
 // reference.
 func (db *DB) PutBlob(ctx context.Context, r io.Reader, contentType string) (Blob, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, db.base+"/v1/blobs", r)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, db.base+"/_blobs", r)
 	if err != nil {
 		return Blob{}, err
 	}
@@ -52,7 +52,7 @@ func (db *DB) PutBlob(ctx context.Context, r io.Reader, contentType string) (Blo
 
 // GetBlob opens the content of b as a stream. The caller closes it.
 func (db *DB) GetBlob(ctx context.Context, b Blob) (io.ReadCloser, error) {
-	path := "/v1/blobs/" + url.PathEscape(b.Ref)
+	path := "/_blobs/" + url.PathEscape(b.Ref)
 
 	if b.Type != "" {
 		path += "?type=" + url.QueryEscape(b.Type)

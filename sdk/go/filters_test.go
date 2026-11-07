@@ -22,17 +22,14 @@ func TestElemMatchAndDateMath(t *testing.T) {
 		TS     time.Time `ndb:"ts,time"`
 	}
 
-	orders, err := Collection[order](ctx, db, newColl())
+	orders, err := Collection[order](db, newColl())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	now := time.Now().UTC()
 
-	if _, err := orders.Insert(ctx,
-		order{ID: "o1", Items: []item{{"a", 1}, {"b", 5}}, Scores: []int{5, 25}, TS: now.Add(-48 * time.Hour)},
-		order{ID: "o2", Items: []item{{"a", 3}}, Scores: []int{15}, TS: now.Add(-time.Minute)},
-	); err != nil {
+	if _, err := orders.InsertMany(ctx, []order{{ID: "o1", Items: []item{{"a", 1}, {"b", 5}}, Scores: []int{5, 25}, TS: now.Add(-48 * time.Hour)}, {ID: "o2", Items: []item{{"a", 3}}, Scores: []int{15}, TS: now.Add(-time.Minute)}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -41,7 +38,7 @@ func TestElemMatchAndDateMath(t *testing.T) {
 		"scalar elemMatch": ElemMatch("scores", Gte("", 10), Lt("", 20)),
 		"date math":        Gte("ts", "now-1d"),
 	} {
-		rows, err := orders.Where(f).All(ctx)
+		rows, err := orders.Query(f).All(ctx)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}

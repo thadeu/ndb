@@ -11,12 +11,12 @@ func TestTruncateAndDrop(t *testing.T) {
 	db := openTest(t, daemon.unix)
 	name := newColl()
 
-	calls, err := Collection[Call](ctx, db, name)
+	calls, err := Collection[Call](db, name)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := calls.Insert(ctx, Call{CallID: "c1", Status: "a"}, Call{CallID: "c2", Status: "b"}); err != nil {
+	if _, err := calls.InsertMany(ctx, []Call{{CallID: "c1", Status: "a"}, {CallID: "c2", Status: "b"}}); err != nil {
 		t.Fatal(err)
 	}
 

@@ -20,14 +20,14 @@ func watchColl(t *testing.T) (*Coll[Job], context.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	t.Cleanup(cancel)
 
-	db, err := Open(daemon.unix)
+	db, err := Connect(daemon.unix)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	t.Cleanup(db.Close)
 
-	c, err := Collection[Job](ctx, db, newColl())
+	c, err := Collection[Job](db, newColl())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestWatchDeleteEventHasZeroDocAndFromNow(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 
-	if _, err := c.Delete(ctx, Eq("_id", "j1")); err != nil {
+	if _, err := c.DeleteBy(ctx, Eq("_id", "j1")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -165,13 +165,13 @@ func TestWatchWhereDeliversOnlyMatchingEvents(t *testing.T) {
 
 	addJobs(t, ctx, c, 1, 2)
 
-	if _, err := c.Insert(ctx, Job{JobID: "j3", Status: "done"}, Job{JobID: "j4", Status: "pending"}); err != nil {
+	if _, err := c.InsertMany(ctx, []Job{{JobID: "j3", Status: "done"}, {JobID: "j4", Status: "pending"}}); err != nil {
 		t.Fatal(err)
 	}
 
 	var ids []string
 
-	for ev, err := range c.Watch(ctx, "only-done", WatchWhere(Eq("status", "done")), Limit(1)) {
+	for ev, err := range c.Watch(ctx, "only-done", WatchQuery(Eq("status", "done")), Limit(1)) {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -187,24 +187,24 @@ func TestWatchWhereDeliversOnlyMatchingEvents(t *testing.T) {
 func TestWatchWhereBadFilterIsInvalidQuery(t *testing.T) {
 	c, ctx := watchColl(t)
 
-	for _, err := range c.Watch(ctx, "bad", WatchWhere(Filter{doc: map[string]any{"status": map[string]any{"$bogus": 1}}})) {
+	for _, err := range c.Watch(ctx, "bad", WatchQuery(Filter{doc: map[string]any{"status": map[string]any{"$bogus": 1}}})) {
 		if !errors.Is(err, ErrInvalidQuery) {
 			t.Fatalf("err = %v, want ErrInvalidQuery", err)
 		}
 	}
 }
 
-func TestWatchBodyCarriesWhere(t *testing.T) {
+func TestWatchBodyCarriesQuery(t *testing.T) {
 	var b watchBody
 
-	WatchWhere(Eq("status", "done"), Gt("n", 2))(&b)
+	WatchQuery(Eq("status", "done"), Gt("n", 2))(&b)
 
 	raw, err := json.Marshal(b)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if string(raw) != `{"consumer":"","where":{"n":{"$gt":2},"status":"done"}}` {
+	if string(raw) != `{"consumer":"","query":{"n":{"$gt":2},"status":"done"}}` {
 		t.Fatalf("body = %s", raw)
 	}
 }

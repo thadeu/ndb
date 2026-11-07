@@ -12,8 +12,8 @@ import (
 
 func TestOpenRejectsUnknownAddress(t *testing.T) {
 	for _, addr := range []string{"http://127.0.0.1:7070", "unix://", "/run/ndb.sock"} {
-		if _, err := Open(addr); err == nil {
-			t.Errorf("Open(%q): want an error", addr)
+		if _, err := Connect(addr); err == nil {
+			t.Errorf("Connect(%q): want an error", addr)
 		}
 	}
 }
@@ -94,7 +94,7 @@ func TestFindStreamsRowsOverBothTransports(t *testing.T) {
 func TestKeepAliveReusesConnection(t *testing.T) {
 	db := openTest(t, daemon.unix)
 
-	first, err := db.do(context.Background(), http.MethodGet, "/health", nil)
+	first, err := db.do(context.Background(), http.MethodGet, "/_health", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestKeepAliveReusesConnection(t *testing.T) {
 
 	ctx := httptrace.WithClientTrace(context.Background(), trace)
 
-	second, err := db.do(ctx, http.MethodGet, "/health", nil)
+	second, err := db.do(ctx, http.MethodGet, "/_health", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestContextIsHonoured(t *testing.T) {
 
 	cancel()
 
-	_, err := db.do(ctx, http.MethodGet, "/health", nil)
+	_, err := db.do(ctx, http.MethodGet, "/_health", nil)
 
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("want context.Canceled, got %v", err)
@@ -144,9 +144,9 @@ func TestErrorsAreTyped(t *testing.T) {
 	rawPut(t, db, name, `{}`)
 	mustInsert(t, db, name, `[{"_id":"a","n":1}]`)
 
-	body := []byte(`{"_id":"a","$bogus":{"n":2}}`)
+	body := []byte(`{"query":{"_id":"a"},"update":{"$bogus":{"n":2}}}`)
 
-	_, err := db.do(context.Background(), http.MethodPost, collPath(name)+"/update", body)
+	_, err := db.do(context.Background(), http.MethodPost, collPath(name)+"/_update_by_query", body)
 
 	var apiErr *Error
 
@@ -170,7 +170,7 @@ func TestErrorsAreTyped(t *testing.T) {
 func TestUnknownCollectionError(t *testing.T) {
 	db := openTest(t, daemon.unix)
 
-	_, err := db.find(context.Background(), newColl(), []byte(`{}`))
+	_, err := db.do(context.Background(), http.MethodPost, collPath(newColl())+"/_search", []byte(`{}`))
 
 	if !errors.Is(err, ErrUnknownCollection) {
 		t.Fatalf("want ErrUnknownCollection, got %v", err)
@@ -181,7 +181,7 @@ func TestUnknownCollectionError(t *testing.T) {
 func rawFind(t *testing.T, db *DB, name, body string) []json.RawMessage {
 	t.Helper()
 
-	resp, err := db.find(context.Background(), name, []byte(body))
+	resp, err := db.do(context.Background(), http.MethodPost, collPath(name)+"/_search", []byte(body))
 	if err != nil {
 		t.Fatal(err)
 	}

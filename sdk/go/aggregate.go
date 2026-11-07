@@ -84,7 +84,7 @@ func AggregateAs[R, T any](ctx context.Context, c *Coll[T], p Pipeline, opts ...
 		return nil, err
 	}
 
-	resp, err := c.db.aggregate(ctx, c.name, raw)
+	resp, err := c.stream(ctx, "_aggregate", raw)
 	if err != nil {
 		return nil, err
 	}

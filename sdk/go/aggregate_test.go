@@ -14,7 +14,7 @@ func seedAggCalls(t *testing.T) (*Coll[Call], context.Context) {
 	ctx := context.Background()
 	db := openTest(t, daemon.unix)
 
-	c, err := Collection[Call](ctx, db, newColl())
+	c, err := Collection[Call](db, newColl())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func seedAggCalls(t *testing.T) (*Coll[Call], context.Context) {
 		})
 	}
 
-	if _, err := c.Insert(ctx, docs...); err != nil {
+	if _, err := c.InsertMany(ctx, docs); err != nil {
 		t.Fatal(err)
 	}
 
