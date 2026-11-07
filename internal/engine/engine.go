@@ -143,6 +143,10 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		}
 	}
 
+	db.gcWait.Add(1)
+
+	go db.sweepPartitionsLoop()
+
 	return db, nil
 }
 
@@ -267,6 +271,10 @@ func (db *DB) MaxLine(name string) int64 {
 // attach opens def if it is not open yet, or adds its indexes to the open
 // collection. The caller holds db.mu.
 func (db *DB) attach(def catalog.Def) error {
+	if def.PartitionBy != "" {
+		return nil // a logical collection: its partitions hold the data
+	}
+
 	if col, ok := db.cols[def.Name]; ok {
 		for _, f := range def.Indexes {
 			if err := col.rd.EnsureIndex(f); err != nil {

@@ -93,6 +93,8 @@ func (rt *router) match(r *http.Request, segs []string) ([]route, bool) {
 
 	routes, ok := table[key]
 
+	r.SetPathValue("action", key)
+
 	return routes, ok
 }
 

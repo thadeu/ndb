@@ -431,3 +431,8 @@ func (c *Collection) close() error {
 
 	return errors.Join(c.tail.Close(), c.mem.Close())
 }
+
+// Name is the collection name.
+func (c *Collection) Name() string {
+	return c.name
+}

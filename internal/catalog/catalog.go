@@ -52,19 +52,26 @@ type Def struct {
 
 	// LegacyID only exists to reject the removed "id" setting with a clear
 	// message. The primary key is always _id.
-	LegacyID      string     `json:"id,omitempty" yaml:"id"`
-	Time          string     `json:"time,omitempty" yaml:"time"`
-	Write         WriteMode  `json:"write,omitempty" yaml:"write"`
-	Path          string     `json:"path,omitempty" yaml:"path"`
-	Indexes       []string   `json:"indexes,omitempty" yaml:"indexes"`
-	Unique        []string   `json:"unique,omitempty" yaml:"unique"`
-	Durability    Durability `json:"durability,omitempty" yaml:"durability"`
-	Retention     string     `json:"retention,omitempty" yaml:"retention"`
-	WALRetention  string     `json:"wal_retention,omitempty" yaml:"wal_retention"`
-	TTL           string     `json:"ttl,omitempty" yaml:"ttl"`
-	ExpiresField  string     `json:"expires_field,omitempty" yaml:"expires_field"`
-	MaxLineSize   int64      `json:"max_line_size,omitempty" yaml:"-"`
-	BlobThreshold int64      `json:"blob_threshold,omitempty" yaml:"-"`
+	LegacyID     string     `json:"id,omitempty" yaml:"id"`
+	Time         string     `json:"time,omitempty" yaml:"time"`
+	Write        WriteMode  `json:"write,omitempty" yaml:"write"`
+	Path         string     `json:"path,omitempty" yaml:"path"`
+	Indexes      []string   `json:"indexes,omitempty" yaml:"indexes"`
+	Unique       []string   `json:"unique,omitempty" yaml:"unique"`
+	Durability   Durability `json:"durability,omitempty" yaml:"durability"`
+	Retention    string     `json:"retention,omitempty" yaml:"retention"`
+	WALRetention string     `json:"wal_retention,omitempty" yaml:"wal_retention"`
+	TTL          string     `json:"ttl,omitempty" yaml:"ttl"`
+	ExpiresField string     `json:"expires_field,omitempty" yaml:"expires_field"`
+	MaxLineSize  int64      `json:"max_line_size,omitempty" yaml:"-"`
+
+	// PartitionBy makes a logical collection that splits its documents by
+	// the period of the time field (day, week, month, year) into partitions
+	// named {name}-{period}. PartitionOf is set on each partition.
+	PartitionBy string `json:"partition_by,omitempty" yaml:"partition_by"`
+	PartitionOf string `json:"partition_of,omitempty" yaml:"-"`
+
+	BlobThreshold int64 `json:"blob_threshold,omitempty" yaml:"-"`
 
 	// OpsFromYAML: durability/retention were set by ndb.yml, so code
 	// declarations cannot change them.
@@ -295,6 +302,8 @@ func merge(cur, decl Def, src Source) (Def, error) {
 		{"expires_field", cur.ExpiresField, decl.ExpiresField, func(v string) { next.ExpiresField = v }},
 		{"write", string(cur.Write), string(decl.Write), func(v string) { next.Write = WriteMode(v) }},
 		{"path", cur.Path, decl.Path, func(v string) { next.Path = v }},
+		{"partition_by", cur.PartitionBy, decl.PartitionBy, func(v string) { next.PartitionBy = v }},
+		{"partition_of", cur.PartitionOf, decl.PartitionOf, func(v string) { next.PartitionOf = v }},
 	}
 
 	for _, f := range fixed {
@@ -357,6 +366,9 @@ func normIndexes(in []string) []string {
 	return slices.Compact(out)
 }
 
+// PartitionPeriods are the values of partition_by.
+var PartitionPeriods = []string{"day", "week", "month", "year"}
+
 var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
 // validateDecl checks one declaration on its own.
@@ -374,6 +386,10 @@ func validateDecl(d Def) error {
 		return fmt.Errorf("%w: max_line_size must be at most 16 MiB", ErrInvalid)
 	case slices.Contains(d.Indexes, "") || slices.Contains(d.Unique, ""):
 		return fmt.Errorf("%w: empty index field", ErrInvalid)
+	case d.PartitionBy != "" && !slices.Contains(PartitionPeriods, d.PartitionBy):
+		return fmt.Errorf("%w: partition_by must be day, week, month or year", ErrInvalid)
+	case d.PartitionBy != "" && len(d.Name) > 53:
+		return fmt.Errorf("%w: a partitioned name has at most 53 characters (the period is added)", ErrInvalid)
 	}
 
 	return validateDurations(d)
@@ -412,6 +428,10 @@ func validateFinal(d Def) error {
 		return fmt.Errorf("%w: set ttl or expires_field, not both", ErrInvalid)
 	case d.TTL != "" && d.Time == "":
 		return fmt.Errorf("%w: ttl needs a time field", ErrInvalid)
+	case d.PartitionBy != "" && d.Time == "":
+		return fmt.Errorf("%w: partition_by needs a time field", ErrInvalid)
+	case d.PartitionBy != "" && d.Write == Direct:
+		return fmt.Errorf("%w: partition_by is for engine mode", ErrInvalid)
 	}
 
 	return nil

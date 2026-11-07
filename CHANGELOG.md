@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Partitioned collections: `partition_by: day | week | month | year` (with `time`) makes a logical collection whose documents go to one partition per period (`calls-2026-11`), created at first use. Reads (`_search`, `_count`, `_aggregate`) go over every live partition; writes go to the partition of the time field; routes by id find the partition that holds the id; update and delete by query run on each partition. With `retention`, a partition whose period ended more than `retention` ago leaves reads at once and a background sweep drops it. See [Partitioned collections](docs/dev/http/collections.md#partitioned-collections).
+
 ## [1.0.0] - 2026-11-07
 
 ndb 1.0 is the stable API. It breaks the 0.x API on purpose, with no compatibility layer: the routes take the shape of Elasticsearch (`/{coll}/_search`), the body keeps the query language of MongoDB, and the SDKs share one vocabulary. Upgrade the daemon, the SDKs and the console together. The data directory, the WAL and backups do not change.

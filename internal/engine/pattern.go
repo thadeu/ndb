@@ -2,6 +2,9 @@ package engine
 
 import (
 	"context"
+	"time"
+
+	"github.com/thadeu/ndb/internal/catalog"
 	"regexp"
 	"slices"
 	"strings"
@@ -106,6 +109,11 @@ func (db *DB) readPattern(pattern string, read func([]collection.Named) (collect
 		return collection.Page{}, err
 	}
 
+	return db.readNames(names, read)
+}
+
+// readNames holds the named collections for the call (see readPattern).
+func (db *DB) readNames(names []string, read func([]collection.Named) (collection.Page, error)) (collection.Page, error) {
 	cols := make([]collection.Named, 0, len(names))
 
 	for _, name := range names {
@@ -130,4 +138,37 @@ func emptyPage(count bool) collection.Page {
 	}
 
 	return page
+}
+
+// FindPartitioned is a find over the live partitions of a logical
+// collection. Each row has _coll, the name of its partition.
+func (db *DB) FindPartitioned(ctx context.Context, def catalog.Def, body []byte) (collection.Page, error) {
+	return db.readNames(db.Partitions(def, true, time.Now()), func(cols []collection.Named) (collection.Page, error) {
+		if len(cols) == 0 {
+			q, err := query.Parse(body, query.Options{TimeField: def.Time})
+			if err != nil {
+				return collection.Page{}, err
+			}
+
+			return emptyPage(q.Count), nil
+		}
+
+		return collection.FindMany(ctx, def.Name, cols, body)
+	})
+}
+
+// AggregatePartitioned runs a pipeline over the live partitions.
+func (db *DB) AggregatePartitioned(ctx context.Context, def catalog.Def, body []byte) (collection.Page, error) {
+	return db.readNames(db.Partitions(def, true, time.Now()), func(cols []collection.Named) (collection.Page, error) {
+		if len(cols) == 0 {
+			p, err := agg.Parse(body, agg.Options{TimeField: def.Time})
+			if err != nil {
+				return collection.Page{}, err
+			}
+
+			return emptyPage(p.Count), nil
+		}
+
+		return collection.AggregateMany(ctx, cols, body)
+	})
 }

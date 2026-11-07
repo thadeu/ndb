@@ -22,6 +22,7 @@ Creates the collection, or merges the definition into it (`ensure_collection`). 
 | `expires_field` | string | none | the field that holds the expiry time of each document |
 | `max_line_size` | bytes | 1 MiB | the largest document and request body |
 | `blob_threshold` | bytes | none | a string field longer than this goes to the blob store |
+| `partition_by` | string | none | `day`, `week`, `month` or `year`: a [partitioned collection](#partitioned-collections); needs `time` |
 
 **Merge rules:** `indexes` and `unique` are united; a different `write`, `path` or `time` is `409 catalog_conflict`; the key `id` is `400 catalog_invalid` (the key is always `_id`); `ndb.yml` wins for `durability`, `retention` and `wal_retention`. See [Collection keys](../configuration.md#collection-keys).
 
@@ -246,3 +247,38 @@ curl --unix-socket /run/ndb/ndb.sock 'http://ndb/logs/_quarantine?limit=20'
 ```
 
 `ndb quarantine <coll>` (CLI) prints the same.
+
+## Partitioned collections
+
+With `partition_by`, the collection is **logical**: it has a definition and no data. Its documents live in partitions, one per period of the `time` field, named `{coll}-{period}`:
+
+| `partition_by` | Partition of 2026-11-07 |
+|---|---|
+| `day` | `calls-2026-11-07` |
+| `week` | `calls-2026-w45` (ISO week) |
+| `month` | `calls-2026-11` |
+| `year` | `calls-2026` |
+
+```bash
+curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/calls \
+  -d '{"time":"ts","indexes":["status"],"partition_by":"month","retention":"180d"}'
+# {"definition":{...},"partitions":[]}
+```
+
+You call the logical name, and ndb picks the partitions:
+
+| Route on `/{coll}` | What happens |
+|---|---|
+| `_doc`, `_bulk` (and upsert) | each document goes to the partition of its time field, created at first use with the definition of the logical collection. A document without the time field (an RFC 3339 string) is `400 invalid_doc`. |
+| `_search`, `_count`, `_aggregate` | read every live partition, like a [collection pattern](queries.md#collection-patterns); each row has `_coll` |
+| `_doc/{id}`, `_update/{id}`, `_expire/{id}`, `_persist/{id}`, `_ttl/{id}` | go to the partition that holds the id (newest first). An upsert of a new id goes to the partition of the time field of its operators, or of now. |
+| `_update_by_query`, `_delete_by_query` | run on every live partition, newest first; without `many`, stop at the first partition that matched |
+| `PUT /{coll}`, `_indexes/{field}` | change the logical definition and every partition |
+| `GET /{coll}` | the definition and the partitions; `_stats`: rows and stats of each partition |
+| `DELETE /{coll}?confirm=`, `_truncate?confirm=` | drop every partition (a drop also removes the definition) |
+| `_watch`, `_ack`, `_compact`, `_quarantine` | `400 not_supported`: call one partition |
+
+- **Retention:** with `retention`, a partition whose period **ended** more than `retention` ago leaves every read at once, and a background sweep (every minute) drops it, which costs a few ms for any size. A month partition with `"retention": "180d"` goes about six months after the month ends.
+- **Partitions are collections:** you can read, compact or watch one by its name (`/calls-2026-11/_search`), or a period range with a pattern (`/calls-2026-*`).
+- **`unique` is per partition**: two partitions can hold the same value. A `_bulk` that spans partitions writes one transaction per partition.
+- `partition_by` cannot change after the collection exists (`409 catalog_conflict`), and needs engine mode.

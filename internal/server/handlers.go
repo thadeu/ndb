@@ -495,6 +495,12 @@ func (s *Server) ensure(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
+	if final.PartitionBy != "" {
+		s.writePartitioned(w, db, final)
+
+		return
+	}
+
 	col, err := db.Get(name)
 	if err != nil {
 		writeError(w, err)

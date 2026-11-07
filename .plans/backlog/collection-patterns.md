@@ -100,6 +100,10 @@ GET  /v1/c/logs-*                  the list of matched collections
 
 ## Later (not in this step)
 
+> Automatic partitions: done after 1.0 (`partition_by` + `retention`), see
+> `internal/engine/partition.go` and docs/dev/http/collections.md.
+
+
 - `watch` on a pattern (one stream, one consumer position per collection).
 - Automatic partitions: `partition_by: month` + `retention: 6mo` in `ndb.yml`;
   ndb creates the next collection and drops the old ones.

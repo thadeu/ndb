@@ -158,6 +158,8 @@ func (s *Server) readyOr(one, many handler) http.HandlerFunc {
 
 		if engine.IsPattern(r.PathValue("coll")) {
 			fn = many
+		} else if s.partitioned(w, r, db) {
+			return
 		}
 
 		if fn == nil {
