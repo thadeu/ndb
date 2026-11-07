@@ -121,12 +121,13 @@ Accept: application/x-ndjson           {"_id":"c1","status":"answered"}
   (absent on the last page), `X-Ndb-Total` (with `count: true`),
   `X-Ndb-Plan`, `X-Ndb-Examined`, `X-Ndb-Took-Ms` (new), `X-Ndb-Explain`
   (with `explain: true`).
-- `Access-Control-Expose-Headers` lists the `X-Ndb-*` headers, so `fetch`
-  in a browser (the console) can read them.
+- No CORS: the daemon is called by servers (apps, the console server, the
+  CLI), never by a browser directly, so it sends no CORS headers. The
+  console reads the `X-Ndb-*` headers on its server side.
 - Rows of a pattern carry `_coll`, in both formats.
 - Why JSON by default: the server builds the page in memory anyway
   (`collection.Page.Rows`), so NDJSON saves little on a page, and a JSON
-  array is what `fetch(...).json()`, curl and Postman expect. NDJSON stays
+  array is what `res.json()`, curl and Postman expect. NDJSON stays
   for exports and `jq` (`ndb query -json`). `_watch` stays NDJSON: it is a
   real stream.
 
@@ -243,6 +244,39 @@ docs/dev/http/errors.md        /http/errors      the error body and every code, 
 - **llms.txt / llms-full.txt:** add `docs/dev/http` to `docsRoots` in
   `docs-site/.vitepress/config.ts`. `docs/dev/ui` is missing there today;
   add it too.
+- **The HTTP pages are the contract of ndb with the world.** Every rule of
+  the protocol is written there, not only the routes. Anything the daemon
+  does on the wire and that a client can see must be on these pages; a
+  behavior that is not written is a bug in the docs. The Overview page
+  covers, each in its own section:
+  - **Transport:** HTTP/1.1, unix socket and TCP (`listen.tcp`), keep-alive,
+    the host name on a socket, no TLS in the daemon (put a proxy in front).
+  - **Auth:** the bearer token on TCP (`-token-file`), none on the socket,
+    `401 unauthorized`, `403 forbidden` (backup over TCP).
+  - **Requests:** `Content-Type: application/json`, UTF-8, one JSON object
+    per body, unknown keys are errors, the body limit (`max_line_size`,
+    `413 request_too_large`), numbers (64-bit floats; big integers keep
+    their text in documents), times (RFC 3339 on the `time` field, date
+    math), ids (UUIDv7 when absent, the `_id` rules).
+  - **Answers:** JSON or NDJSON by `Accept`, the shape of rows (`_id`,
+    `_v`, `_coll`), every `X-Ndb-*` header with its meaning, status codes.
+  - **Order and pagination:** sort, the id tie-break, insertion order,
+    `skip`/`limit`/`after`, cursors bound to the query, `snapshot`.
+  - **Consistency:** a write is acked after the WAL (durability modes), a
+    read after an ack sees the write, one write is atomic, a `many` write is
+    atomic per record, optimistic `_v` guards.
+  - **Readiness and retries:** `503 not_ready` while recovering, `503
+    closed` on shutdown, `499 canceled`; which routes are safe to retry
+    (reads, `_doc/{id}` GET) and which are not (writes, unless guarded),
+    what the SDKs retry.
+  - **Streams:** `_watch` is NDJSON; heartbeat lines and their interval,
+    how a stream ends (truncate, drop, shutdown, client gone), resume with
+    `from` and `_ack`.
+  - **Limits:** every cap in one table (body size, regex 1 KiB, group table
+    memory, pattern 256 collections, snapshot TTL 60 s, names 64 chars).
+  - **Versioning:** no version in the path; how breaking changes ship
+    (major release, CHANGELOG migration table).
+  - **No CORS:** the daemon is for servers; browsers go through an app.
 - `query.md`, `aggregate.md` and `watch.md` keep the language (operators,
   stages, events) and link to the HTTP pages for the routes, so a route is
   described in one place only.
