@@ -196,9 +196,56 @@ Changes per SDK:
 - **Spec cases** (`spec/cases`): shared by the SDK suites; `where` →
   `query`, routes, JSON rows.
 - **Smoke and golden tests** (`test/`).
-- **Docs:** `http-api.md` rewritten from the tables above; `query.md`,
-  `watch.md`, `aggregate.md`, `operations.md`, the client guides, the
-  deploy recipes (`curl` health checks), the `llms.txt` build, the README.
+- **Docs:** `query.md`, `watch.md`, `aggregate.md`, `operations.md`, the
+  client guides, the deploy recipes (`curl` health checks), the README. The
+  HTTP reference becomes its own tab (below).
+
+## Docs: an HTTP tab next to UI
+
+The route groups of this plan (system, collection, documents, queries,
+watch) are how people and AI agents look for a route. The HTTP reference
+gets its own tab in the docs site, next to UI, with one page per group.
+`docs/dev/http-api.md` is removed; its content moves here.
+
+```
+docs/dev/http.md               /http             Overview
+docs/dev/http/system.md        /http/system      _health _metrics _collections _stats _size _backup _blobs
+docs/dev/http/collections.md   /http/collections PUT GET DELETE /{coll}, _truncate, _indexes, _stats, _compact, _quarantine
+docs/dev/http/documents.md     /http/documents   _doc _bulk _update/{id} _expire _persist _ttl
+docs/dev/http/queries.md       /http/queries     _search _count _aggregate _update_by_query _delete_by_query, patterns
+docs/dev/http/watch.md         /http/watch       _watch _ack
+docs/dev/http/errors.md        /http/errors      the error body and every code, with its status
+```
+
+- **Overview (`/http`):** the rules of this plan (`_` namespace, ids after
+  `_doc`, query vs search, `update` apart from `query`, options in the body,
+  `_v`), unix socket and TCP, the token, the two answer formats and the
+  `X-Ndb-*` headers, and one table of every route that links to its page.
+- **One template per route,** the same on every page, so a person can scan
+  it and an agent can parse it:
+
+  ```
+  ### POST /{coll}/_search
+  One line: what it does.
+  | Body key | Type | Default | Meaning |
+  Answer: shape + headers.
+  Errors: the codes this route can return (links to /http/errors).
+  curl example, then the same call in Go, Ruby, TS (code group).
+  ```
+
+- **Navigation:** `docs-site/.vitepress/nav.ts` gets a tab `{ id: 'http',
+  text: 'HTTP', link: '/http' }` next to `ui`, with groups Start (Overview,
+  Errors) and Routes (System, Collections, Documents, Queries, Watch). The
+  Daemon tab "HTTP API" and "Errors" links point to `/http` and
+  `/http/errors`. The Query tab links follow the renames (`find` → search).
+- **Site config:** a rewrite `'docs/dev/http/:page.md': 'http/:page.md'`, as
+  for `ui`.
+- **llms.txt / llms-full.txt:** add `docs/dev/http` to `docsRoots` in
+  `docs-site/.vitepress/config.ts`. `docs/dev/ui` is missing there today;
+  add it too.
+- `query.md`, `aggregate.md` and `watch.md` keep the language (operators,
+  stages, events) and link to the HTTP pages for the routes, so a route is
+  described in one place only.
 
 ## Order of work
 
@@ -210,7 +257,8 @@ Changes per SDK:
 3. Spec cases.
 4. Go SDK, then TS, then Ruby (new `Collection`), then Rails.
 5. Console.
-6. Docs, CHANGELOG (a migration table old → new), release 1.0.0.
+6. Docs: the HTTP tab (pages, nav, rewrites, llms roots), then the other
+   pages; CHANGELOG (a migration table old → new); release 1.0.0.
 
 Each step ends green (`go test ./...`, the SDK suites, the console tests)
 before the next.
