@@ -1,6 +1,8 @@
 package collection
 
 import (
+	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/thadeu/ndb/internal/fs"
@@ -17,6 +19,22 @@ type segRef struct {
 
 	path string
 	fs   fs.FS
+
+	// ids, keys (secondary index fields) and uniq (unique fields) are the
+	// key files of the segment (sealed.go). keys gains a field when an index
+	// built later reaches this segment; the map is changed under
+	// Collection.mu.
+	ids  *segment.Keys
+	keys map[string]*segment.Keys
+	uniq map[string]*segment.Keys
+
+	// live has the rows that are the current version of their document, and
+	// nlive counts them. gen counts the changes to live, and saved is the gen
+	// that meta.bolt holds. All four are guarded by Collection.mu.
+	live  bitset
+	nlive int
+	gen   uint64
+	saved uint64
 
 	mu      sync.Mutex
 	refs    int
@@ -75,8 +93,61 @@ func (r *segRef) finished() bool {
 }
 
 func (r *segRef) remove() {
-	r.Reader.Close()
+	r.closeFiles()
 	r.fs.Remove(r.path)
+
+	removeSidecars(r.fs, r.path)
+}
+
+// closeFiles closes the segment and its key files.
+func (r *segRef) closeFiles() {
+	r.Reader.Close()
+
+	if r.ids != nil {
+		r.ids.Close()
+	}
+
+	for _, k := range r.keys {
+		k.Close()
+	}
+
+	for _, k := range r.uniq {
+		k.Close()
+	}
+}
+
+// attachIndex opens the index file of field, when it exists.
+func (r *segRef) attachIndex(fsys fs.FS, field string) error {
+	k, err := segment.OpenKeys(fsys, indexPath(r.path, field))
+
+	if isNotExist(err) {
+		return nil
+	}
+
+	if err != nil {
+		return err
+	}
+
+	r.keys[field] = k
+
+	return nil
+}
+
+// removeSidecars deletes the key files of the segment at path.
+func removeSidecars(fsys fs.FS, path string) {
+	dir := filepath.Dir(path)
+	prefix := filepath.Base(sidecarBase(path)) + "."
+
+	entries, err := fsys.ReadDir(dir)
+	if err != nil {
+		return
+	}
+
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), prefix) && e.Name() != filepath.Base(path) {
+			fsys.Remove(filepath.Join(dir, e.Name()))
+		}
+	}
 }
 
 // holdSegments takes a reference on every live segment. The caller holds

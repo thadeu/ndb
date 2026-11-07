@@ -38,7 +38,7 @@ func (s source) release() {
 type segSnap struct {
 	r      segment.Reader
 	groups []segment.Group
-	live   []uint64
+	live   bitset
 }
 
 // part is the result of one unit: its top-k rows, the matches, and the counters.
@@ -48,36 +48,21 @@ type part struct {
 	ex    Explain
 }
 
-// scanSource takes the memtable entries and the live bits. It runs under
-// c.mu.RLock.
+// scanSource takes the memtable entries and a copy of the live bits of each
+// segment. It runs under c.mu.RLock.
 func (c *Collection) scanSource() source {
-	src := source{plan: "scan"}
-	index := map[segment.Reader]int{}
-
-	if c.seal != nil {
-		for i, r := range c.seal.readers {
-			index[r] = i
-
-			src.segs = append(src.segs, segSnap{
-				r:      r,
-				groups: r.Groups(),
-				live:   make([]uint64, (r.Len()+63)/64),
-			})
-		}
-	}
+	src := source{plan: "scan", cands: make([]cand, 0, len(c.durable.docs))}
 
 	for id, e := range c.durable.docs {
-		if e.doc != nil {
-			src.cands = append(src.cands, cand{id, e})
+		src.cands = append(src.cands, cand{id, e})
+	}
 
-			continue
-		}
+	if c.seal == nil {
+		return src
+	}
 
-		i, ok := index[e.loc.seg]
-
-		if ok {
-			setLive(src.segs[i].live, e.loc.row)
-		}
+	for _, r := range c.seal.readers {
+		src.segs = append(src.segs, segSnap{r: r, groups: r.Groups(), live: r.live.clone()})
 	}
 
 	return src

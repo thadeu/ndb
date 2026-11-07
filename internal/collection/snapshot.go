@@ -33,7 +33,7 @@ func WriteSnapshot(fsys fs.FS, dir string, def catalog.Def, tx uint64, rows []se
 
 	s.meta = db
 
-	cp := checkpoint{Pos: recovery.Position{Tx: tx}, Next: 1}
+	cp := checkpoint{Pos: recovery.Position{Tx: tx}, Next: 1, Format: formatSidecars}
 
 	if len(rows) == 0 {
 		return db.Update(func(t *bolt.Tx) error {
@@ -51,18 +51,29 @@ func WriteSnapshot(fsys fs.FS, dir string, def catalog.Def, tx uint64, rows []se
 		})
 	}
 
-	data, info, err := s.enc.Encode(rows, def.Indexes)
+	const name = "000000.parquet"
+
+	info, err := segment.PublishRows(fsys, s.path(name), segment.RowsOf(rows), def.Indexes)
 	if err != nil {
 		return err
 	}
 
-	const name = "000000.parquet"
+	c := &Collection{def: def, seal: s}
 
-	if err := segment.Publish(fsys, s.path(name), data); err != nil {
+	if err := c.writeSidecars(s.path(name), c.declaredFields(), snapRows(rows)); err != nil {
 		return err
 	}
 
-	cp.Segments = []string{name}
+	live := newBitset(len(rows))
 
-	return s.commit(info, name, cp)
+	for i, r := range rows {
+		if !r.Del {
+			live.set(i)
+		}
+	}
+
+	cp.Segments = []string{name}
+	cp.Format = formatSidecars
+
+	return s.commit(info, name, cp, map[string][]byte{name: live.bytes()})
 }

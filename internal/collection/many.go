@@ -117,10 +117,10 @@ func (c *Collection) skipRead(m *manyCursor, cd cand, vq *query.Query) bool {
 	}
 
 	c.mu.RLock()
-	same := c.durable.docs[cd.id] == cd.e
+	cur, ok := c.durable.get(cd.id)
 	c.mu.RUnlock()
 
-	return same
+	return ok && sameVersion(cur, cd.e)
 }
 
 // recordBudget is the size of ops one record of a many write takes, half

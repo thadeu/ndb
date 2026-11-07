@@ -15,7 +15,7 @@ type docCache struct {
 	mu  sync.Mutex
 	max int
 	ll  *list.List
-	idx map[*entry]*list.Element
+	idx map[any]*list.Element
 }
 
 type cached struct {
@@ -35,7 +35,7 @@ func newDocCache(n int) *docCache {
 		n = defaultDocCache
 	}
 
-	return &docCache{max: n, ll: list.New(), idx: map[*entry]*list.Element{}}
+	return &docCache{max: n, ll: list.New(), idx: map[any]*list.Element{}}
 }
 
 // get returns the cached document of e and marks it as recently used.
@@ -48,7 +48,7 @@ func (d *docCache) get(e *entry) (cached, bool) {
 
 	defer d.mu.Unlock()
 
-	el, ok := d.idx[e]
+	el, ok := d.idx[cacheKey(e)]
 
 	if !ok {
 		return cached{}, false
@@ -69,18 +69,28 @@ func (d *docCache) put(c cached) {
 
 	defer d.mu.Unlock()
 
-	if el, ok := d.idx[c.e]; ok {
+	if el, ok := d.idx[cacheKey(c.e)]; ok {
 		d.ll.MoveToFront(el)
 
 		return
 	}
 
-	d.idx[c.e] = d.ll.PushFront(c)
+	d.idx[cacheKey(c.e)] = d.ll.PushFront(c)
 
 	if d.ll.Len() > d.max {
 		last := d.ll.Back()
 
 		d.ll.Remove(last)
-		delete(d.idx, last.Value.(cached).e)
+		delete(d.idx, cacheKey(last.Value.(cached).e))
 	}
+}
+
+// cacheKey names one version of a document: the memtable entry, or the
+// segment row of a sealed one (a lookup makes a new stub each time).
+func cacheKey(e *entry) any {
+	if e.loc != nil {
+		return *e.loc
+	}
+
+	return e
 }

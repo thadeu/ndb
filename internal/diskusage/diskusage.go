@@ -107,6 +107,21 @@ func scanCollections(dir string) ([]Collection, error) {
 	return out, nil
 }
 
+// countSuffix counts the files of dir whose name ends with suffix. The key
+// files next to each segment are counted in its bytes, not as segments.
+func countSuffix(dir, suffix string) int {
+	entries, _ := os.ReadDir(dir)
+	n := 0
+
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), suffix) {
+			n++
+		}
+	}
+
+	return n
+}
+
 // ScanCollection sorts the files of one collection dir: *.ndjson are WAL
 // files, segments/ holds the segments, the rest (meta.bolt) is meta.
 func ScanCollection(dir, name string) Collection {
@@ -121,7 +136,7 @@ func ScanCollection(dir, name string) Collection {
 		switch {
 		case e.IsDir() && e.Name() == "segments":
 			c.Bytes.Segments += size
-			c.SegmentFiles += files
+			c.SegmentFiles += countSuffix(path, ".parquet")
 		case strings.HasSuffix(e.Name(), ".ndjson"):
 			c.Bytes.WAL += size
 			c.WALFiles += files

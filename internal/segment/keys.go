@@ -29,7 +29,7 @@ import (
 //	         (keysFooter bytes)
 
 const (
-	keyBlock    = 64
+	keyBlock    = 128
 	keysMagic   = "NDBK"
 	keysFooter  = 4 + 1 + 8*6
 	bloomBits   = 10

@@ -613,3 +613,100 @@ func TestReinsertAfterSealedDelete(t *testing.T) {
 		t.Fatalf("rows = %d, want 5", len(rowsOfAll(t, c)))
 	}
 }
+
+func TestSegmentsOfAnOlderVersionAreMigratedOnce(t *testing.T) {
+	root := t.TempDir()
+	c := openSealed(t, root, collection.Config{})
+
+	insertN(t, c, 0, 50)
+	mustSeal(t, c)
+	update(t, c, "c0003", "moved")
+	remove(t, c, "c0004")
+	mustSeal(t, c)
+
+	want := rowsOf(t, c)
+
+	closeOnce(c)
+
+	if err := collection.MakeLegacy(root); err != nil {
+		t.Fatal(err)
+	}
+
+	c = openSealed(t, root, collection.Config{})
+
+	sameRows(t, want, rowsOf(t, c))
+
+	if n := c.Len(); n != 49 {
+		t.Fatalf("len after migration = %d, want 49", n)
+	}
+
+	c = reopen(t, c, root, collection.Config{})
+
+	sameRows(t, want, rowsOf(t, c))
+}
+
+func TestChangesToSealedRowsSurviveARestartWithoutSeal(t *testing.T) {
+	root := t.TempDir()
+	c := openSealed(t, root, collection.Config{})
+
+	insertN(t, c, 0, 30)
+	mustSeal(t, c)
+
+	update(t, c, "c0003", "moved")
+	remove(t, c, "c0004")
+	insertN(t, c, 30, 35)
+
+	want := rowsOf(t, c)
+
+	c = reopen(t, c, root, collection.Config{})
+
+	sameRows(t, want, rowsOf(t, c))
+
+	if n := c.Len(); n != 34 {
+		t.Fatalf("len = %d, want 34", n)
+	}
+
+	if _, ok := c.Get("c0004"); ok {
+		t.Fatal("a deleted sealed row came back")
+	}
+}
+
+func TestIndexAddedLaterBuildsKeyFilesForSealedSegments(t *testing.T) {
+	root := t.TempDir()
+	c := openSealed(t, root, collection.Config{})
+
+	insertN(t, c, 0, 40)
+	mustSeal(t, c)
+	insertN(t, c, 40, 50)
+
+	if err := c.EnsureIndex("n"); err != nil {
+		t.Fatal(err)
+	}
+
+	waitFor(t, func() bool {
+		for _, ix := range c.Indexes() {
+			if ix.Field == "n" {
+				return ix.State == "ready"
+			}
+		}
+
+		return false
+	})
+
+	q, _ := c.ParseQuery([]byte(`{"query":{"n":{"$gte":35,"$lt":45}},"count":true}`))
+
+	page, err := c.Query(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if page.Plan != "index:n" || *page.Total != 10 {
+		t.Fatalf("plan %q total %d, want index:n and 10", page.Plan, *page.Total)
+	}
+
+	files, _ := filepath.Glob(filepath.Join(root, "segments", "*.i.6e"))
+
+	if len(files) != 1 {
+		t.Fatalf("key files of n: %v", files)
+	}
+}

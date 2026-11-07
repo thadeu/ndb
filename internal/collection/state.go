@@ -9,8 +9,9 @@ import (
 	"github.com/thadeu/ndb/internal/wal"
 )
 
-// entry is immutable. A memtable entry holds doc. A sealed entry has doc nil:
-// its bytes are in the segment at loc, and uniq keeps its unique keys.
+// entry is immutable. A memtable entry holds doc. A sealed entry (a stub
+// made by a lookup, sealed.go) has doc nil: its bytes are in the segment at
+// loc.
 type entry struct {
 	v   uint64
 	doc json.RawMessage
@@ -22,8 +23,7 @@ type entry struct {
 	// tx is the WAL transaction of the last change.
 	tx uint64
 
-	loc  *location
-	uniq map[string]string
+	loc *location
 }
 
 type location struct {
@@ -44,13 +44,12 @@ func (e *entry) raw() (json.RawMessage, error) {
 
 // key returns the canonical value of a unique field.
 func (e *entry) key(field string) (string, bool) {
-	if e.doc == nil {
-		k, ok := e.uniq[field]
-
-		return k, ok
+	raw, err := e.raw()
+	if err != nil {
+		return "", false
 	}
 
-	return uniqueKey(e.doc, field)
+	return uniqueKey(raw, field)
 }
 
 func uniqueKeys(doc json.RawMessage, fields []string) map[string]string {
@@ -65,14 +64,20 @@ func uniqueKeys(doc json.RawMessage, fields []string) map[string]string {
 	return out
 }
 
-// state is documents by id plus the unique indexes (field → value → id).
+// state is the memtable documents by id plus their unique values (field →
+// value → id). With segments, a document that is not in docs is looked up in
+// them (sealed), unless it was deleted since the last seal (gone).
 type state struct {
 	docs   map[string]*entry
 	unique map[string]map[string]string
+
+	gone   map[string]struct{}
+	sealed func(id string) (*entry, bool)
+	owners func(field, key string) []string
 }
 
 func newState(uniqueFields []string) *state {
-	s := &state{docs: map[string]*entry{}, unique: map[string]map[string]string{}}
+	s := &state{docs: map[string]*entry{}, unique: map[string]map[string]string{}, gone: map[string]struct{}{}}
 
 	for _, f := range uniqueFields {
 		s.unique[f] = map[string]string{}
@@ -91,11 +96,26 @@ func (s *state) apply(op wal.Op) {
 	s.put(op.ID, &entry{v: op.V, doc: op.Doc})
 }
 
+// get returns the current version of id: the memtable, then the segments.
+func (s *state) get(id string) (*entry, bool) {
+	if e, ok := s.docs[id]; ok {
+		return e, true
+	}
+
+	if _, deleted := s.gone[id]; deleted || s.sealed == nil {
+		return nil, false
+	}
+
+	return s.sealed(id)
+}
+
 // put sets the entry of id, replacing the old one and its unique keys.
 func (s *state) put(id string, e *entry) {
 	if old, ok := s.docs[id]; ok {
 		s.unindex(id, old)
 	}
+
+	delete(s.gone, id)
 
 	s.docs[id] = e
 	s.index(id, e)
@@ -107,6 +127,62 @@ func (s *state) remove(id string) {
 	}
 
 	delete(s.docs, id)
+
+	if s.sealed != nil {
+		s.gone[id] = struct{}{}
+	}
+}
+
+// release takes a memtable entry out after a seal wrote it: its id is now
+// found in the segment.
+func (s *state) release(id string) {
+	if old, ok := s.docs[id]; ok {
+		s.unindex(id, old)
+		delete(s.docs, id)
+	}
+}
+
+// shrink copies the maps into new ones: a Go map keeps its buckets when
+// entries leave, and a seal takes almost every entry out.
+func (s *state) shrink() {
+	s.docs = clone(s.docs)
+	s.gone = clone(s.gone)
+
+	for f, idx := range s.unique {
+		s.unique[f] = clone(idx)
+	}
+}
+
+func clone[K comparable, V any](m map[K]V) map[K]V {
+	out := make(map[K]V, len(m))
+
+	for k, v := range m {
+		out[k] = v
+	}
+
+	return out
+}
+
+// owner returns the id whose current version holds key in the unique field:
+// the memtable first, then the sealed rows, checked against get.
+func (s *state) owner(field, key string, get func(string) (*entry, bool)) string {
+	if id := s.unique[field][key]; id != "" {
+		return id
+	}
+
+	if s.owners == nil {
+		return ""
+	}
+
+	for _, id := range s.owners(field, key) {
+		if cur, ok := get(id); ok {
+			if k, ok := cur.key(field); ok && k == key {
+				return id
+			}
+		}
+	}
+
+	return ""
 }
 
 func (s *state) index(id string, e *entry) {
@@ -187,9 +263,7 @@ func (v *view) get(id string) (*entry, bool) {
 		return e, e != nil
 	}
 
-	e, ok := v.head.docs[id]
-
-	return e, ok
+	return v.head.get(id)
 }
 
 func (v *view) uniqueOwner(field, key string) string {
@@ -199,7 +273,7 @@ func (v *view) uniqueOwner(field, key string) string {
 		}
 	}
 
-	return v.head.unique[field][key]
+	return v.head.owner(field, key, v.get)
 }
 
 func (v *view) setOwner(field, key, id string) {

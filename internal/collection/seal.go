@@ -1,6 +1,7 @@
 package collection
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,12 +10,14 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
 
 	"github.com/thadeu/ndb/internal/fs"
+	"github.com/thadeu/ndb/internal/index"
 	"github.com/thadeu/ndb/internal/recovery"
 	"github.com/thadeu/ndb/internal/segment"
 	"github.com/thadeu/ndb/internal/writer"
@@ -46,8 +49,13 @@ const (
 var (
 	bucketSegments   = []byte("segments")
 	bucketCheckpoint = []byte("checkpoint")
+	bucketLiveBits   = []byte("live_bits")
 	keyLive          = []byte("live")
 )
+
+// formatSidecars is the checkpoint format whose segments have key files and
+// saved live bits (M16). An older checkpoint is migrated once at open.
+const formatSidecars = 2
 
 type sealer struct {
 	dir   string
@@ -82,6 +90,7 @@ type checkpoint struct {
 	Pos      recovery.Position `json:"pos"`
 	Segments []string          `json:"segments"`
 	Next     int               `json:"next"`
+	Format   int               `json:"format,omitempty"`
 }
 
 type sealItem struct {
@@ -92,15 +101,20 @@ type sealItem struct {
 }
 
 type sealSnap struct {
-	pos   recovery.Position
-	items []sealItem
-	rows  []segment.Row
-	uniq  []map[string]string
-	tombs map[string]uint64
+	pos    recovery.Position
+	items  []sealItem
+	rows   []segment.Row
+	tombs  map[string]uint64
+	fields []indexField
+
+	// bits are the live bits that changed since meta.bolt saved them, as of
+	// the capture; gens is the gen of each such segment.
+	bits map[string][]byte
+	gens map[*segRef]uint64
 }
 
-// openSegments opens meta.bolt and the live segments, and makes their rows
-// the durable state. It returns the WAL position to replay from.
+// openSegments opens meta.bolt, the live segments, their key files and their
+// live bits. It returns the WAL position to replay from.
 func (c *Collection) openSegments(cfg Config) (recovery.Position, error) {
 	s := &sealer{
 		dir:   cfg.Data,
@@ -120,6 +134,10 @@ func (c *Collection) openSegments(cfg Config) (recovery.Position, error) {
 	s.setDefaults()
 
 	c.seal = s
+
+	for _, st := range []*state{c.head, c.durable} {
+		st.sealed, st.owners = c.sealedGet, c.sealedOwners
+	}
 
 	if err := cfg.FS.MkdirAll(filepath.Join(cfg.Data, segmentDir)); err != nil {
 		return recovery.Position{}, err
@@ -143,14 +161,8 @@ func (c *Collection) openSegments(cfg Config) (recovery.Position, error) {
 			return recovery.Position{}, err
 		}
 
-		r := newSegRef(raw, cfg.FS, s.path(name))
-
-		s.readers = append(s.readers, r)
+		s.readers = append(s.readers, newSegRef(raw, cfg.FS, s.path(name)))
 		s.names = append(s.names, name)
-
-		if err := c.loadSegment(r); err != nil {
-			return recovery.Position{}, err
-		}
 	}
 
 	s.next = cp.Next
@@ -159,7 +171,101 @@ func (c *Collection) openSegments(cfg Config) (recovery.Position, error) {
 		return recovery.Position{}, err
 	}
 
+	fields := c.declaredFields()
+
+	if cp.Format < formatSidecars && len(cp.Segments) > 0 {
+		if err := c.migrate(fields, cp); err != nil {
+			return recovery.Position{}, err
+		}
+	}
+
+	if err := c.loadSidecars(fields); err != nil {
+		return recovery.Position{}, err
+	}
+
 	return cp.Pos, nil
+}
+
+// declaredFields are the index fields of the definition, which every
+// segment written by this version has.
+func (c *Collection) declaredFields() []indexField {
+	out := make([]indexField, 0, len(c.def.Indexes))
+
+	for _, f := range c.def.Indexes {
+		out = append(out, indexField{name: f, isTime: f == c.def.Time})
+	}
+
+	return out
+}
+
+// loadSidecars opens the key files and reads the live bits of every segment.
+func (c *Collection) loadSidecars(fields []indexField) error {
+	s := c.seal
+
+	bits, err := readLiveBits(s.meta)
+	if err != nil {
+		return err
+	}
+
+	for i, r := range s.readers {
+		if err := c.openSidecars(r, fields); err != nil {
+			return err
+		}
+
+		raw, ok := bits[s.names[i]]
+		if !ok {
+			return fmt.Errorf("segment %s: no live bits in %s", s.names[i], metaFile)
+		}
+
+		r.live = bitsetOf(raw)
+		r.nlive = r.live.count()
+		c.rd.seq = max(c.rd.seq, r.ids.MaxSeq())
+	}
+
+	return nil
+}
+
+func readLiveBits(db *bolt.DB) (map[string][]byte, error) {
+	out := map[string][]byte{}
+
+	err := db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketLiveBits)
+
+		if b == nil {
+			return nil
+		}
+
+		return b.ForEach(func(k, v []byte) error {
+			out[string(k)] = bytes.Clone(v)
+
+			return nil
+		})
+	})
+
+	return out, err
+}
+
+// putLiveBits writes the live bits of the named segments in a bolt
+// transaction, and deletes the bits of gone.
+func putLiveBits(tx *bolt.Tx, bits map[string][]byte, gone []string) error {
+	b, err := tx.CreateBucketIfNotExists(bucketLiveBits)
+	if err != nil {
+		return err
+	}
+
+	for _, name := range gone {
+		if err := b.Delete([]byte(name)); err != nil {
+			return err
+		}
+	}
+
+	for name, raw := range bits {
+		if err := b.Put([]byte(name), raw); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (s *sealer) setDefaults() {
@@ -184,8 +290,9 @@ func (s *sealer) path(name string) string {
 	return filepath.Join(s.dir, segmentDir, name)
 }
 
-// removeOrphans deletes the files of segmentDir that the checkpoint does not
-// name: tmp files and segments of a seal that did not commit.
+// removeOrphans deletes the files of segmentDir that belong to no segment of
+// the checkpoint: tmp files, and the files of a seal or a compaction that did
+// not commit.
 func (s *sealer) removeOrphans(live []string) error {
 	paths, err := filepath.Glob(filepath.Join(s.dir, segmentDir, "*"))
 	if err != nil {
@@ -195,11 +302,13 @@ func (s *sealer) removeOrphans(live []string) error {
 	keep := map[string]bool{}
 
 	for _, name := range live {
-		keep[s.path(name)] = true
+		keep[strings.TrimSuffix(name, ".parquet")] = true
 	}
 
 	for _, p := range paths {
-		if keep[p] {
+		base, _, _ := strings.Cut(filepath.Base(p), ".")
+
+		if keep[base] && !strings.HasSuffix(p, ".tmp") {
 			continue
 		}
 
@@ -211,35 +320,77 @@ func (s *sealer) removeOrphans(live []string) error {
 	return nil
 }
 
-// loadSegment makes the rows of r the state of their ids, as sealed entries.
-// Rows are read in file order: a later row replaces an earlier one, and a
-// tombstone removes the id.
-func (c *Collection) loadSegment(r segment.Reader) error {
-	return r.Entries(func(row int, rec segment.Row) error {
-		if rec.Del {
-			c.head.remove(rec.ID)
-			c.durable.remove(rec.ID)
+// migrate gives the segments of an older version their key files and live
+// bits, once. It reads every row id, so it needs memory for one map of the
+// ids; the next opens do not.
+func (c *Collection) migrate(fields []indexField, cp checkpoint) error {
+	s := c.seal
+
+	type at struct {
+		seg, row int
+		del      bool
+	}
+
+	latest := map[string]at{}
+
+	for si, r := range s.readers {
+		err := r.Entries(func(row int, rec segment.Row) error {
+			latest[rec.ID] = at{seg: si, row: row, del: rec.Del}
 
 			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	bits := map[string][]byte{}
+
+	for si, r := range s.readers {
+		live := newBitset(r.Len())
+
+		for _, a := range latest {
+			if a.seg == si && !a.del {
+				live.set(a.row)
+			}
 		}
 
-		e := &entry{v: rec.V, seq: rec.Seq, tx: rec.Tx, loc: &location{seg: r, row: row}}
+		if err := c.writeSidecars(r.path, fields, segmentRows(r)); err != nil {
+			return err
+		}
 
-		if len(c.def.Unique) > 0 {
-			raw, err := r.Raw(row)
-			if err != nil {
-				return err
+		bits[s.names[si]] = live.bytes()
+	}
+
+	cp.Format = formatSidecars
+
+	return s.meta.Update(func(tx *bolt.Tx) error {
+		if err := putLiveBits(tx, bits, nil); err != nil {
+			return err
+		}
+
+		return putCheckpoint(tx, cp)
+	})
+}
+
+// segmentRows reads the rows of a segment for its key files.
+func segmentRows(r segment.Reader) func(fn func(sideRow) error) error {
+	return func(fn func(sideRow) error) error {
+		return r.Entries(func(row int, rec segment.Row) error {
+			sr := sideRow{row: row, id: rec.ID, v: rec.V, seq: rec.Seq, tx: rec.Tx, del: rec.Del}
+
+			if !rec.Del {
+				raw, err := r.Raw(row)
+				if err != nil {
+					return err
+				}
+
+				sr.doc = raw
 			}
 
-			e.uniq = uniqueKeys(raw, c.def.Unique)
-		}
-
-		c.head.put(rec.ID, e)
-		c.durable.put(rec.ID, e)
-		c.rd.seq = max(c.rd.seq, rec.Seq)
-
-		return nil
-	})
+			return fn(sr)
+		})
+	}
 }
 
 func readCheckpoint(db *bolt.DB) (checkpoint, error) {
@@ -264,8 +415,9 @@ func readCheckpoint(db *bolt.DB) (checkpoint, error) {
 	return cp, err
 }
 
-// commit writes the segment info and the checkpoint in one transaction.
-func (s *sealer) commit(info segment.Info, name string, cp checkpoint) error {
+// commit writes the segment info, the live bits that changed and the
+// checkpoint in one transaction.
+func (s *sealer) commit(info segment.Info, name string, cp checkpoint, bits map[string][]byte) error {
 	return s.meta.Update(func(tx *bolt.Tx) error {
 		segs, err := tx.CreateBucketIfNotExists(bucketSegments)
 		if err != nil {
@@ -281,18 +433,26 @@ func (s *sealer) commit(info segment.Info, name string, cp checkpoint) error {
 			return err
 		}
 
-		cps, err := tx.CreateBucketIfNotExists(bucketCheckpoint)
-		if err != nil {
+		if err := putLiveBits(tx, bits, nil); err != nil {
 			return err
 		}
 
-		cpJSON, err := json.Marshal(cp)
-		if err != nil {
-			return err
-		}
-
-		return cps.Put(keyLive, cpJSON)
+		return putCheckpoint(tx, cp)
 	})
+}
+
+func putCheckpoint(tx *bolt.Tx, cp checkpoint) error {
+	cps, err := tx.CreateBucketIfNotExists(bucketCheckpoint)
+	if err != nil {
+		return err
+	}
+
+	cpJSON, err := json.Marshal(cp)
+	if err != nil {
+		return err
+	}
+
+	return cps.Put(keyLive, cpJSON)
 }
 
 // Seal writes the memtable to one new segment and releases the bytes of its
@@ -324,31 +484,76 @@ func (c *Collection) Seal() error {
 		return nil
 	}
 
-	snap.uniq = c.uniqueOf(snap.items)
-
 	name := fmt.Sprintf("%06d.parquet", s.next)
+	path := s.path(name)
 
-	info, err := segment.PublishRows(s.fs, s.path(name), segment.RowsOf(snap.rows), c.def.Indexes)
+	info, err := segment.PublishRows(s.fs, path, segment.RowsOf(snap.rows), c.def.Indexes)
 	if err != nil {
 		return err
 	}
 
-	raw, err := segment.Open(s.fs, s.path(name))
+	if err := c.writeSidecars(path, snap.fields, snapRows(snap.rows)); err != nil {
+		return err
+	}
+
+	reader, err := c.openSegment(name, snap.fields)
 	if err != nil {
 		return err
 	}
 
-	reader := newSegRef(raw, s.fs, s.path(name))
+	for i, r := range snap.rows {
+		if !r.Del {
+			reader.live.set(i)
+			reader.nlive++
+		}
+	}
 
-	cp := checkpoint{Pos: snap.pos, Segments: append(slices.Clone(s.names), name), Next: s.next + 1}
+	snap.bits[name] = reader.live.bytes()
 
-	if err := s.commit(info, name, cp); err != nil {
-		reader.Close()
+	cp := checkpoint{Pos: snap.pos, Segments: append(slices.Clone(s.names), name), Next: s.next + 1, Format: formatSidecars}
+
+	if err := s.commit(info, name, cp, snap.bits); err != nil {
+		reader.closeFiles()
 
 		return err
 	}
 
 	return c.adopt(snap, reader, name)
+}
+
+// openSegment opens a new segment and its key files, with no live row yet.
+func (c *Collection) openSegment(name string, fields []indexField) (*segRef, error) {
+	s := c.seal
+
+	raw, err := segment.Open(s.fs, s.path(name))
+	if err != nil {
+		return nil, err
+	}
+
+	r := newSegRef(raw, s.fs, s.path(name))
+
+	if err := c.openSidecars(r, fields); err != nil {
+		r.closeFiles()
+
+		return nil, err
+	}
+
+	r.live = newBitset(r.Len())
+
+	return r, nil
+}
+
+// snapRows are the rows of a seal, for its key files.
+func snapRows(rows []segment.Row) func(fn func(sideRow) error) error {
+	return func(fn func(sideRow) error) error {
+		for i, r := range rows {
+			if err := fn(sideRow{row: i, id: r.ID, v: r.V, seq: r.Seq, tx: r.Tx, del: r.Del, doc: r.Raw}); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
 }
 
 // capture runs on the writer goroutine, so the memtable is the state after
@@ -367,9 +572,7 @@ func (c *Collection) capture() (sealSnap, error) {
 		var items []sealItem
 
 		for id, e := range c.durable.docs {
-			if e.doc != nil {
-				items = append(items, sealItem{id: id, e: e})
-			}
+			items = append(items, sealItem{id: id, e: e})
 		}
 
 		for id, tx := range c.tombs {
@@ -388,9 +591,28 @@ func (c *Collection) capture() (sealSnap, error) {
 		for i, it := range items {
 			snap.rows[i] = rowOf(it, c.tombs)
 		}
+
+		snap.fields = c.indexFields()
+		snap.bits, snap.gens = c.changedBits()
 	})
 
 	return snap, err
+}
+
+// changedBits copies the live bits that changed since meta.bolt saved them.
+// The caller holds c.mu.
+func (c *Collection) changedBits() (map[string][]byte, map[*segRef]uint64) {
+	bits := map[string][]byte{}
+	gens := map[*segRef]uint64{}
+
+	for i, r := range c.seal.readers {
+		if r.gen != r.saved {
+			bits[c.seal.names[i]] = r.live.bytes()
+			gens[r] = r.gen
+		}
+	}
+
+	return bits, gens
 }
 
 // sealOrder puts tombstones first, then rows in insertion order.
@@ -420,26 +642,10 @@ func rowOf(it sealItem, tombs map[string]uint64) segment.Row {
 	return segment.Row{ID: it.id, V: it.e.v, Seq: it.e.seq, Tx: it.e.tx, Raw: it.e.doc}
 }
 
-// uniqueOf returns the unique keys of each row, for the stubs.
-func (c *Collection) uniqueOf(items []sealItem) []map[string]string {
-	out := make([]map[string]string, len(items))
-
-	if len(c.def.Unique) == 0 {
-		return out
-	}
-
-	for i, it := range items {
-		if it.e != nil {
-			out[i] = uniqueKeys(it.e.doc, c.def.Unique)
-		}
-	}
-
-	return out
-}
-
-// adopt runs on the writer goroutine. It makes the segment live and turns
-// the captured entries into stubs. An entry that changed after the capture
-// keeps its memtable version; a tombstone that was captured is cleared.
+// adopt runs on the writer goroutine. It makes the segment live and takes
+// the sealed documents out of the memtable. A document that changed after
+// the capture keeps its memtable version, and its row in the segment is not
+// live; a tombstone that was captured is cleared.
 func (c *Collection) adopt(snap sealSnap, r *segRef, name string) error {
 	err := c.w.Run(func(writer.Pos) {
 		c.mu.Lock()
@@ -458,15 +664,18 @@ func (c *Collection) adopt(snap sealSnap, r *segRef, name string) error {
 				continue
 			}
 
-			stub := &entry{v: it.e.v, seq: it.e.seq, tx: it.e.tx, loc: &location{seg: r, row: i}, uniq: snap.uniq[i]}
-
 			if c.durable.docs[it.id] == it.e {
-				c.durable.docs[it.id] = stub
+				c.unindexMem(it.id, it.e)
+				c.durable.release(it.id)
 				c.memBytes -= int64(len(it.e.doc))
+			} else {
+				r.live.clear(i)
+				r.nlive--
+				r.gen++
 			}
 
 			if cur := c.head.docs[it.id]; cur != nil && cur.v == it.e.v {
-				c.head.docs[it.id] = stub
+				c.head.release(it.id)
 			}
 		}
 
@@ -474,14 +683,45 @@ func (c *Collection) adopt(snap sealSnap, r *segRef, name string) error {
 			if c.tombs[id] == tx {
 				delete(c.tombs, id)
 			}
+
+			delete(c.durable.gone, id)
+			delete(c.head.gone, id)
 		}
+
+		for seg, gen := range snap.gens {
+			seg.saved = gen
+		}
+
+		c.durable.shrink()
+		c.head.shrink()
+		c.tombs = clone(c.tombs)
 	})
 
 	if err != nil {
-		r.Close()
+		r.closeFiles()
 	}
 
 	return err
+}
+
+// unindexMem removes a memtable document from the secondary indexes of the
+// memtable. The caller holds c.mu for writing.
+func (c *Collection) unindexMem(id string, e *entry) {
+	if len(c.rd.idx) == 0 {
+		return
+	}
+
+	m := c.decodeEntry(e)
+
+	if m == nil {
+		return
+	}
+
+	for _, s := range c.rd.idx {
+		for _, k := range index.Keys(m, s.field, s.isTime) {
+			s.mem.Remove(k, id)
+		}
+	}
 }
 
 // Segments is the number of live segments.
@@ -573,7 +813,7 @@ func (c *Collection) closeSegments() {
 	}
 
 	for _, r := range s.readers {
-		r.Reader.Close()
+		r.closeFiles()
 	}
 
 	s.readers = nil

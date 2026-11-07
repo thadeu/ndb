@@ -1,6 +1,7 @@
 package collection
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,7 +15,6 @@ import (
 	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/query"
 	"github.com/thadeu/ndb/internal/segment"
-	"github.com/thadeu/ndb/internal/wal"
 	"github.com/thadeu/ndb/internal/writer"
 )
 
@@ -23,61 +23,96 @@ import (
 // older segment needs, and rows that are expired or past the retention.
 //
 // A compaction of the run names[lo:hi] has five steps, serialized with Seal:
-//  1. plan, on the writer goroutine: the live entries that point into the run.
-//  2. build the merged segment from them, with no lock held; writes go on.
-//  3. publish the file (tmp + fsync + rename + fsync dir).
+//  1. plan, on the writer goroutine: the live rows of the run (live bits).
+//  2. build the merged segment and its key files, with no lock held; writes
+//     go on.
+//  3. publish the files (tmp + fsync + rename + fsync dir).
 //  4. commit: one bolt transaction replaces the run by the new segment in the
-//     checkpoint. The WAL position of the checkpoint does not change.
-//  5. swap, on the writer goroutine: the stubs that still point into the run
-//     point to the new segment, and the run is retired. A retired segment
-//     closes and its file goes when the last query that holds it ends
-//     (segref.go).
+//     checkpoint, with its live bits. The WAL position does not change.
+//  5. swap, on the writer goroutine: the new segment takes the place of the
+//     run, and its live bits drop the rows that changed since step 1. The
+//     run is retired: a retired segment closes and its files go when the
+//     last query that holds it ends (segref.go).
 //
-// A crash before step 4 leaves an orphan file, removed at the next open. A
-// crash after it starts from the new checkpoint, and the old files are
-// orphans. An entry that changed after step 1 keeps its newer version; the
-// merged segment only holds a dead row for it.
+// A crash before step 4 leaves orphan files, removed at the next open. A
+// crash after it starts from the new checkpoint, and the WAL tail clears the
+// bits of the rows that changed since step 1 again.
 //
-// Load replays the rows of every segment in order, so a row that is dropped
-// must not let an older segment bring its id back. A tombstone is written
-// for such an id when an older segment (before lo) holds a row of it.
+// A lookup takes the newest row of an id, so a row that is dropped must not
+// let an older segment bring its id back. A tombstone is written for such an
+// id when an older segment (before lo) holds a row of it.
+//
+// A run holds at most maxCompactRows live rows: the plan and the key files of
+// the merged segment are in memory.
 
 // defaultCompactMin is the number of adjacent small segments that start a
 // compaction on the sealer tick. A segment is small under smallSegmentRows.
 const (
 	defaultCompactMin = 4
 	smallSegmentRows  = 100_000
+	maxCompactRows    = 512 << 10
 )
 
-// Compact merges every segment into one. Without segments it does nothing.
+// Compact merges the segments, in runs of at most maxCompactRows live rows.
+// Without segments it does nothing.
 func (c *Collection) Compact() error {
 	if c.seal == nil {
 		return nil
 	}
 
-	c.seal.running.Lock()
+	for lo := 0; ; lo++ {
+		hi, ok := c.runFrom(lo)
 
-	n := len(c.seal.readers)
+		if !ok {
+			return nil
+		}
 
-	c.seal.running.Unlock()
+		if err := c.compactRange(lo, hi); err != nil {
+			return err
+		}
+	}
+}
 
-	if n == 0 {
-		return nil
+// runFrom is the end of the run that starts at segment lo: as many segments
+// as fit in maxCompactRows live rows, at least one.
+func (c *Collection) runFrom(lo int) (int, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	rs := c.seal.readers
+
+	if lo >= len(rs) {
+		return 0, false
 	}
 
-	return c.compactRange(0, n)
+	hi, rows := lo+1, rs[lo].nlive
+
+	for hi < len(rs) && rows+rs[hi].nlive <= maxCompactRows {
+		rows += rs[hi].nlive
+		hi++
+	}
+
+	return hi, true
 }
 
 type liveRow struct {
-	id string
-	e  *entry
-	r  *segRef
+	id  string
+	v   uint64
+	seq uint64
+	tx  uint64
+	r   *segRef
+	row int
+
+	// out is the row in the merged segment, -1 when the row is dropped.
+	out int
 }
 
 type compactPlan struct {
-	run  []*segRef
-	live []liveRow
-	now  time.Time
+	run    []*segRef
+	live   []liveRow
+	gone   map[string]uint64
+	fields []indexField
+	now    time.Time
 }
 
 // compactRange merges the segments lo..hi-1.
@@ -107,21 +142,19 @@ func (c *Collection) compactRange(lo, hi int) error {
 		return err
 	}
 
-	drop, tombs, err := c.planDrops(plan, lo)
+	tombs, err := c.planDrops(&plan, lo)
 	if err != nil {
 		return err
 	}
 
-	count := len(tombs) + len(plan.live) - len(drop)
-
-	name, merged, info, err := c.publishMerged(c.mergedRows(plan, drop, tombs), count)
+	name, merged, info, err := c.publishMerged(plan, tombs)
 	if err != nil {
 		return err
 	}
 
 	s.step("published")
 
-	if err := c.commitSwap(lo, hi, name, info, merged != nil); err != nil {
+	if err := c.commitSwap(lo, hi, name, info, merged); err != nil {
 		c.discard(merged, name)
 
 		return err
@@ -129,7 +162,7 @@ func (c *Collection) compactRange(lo, hi int) error {
 
 	s.step("committed")
 
-	if err := c.swap(plan, len(tombs), drop, lo, hi, name, merged); err != nil {
+	if err := c.swap(plan, lo, hi, name, merged); err != nil {
 		return err
 	}
 
@@ -168,85 +201,100 @@ func (s *sealer) step(name string) {
 	}
 }
 
-// planCompact lists the live entries that point into the run. It runs on the
-// writer goroutine, so the entries are one point in the commit order.
+// planCompact lists the live rows of the run from the live bits, and the
+// tombstones it holds. It runs on the writer goroutine, so the rows are one
+// point in the commit order.
 func (c *Collection) planCompact(lo, hi int) (compactPlan, error) {
-	plan := compactPlan{run: slices.Clone(c.seal.readers[lo:hi]), now: c.clock()}
-	in := map[*segRef]bool{}
+	plan := compactPlan{run: slices.Clone(c.seal.readers[lo:hi]), gone: map[string]uint64{}, now: c.clock()}
 
-	for _, r := range plan.run {
-		in[r] = true
-	}
+	var failed error
 
 	err := c.w.Run(func(writer.Pos) {
 		c.mu.RLock()
 
 		defer c.mu.RUnlock()
 
-		for id, e := range c.durable.docs {
-			if e.doc != nil {
-				continue
-			}
+		plan.fields = c.indexFields()
 
-			if r, ok := e.loc.seg.(*segRef); ok && in[r] {
-				plan.live = append(plan.live, liveRow{id: id, e: e, r: r})
+		for _, r := range plan.run {
+			failed = r.ids.Each(func(e segment.KeyEntry) bool {
+				switch {
+				case e.Del:
+					plan.gone[string(e.Key)] = max(plan.gone[string(e.Key)], e.Tx)
+				case r.live.has(e.Row):
+					plan.live = append(plan.live, liveRow{id: string(e.Key), v: e.V, seq: e.Seq, tx: e.Tx, r: r, row: e.Row})
+				}
+
+				return true
+			})
+
+			if failed != nil {
+				return
 			}
 		}
 	})
 
-	sort.Slice(plan.live, func(a, b int) bool { return plan.live[a].e.seq < plan.live[b].e.seq })
+	sort.Slice(plan.live, func(a, b int) bool { return plan.live[a].seq < plan.live[b].seq })
 
-	return plan, err
+	return plan, cmp.Or(err, failed)
 }
 
-// planDrops finds the live entries that no read can see any more (expired or
-// past the retention), and the tombstones the merged segment needs. Only a
-// collection with a TTL or a retention reads the documents here.
-func (c *Collection) planDrops(plan compactPlan, lo int) (map[string]*entry, []segment.Row, error) {
+// planDrops marks the live rows that no read can see any more (expired or
+// past the retention), and returns the tombstones the merged segment needs.
+// Only a collection with a TTL or a retention reads the documents here. The
+// kept rows get their row in the merged segment, after the tombstones.
+func (c *Collection) planDrops(plan *compactPlan, lo int) ([]segment.Row, error) {
 	vis, err := c.visibility(plan.now)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	drop := map[string]*entry{}
-	gone := map[string]segment.Row{}
+	for i := range plan.live {
+		lr := &plan.live[i]
 
-	for i, lr := range plan.live {
 		if vis == nil {
 			break
 		}
 
 		if i&1023 == 0 && c.seal.stopping() {
-			return nil, nil, errStopped
+			return nil, errStopped
 		}
 
-		raw, err := lr.e.loc.seg.Raw(lr.e.loc.row)
+		raw, err := lr.r.Raw(lr.row)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 
 		if !visibleTo(vis, raw) {
-			drop[lr.id] = lr.e
-			gone[lr.id] = segment.Row{ID: lr.id, Del: true, Tx: lr.e.tx}
+			lr.out = -1
+			plan.gone[lr.id] = max(plan.gone[lr.id], lr.tx)
 		}
 	}
 
-	if err := c.runTombstones(plan, gone); err != nil {
-		return nil, nil, err
+	tombs, err := c.tombstonesFor(plan.gone, lo)
+	if err != nil {
+		return nil, err
 	}
 
-	tombs, err := c.tombstonesFor(gone, lo)
+	out := len(tombs)
 
-	return drop, tombs, err
+	for i := range plan.live {
+		if plan.live[i].out == 0 {
+			plan.live[i].out = out
+			out++
+		}
+	}
+
+	return tombs, nil
 }
 
 // mergedRows streams the rows of the merged segment: tombstones first, then
 // the kept rows in insertion order, as a seal does. Each document is read
 // from its segment when the encoder asks for it.
-func (c *Collection) mergedRows(plan compactPlan, drop map[string]*entry, tombs []segment.Row) segment.Rows {
-	return func(fn func(segment.Row) error) error {
-		for _, t := range tombs {
-			if err := fn(t); err != nil {
+func (c *Collection) mergedRows(plan compactPlan, tombs []segment.Row) func(fn func(sideRow) error) error {
+	return func(fn func(sideRow) error) error {
+		for i, t := range tombs {
+			if err := fn(sideRow{row: i, id: t.ID, tx: t.Tx, del: true}); err != nil {
 				return err
 			}
 		}
@@ -256,16 +304,16 @@ func (c *Collection) mergedRows(plan compactPlan, drop map[string]*entry, tombs 
 				return errStopped
 			}
 
-			if _, dropped := drop[lr.id]; dropped {
+			if lr.out < 0 {
 				continue
 			}
 
-			raw, err := lr.e.loc.seg.Raw(lr.e.loc.row)
+			raw, err := lr.r.Raw(lr.row)
 			if err != nil {
 				return err
 			}
 
-			if err := fn(segment.Row{ID: lr.id, V: lr.e.v, Seq: lr.e.seq, Tx: lr.e.tx, Raw: raw}); err != nil {
+			if err := fn(sideRow{row: lr.out, id: lr.id, v: lr.v, seq: lr.seq, tx: lr.tx, doc: raw}); err != nil {
 				return err
 			}
 		}
@@ -280,53 +328,24 @@ func visibleTo(vis *query.Query, raw []byte) bool {
 	return err == nil && vis.Match(m)
 }
 
-// runTombstones adds to gone the deletes that the run holds. The one with the
-// highest tx of an id wins.
-func (c *Collection) runTombstones(plan compactPlan, gone map[string]segment.Row) error {
-	for _, r := range plan.run {
-		err := r.Entries(func(_ int, rec segment.Row) error {
-			if rec.Del && rec.Tx >= gone[rec.ID].Tx {
-				gone[rec.ID] = segment.Row{ID: rec.ID, Del: true, Tx: rec.Tx}
-			}
-
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 // tombstonesFor keeps the deletes whose id has a row in a segment before lo:
-// without them that row would come back at the next load. Rows are sorted by
-// id for a stable file.
-func (c *Collection) tombstonesFor(gone map[string]segment.Row, lo int) ([]segment.Row, error) {
-	if lo == 0 || len(gone) == 0 {
-		return nil, nil
-	}
-
-	older := map[string]bool{}
-
-	for _, r := range c.seal.readers[:lo] {
-		err := r.Entries(func(_ int, rec segment.Row) error {
-			if _, want := gone[rec.ID]; want {
-				older[rec.ID] = true
-			}
-
-			return nil
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
-
+// without them that row would come back. Rows are sorted by id for a stable
+// file.
+func (c *Collection) tombstonesFor(gone map[string]uint64, lo int) ([]segment.Row, error) {
 	var out []segment.Row
 
-	for id, row := range gone {
-		if older[id] {
-			out = append(out, row)
+	for id, tx := range gone {
+		for _, r := range c.seal.readers[:lo] {
+			_, ok, err := r.ids.Find([]byte(id))
+			if err != nil {
+				return nil, err
+			}
+
+			if ok {
+				out = append(out, segment.Row{ID: id, Del: true, Tx: tx})
+
+				break
+			}
 		}
 	}
 
@@ -335,10 +354,18 @@ func (c *Collection) tombstonesFor(gone map[string]segment.Row, lo int) ([]segme
 	return out, nil
 }
 
-// publishMerged encodes and writes the merged segment. With no rows there is
-// no file: the run just leaves the checkpoint.
-func (c *Collection) publishMerged(rows segment.Rows, count int) (string, *segRef, segment.Info, error) {
+// publishMerged writes the merged segment and its key files. With no rows
+// there is no file: the run just leaves the checkpoint.
+func (c *Collection) publishMerged(plan compactPlan, tombs []segment.Row) (string, *segRef, segment.Info, error) {
 	s := c.seal
+	rows := c.mergedRows(plan, tombs)
+	count := len(tombs)
+
+	for _, lr := range plan.live {
+		if lr.out >= 0 {
+			count++
+		}
+	}
 
 	if count == 0 {
 		return "", nil, segment.Info{}, nil
@@ -346,17 +373,37 @@ func (c *Collection) publishMerged(rows segment.Rows, count int) (string, *segRe
 
 	name := fmt.Sprintf("%06d.parquet", s.next)
 
-	info, err := segment.PublishRows(s.fs, s.path(name), rows, c.def.Indexes)
+	info, err := segment.PublishRows(s.fs, s.path(name), segmentRowsOf(rows), c.def.Indexes)
 	if err != nil {
 		return "", nil, info, err
 	}
 
-	raw, err := segment.Open(s.fs, s.path(name))
+	if err := c.writeSidecars(s.path(name), plan.fields, rows); err != nil {
+		return "", nil, info, err
+	}
+
+	merged, err := c.openSegment(name, plan.fields)
 	if err != nil {
 		return "", nil, info, err
 	}
 
-	return name, newSegRef(raw, s.fs, s.path(name)), info, nil
+	for _, lr := range plan.live {
+		if lr.out >= 0 {
+			merged.live.set(lr.out)
+			merged.nlive++
+		}
+	}
+
+	return name, merged, info, nil
+}
+
+// segmentRowsOf turns sideRows into the rows of the segment encoder.
+func segmentRowsOf(rows func(fn func(sideRow) error) error) segment.Rows {
+	return func(fn func(segment.Row) error) error {
+		return rows(func(r sideRow) error {
+			return fn(segment.Row{ID: r.id, V: r.v, Seq: r.seq, Tx: r.tx, Del: r.del, Raw: r.doc})
+		})
+	}
 }
 
 // discard drops a published segment whose commit failed.
@@ -365,18 +412,19 @@ func (c *Collection) discard(r *segRef, name string) {
 		return
 	}
 
-	r.Reader.Close()
+	r.closeFiles()
 	c.seal.fs.Remove(c.seal.path(name))
+	removeSidecars(c.seal.fs, c.seal.path(name))
 }
 
-// commitSwap replaces the run by the merged segment in meta.bolt, in one
-// transaction. The WAL position of the checkpoint stays.
-func (c *Collection) commitSwap(lo, hi int, name string, info segment.Info, hasRows bool) error {
+// commitSwap replaces the run by the merged segment in meta.bolt, with its
+// live bits, in one transaction. The WAL position of the checkpoint stays.
+func (c *Collection) commitSwap(lo, hi int, name string, info segment.Info, merged *segRef) error {
 	s := c.seal
 
 	names := slices.Clone(s.names[:lo])
 
-	if hasRows {
+	if merged != nil {
 		names = append(names, name)
 	}
 
@@ -387,7 +435,7 @@ func (c *Collection) commitSwap(lo, hi int, name string, info segment.Info, hasR
 		return err
 	}
 
-	cp := checkpoint{Pos: cur.Pos, Segments: names, Next: s.next + 1}
+	cp := checkpoint{Pos: cur.Pos, Segments: names, Next: s.next + 1, Format: formatSidecars}
 
 	return s.meta.Update(func(tx *bolt.Tx) error {
 		segs, err := tx.CreateBucketIfNotExists(bucketSegments)
@@ -401,7 +449,9 @@ func (c *Collection) commitSwap(lo, hi int, name string, info segment.Info, hasR
 			}
 		}
 
-		if hasRows {
+		bits := map[string][]byte{}
+
+		if merged != nil {
 			infoJSON, err := json.Marshal(info)
 			if err != nil {
 				return err
@@ -410,35 +460,21 @@ func (c *Collection) commitSwap(lo, hi int, name string, info segment.Info, hasR
 			if err := segs.Put([]byte(name), infoJSON); err != nil {
 				return err
 			}
+
+			bits[name] = merged.live.bytes()
 		}
 
-		cps, err := tx.CreateBucketIfNotExists(bucketCheckpoint)
-		if err != nil {
+		if err := putLiveBits(tx, bits, s.names[lo:hi]); err != nil {
 			return err
 		}
 
-		cpJSON, err := json.Marshal(cp)
-		if err != nil {
-			return err
-		}
-
-		return cps.Put(keyLive, cpJSON)
+		return putCheckpoint(tx, cp)
 	})
 }
 
-// swap runs on the writer goroutine: it points the entries that still use the
-// run to the merged segment, and removes the dropped ones.
-func (c *Collection) swap(plan compactPlan, tombs int, drop map[string]*entry, lo, hi int, name string, merged *segRef) error {
-	rowOf := map[string]int{}
-	row := tombs
-
-	for _, lr := range plan.live {
-		if _, dropped := drop[lr.id]; !dropped {
-			rowOf[lr.id] = row
-			row++
-		}
-	}
-
+// swap runs on the writer goroutine: the merged segment takes the place of
+// the run, and a row that changed since the plan is not live in it.
+func (c *Collection) swap(plan compactPlan, lo, hi int, name string, merged *segRef) error {
 	return c.w.Run(func(writer.Pos) {
 		c.mu.Lock()
 
@@ -461,56 +497,20 @@ func (c *Collection) swap(plan compactPlan, tombs int, drop map[string]*entry, l
 			delete(s.maxTimes, r)
 		}
 
+		if merged == nil {
+			return
+		}
+
+		merged.saved = merged.gen
+
 		for _, lr := range plan.live {
-			c.repoint(lr, rowOf, drop, merged)
+			if lr.out >= 0 && !lr.r.live.has(lr.row) {
+				merged.live.clear(lr.out)
+				merged.nlive--
+				merged.gen++
+			}
 		}
 	})
-}
-
-// repoint moves one live entry of the run to its row in the merged segment, or
-// removes it when the compaction dropped it. An entry that changed since the
-// plan is left alone.
-func (c *Collection) repoint(lr liveRow, rowOf map[string]int, drop map[string]*entry, merged *segRef) {
-	cur := c.durable.docs[lr.id]
-	head := c.head.docs[lr.id]
-	headOld := head != nil && head.loc != nil && head.loc.seg == lr.e.loc.seg && head.loc.row == lr.e.loc.row
-
-	if _, dropped := drop[lr.id]; dropped {
-		if cur == lr.e {
-			c.dropEntry(lr.id)
-		} else if headOld {
-			c.head.remove(lr.id)
-		}
-
-		return
-	}
-
-	stub := &entry{v: lr.e.v, seq: lr.e.seq, tx: lr.e.tx, loc: &location{seg: merged, row: rowOf[lr.id]}, uniq: lr.e.uniq}
-
-	if cur == lr.e {
-		c.durable.docs[lr.id] = stub
-	}
-
-	if headOld {
-		c.head.docs[lr.id] = stub
-	}
-}
-
-// dropEntry removes a document from the state without a WAL record: the
-// compaction dropped it because it is expired or past the retention. A delete
-// that waits for the next seal stays as it was.
-func (c *Collection) dropEntry(id string) {
-	prev, had := c.tombs[id]
-
-	c.applyDurable(wal.Op{Kind: wal.Del, ID: id}, 0)
-
-	if had {
-		c.tombs[id] = prev
-	} else {
-		delete(c.tombs, id)
-	}
-
-	c.head.remove(id)
 }
 
 // liveDocs iterates the raw bytes of every live document: the memtable and
@@ -519,34 +519,40 @@ func (c *Collection) liveDocs() iter.Seq[[]byte] {
 	return func(yield func([]byte) bool) {
 		c.mu.RLock()
 
-		held := c.holdSegments()
-		entries := make([]*entry, 0, len(c.durable.docs))
-
-		for _, e := range c.durable.docs {
-			entries = append(entries, e)
-		}
+		src := c.scanSource()
+		src.held = c.holdSegments()
 
 		c.mu.RUnlock()
 
-		defer releaseAll(held)
+		defer src.release()
 
-		for _, e := range entries {
+		for _, cd := range src.cands {
+			if !yield(cd.e.doc) {
+				return
+			}
+		}
+
+		err := eachLive(src.segs, func(_ string, e *entry) error {
 			raw, err := e.raw()
 			if err != nil {
-				c.fail(err)
-
-				return
+				return err
 			}
 
 			if !yield(raw) {
-				return
+				return errStopped
 			}
+
+			return nil
+		})
+		if err != nil && !errors.Is(err, errStopped) {
+			c.fail(err)
 		}
 	}
 }
 
-// compactDue runs on the sealer tick. It merges a run of small segments, or
-// one segment that is wholly past the retention.
+// compactDue runs on the sealer tick. It merges a run of small segments,
+// rewrites a segment whose rows are mostly replaced, or drops one segment
+// that is wholly past the retention.
 func (c *Collection) compactDue() error {
 	lo, hi, ok := c.pickRun()
 
@@ -568,20 +574,35 @@ func (c *Collection) pickRun() (int, int, bool) {
 		return i, i + 1, true
 	}
 
-	start := -1
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	for i, r := range s.readers {
+		if r.Len() >= smallSegmentRows && 2*r.nlive < r.Len() {
+			return i, i + 1, true
+		}
+	}
+
+	start, rows := -1, 0
 
 	for i := 0; i <= len(s.readers); i++ {
-		small := i < len(s.readers) && s.readers[i].Len() < smallSegmentRows
+		small := i < len(s.readers) && s.readers[i].nlive < smallSegmentRows && rows+s.readers[i].nlive <= maxCompactRows
 
 		switch {
 		case small && start < 0:
-			start = i
-		case !small && start >= 0:
+			start, rows = i, s.readers[i].nlive
+		case small:
+			rows += s.readers[i].nlive
+		case start >= 0:
 			if i-start >= s.compactMin {
 				return start, i, true
 			}
 
-			start = -1
+			start, rows = -1, 0
+
+			if i < len(s.readers) && s.readers[i].nlive < smallSegmentRows {
+				start, rows = i, s.readers[i].nlive
+			}
 		}
 	}
 

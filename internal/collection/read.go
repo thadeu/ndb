@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"log"
 	"slices"
 	"sort"
 	"strconv"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/thadeu/ndb/internal/index"
 	"github.com/thadeu/ndb/internal/query"
+	"github.com/thadeu/ndb/internal/segment"
 	"github.com/thadeu/ndb/internal/wal"
 )
 
@@ -166,7 +168,7 @@ func (c *Collection) ParseQuery(body []byte) (*query.Query, error) {
 // deletes that a seal must write as tombstones in step. Callers hold c.mu, or
 // run before the collection is shared.
 func (c *Collection) applyDurable(op wal.Op, tx uint64) {
-	old := c.durable.docs[op.ID]
+	old, _ := c.durable.get(op.ID)
 
 	c.durable.apply(op)
 
@@ -183,6 +185,10 @@ func (c *Collection) applyDurable(op wal.Op, tx uint64) {
 		cur.seq = c.rd.seq
 	}
 
+	if old != nil && old.loc != nil {
+		c.clearLive(old.loc)
+	}
+
 	c.memBytes += int64(len(docOf(cur))) - int64(len(docOf(old)))
 
 	if op.Kind == wal.Del && c.seal != nil {
@@ -193,7 +199,14 @@ func (c *Collection) applyDurable(op wal.Op, tx uint64) {
 		return
 	}
 
-	oldDoc := c.decodeEntry(old)
+	// The memtable index holds memtable documents only: a sealed old
+	// version is in the key files of its segment, and its live bit is clear.
+	var oldDoc map[string]any
+
+	if old != nil && old.loc == nil {
+		oldDoc = c.decodeEntry(old)
+	}
+
 	curDoc := c.decodeEntry(cur)
 
 	for _, s := range c.rd.idx {
@@ -239,8 +252,9 @@ func (c *Collection) decodeEntry(e *entry) map[string]any {
 }
 
 // EnsureIndex adds a secondary index on a field path and builds it in the
-// background. Until it is ready, queries scan; writes already keep it
-// up to date. The id field needs no index.
+// background: the memtable index, and the key file of every segment that has
+// none. Until it is ready, queries scan; writes already keep it up to date.
+// The id field needs no index.
 func (c *Collection) EnsureIndex(field string) error {
 	if field == "" {
 		return errf("invalid_index", "empty field")
@@ -272,36 +286,44 @@ func (c *Collection) EnsureIndex(field string) error {
 	}
 
 	s.total = len(items)
-	c.rd.idx[field] = s
 
-	held := c.holdSegments()
+	var segs []*segRef
+
+	for _, r := range c.holdSegments() {
+		if r.keys[field] != nil {
+			r.release()
+
+			continue
+		}
+
+		segs = append(segs, r)
+		s.total += r.Len()
+	}
+
+	c.rd.idx[field] = s
 
 	c.rd.wg.Add(1)
 
 	go func() {
-		defer releaseAll(held)
+		defer releaseAll(segs)
 
-		c.build(s, items)
+		c.build(s, items, segs)
 	}()
 
 	return nil
 }
 
-// build fills s with the documents that existed when it was registered.
-// Documents written later are indexed by applyDurable. A document that
-// changed since is skipped here: applyDurable indexed its new version.
-func (c *Collection) build(s *secondary, items []cand) {
+// build fills s with the documents that existed when it was registered: the
+// memtable entries, then a key file for each segment. Documents written
+// later are indexed by applyDurable, and a seal or a compaction writes the
+// key file of its new segment. A document that changed since is skipped
+// here: applyDurable indexed its new version.
+func (c *Collection) build(s *secondary, items []cand, segs []*segRef) {
 	defer c.rd.wg.Done()
 
 	for start := 0; start < len(items); start += buildChunk {
-		if c.rd.gate != nil {
-			c.rd.gate()
-		}
-
-		select {
-		case <-c.rd.stop:
+		if c.buildStopped() {
 			return
-		default:
 		}
 
 		chunk := items[start:min(start+buildChunk, len(items))]
@@ -329,9 +351,93 @@ func (c *Collection) build(s *secondary, items []cand) {
 		c.mu.Unlock()
 	}
 
+	f := indexField{name: s.field, isTime: s.isTime}
+
+	for _, r := range segs {
+		if c.buildStopped() {
+			return
+		}
+
+		if err := c.buildIndexFile(r, f); err != nil {
+			log.Printf("ndb: index %s: segment %s: %v", s.field, r.path, err)
+
+			return
+		}
+
+		c.mu.Lock()
+		s.done += r.Len()
+		c.mu.Unlock()
+	}
+
 	c.mu.Lock()
 	s.ready = true
 	c.mu.Unlock()
+}
+
+// buildStopped runs the test gate and tells if the collection is closing.
+func (c *Collection) buildStopped() bool {
+	if c.rd.gate != nil {
+		c.rd.gate()
+	}
+
+	select {
+	case <-c.rd.stop:
+		return true
+	default:
+		return false
+	}
+}
+
+// buildIndexFile writes the key file of one field for a segment that has
+// none, and attaches it while the segment is live.
+func (c *Collection) buildIndexFile(r *segRef, f indexField) error {
+	var entries []segment.KeyEntry
+
+	err := r.Entries(func(row int, rec segment.Row) error {
+		if rec.Del {
+			return nil
+		}
+
+		raw, err := r.Raw(row)
+		if err != nil {
+			return err
+		}
+
+		if m, err := query.Decode(raw); err == nil {
+			for _, k := range index.Keys(m, f.name, f.isTime) {
+				entries = append(entries, segment.KeyEntry{Key: k, Row: row})
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	path := indexPath(r.path, f.name)
+
+	if err := segment.WriteKeys(r.fs, path, entries, false, false); err != nil {
+		return err
+	}
+
+	k, err := segment.OpenKeys(r.fs, path)
+	if err != nil {
+		return err
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if r.keys[f.name] != nil || !slices.Contains(c.seal.readers, r) {
+		k.Close()
+
+		return nil
+	}
+
+	r.keys[f.name] = k
+
+	return nil
 }
 
 // Len is the number of durable documents.
@@ -339,7 +445,7 @@ func (c *Collection) Len() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return len(c.durable.docs)
+	return len(c.durable.docs) + c.sealedLen()
 }
 
 // DropIndex removes a secondary index. Queries stop using it at once.
@@ -545,28 +651,29 @@ func (r *reader) lookup(id string) (*snapshot, error) {
 	return s, nil
 }
 
-// source takes what the query reads. It uses the id map or a ready index
+// source takes what the query reads. It uses the id lookups or a ready index
 // when a where condition allows it; otherwise it takes a scan source.
 func (c *Collection) source(q *query.Query) source {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if plan, cands, ok := c.indexedCands(q.Indexable()); ok {
-		return source{plan: plan, cands: cands, held: c.holdSegments()}
+	src, ok := c.indexedSource(q.Indexable())
+
+	if !ok {
+		src = c.scanSource()
 	}
 
-	src := c.scanSource()
 	src.held = c.holdSegments()
 
 	return src
 }
 
-// indexedCands is the candidate list that the id map or a ready index gives
-// for conds, with the plan name. ok is false when neither can answer. The
-// caller holds c.mu.
-func (c *Collection) indexedCands(conds []query.Cond) (string, []cand, bool) {
+// indexedSource is the source that the id lookups or a ready index give for
+// conds, with the plan name. ok is false when neither can answer. The caller
+// holds c.mu.
+func (c *Collection) indexedSource(conds []query.Cond) (source, bool) {
 	if out, ok := c.byID(conds); ok {
-		return "id", out, true
+		return source{plan: "id", cands: out}, true
 	}
 
 	for _, pass := range []func(string) bool{isPoint, isRange} {
@@ -577,11 +684,37 @@ func (c *Collection) indexedCands(conds []query.Cond) (string, []cand, bool) {
 				continue
 			}
 
-			return "index:" + cd.Path, c.byIndex(s, cd, conds), true
+			src := c.byIndex(s, cd, conds)
+			src.plan = "index:" + cd.Path
+
+			return src, true
 		}
 	}
 
-	return "", nil, false
+	return source{}, false
+}
+
+// indexedCands is indexedSource as a list of candidates: the memtable ones,
+// then a stub for each sealed row of the index. ok is false when neither the
+// ids nor an index can answer. The caller holds c.mu.
+func (c *Collection) indexedCands(conds []query.Cond) (string, []cand, bool) {
+	src, ok := c.indexedSource(conds)
+	if !ok {
+		return "", nil, false
+	}
+
+	cands := src.cands
+
+	err := eachLive(src.segs, func(id string, e *entry) error {
+		cands = append(cands, cand{id, e})
+
+		return nil
+	})
+	if err != nil {
+		c.fail(err)
+	}
+
+	return src.plan, cands, true
 }
 
 func isPoint(op string) bool {
@@ -592,7 +725,7 @@ func isRange(op string) bool {
 	return !isPoint(op)
 }
 
-// byID answers eq and in on the id field with one map lookup per key.
+// byID answers eq and in on the id field with one lookup per key.
 func (c *Collection) byID(conds []query.Cond) ([]cand, bool) {
 	for _, cd := range conds {
 		if cd.Path != idField || !isPoint(cd.Op) {
@@ -606,7 +739,11 @@ func (c *Collection) byID(conds []query.Cond) ([]cand, bool) {
 		out := make([]cand, 0, len(cd.Vals))
 
 		for _, v := range cd.Vals {
-			if e, ok := c.durable.docs[v.Str]; ok && !slices.ContainsFunc(out, func(o cand) bool { return o.id == v.Str }) {
+			if slices.ContainsFunc(out, func(o cand) bool { return o.id == v.Str }) {
+				continue
+			}
+
+			if e, ok := c.durable.get(v.Str); ok {
 				out = append(out, cand{v.Str, e})
 			}
 		}
@@ -617,10 +754,22 @@ func (c *Collection) byID(conds []query.Cond) ([]cand, bool) {
 	return nil, false
 }
 
-// byIndex does one index lookup per key of the condition. A range
-// condition is narrowed with the opposite bound on the same field.
-func (c *Collection) byIndex(s *secondary, cd query.Cond, conds []query.Cond) []cand {
-	var out []cand
+// byIndex does one index lookup per key of the condition: in the memtable
+// index, and in the key file of each segment, whose rows it keeps when they
+// are live. A segment with no key file for the field is scanned whole. A
+// range condition is narrowed with the opposite bound on the same field.
+func (c *Collection) byIndex(s *secondary, cd query.Cond, conds []query.Cond) source {
+	var src source
+
+	ranges := make([]index.Range, len(cd.Vals))
+
+	for i, v := range cd.Vals {
+		ranges[i] = index.Eq(v)
+
+		if isRange(cd.Op) {
+			ranges[i] = narrow(index.Cmp(cd.Op, v), cd, conds)
+		}
+	}
 
 	seen := map[string]struct{}{}
 
@@ -632,23 +781,51 @@ func (c *Collection) byIndex(s *secondary, cd query.Cond, conds []query.Cond) []
 		seen[id] = struct{}{}
 
 		if e, ok := c.durable.docs[id]; ok {
-			out = append(out, cand{id, e})
+			src.cands = append(src.cands, cand{id, e})
 		}
 
 		return true
 	}
 
-	for _, v := range cd.Vals {
-		r := index.Eq(v)
-
-		if isRange(cd.Op) {
-			r = narrow(index.Cmp(cd.Op, v), cd, conds)
-		}
-
+	for _, r := range ranges {
 		s.mem.Ascend(r, collect)
 	}
 
-	return out
+	if c.seal == nil {
+		return src
+	}
+
+	for _, r := range c.seal.readers {
+		hits := r.live.clone()
+
+		if keys := r.keys[s.field]; keys != nil {
+			hits = c.indexHits(r, keys, ranges)
+		}
+
+		src.segs = append(src.segs, segSnap{r: r, groups: r.Groups(), live: hits})
+	}
+
+	return src
+}
+
+// indexHits are the live rows of r whose key is in one of the ranges.
+func (c *Collection) indexHits(r *segRef, keys *segment.Keys, ranges []index.Range) bitset {
+	hits := newBitset(r.Len())
+
+	for _, rg := range ranges {
+		err := keys.Range(rg.Lo, rg.Hi, rg.LoIncl, rg.HiIncl, func(e segment.KeyEntry) bool {
+			hits.set(e.Row)
+
+			return true
+		})
+		if err != nil {
+			c.fail(err)
+		}
+	}
+
+	hits.and(r.live)
+
+	return hits
 }
 
 // narrow takes the other end of r from a condition of the opposite side

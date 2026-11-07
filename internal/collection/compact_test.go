@@ -72,8 +72,21 @@ func segmentFiles(t *testing.T, root string) []string {
 
 	var out []string
 
+	parquet := map[string]bool{}
+
 	for _, e := range entries {
-		out = append(out, e.Name())
+		base, ext, _ := strings.Cut(e.Name(), ".")
+
+		if ext == "parquet" {
+			out = append(out, e.Name())
+			parquet[base] = true
+		}
+	}
+
+	for _, e := range entries {
+		if base, _, _ := strings.Cut(e.Name(), "."); !parquet[base] {
+			t.Fatalf("key file %s has no segment", e.Name())
+		}
 	}
 
 	return out
@@ -311,7 +324,9 @@ func copyDir(src, dst string) error {
 
 func TestCompactFailureLeavesTheCollectionWorking(t *testing.T) {
 	root := t.TempDir()
-	faulty := fs.NewFault(fs.OS{}, fs.Fault{Op: fs.OpRename, At: 4})
+	// A seal renames 3 files (segment, ids, index of status): the 10th rename
+	// is the first one of the compaction.
+	faulty := fs.NewFault(fs.OS{}, fs.Fault{Op: fs.OpRename, At: 10})
 	c := openSealed(t, root, collection.Config{FS: faulty, SealAge: time.Hour})
 
 	for i := range 3 {

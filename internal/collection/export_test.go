@@ -3,6 +3,10 @@ package collection
 import (
 	"context"
 	"encoding/json"
+	bolt "go.etcd.io/bbolt"
+	"os"
+	"path/filepath"
+	"strings"
 )
 
 // SetBuildGate makes the background index build call g before each chunk.
@@ -120,4 +124,43 @@ func (c *Collection) DeleteByID(ctx context.Context, id string) error {
 	}
 
 	return nil
+}
+
+// MakeLegacy turns the data under root into the format of a version before
+// M16: no key files, no live bits, checkpoint format 0.
+func MakeLegacy(root string) error {
+	entries, err := os.ReadDir(filepath.Join(root, segmentDir))
+	if err != nil {
+		return err
+	}
+
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".parquet") {
+			if err := os.Remove(filepath.Join(root, segmentDir, e.Name())); err != nil {
+				return err
+			}
+		}
+	}
+
+	db, err := bolt.Open(filepath.Join(root, metaFile), 0o644, nil)
+	if err != nil {
+		return err
+	}
+
+	defer db.Close()
+
+	cp, err := readCheckpoint(db)
+	if err != nil {
+		return err
+	}
+
+	cp.Format = 0
+
+	return db.Update(func(tx *bolt.Tx) error {
+		if err := tx.DeleteBucket(bucketLiveBits); err != nil {
+			return err
+		}
+
+		return putCheckpoint(tx, cp)
+	})
 }

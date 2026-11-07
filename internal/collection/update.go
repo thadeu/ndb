@@ -615,11 +615,35 @@ func (c *Collection) candidates(v *view, q *query.Query) (iter.Seq[string], erro
 		return slices.Values(ids), nil
 	}
 
+	c.mu.RLock()
+
+	src := c.scanSource()
+	src.held = c.holdSegments()
+
+	c.mu.RUnlock()
+
 	return func(yield func(string) bool) {
+		defer src.release()
+
 		for id := range v.head.docs {
 			if !yield(id) {
 				return
 			}
+		}
+
+		err := eachLive(src.segs, func(id string, _ *entry) error {
+			if _, mem := v.head.docs[id]; mem {
+				return nil
+			}
+
+			if !yield(id) {
+				return errStopped
+			}
+
+			return nil
+		})
+		if err != nil && !errors.Is(err, errStopped) {
+			c.fail(err)
 		}
 	}, nil
 }

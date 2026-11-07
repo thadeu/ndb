@@ -3,7 +3,6 @@ package collection_test
 import (
 	"context"
 	"fmt"
-	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -18,10 +17,6 @@ import (
 func TestHeapDoesNotGrowWithSealedDocs(t *testing.T) {
 	if testing.Short() {
 		t.Skip("loads 120k documents")
-	}
-
-	if os.Getenv("NDB_M16") == "" {
-		t.Skip("M16: fails until sealed ids leave the heap; run with NDB_M16=1")
 	}
 
 	c := openSealed(t, t.TempDir(), collection.Config{SealBytes: 1 << 40})

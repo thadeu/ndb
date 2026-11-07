@@ -340,7 +340,7 @@ func (c *Collection) Find(id string) (Doc, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	e, ok := c.durable.docs[id]
+	e, ok := c.durable.get(id)
 	if !ok {
 		return Doc{}, false
 	}
@@ -684,6 +684,17 @@ func (c *Collection) WALMarkSnapshot() (WALMark, []SnapshotDoc, error) {
 
 		for id, e := range c.durable.docs {
 			docs = append(docs, SnapshotDoc{ID: id, V: e.v, Tx: e.tx, Seq: e.seq, e: e})
+		}
+
+		src := c.scanSource()
+
+		err := eachLive(src.segs, func(id string, e *entry) error {
+			docs = append(docs, SnapshotDoc{ID: id, V: e.v, Seq: e.seq, e: e})
+
+			return nil
+		})
+		if err != nil {
+			c.fail(err)
 		}
 	})
 
