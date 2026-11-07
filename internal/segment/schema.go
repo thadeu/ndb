@@ -1,9 +1,9 @@
 package segment
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/thadeu/ndb/internal/jsondoc"
 	"sort"
 	"strconv"
 	"strings"
@@ -145,12 +145,8 @@ func dominant(byKind map[kind]int) kind {
 // flatten returns the cells of one document. The paths that cannot be
 // columns (too large, or repeated) come back in bad.
 func flatten(doc []byte) (map[string]cell, []string, error) {
-	var m map[string]any
-
-	dec := json.NewDecoder(bytes.NewReader(doc))
-	dec.UseNumber()
-
-	if err := dec.Decode(&m); err != nil {
+	m, err := jsondoc.Decode(doc)
+	if err != nil {
 		return nil, nil, err
 	}
 

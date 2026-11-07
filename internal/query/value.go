@@ -1,8 +1,8 @@
 package query
 
 import (
-	"bytes"
 	"encoding/json"
+	"github.com/thadeu/ndb/internal/jsondoc"
 	"slices"
 	"strconv"
 	"strings"
@@ -37,16 +37,7 @@ type Value struct {
 
 // Decode reads a document with numbers as json.Number.
 func Decode(raw []byte) (map[string]any, error) {
-	var m map[string]any
-
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-
-	if err := dec.Decode(&m); err != nil {
-		return nil, err
-	}
-
-	return m, nil
+	return jsondoc.Decode(raw)
 }
 
 // FromJSON classifies a decoded JSON value. With isTime, a string in
