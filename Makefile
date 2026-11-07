@@ -20,11 +20,11 @@ fuzz-smoke:
 		done; \
 	done
 
-# The ESL benchmark (benchmark/esl): live writes with a consumer, a kill -9,
-# a bulk load and reads, in about two minutes, on its own daemon. Run it
+# The ESL benchmark (ndb bench): live writes with a consumer, a kill -9, a
+# bulk load and reads, in about two minutes, on its own daemon. Run it
 # before and after a change of impact; it is not part of CI.
 bench: build
-	go run ./benchmark/esl -ndb bin/ndb
+	./bin/ndb bench
 
 # The Go micro-benchmarks of the packages.
 bench-go:

@@ -12,6 +12,7 @@ import (
 // subcommands maps the first argument to its command. Anything else, flags
 // included, starts the daemon, so "ndb -data-dir d" keeps working.
 var subcommands = map[string]func(args []string) error{
+	"bench":   runBench,
 	"backup":  runBackup,
 	"restore": runRestore,
 	"stats":   runStats,
@@ -119,6 +120,7 @@ Usage:
   ndb truncate <collection>     remove every document; keep the definition and indexes
   ndb drop <collection>         remove the collection, its definition and watch consumers
   ndb health                    exit 0 when the daemon is ready (for container health checks)
+  ndb bench [-calls n]          the ESL benchmark on a daemon of its own, about 2 minutes
   ndb get <coll> <_id>          one document by _id
   ndb update <coll> '<query>' '<update>'
                                 atomic update by query; update holds the write operators

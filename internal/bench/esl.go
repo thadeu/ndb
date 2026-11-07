@@ -1,4 +1,5 @@
-// Command esl is the ESL outbox benchmark: an app that talks to FreeSWITCH
+// Package bench is the ESL outbox benchmark (ndb bench): an app that talks
+// to FreeSWITCH
 // writes 7 docs per call (6 events and a finishcall) and workers consume them.
 // It starts its own daemon in a temp dir and runs four phases in about two
 // minutes:
@@ -9,8 +10,8 @@
 //  3. load: bulk load of calls into a daily partition;
 //  4. reads: by id, by indexed fields, counts, aggregates.
 //
-// The daemon RSS is sampled all the time. Run it with make bench.
-package main
+// The daemon RSS is sampled all the time.
+package bench
 
 import (
 	"bufio"
@@ -18,7 +19,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -35,21 +36,54 @@ import (
 	"time"
 )
 
+// Options of a run. Bin is the ndb binary the daemon runs from.
+type Options struct {
+	Bin   string
+	Live  time.Duration
+	Rate  int
+	Calls int
+	Dir   string
+	Keep  bool
+}
+
+// Defaults run in about two minutes.
+func Defaults() Options {
+	return Options{Live: 30 * time.Second, Rate: 400, Calls: 30_000}
+}
+
 var (
-	bin     = flag.String("ndb", "bin/ndb", "the ndb binary")
-	liveFor = flag.Duration("live", 30*time.Second, "how long the live phase writes")
-	rate    = flag.Int("rate", 400, "live docs per second")
-	calls   = flag.Int("calls", 30_000, "calls of the load phase (7 docs each)")
-	keep    = flag.Bool("keep", false, "keep the data dir")
+	bin     *string
+	liveFor *time.Duration
+	rate    *int
+	calls   *int
+	out     io.Writer = os.Stdout
 )
 
-func main() {
-	flag.Parse()
+// failure is a fatal error of a run (check panics with it).
+type failure struct{ err error }
 
-	dir, err := os.MkdirTemp("", "ndb-bench-")
+// Run starts a daemon from o.Bin in a temp dir (under o.Dir), runs the four
+// phases and writes their table to w.
+func Run(o Options, w io.Writer) (err error) {
+	bin, liveFor, rate, calls, out = &o.Bin, &o.Live, &o.Rate, &o.Calls, w
+
+	defer func() {
+		if r := recover(); r != nil {
+			f, ok := r.(failure)
+			if !ok {
+				panic(r)
+			}
+
+			err = f.err
+		}
+	}()
+
+	dir, err := os.MkdirTemp(o.Dir, "ndb-bench-")
 	check(err)
 
-	if !*keep {
+	if o.Keep {
+		fmt.Fprintln(out, "data dir:", dir)
+	} else {
 		defer os.RemoveAll(dir)
 	}
 
@@ -67,15 +101,18 @@ func main() {
 	report = append(report, load(d)...)
 	report = append(report, reads(d)...)
 
-	fmt.Println()
-	fmt.Println("| Phase | Result |")
-	fmt.Println("|---|---|")
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "ndb bench, ESL outbox, %s/%s, %d CPU\n\n", runtime.GOOS, runtime.GOARCH, runtime.NumCPU())
+	fmt.Fprintln(out, "| Phase | Result |")
+	fmt.Fprintln(out, "|---|---|")
 
 	for _, line := range report {
-		fmt.Println(line)
+		fmt.Fprintln(out, line)
 	}
 
-	fmt.Printf("| disk | %s |\n", du(dir))
+	fmt.Fprintf(out, "| disk | %s |\n", du(dir))
+
+	return nil
 }
 
 // daemon is the ndb process under test, with its RSS peak per phase.
@@ -189,7 +226,7 @@ func (d *daemon) must(method, path, body string) []byte {
 
 // live: concurrent calls write one doc at a time, a watcher acks.
 func live(d *daemon) []string {
-	fmt.Printf("live: %s at %d docs/s, strict, with a _watch consumer\n", *liveFor, *rate)
+	fmt.Fprintf(out, "live: %s at %d docs/s, strict, with a _watch consumer\n", *liveFor, *rate)
 	d.must("PUT", "/outbox", `{"time":"ts","indexes":["status","call_id"],"durability":"strict"}`)
 
 	peak := d.phase()
@@ -206,7 +243,7 @@ func live(d *daemon) []string {
 
 // crash: kill -9 while writing, restart, every acked write must be there.
 func crash(d *daemon) []string {
-	fmt.Println("crash: kill -9 while writing, restart, read back")
+	fmt.Fprintln(out, "crash: kill -9 while writing, restart, read back")
 
 	var acked []string
 
@@ -236,7 +273,7 @@ func crash(d *daemon) []string {
 
 // load: bulk load of calls into a daily partition.
 func load(d *daemon) []string {
-	fmt.Printf("load: %d calls (%d docs) into a daily partition\n", *calls, *calls*7)
+	fmt.Fprintf(out, "load: %d calls (%d docs) into a daily partition\n", *calls, *calls*7)
 	d.must("PUT", "/events", `{"time":"ts","indexes":["call_id","customer","type"],"partition_by":"day","retention":"7d","max_line_size":16777216}`)
 
 	peak := d.phase()
@@ -320,7 +357,7 @@ func (d *daemon) settle(coll string) time.Duration {
 
 // reads: the queries of the ESL, the median of 3 runs each.
 func reads(d *daemon) []string {
-	fmt.Println("reads")
+	fmt.Fprintln(out, "reads")
 
 	peak := d.phase()
 	part := "/events-" + time.Now().UTC().Add(-24*time.Hour).Format("2006-01-02")
@@ -604,7 +641,6 @@ func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
 
 func check(err error) {
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "bench:", err)
-		os.Exit(1)
+		panic(failure{err})
 	}
 }
