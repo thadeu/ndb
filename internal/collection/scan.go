@@ -368,6 +368,10 @@ func (sc *segScan) row(rows segment.GroupRows, i, abs int) error {
 		return nil
 	}
 
+	if !sc.top.wants(pos) {
+		return nil
+	}
+
 	doc, err := st.document()
 	if err != nil {
 		return err

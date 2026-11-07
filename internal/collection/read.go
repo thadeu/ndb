@@ -884,6 +884,12 @@ func (t *topK) Pop() any {
 	return last
 }
 
+// wants tells if a row at p would be kept: the caller fetches the document
+// of a row only when it is.
+func (t *topK) wants(p query.Pos) bool {
+	return t.k == 0 || len(t.rows) < t.k || t.q.Cmp(p, t.rows[0].Pos) < 0
+}
+
 func (t *topK) add(r row) {
 	switch {
 	case t.k == 0:
