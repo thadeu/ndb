@@ -23,6 +23,7 @@ The `ndb` binary is the daemon and the CLI. `ndb` with only flags still runs the
 | `ndb update <collection> '<query>' '<update>'` | [Atomic update by query](../query.md#update-by-query): the query, then the write operators. `--many`, `--upsert`, `--expire-in 60s`. `ndb update <collection> <_id> '<update>'` updates one by `_id`. |
 | `ndb delete <collection> '<query>'` | Delete the documents that the query matches. `--many`. `ndb delete <collection> <_id>` deletes one by `_id`. |
 | `ndb health` | Exit 0 and print `ok` when the daemon is ready; exit 1 otherwise. For container health checks. |
+| `ndb bench` | The ESL benchmark on a daemon of its own, about two minutes. See [Measure](../operations.md#measure). |
 | `ndb version` | Print the version. `ndb -version` still works. |
 | `ndb help` | List the commands. |
 

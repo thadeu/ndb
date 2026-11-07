@@ -11,8 +11,12 @@
   collections/
     <name>/
       000001.ndjson ...         WAL (engine mode), see wal.md
-      segments/                 Parquet segments (derived)
-      meta.bolt                 checkpoint, segment list, file cursors (derived)
+      segments/                 Parquet segments and their key files (derived)
+        000007.parquet          the rows
+        000007.ids              id → row (sorted, with a bloom filter)
+        000007.i.<hex field>    an index field: key → row
+        000007.u.<hex field>    a unique field: value → id
+      meta.bolt                 checkpoint, segment list, live bits, file cursors (derived)
       quarantine/<name>.ndjson  lines that could not be applied (direct mode)
     <name>~new/                 a truncate in progress (finished or removed at start)
   trash/                        dirs of truncated and dropped collections, deleted in the background
@@ -35,7 +39,23 @@ ndb finds files by the glob, with fsnotify and a 5 s poll (bind mounts and overl
 
 ## Segments and compaction
 
-The recent rows live in memory. They are sealed to an immutable Parquet segment when they reach 64 MiB or 10 minutes since the last seal. Segments hold per-row-group min/max (zone maps), so queries skip what cannot match. DuckDB, Spark and pandas can read them. When 4 or more small segments are adjacent, compaction merges them, and drops old versions, tombstones, expired rows and rows past `retention`.
+The recent rows live in memory (the memtable). They are sealed to an immutable Parquet segment when the memtable of a collection reaches its share of `write_buffer` (32 MiB for the whole daemon, the largest memtable goes first) or 10 minutes since the last seal. Segments hold per-row-group min/max (zone maps), so queries skip what cannot match. DuckDB, Spark and pandas can read them. When 4 or more small segments are adjacent, compaction merges them (at most 512k rows at a time), and drops old versions, tombstones, expired rows and rows past `retention`. A segment whose rows are mostly replaced is rewritten alone. A seal can run while a compaction builds its segment.
+
+## Memory
+
+ndb keeps data on disk; memory has a fixed size, whatever the number of documents, collections or partitions:
+
+| In memory | Size |
+|---|---|
+| memtables (rows not sealed yet) | `write_buffer`, 32 MiB; writes wait while a memtable is over twice its seal size |
+| per sealed row: a live bit, a share of the bloom filter and of the sparse index of its ids | about 20–40 bytes |
+| a decoded row group per segment being read, the plan of one compaction | a few MB |
+
+A sealed document is not in a map: a lookup by `_id` asks the memtable, then the key files of the segments from the newest. One bitmap per segment marks the rows that are still the current version of their document; a scan reads only those, and a `_count` with no conditions adds whole row groups from the bits. The bits are saved with each checkpoint, and the WAL tail clears them again after a crash.
+
+`memory_limit` (default 384 MiB) is the Go heap soft limit: with it the daemon stays near 512 MB of RSS. The OS page cache holds the hot parts of the segments; it is not the daemon's memory, and the kernel takes it back under pressure.
+
+A data dir of a version before 1.1 has segments without key files: the first start writes them once (it reads every row id, so it needs memory for one map of the ids).
 
 ## Rebuild and recovery
 

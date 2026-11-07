@@ -145,6 +145,17 @@ In direct mode, a line that is not a JSON object, has a bad id, or is over `max_
 
 Find the writer that produced the line with `file` and `offset`, fix it, and watch `ndb_quarantined_total`. ndb does not read the quarantine file back to recover; delete it when you are done. `stats` shows the count as `quarantined`, and `ndb quarantine <collection>` (or `GET /{coll}/_quarantine`) lists the last lines. A direct collection is rebuilt from offset 0 at each start, but a line already in the file (same `file` and `offset`) is not written again, so the file has one entry per bad line however often the daemon restarts. The count (`quarantined`, `ndb_quarantined_total`) is the number of distinct lines in the file: it is read from the file at start, so a restart does not raise it, and it drops if you delete the file. A file written by an older version may still hold repeats; the API shows each line once.
 
+## Measure
+
+`ndb bench` runs the ESL outbox scenario (6 events and a `finishcall` per call) on a daemon of its own, from the same binary, in a temp dir, in about two minutes: live writes with a `_watch` consumer, a `kill -9` with every acked write read back, a bulk load into a daily partition, and reads. It prints one table with the latency, the RSS peak of each phase and the read times. Copy the binary to a machine and run it there to compare machines (arm64, x86) or versions.
+
+```bash
+ndb bench                 # defaults: 30 s live at 400 docs/s, 30k calls loaded
+ndb bench -calls 100000   # a bigger load
+```
+
+From a checkout, `make bench` runs it on `bin/ndb`.
+
 ## Change
 
 ### Upgrade

@@ -33,7 +33,7 @@ Deferred ideas: [`../backlog/`](../backlog/).
 | [M13](m13-packaging-adoption.md) | Packaging + adoption | release, Docker, docs, use in 3 apps | all | phase 10 |
 | [M14](m14-console.md) | Ndb Console | self-hosted web UI: connections, browser, dev tools | M07, M13 | — |
 | [M15](m15-api-1.0.md) | API 1.0 | ES-style routes (`/{coll}/_search`), `query` body key, JSON search envelope, one SDK vocabulary; breaking, release 1.0.0 (done, 1.0.0) | M07–M14 | — |
-| [M16](m16-disk-first.md) | Disk first | the daemon stays under 512 MB of RSS at any data size: ids, live bits and indexes per segment on disk, one write budget, streaming seal and compaction (not started) | M15 | — |
+| [M16](m16-disk-first.md) | Disk first | the daemon stays under 512 MB of RSS at any data size: ids, live bits and indexes per segment on disk, one write budget, streaming seal and compaction (done) | M15 | — |
 
 ## Next (after 0.1.2)
 

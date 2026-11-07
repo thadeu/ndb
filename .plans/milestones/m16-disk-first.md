@@ -1,8 +1,10 @@
 # M16: Disk first (bounded memory)
 
-> Status: in progress. Plan written 2026-11-07, after the 2M × 4 KB bench.
-> Built (2026-11-07): steps 1–6 (bounded memory). Left: fast counts,
-> seal during compaction, parallel partitions, streaming backup, docs.
+> Status: done (2026-11-07). Plan written the same day, after the 2M × 4 KB
+> bench. Built: steps 1–7, fast counts, a seal during a compaction, parallel
+> partitions, a streaming backup snapshot, `ndb bench`, Sonic on the read
+> paths. Not done: restore still holds the rows of a snapshot in memory
+> (WriteSnapshot), and a scan of the memtable decodes each document.
 
 ## Why
 

@@ -6,7 +6,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- **Memory has a fixed size (M16).** Sealed documents stay on disk: each segment has key files next to it (its ids with a bloom filter, the keys of each index field, the values of each unique field) and one bitmap of live rows, saved with the checkpoint. The memtable is the only map of documents. A sealed document costs ~20–40 bytes of memory instead of ~340, and the daemon stays near 512 MB of RSS whatever the data size. See [Storage: memory](docs/dev/storage.md#memory).
+- One write buffer for the whole daemon: `write_buffer` (default 32 MiB) is shared by every collection and partition; over it, the largest memtable is sealed. Writes wait while a memtable is over twice its seal size, instead of growing the memory.
+- `memory_limit` defaults to 384 MiB (the Go heap soft limit) when neither it nor `GOMEMLIMIT` is set.
+- Seals and compactions write one row group at a time. A seal runs while a compaction builds its segment; one compaction runs at a time in the daemon, at most 512k rows; a segment whose rows are mostly replaced is rewritten alone.
+- The collections of a pattern, and the partitions of a partitioned collection, are read in parallel (up to 4 at once).
+- A scan reads the document of a row only when the row enters the result: a `_count` or a search with a `limit` no longer decodes every match. A `_count` with no conditions adds whole row groups from the live bits.
+- The stored documents are decoded with Sonic on the read paths (queries, aggregations, seals, compactions); the API input and writes keep `encoding/json`.
+- A backup that needs a snapshot streams it from the segments instead of listing every document in memory.
+- Upgrade: the first start of 1.1 writes the key files and live bits of the existing segments, once.
+
+### Added
+
+- `ndb bench`: the ESL outbox benchmark (live writes with a `_watch` consumer, `kill -9`, bulk load, reads) on a daemon of its own, in about two minutes; `make bench` runs it. See [Measure](docs/dev/operations.md#measure).
+- `write_buffer` config key.
+
 ### Fixed
+
+- The blob GC ran after each compaction and read every document of every collection, even with no blob stored. It now skips when the store is empty.
 
 - TypeScript SDK on Bun: the undici `Pool` of Bun cannot dial a unix socket, so every call failed (`statusCode` of undefined). On Bun the transport now uses its `fetch` (unix socket and TCP); Node keeps undici.
 
