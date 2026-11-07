@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -609,7 +610,81 @@ func TestCompactWhileReadingAndWriting(t *testing.T) {
 	before := rowsOf(t, c)
 	c = reopen(t, c, root, collection.Config{SealAge: time.Hour})
 
-	if !reflect.DeepEqual(rowsOf(t, c), before) {
+	if after := rowsOf(t, c); !reflect.DeepEqual(after, before) {
+		for i := range before {
+			if i < len(after) && before[i] != after[i] {
+				t.Logf("probe %d\nbefore %.400s\nafter  %.400s", i, before[i], after[i])
+			}
+		}
+
 		t.Fatal("results changed after a restart")
 	}
+}
+
+// A seal does not wait for a compaction: it commits while the compaction is
+// still building its segment, and both end with the right rows.
+func TestSealRunsWhileACompactionBuilds(t *testing.T) {
+	root := t.TempDir()
+	c := openSealed(t, root, collection.Config{SealAge: time.Hour})
+
+	for i := range 4 {
+		insertN(t, c, i*20, i*20+20)
+		mustSeal(t, c)
+	}
+
+	paused, resume := make(chan struct{}), make(chan struct{})
+
+	var once sync.Once
+
+	collection.SetCompactHook(c, func(step string) {
+		if step == "published" {
+			once.Do(func() {
+				close(paused)
+				<-resume
+			})
+		}
+	})
+
+	done := make(chan error, 1)
+
+	go func() { done <- c.Compact() }()
+
+	<-paused
+
+	insertN(t, c, 80, 100)
+	update(t, c, "c0005", "moved")
+	remove(t, c, "c0010")
+
+	sealed := make(chan error, 1)
+
+	go func() { sealed <- c.Seal() }()
+
+	select {
+	case err := <-sealed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the seal waited for the compaction")
+	}
+
+	close(resume)
+
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+
+	want := rowsOf(t, c)
+
+	if n := c.Len(); n != 99 {
+		t.Fatalf("len = %d, want 99", n)
+	}
+
+	if _, ok := c.Get("c0010"); ok {
+		t.Fatal("a deleted row came back")
+	}
+
+	c = reopen(t, c, root, collection.Config{SealAge: time.Hour})
+
+	sameRows(t, want, rowsOf(t, c))
 }

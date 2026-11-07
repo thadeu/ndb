@@ -123,9 +123,9 @@ func (c *Collection) compactRange(lo, hi int) error {
 		return nil
 	}
 
-	s.running.Lock()
+	s.compacting.Lock()
 
-	defer s.running.Unlock()
+	defer s.compacting.Unlock()
 
 	if !c.shared.acquire(s.stop) {
 		return errStopped
@@ -154,15 +154,7 @@ func (c *Collection) compactRange(lo, hi int) error {
 
 	s.step("published")
 
-	if err := c.commitSwap(lo, hi, name, info, merged); err != nil {
-		c.discard(merged, name)
-
-		return err
-	}
-
-	s.step("committed")
-
-	if err := c.swap(plan, lo, hi, name, merged); err != nil {
+	if err := c.commitAndSwap(plan, lo, hi, name, info, merged); err != nil {
 		return err
 	}
 
@@ -179,6 +171,32 @@ func (c *Collection) compactRange(lo, hi int) error {
 	}
 
 	return nil
+}
+
+// commitAndSwap commits the merged segment to meta.bolt and swaps it in, with
+// no seal commit in between (s.commitMu).
+func (c *Collection) commitAndSwap(plan compactPlan, lo, hi int, name string, info segment.Info, merged *segRef) error {
+	s := c.seal
+
+	s.commitMu.Lock()
+	defer s.commitMu.Unlock()
+
+	// A seal may have committed during the build: its checkpoint is past the
+	// writes made since the plan, so the bits saved here must already drop
+	// the rows those writes replaced (the WAL tail will not replay them).
+	c.mu.RLock()
+	transferCleared(plan, merged)
+	c.mu.RUnlock()
+
+	if err := c.commitSwap(lo, hi, name, info, merged); err != nil {
+		c.discard(merged, name)
+
+		return err
+	}
+
+	s.step("committed")
+
+	return c.swap(plan, lo, hi, name, merged)
 }
 
 // errStopped ends a seal or a compaction because the collection is closing
@@ -475,7 +493,7 @@ func (c *Collection) publishMerged(plan compactPlan, tombs []segment.Row) (strin
 		return "", nil, segment.Info{}, nil
 	}
 
-	name := fmt.Sprintf("%06d.parquet", s.next)
+	name := s.newName()
 
 	// The encoder reads the rows twice; the key files take the second pass,
 	// so each document is read from its old segment twice, not three times.
@@ -558,7 +576,7 @@ func (c *Collection) commitSwap(lo, hi int, name string, info segment.Info, merg
 		return err
 	}
 
-	cp := checkpoint{Pos: cur.Pos, Segments: names, Next: s.next + 1, Format: formatSidecars}
+	cp := checkpoint{Pos: cur.Pos, Segments: names, Next: s.peekNext(), Format: formatSidecars}
 
 	return s.meta.Update(func(tx *bolt.Tx) error {
 		segs, err := tx.CreateBucketIfNotExists(bucketSegments)
@@ -614,7 +632,6 @@ func (c *Collection) swap(plan compactPlan, lo, hi int, name string, merged *seg
 
 		s.readers = append(readers, s.readers[hi:]...)
 		s.names = append(names, s.names[hi:]...)
-		s.next++
 
 		for _, r := range plan.run {
 			delete(s.maxTimes, r)
@@ -626,14 +643,25 @@ func (c *Collection) swap(plan compactPlan, lo, hi int, name string, merged *seg
 
 		merged.saved = merged.gen
 
-		for _, lr := range plan.live {
-			if lr.out >= 0 && !lr.r.live.has(lr.row) {
-				merged.live.clear(lr.out)
-				merged.nlive--
-				merged.gen++
-			}
-		}
+		transferCleared(plan, merged)
 	})
+}
+
+// transferCleared clears in merged the rows whose source row is no longer
+// live: a write replaced or deleted them after the plan. The caller holds
+// c.mu.
+func transferCleared(plan compactPlan, merged *segRef) {
+	if merged == nil {
+		return
+	}
+
+	for _, lr := range plan.live {
+		if lr.out >= 0 && merged.live.has(lr.out) && !lr.r.live.has(lr.row) {
+			merged.live.clear(lr.out)
+			merged.nlive--
+			merged.gen++
+		}
+	}
 }
 
 // liveDocs iterates the raw bytes of every live document: the memtable and
@@ -689,9 +717,9 @@ func (c *Collection) compactDue() error {
 func (c *Collection) pickRun() (int, int, bool) {
 	s := c.seal
 
-	s.running.Lock()
+	s.compacting.Lock()
 
-	defer s.running.Unlock()
+	defer s.compacting.Unlock()
 
 	if i := c.expiredSegment(); i >= 0 {
 		return i, i + 1, true

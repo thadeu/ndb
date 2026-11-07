@@ -79,11 +79,20 @@ type sealer struct {
 	next    int
 	last    time.Time
 
-	running  sync.Mutex
-	stop     chan struct{}
-	wake     chan struct{}
-	stopOnce sync.Once
-	wg       sync.WaitGroup
+	// sealing serializes the seals and compacting the compactions: a seal
+	// runs while a compaction builds its segment, so writes do not wait for
+	// it. commitMu serializes the commit of either one to meta.bolt with its
+	// apply on the writer goroutine, so each checkpoint is made from the
+	// segment list it replaces. A compaction changes names[lo:hi] and a
+	// seal only appends, so the run of a compaction stays at lo:hi.
+	sealing    sync.Mutex
+	compacting sync.Mutex
+	commitMu   sync.Mutex
+	nameMu     sync.Mutex
+	stop       chan struct{}
+	wake       chan struct{}
+	stopOnce   sync.Once
+	wg         sync.WaitGroup
 }
 
 // checkpoint is the value of meta.bolt: the WAL end covered by the
@@ -468,15 +477,9 @@ func (c *Collection) Seal() error {
 		return nil
 	}
 
-	s.running.Lock()
+	s.sealing.Lock()
 
-	defer s.running.Unlock()
-
-	if !c.shared.acquire(s.stop) {
-		return errStopped
-	}
-
-	defer c.shared.release()
+	defer s.sealing.Unlock()
 
 	snap, err := c.capture()
 	if err != nil {
@@ -487,7 +490,7 @@ func (c *Collection) Seal() error {
 		return nil
 	}
 
-	name := fmt.Sprintf("%06d.parquet", s.next)
+	name := s.newName()
 	path := s.path(name)
 
 	info, err := segment.PublishRows(s.fs, path, segment.RowsOf(snap.rows), c.def.Indexes)
@@ -511,17 +514,55 @@ func (c *Collection) Seal() error {
 		}
 	}
 
-	snap.bits[name] = reader.live.bytes()
+	s.commitMu.Lock()
+	defer s.commitMu.Unlock()
 
-	cp := checkpoint{Pos: snap.pos, Segments: append(slices.Clone(s.names), name), Next: s.next + 1, Format: formatSidecars}
+	bits := s.liveOnly(snap.bits)
+	bits[name] = reader.live.bytes()
 
-	if err := s.commit(info, name, cp, snap.bits); err != nil {
+	cp := checkpoint{Pos: snap.pos, Segments: append(slices.Clone(s.names), name), Next: s.peekNext(), Format: formatSidecars}
+
+	if err := s.commit(info, name, cp, bits); err != nil {
 		reader.closeFiles()
 
 		return err
 	}
 
 	return c.adopt(snap, reader, name)
+}
+
+// newName is the file name of a new segment. A seal and a compaction may
+// both make one at the same time.
+func (s *sealer) newName() string {
+	s.nameMu.Lock()
+	defer s.nameMu.Unlock()
+
+	name := fmt.Sprintf("%06d.parquet", s.next)
+	s.next++
+
+	return name
+}
+
+// peekNext is the number of the next segment name, for the checkpoint.
+func (s *sealer) peekNext() int {
+	s.nameMu.Lock()
+	defer s.nameMu.Unlock()
+
+	return s.next
+}
+
+// liveOnly keeps the bits of the segments that are still live: a compaction
+// may have replaced some since the capture. The caller holds s.commitMu.
+func (s *sealer) liveOnly(bits map[string][]byte) map[string][]byte {
+	out := map[string][]byte{}
+
+	for _, name := range s.names {
+		if b, ok := bits[name]; ok {
+			out[name] = b
+		}
+	}
+
+	return out
 }
 
 // openSegment opens a new segment and its key files, with no live row yet.
@@ -659,7 +700,6 @@ func (c *Collection) adopt(snap sealSnap, r *segRef, name string) error {
 
 		s.readers = append(s.readers, r)
 		s.names = append(s.names, name)
-		s.next++
 		s.last = time.Now()
 
 		for i, it := range snap.items {
@@ -808,9 +848,30 @@ func (c *Collection) waitRoom(ctx context.Context) error {
 }
 
 func (c *Collection) startSealer() {
-	c.seal.wg.Add(1)
+	c.seal.wg.Add(2)
 
 	go c.runSealer()
+	go c.runCompactor()
+}
+
+// runCompactor merges segments on the sealer tick, apart from the seals.
+func (c *Collection) runCompactor() {
+	defer c.seal.wg.Done()
+
+	t := time.NewTicker(c.seal.tick)
+
+	defer t.Stop()
+
+	for {
+		select {
+		case <-c.seal.stop:
+			return
+		case <-t.C:
+			if err := c.compactDue(); err != nil && !errors.Is(err, errStopped) {
+				log.Printf("ndb: compaction failed, retrying on the next tick: %v", err)
+			}
+		}
+	}
 }
 
 func (c *Collection) runSealer() {
@@ -833,10 +894,6 @@ func (c *Collection) runSealer() {
 				if err := c.Seal(); err != nil && !errors.Is(err, errStopped) {
 					log.Printf("ndb: seal failed, retrying on the next tick: %v", err)
 				}
-			}
-
-			if err := c.compactDue(); err != nil && !errors.Is(err, errStopped) {
-				log.Printf("ndb: compaction failed, retrying on the next tick: %v", err)
 			}
 
 			if _, err := c.TruncateWAL(); err != nil {
