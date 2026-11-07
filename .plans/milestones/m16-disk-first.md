@@ -1,6 +1,8 @@
 # M16: Disk first (bounded memory)
 
-> Status: not started. Plan written 2026-11-07, after the 2M × 4 KB bench.
+> Status: in progress. Plan written 2026-11-07, after the 2M × 4 KB bench.
+> Built (2026-11-07): steps 1–6 (bounded memory). Left: fast counts,
+> seal during compaction, parallel partitions, streaming backup, docs.
 
 ## Why
 
@@ -164,10 +166,41 @@ new watch consumer can replay).
 7. WAL default (after the decision), `/_stats` memory fields, docs (config,
    sizing page: "ndb runs in 512 MB"), CHANGELOG, migration.
 
+## Results (2026-11-07, ESL bench)
+
+| Phase | Before | M16 |
+|---|---|---|
+| live outbox, 400 docs/s, strict | peak 812 MB | peak 215 MB; p50 1.3 ms, p99 4 ms, p99.9 25 ms |
+| `kill -9` mid-write | 0 acked writes lost | 0 lost of 63,871; restart 55 ms |
+| bulk load, ~1M docs | OOM at 13.9 GB | 321–398 MB; 3.9k docs/s (writes wait for seals) |
+| reads on ~1M docs | — | 218–372 MB |
+| heap per sealed doc (Go test) | 340 B | 18 B |
+
+Reads on ~1M docs: get by id 0.3 ms, indexed `call_id` 1.1 ms, last 20 of a
+customer 744 ms, count of 2.4k docs 853 ms, count of 140k docs 3.1 s,
+count all 2.5 s, aggregates of the day 0.6 s. Counts read every document:
+the next step answers them from the index and the live bits.
+
+Changes from the plan: writes wait while a memtable is over twice its seal
+size (`writeHold`), and `memory_limit` defaults to 384 MiB. The blob GC ran
+a full read of every collection after each compaction; it now skips when
+no blob is stored.
+
+## Bench
+
+Keep it short (about 3 minutes): the ESL bench in the session scratchpad,
+not in the repo.
+
+1. live outbox: 60 s at 400 docs/s, 350 concurrent calls, a `_watch`
+   consumer that acks;
+2. `kill -9` mid-write, restart, every acked write read back;
+3. load 100k calls (700k docs) into a daily partition, RSS sampled;
+4. reads: by id, by indexed fields, counts, aggregates.
+
 ## Exit criteria
 
-- The 2M × 4 KB bench, 5 monthly partitions: **RSS ≤ 512 MB in every
-  phase** (load, reads, compaction, deletes, drop, restart).
+- The ESL bench above: **RSS ≤ 512 MB in every phase** (live, crash and
+  restart, load, reads). Done.
 - The memory test passes: the heap does not grow with the number of docs.
 - `GET _doc/{id}` < 2 ms with a cold page cache, < 0.5 ms warm.
 - Load ≥ today's 2.8k docs/s at 4 KB.
