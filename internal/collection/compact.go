@@ -2,6 +2,7 @@ package collection
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"iter"
 	"slices"
@@ -139,6 +140,20 @@ func (c *Collection) compactRange(lo, hi int) error {
 	return nil
 }
 
+// errStopped ends a compaction because the collection is closing (a drop,
+// a truncate, a shutdown): its result would be thrown away.
+var errStopped = errors.New("compaction stopped: the collection is closing")
+
+// stopping tells if the sealer was asked to stop.
+func (s *sealer) stopping() bool {
+	select {
+	case <-s.stop:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *sealer) step(name string) {
 	if s.hook != nil {
 		s.hook(name)
@@ -191,7 +206,11 @@ func (c *Collection) buildRows(plan compactPlan, lo int) ([]segment.Row, map[str
 		gone = map[string]segment.Row{}
 	)
 
-	for _, lr := range plan.live {
+	for i, lr := range plan.live {
+		if i&1023 == 0 && c.seal.stopping() {
+			return nil, nil, errStopped
+		}
+
 		raw, err := lr.e.loc.seg.Raw(lr.e.loc.row)
 		if err != nil {
 			return nil, nil, err

@@ -2,6 +2,7 @@ package collection
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"iter"
 	"log"
@@ -536,7 +537,7 @@ func (c *Collection) runSealer() {
 				}
 			}
 
-			if err := c.compactDue(); err != nil {
+			if err := c.compactDue(); err != nil && !errors.Is(err, errStopped) {
 				log.Printf("ndb: compaction failed, retrying on the next tick: %v", err)
 			}
 
