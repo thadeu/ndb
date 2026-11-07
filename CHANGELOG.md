@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-07
+
 ### Added
 
 - Collection patterns: `POST /v1/c/logs-2026-*/find` and `/aggregate` read every collection whose name starts with `logs-2026-`, for collections split by time. Rows are merged in the `sort` order (then `_coll`, then `_id`); each row starts with `_coll`, the name of its collection. `count`, `skip`, `limit` and `after` work over the whole result; each collection uses its own indexes. `GET /v1/c/logs-*` lists the matched names. Writes and admin calls on a pattern are `400 pattern_read_only`. See [Collection patterns](docs/dev/query.md#collection-patterns).
@@ -15,6 +17,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - SDKs: Go `ndb.ElemMatch`; TypeScript `$elemMatch` in `Where`. Date math strings work in every SDK as is.
 - SDKs, queries built elsewhere (a search form, a saved search), sent as is: Go `ndb.Raw(map)`, `ndb.RawJSON([]byte)` and `Coll.Find(ctx, body)` (one page: rows, next, total); TypeScript `whereRaw(obj)` and `model.find(body)`; Rails `where_raw(hash)` (no Array-to-`$in` convention) and `Model.search(body)` (records, next cursor, total).
 - SDKs: Go `ndb.Pattern[T](db, "logs-*")` and the `ndb:"_coll"` field; Ruby `ndb.find("logs-*", ...)`; Rails `self.collection_name = "logs-*"` and `record.source_collection`; TypeScript `db.model('logs-*', schema)` and `row._coll`.
+
+### Changed
+
+- On the time field (and `expires_field`), a string operand that starts with `now` is now date math. A malformed one (`"nowish"`, `"now-7x"`) is `invalid_query`; before 0.4.0 it was compared as a plain string and matched nothing.
 
 ## [0.3.3] - 2026-11-07
 
@@ -162,7 +168,12 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/thadeu/ndb/compare/v0.3.3...v0.4.0
+[0.3.3]: https://github.com/thadeu/ndb/compare/v0.3.2...v0.3.3
+[0.3.2]: https://github.com/thadeu/ndb/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/thadeu/ndb/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/thadeu/ndb/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/thadeu/ndb/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/thadeu/ndb/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/thadeu/ndb/compare/v0.1.2...v0.2.0
