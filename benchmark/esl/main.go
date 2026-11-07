@@ -280,11 +280,42 @@ func load(d *daemon) []string {
 	wg.Wait()
 
 	el := time.Since(start).Seconds()
+	settle := d.settle("/events-" + day.Format("2006-01-02"))
 
 	return []string{
 		fmt.Sprintf("| load | %d docs in %.0f s, %.0f docs/s |", *calls*7, el, float64(*calls*7)/el),
+		fmt.Sprintf("| load settle | seals and compactions done %.0f s after the load |", settle.Seconds()),
 		fmt.Sprintf("| load RSS | peak %d MB, after %d MB |", peak(), d.rss()),
 	}
+}
+
+// settle waits until the segments of coll stop changing (no seal or
+// compaction for 3 s), so the reads do not share the CPU with them.
+func (d *daemon) settle(coll string) time.Duration {
+	start := time.Now()
+	last, same := "", 0
+
+	for time.Since(start) < time.Minute && same < 6 {
+		var stats struct {
+			Segments int   `json:"segments"`
+			Bytes    any   `json:"bytes"`
+			Rows     int64 `json:"rows"`
+		}
+
+		json.Unmarshal(d.must("GET", coll+"/_stats", ""), &stats)
+
+		cur := fmt.Sprint(stats.Segments, stats.Bytes)
+
+		if cur == last {
+			same++
+		} else {
+			last, same = cur, 0
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	return time.Since(start) - 3*time.Second
 }
 
 // reads: the queries of the ESL, the median of 3 runs each.

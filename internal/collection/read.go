@@ -884,6 +884,11 @@ func (t *topK) Pop() any {
 	return last
 }
 
+// full tells if the top-k holds k rows (never with no limit).
+func (t *topK) full() bool {
+	return t.k > 0 && len(t.rows) == t.k
+}
+
 // wants tells if a row at p would be kept: the caller fetches the document
 // of a row only when it is.
 func (t *topK) wants(p query.Pos) bool {

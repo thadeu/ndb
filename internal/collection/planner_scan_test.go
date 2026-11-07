@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/collection"
+	"github.com/thadeu/ndb/internal/fs"
 )
 
 // explainOf runs body with explain on and returns the plan counters.
@@ -611,5 +613,58 @@ func TestRegexPrefixPrunesSegments(t *testing.T) {
 
 	if folded.SegmentsSkipped != 0 || folded.RowsMatched != 2000 {
 		t.Fatalf("case folded: %+v", folded)
+	}
+}
+
+// A count with no conditions adds whole row groups from their live bits when
+// the zone map proves that no row is past the retention, and reads the
+// groups near the cutoff.
+func TestCountAddsVisibleGroupsWithoutReading(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
+	def := catalog.Def{Name: "events", Time: "ts", Retention: "7d"}
+
+	c, err := collection.Open(collection.Config{Dir: filepath.Join(root, "wal"), Data: root, FS: fs.OS{}, Def: def, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer c.Close()
+
+	var docs [][]byte
+
+	for i := range 5000 {
+		at := now.Add(-time.Duration(i) * time.Minute)
+
+		if i >= 4000 {
+			at = now.Add(-10 * 24 * time.Hour).Add(-time.Duration(i) * time.Second)
+		}
+
+		docs = append(docs, fmt.Appendf(nil, `{"_id":"e%05d","ts":%q}`, i, at.Format(time.RFC3339)))
+	}
+
+	if _, err := c.Insert(ctx, docs...); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := c.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	remove(t, c, "e00010")
+
+	q, _ := c.ParseQuery([]byte(`{"count":true,"limit":1,"explain":true}`))
+
+	page, err := c.Query(ctx, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if *page.Total != 3999 {
+		t.Fatalf("count = %d, want 3999", *page.Total)
+	}
+
+	if page.Explain.RowGroupsRead >= 5 {
+		t.Fatalf("row groups read = %d, want only the first and the ones near the cutoff", page.Explain.RowGroupsRead)
 	}
 }

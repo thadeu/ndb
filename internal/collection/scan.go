@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/thadeu/ndb/internal/query"
 	"github.com/thadeu/ndb/internal/segment"
@@ -256,6 +257,8 @@ type segScan struct {
 func (c *Collection) scanSegment(ctx context.Context, q *query.Query, s segSnap, cur query.Pos, hasCur bool) (part, error) {
 	sc := newSegScan(q, s.r, cur, hasCur)
 	conds := q.Indexable()
+	countable := !q.HasWhere() && len(q.Sort) == 0 && !hasCur && !q.NeedsDoc()
+	bounds := c.hideBounds(c.clock())
 
 	for gi, g := range s.groups {
 		if err := ctx.Err(); err != nil {
@@ -263,6 +266,16 @@ func (c *Collection) scanSegment(ctx context.Context, q *query.Query, s segSnap,
 		}
 
 		if liveIn(s.live, g) == 0 || pruned(s.r, gi, conds) {
+			sc.p.ex.RowGroupsSkipped++
+
+			continue
+		}
+
+		// Rows come in insertion order, so once the top-k is full no later
+		// row of this segment enters it: a group whose rows all match only
+		// adds its live rows to the total.
+		if countable && sc.top.full() && allVisible(s.r, gi, bounds) {
+			sc.p.total += liveIn(s.live, g)
 			sc.p.ex.RowGroupsSkipped++
 
 			continue
@@ -506,6 +519,64 @@ func rawOf(s segment.Scalar) any {
 	}
 
 	return s.Str
+}
+
+// maxZoneOffset is the largest UTC offset of an RFC 3339 time. The zone of a
+// string column is its lexical min, which is the earliest wall clock, not the
+// earliest instant: the instant is at most this much before it.
+const maxZoneOffset = 14 * time.Hour
+
+// allVisible tells if no row of the group can be hidden by a bound (TTL,
+// expires_field, retention), from the zone map of each bound path. It is
+// false whenever the zone cannot prove it.
+func allVisible(r segment.Reader, g int, bounds []hideBound) bool {
+	for _, b := range bounds {
+		col, ok := r.ColumnOf(b.path)
+		if !ok || col.Mixed {
+			return false
+		}
+
+		zone, ok := r.Zone(g, b.path)
+		if !ok {
+			return false
+		}
+
+		if zone.Empty {
+			continue
+		}
+
+		switch zone.Kind {
+		case segment.ScalarString:
+			wall, ok := wallClock(zone.Lo.Str)
+
+			if !ok || !wall.Add(-maxZoneOffset).After(b.cutoff) {
+				return false
+			}
+		case segment.ScalarNumber:
+			if zone.Lo.Num <= float64(b.cutoff.Unix()) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+
+	return true
+}
+
+// wallClock reads the date and time of an RFC 3339 string, without its
+// offset. The page index keeps only a prefix of long strings (16 bytes), so a
+// prefix is read too: it is never after the full value.
+func wallClock(s string) (time.Time, bool) {
+	for _, layout := range []string{"2006-01-02T15:04:05", "2006-01-02T15:04", "2006-01-02T15", "2006-01-02"} {
+		if len(s) >= len(layout) {
+			if t, err := time.Parse(layout, s[:len(layout)]); err == nil {
+				return t, true
+			}
+		}
+	}
+
+	return time.Time{}, false
 }
 
 // pruned tells whether a row group cannot hold a row that matches the

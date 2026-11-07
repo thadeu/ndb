@@ -591,6 +591,13 @@ func (q *Query) slot(path string) int {
 
 // Paths lists the distinct paths of where. MatchCols takes one value list
 // per path, in this order.
+// HasWhere tells if the query text has conditions (Hide adds none).
+func (q *Query) HasWhere() bool {
+	m, ok := q.raw.(map[string]any)
+
+	return ok && len(m) > 0
+}
+
 func (q *Query) Paths() []string {
 	return slices.Clone(q.paths)
 }
