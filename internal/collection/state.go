@@ -134,22 +134,25 @@ func (s *state) remove(id string) {
 }
 
 // release takes a memtable entry out after a seal wrote it: its id is now
-// found in the segment.
+// found in the segment. The unique values are rebuilt by shrink, from the
+// few entries that stay, instead of decoding every sealed one.
 func (s *state) release(id string) {
-	if old, ok := s.docs[id]; ok {
-		s.unindex(id, old)
-		delete(s.docs, id)
-	}
+	delete(s.docs, id)
 }
 
-// shrink copies the maps into new ones: a Go map keeps its buckets when
-// entries leave, and a seal takes almost every entry out.
+// shrink copies the maps into new ones after a seal: a Go map keeps its
+// buckets when entries leave, and a seal takes almost every entry out. The
+// unique values are rebuilt from the entries that stay.
 func (s *state) shrink() {
 	s.docs = clone(s.docs)
 	s.gone = clone(s.gone)
 
-	for f, idx := range s.unique {
-		s.unique[f] = clone(idx)
+	for f := range s.unique {
+		s.unique[f] = map[string]string{}
+	}
+
+	for id, e := range s.docs {
+		s.index(id, e)
 	}
 }
 

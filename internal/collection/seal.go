@@ -665,7 +665,6 @@ func (c *Collection) adopt(snap sealSnap, r *segRef, name string) error {
 			}
 
 			if c.durable.docs[it.id] == it.e {
-				c.unindexMem(it.id, it.e)
 				c.durable.release(it.id)
 				c.memBytes -= int64(len(it.e.doc))
 			} else {
@@ -695,6 +694,7 @@ func (c *Collection) adopt(snap sealSnap, r *segRef, name string) error {
 		c.durable.shrink()
 		c.head.shrink()
 		c.tombs = clone(c.tombs)
+		c.rebuildMemIndexes()
 	})
 
 	if err != nil {
@@ -704,22 +704,29 @@ func (c *Collection) adopt(snap sealSnap, r *segRef, name string) error {
 	return err
 }
 
-// unindexMem removes a memtable document from the secondary indexes of the
-// memtable. The caller holds c.mu for writing.
-func (c *Collection) unindexMem(id string, e *entry) {
+// rebuildMemIndexes makes the memtable indexes again from the documents
+// that stay in the memtable after a seal: usually a few, so this is cheaper
+// than taking each sealed document out. The caller holds c.mu for writing.
+func (c *Collection) rebuildMemIndexes() {
+	for _, s := range c.rd.idx {
+		s.mem = index.NewMem()
+	}
+
 	if len(c.rd.idx) == 0 {
 		return
 	}
 
-	m := c.decodeEntry(e)
+	for id, e := range c.durable.docs {
+		m := c.decodeEntry(e)
 
-	if m == nil {
-		return
-	}
+		if m == nil {
+			continue
+		}
 
-	for _, s := range c.rd.idx {
-		for _, k := range index.Keys(m, s.field, s.isTime) {
-			s.mem.Remove(k, id)
+		for _, s := range c.rd.idx {
+			for _, k := range index.Keys(m, s.field, s.isTime) {
+				s.mem.Add(k, id)
+			}
 		}
 	}
 }
