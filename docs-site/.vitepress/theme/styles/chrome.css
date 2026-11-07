@@ -286,6 +286,11 @@
   display: none;
 }
 
+/* part: top bar links inside the drawer, phones only */
+.side-site {
+  display: none;
+}
+
 /* part: mobile, sidebar becomes a drawer */
 @media (max-width: 860px) {
   .topbar {
@@ -298,6 +303,12 @@
 
   .home-nav {
     display: block;
+  }
+
+  .side-site {
+    display: block;
+    padding-top: 16px;
+    border-top: 1px solid var(--ndb-line);
   }
 
   .main-links {

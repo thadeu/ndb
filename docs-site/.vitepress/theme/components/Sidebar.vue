@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRoute, withBase } from 'vitepress'
+import { useData, useRoute, withBase } from 'vitepress'
 
 import type { Tab } from '../../nav'
 import { useActiveAnchor } from '../composables/useActiveAnchor'
@@ -10,6 +10,17 @@ const props = defineProps<{ tab: Tab; open: boolean }>()
 defineEmits<{ (e: 'close'): void }>()
 
 const route = useRoute()
+const { theme } = useData()
+
+// siteLinks are the top bar links. The top bar hides them on phones, so the
+// drawer shows them at the end.
+const repo = 'https://github.com/thadeu/ndb'
+const siteLinks = [
+  { text: 'Docs', link: '/architecture' },
+  { text: 'Guides', link: '/clients' },
+  { text: 'Reference', link: '/http-api' },
+  { text: 'UI', link: '/ui' },
+]
 const anchor = useActiveAnchor()
 
 const current = computed(() => {
@@ -80,6 +91,20 @@ function activeByOrder(links: string[]): string | undefined {
         @click="$emit('close')"
       >
         {{ item.text }}
+      </a>
+    </section>
+
+    <section class="side-group side-site">
+      <h4 class="side-title">ndb</h4>
+
+      <a v-for="item in siteLinks" :key="item.link" class="side-item" :href="withBase(item.link)" @click="$emit('close')">
+        {{ item.text }}
+      </a>
+
+      <a class="side-item" :href="repo" target="_blank" rel="noopener">GitHub</a>
+
+      <a v-if="theme.version" class="side-item" :href="`${repo}/blob/main/CHANGELOG.md`" target="_blank" rel="noopener">
+        Changelog · v{{ theme.version }}
       </a>
     </section>
   </aside>
