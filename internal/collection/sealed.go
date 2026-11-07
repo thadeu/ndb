@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/thadeu/ndb/internal/fs"
 	"github.com/thadeu/ndb/internal/index"
 	"github.com/thadeu/ndb/internal/query"
 	"github.com/thadeu/ndb/internal/segment"
@@ -114,61 +115,80 @@ type indexField struct {
 }
 
 // writeSidecars writes the key files of the segment at segPath: the ids, one
-// file per index field and one per unique field. The rows of one segment are
-// held in memory, as key entries; a segment is never larger than a seal or
-// maxCompactRows.
+// file per index field and one per unique field.
 func (c *Collection) writeSidecars(segPath string, fields []indexField, rows func(fn func(sideRow) error) error) error {
-	var (
-		ids    []segment.KeyEntry
-		idx    = make([][]segment.KeyEntry, len(fields))
-		uniq   = make([][]segment.KeyEntry, len(c.def.Unique))
-		decode = len(fields) > 0 || len(c.def.Unique) > 0
-	)
+	kf := c.newKeyFiles(fields)
 
-	err := rows(func(r sideRow) error {
-		ids = append(ids, segment.KeyEntry{Key: []byte(r.id), Row: r.row, V: r.v, Seq: r.seq, Tx: r.tx, Del: r.del})
+	if err := rows(kf.add); err != nil {
+		return err
+	}
 
-		if r.del || !decode {
-			return nil
-		}
+	return kf.write(segPath)
+}
 
-		m, err := query.Decode(r.doc)
-		if err != nil {
-			return nil
-		}
+// keyFiles collects the key entries of one segment. The rows of one segment
+// are held in memory as key entries: a segment is never larger than a seal
+// or maxCompactRows.
+type keyFiles struct {
+	fsys   fs.FS
+	fields []indexField
+	unique []string
 
-		for i, f := range fields {
-			for _, k := range index.Keys(m, f.name, f.isTime) {
-				idx[i] = append(idx[i], segment.KeyEntry{Key: k, Row: r.row})
-			}
-		}
+	ids  []segment.KeyEntry
+	idx  [][]segment.KeyEntry
+	uniq [][]segment.KeyEntry
+}
 
-		for i, f := range c.def.Unique {
-			if key, ok := uniqueKey(r.doc, f); ok {
-				uniq[i] = append(uniq[i], segment.KeyEntry{Key: uniqueEntry(key, r.id), Row: r.row})
-			}
-		}
+func (c *Collection) newKeyFiles(fields []indexField) *keyFiles {
+	return &keyFiles{
+		fsys:   c.seal.fs,
+		fields: fields,
+		unique: c.def.Unique,
+		idx:    make([][]segment.KeyEntry, len(fields)),
+		uniq:   make([][]segment.KeyEntry, len(c.def.Unique)),
+	}
+}
 
+func (kf *keyFiles) add(r sideRow) error {
+	kf.ids = append(kf.ids, segment.KeyEntry{Key: []byte(r.id), Row: r.row, V: r.v, Seq: r.seq, Tx: r.tx, Del: r.del})
+
+	if r.del || len(kf.fields)+len(kf.unique) == 0 {
 		return nil
-	})
+	}
+
+	m, err := query.Decode(r.doc)
 	if err != nil {
+		return nil
+	}
+
+	for i, f := range kf.fields {
+		for _, k := range index.Keys(m, f.name, f.isTime) {
+			kf.idx[i] = append(kf.idx[i], segment.KeyEntry{Key: k, Row: r.row})
+		}
+	}
+
+	for i, f := range kf.unique {
+		if key, ok := uniqueKey(r.doc, f); ok {
+			kf.uniq[i] = append(kf.uniq[i], segment.KeyEntry{Key: uniqueEntry(key, r.id), Row: r.row})
+		}
+	}
+
+	return nil
+}
+
+func (kf *keyFiles) write(segPath string) error {
+	if err := segment.WriteKeys(kf.fsys, idsPath(segPath), kf.ids, true, true); err != nil {
 		return err
 	}
 
-	fsys := c.seal.fs
-
-	if err := segment.WriteKeys(fsys, idsPath(segPath), ids, true, true); err != nil {
-		return err
-	}
-
-	for i, f := range fields {
-		if err := segment.WriteKeys(fsys, indexPath(segPath, f.name), idx[i], false, false); err != nil {
+	for i, f := range kf.fields {
+		if err := segment.WriteKeys(kf.fsys, indexPath(segPath, f.name), kf.idx[i], false, false); err != nil {
 			return err
 		}
 	}
 
-	for i, f := range c.def.Unique {
-		if err := segment.WriteKeys(fsys, uniquePath(segPath, f), uniq[i], false, false); err != nil {
+	for i, f := range kf.unique {
+		if err := segment.WriteKeys(kf.fsys, uniquePath(segPath, f), kf.uniq[i], false, false); err != nil {
 			return err
 		}
 	}

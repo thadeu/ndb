@@ -241,10 +241,10 @@ func (c *Collection) planCompact(lo, hi int) (compactPlan, error) {
 
 // planDrops marks the live rows that no read can see any more (expired or
 // past the retention), and returns the tombstones the merged segment needs.
-// Only a collection with a TTL or a retention reads the documents here. The
-// kept rows get their row in the merged segment, after the tombstones.
+// It reads the time columns, not the documents. The kept rows get their row
+// in the merged segment, after the tombstones.
 func (c *Collection) planDrops(plan *compactPlan, lo int) ([]segment.Row, error) {
-	vis, err := c.visibility(plan.now)
+	hidden, err := c.hiddenRows(plan)
 	if err != nil {
 		return nil, err
 	}
@@ -252,20 +252,7 @@ func (c *Collection) planDrops(plan *compactPlan, lo int) ([]segment.Row, error)
 	for i := range plan.live {
 		lr := &plan.live[i]
 
-		if vis == nil {
-			break
-		}
-
-		if i&1023 == 0 && c.seal.stopping() {
-			return nil, errStopped
-		}
-
-		raw, err := lr.r.Raw(lr.row)
-		if err != nil {
-			return nil, err
-		}
-
-		if !visibleTo(vis, raw) {
+		if hidden[lr.r] != nil && hidden[lr.r].has(lr.row) {
 			lr.out = -1
 			plan.gone[lr.id] = max(plan.gone[lr.id], lr.tx)
 		}
@@ -286,6 +273,123 @@ func (c *Collection) planDrops(plan *compactPlan, lo int) ([]segment.Row, error)
 	}
 
 	return tombs, nil
+}
+
+// hideBound is one rule of hidden(): a row whose path is at or before cutoff
+// is hidden (TTL, expires_field, retention).
+type hideBound struct {
+	path   string
+	cutoff time.Time
+}
+
+func (c *Collection) hideBounds(now time.Time) []hideBound {
+	var out []hideBound
+
+	add := func(path, dur string) {
+		if path == "" || dur == "" {
+			return
+		}
+
+		if d, err := catalog.ParseDuration(dur); err == nil {
+			out = append(out, hideBound{path: path, cutoff: now.Add(-d)})
+		}
+	}
+
+	add(c.def.Time, c.def.TTL)
+	add(c.def.Time, c.def.Retention)
+
+	if c.def.ExpiresField != "" {
+		out = append(out, hideBound{path: c.def.ExpiresField, cutoff: now})
+	}
+
+	return out
+}
+
+// hiddenRows marks, per segment of the run, the live rows that a read can no
+// longer see. It reads the time columns of the groups with live rows; a row
+// whose column cannot answer is decoded.
+func (c *Collection) hiddenRows(plan *compactPlan) (map[*segRef]bitset, error) {
+	bounds := c.hideBounds(plan.now)
+
+	if len(bounds) == 0 {
+		return nil, nil
+	}
+
+	vis, err := c.visibility(plan.now)
+	if err != nil {
+		return nil, err
+	}
+
+	paths := make([]string, len(bounds))
+
+	for i, b := range bounds {
+		paths[i] = b.path
+	}
+
+	out := map[*segRef]bitset{}
+
+	for _, r := range plan.run {
+		hidden := newBitset(r.Len())
+
+		for gi, g := range r.Groups() {
+			if c.seal.stopping() {
+				return nil, errStopped
+			}
+
+			if liveIn(r.live, g) == 0 {
+				continue
+			}
+
+			rows, err := r.ReadGroup(gi, paths)
+			if err != nil {
+				return nil, err
+			}
+
+			for i := range g.Rows {
+				row := g.Start + i
+
+				if !r.live.has(row) {
+					continue
+				}
+
+				hide, err := rowHidden(r, row, rows, i, bounds, vis)
+				if err != nil {
+					return nil, err
+				}
+
+				if hide {
+					hidden.set(row)
+				}
+			}
+		}
+
+		out[r] = hidden
+	}
+
+	return out, nil
+}
+
+// rowHidden checks one row against the bounds with its column cells, or
+// against vis with its document when a cell cannot answer.
+func rowHidden(r *segRef, row int, rows segment.GroupRows, i int, bounds []hideBound, vis *query.Query) (bool, error) {
+	for j, b := range bounds {
+		cell := rows.Cells[j][i]
+
+		if !cell.Known {
+			raw, err := r.Raw(row)
+			if err != nil {
+				return false, err
+			}
+
+			return !visibleTo(vis, raw), nil
+		}
+
+		if t, ok := cellTime(cell); ok && !t.After(b.cutoff) {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 // mergedRows streams the rows of the merged segment: tombstones first, then
@@ -373,12 +477,31 @@ func (c *Collection) publishMerged(plan compactPlan, tombs []segment.Row) (strin
 
 	name := fmt.Sprintf("%06d.parquet", s.next)
 
-	info, err := segment.PublishRows(s.fs, s.path(name), segmentRowsOf(rows), c.def.Indexes)
+	// The encoder reads the rows twice; the key files take the second pass,
+	// so each document is read from its old segment twice, not three times.
+	kf := c.newKeyFiles(plan.fields)
+	pass := 0
+
+	tap := func(fn func(sideRow) error) error {
+		pass++
+
+		return rows(func(r sideRow) error {
+			if pass == 2 {
+				if err := kf.add(r); err != nil {
+					return err
+				}
+			}
+
+			return fn(r)
+		})
+	}
+
+	info, err := segment.PublishRows(s.fs, s.path(name), segmentRowsOf(tap), c.def.Indexes)
 	if err != nil {
 		return "", nil, info, err
 	}
 
-	if err := c.writeSidecars(s.path(name), plan.fields, rows); err != nil {
+	if err := kf.write(s.path(name)); err != nil {
 		return "", nil, info, err
 	}
 

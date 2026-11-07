@@ -22,6 +22,10 @@ func (db *DB) Blobs() *blob.Store {
 // of every collection. The grace period covers a blob whose document is not
 // written yet, and a document that changed after its collection was scanned.
 func (db *DB) GCBlobs(ctx context.Context, grace time.Duration) (blob.GCResult, error) {
+	if count, _ := db.blobs.Stats(); count == 0 {
+		return blob.GCResult{}, nil
+	}
+
 	live, err := db.liveBlobs(ctx)
 	if err != nil {
 		return blob.GCResult{}, err
@@ -33,7 +37,8 @@ func (db *DB) GCBlobs(ctx context.Context, grace time.Duration) (blob.GCResult, 
 // compacted is the OnCompact hook of every engine collection. A compaction
 // is when old document versions stop existing, so it starts one blob GC in
 // the background. The GC scans all collections, so the documents the hook
-// gives are not used, and a GC that is running already is not doubled.
+// gives are not used, and a GC that is running already is not doubled. With
+// no blob stored there is nothing to scan for.
 func (db *DB) compacted(iter.Seq[[]byte]) {
 	if !db.gcRunning.CompareAndSwap(false, true) {
 		return
