@@ -41,7 +41,15 @@ export class Model<F extends Fields> {
     return op ? `${base}/${op}` : base
   }
 
+  // A collection pattern ("logs-2026-*") reads many collections and declares
+  // none: its writes fail with pattern_read_only.
+  get isPattern(): boolean {
+    return this.name.includes('*')
+  }
+
   ready(): Promise<void> {
+    if (this.isPattern) return Promise.resolve()
+
     this.ensured ??= this.db.transport.request<void>('PUT', this.path(), this.catalog()).catch((err: unknown) => {
       this.ensured = undefined
 

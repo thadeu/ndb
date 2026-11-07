@@ -183,6 +183,15 @@ Ruby features that RE2 does not have raise `Ndb::InvalidQuery` (code `invalid_qu
 
 A String pattern is sent unchanged and has no `m`: `where: { name: { "$regex" => "^abc" } }`. A pattern anchored with `^` and a literal start, without `i` or `m`, uses the index on the field (`page.plan` is `index:name`). A Regexp always sends `m`, so it is a scan filter, not an index range. For a prefix search that uses the index, send the String form.
 
+### Collection patterns
+
+Pass a [collection pattern](../query.md#collection-patterns) as the collection name to `find` and `aggregate`. Each row has `"_coll"`, the name of its collection. Writes raise `Ndb::Error` with code `pattern_read_only`.
+
+```ruby
+page = ndb.find("logs-2026-*", where: { lvl: "error" }, sort: { at: -1 }, count: true)
+page.rows.first["_coll"]   # => "logs-2026-11"
+```
+
 ### Count
 
 ```ruby

@@ -17,7 +17,7 @@ it('infers row types from the schema', async () => {
   const row = await calls.get('x')
 
   expectTypeOf(row).toEqualTypeOf<
-    | (({ status: string; ts: Date } & { dur?: number; meta?: unknown }) & { _id: string; _v: number })
+    | (({ status: string; ts: Date } & { dur?: number; meta?: unknown }) & { _id: string; _v: number; _coll?: string })
     | null
   >()
 })

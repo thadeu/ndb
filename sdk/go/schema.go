@@ -10,6 +10,10 @@ import (
 // idField is the primary key of every collection.
 const idField = "_id"
 
+// collField is the collection of a row read through a Pattern. It is filled
+// on reads and never sent on writes.
+const collField = "_coll"
+
 // schema is the mapping from a Go struct to a document, read from the
 // `ndb:"name[,option...]"` tags. Options: id, time, expires (the field
 // holds the expiry time of the document), index, unique, and version (the
@@ -150,7 +154,7 @@ func (s *schema) encode(v any) (json.RawMessage, error) {
 	for _, f := range s.fields {
 		fv := rv.Field(f.index)
 
-		if f.name == idField && fv.IsZero() || f.name == s.version {
+		if f.name == idField && fv.IsZero() || f.name == s.version || f.name == collField {
 			continue
 		}
 

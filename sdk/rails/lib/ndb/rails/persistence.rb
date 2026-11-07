@@ -42,15 +42,20 @@ module Ndb
       def instantiate(row)
         row = row.dup
         version = row.delete("_v")
+        source = row.delete("_coll")
         record = new(row.slice(*attribute_names))
 
-        record.send(:loaded!, version)
+        record.send(:loaded!, version, source)
 
         record
       end
     end
 
     attr_reader :version
+
+    # The collection a record was read from, when its model reads a
+    # collection pattern (self.collection_name = "logs-2026-*"); nil otherwise.
+    attr_reader :source_collection
 
     # id is an alias of _id.
     def id
@@ -244,9 +249,10 @@ module Ndb
       self
     end
 
-    def loaded!(version)
+    def loaded!(version, source = nil)
       @persisted = true
       @version = version
+      @source_collection = source if source
 
       changes_applied
     end

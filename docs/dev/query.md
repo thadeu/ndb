@@ -393,6 +393,40 @@ ndb delete calls '{"status":"expired"}' --many
 
 :::
 
+## Collection patterns
+
+A path with a name prefix and one `*` at the end reads every collection whose name starts with that prefix. It is made for collections split by time: write to `logs-2026-11`, read a year with `logs-2026-*` and everything with `logs-*`, and [drop](operations.md#truncate-and-drop) a whole period when it ends.
+
+```bash
+curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/logs-2026-*/find -d '{
+  "where": { "lvl": "error" },
+  "sort": { "at": -1 },
+  "limit": 50
+}'
+# {"_coll":"logs-2026-11","_id":"...","at":"2026-11-07T10:00:00Z","lvl":"error"}
+# {"_coll":"logs-2026-10","_id":"...","at":"2026-10-31T23:59:00Z","lvl":"error"}
+```
+
+| Call | On a pattern |
+|---|---|
+| `find` | One result over every matched collection, in the `sort` order. |
+| `count: true` | `X-Ndb-Total` is the sum over the collections. |
+| `aggregate` | The pipeline runs as if the collections were one. |
+| `GET /v1/c/{pattern}` | `{"collections":[...]}`: the matched names. |
+| everything else | `400 pattern_read_only`: insert, update, delete, expire, persist, watch, truncate, drop, `PUT`. |
+
+Rules:
+
+- **Pattern:** a prefix and one `*` at the end: `logs-2026-*`, `logs-*`. `*` alone, a `*` in the middle or an upper-case prefix is `invalid_pattern`. A name never has `*`, so a pattern never means a real collection.
+- **Plain prefix:** `logs-*` also matches `logs-archive`. Name the partitions so their prefix is unique.
+- **`_coll`:** each row starts with `_coll`, the name of its collection. A `_coll` field stored in the document is replaced.
+- **Order:** the `sort` keys, then `_coll`, then `_id`. With no `sort`: collections by name, then insertion order.
+- **Plans:** each collection uses its own indexes and zone maps, so a time filter on `logs-*` skips old row groups. `X-Ndb-Plan` is `pattern`; `X-Ndb-Examined` and `X-Ndb-Explain` add up the collections.
+- **Pagination:** `skip`, `limit` and `after` work over the whole result. A cursor is bound to its pattern: used with another pattern or with one collection, it is `cursor_mismatch`. `snapshot: true` is `invalid_query` on a pattern.
+- **Set of collections:** taken when the call starts. A pattern with no match answers no rows (and `X-Ndb-Total: 0`), not `unknown_collection`. At most 256 collections, else `pattern_too_wide`.
+- **Consistency:** each collection is read at its own point in time; there is no snapshot over many collections. A truncate or drop of a matched collection waits for the call.
+- **Definitions:** keep the same `time` field in every partition, so that time values sort the same way.
+
 ## Pagination
 
 Both modes work on `find` and [aggregate](aggregate.md).

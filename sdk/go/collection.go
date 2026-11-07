@@ -36,6 +36,20 @@ func Collection[T any](ctx context.Context, db *DB, name string) (*Coll[T], erro
 	return &Coll[T]{db: db, name: name, schema: s}, nil
 }
 
+// Pattern reads every collection whose name starts with a prefix: pattern
+// is the prefix and one "*" at the end, like "logs-2026-*". It sends
+// nothing to the daemon. Only reads work (Where, All, Count, Aggregate);
+// writes fail with pattern_read_only. Each row carries "_coll", the name of
+// its collection: map it with a field tagged `ndb:"_coll"`.
+func Pattern[T any](db *DB, pattern string) (*Coll[T], error) {
+	s, err := schemaOf(reflect.TypeFor[T]())
+	if err != nil {
+		return nil, err
+	}
+
+	return &Coll[T]{db: db, name: pattern, schema: s}, nil
+}
+
 // Result is the _id and version of a written document. An empty _id field is
 // not sent, so the daemon generates the id and Result carries it. Insert
 // fails with ErrDuplicateID when an _id exists.

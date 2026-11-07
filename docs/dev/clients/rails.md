@@ -224,6 +224,22 @@ Call.where(caller: { "$regex" => "^55" })   # a String: no `m`, and a literal ^p
 
 A Regexp is a scan filter. For a prefix search that uses the index, pass the String form. See the [`ndb` README](https://github.com/thadeu/ndb/blob/main/sdk/ruby/README.md) for the full mapping.
 
+### Collection patterns
+
+A model whose `collection_name` is a [collection pattern](../query.md#collection-patterns) reads every matched collection. It declares nothing at boot, and its writes raise `Ndb::Error` with code `pattern_read_only`. `record.source_collection` is the collection a record came from.
+
+```ruby
+class LogArchive < Ndb::Record
+  self.collection_name = "logs-2026-*"
+
+  attribute :at, :datetime, time: true
+  attribute :lvl, :string
+end
+
+LogArchive.where(lvl: "error").order(at: :desc).limit(50).map(&:source_collection)
+LogArchive.where(lvl: "error").count
+```
+
 ### Count
 
 ```ruby

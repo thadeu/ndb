@@ -51,13 +51,50 @@ func (c *Collection) Aggregate(ctx context.Context, p *agg.Pipeline) (Page, erro
 		return Page{}, err
 	}
 
+	part, plan, err := c.aggTable(ctx, p, c.budget())
+	if err != nil {
+		return Page{}, err
+	}
+
+	return finishAgg(p, part, plan)
+}
+
+// finishAgg runs the stages after the group stage on the merged table.
+func finishAgg(p *agg.Pipeline, part aggPart, plan string) (Page, error) {
+	res, err := p.Finish(part.tbl.Rows())
+	if err != nil {
+		return Page{}, err
+	}
+
+	page := Page{Rows: res.Rows, Next: res.Next, Plan: plan, Examined: part.ex.RowsRead}
+
+	if p.Count {
+		page.Total = &res.Total
+	}
+
+	if p.Explain {
+		ex := part.ex
+		ex.Plan, ex.RowsMatched = plan, part.matched
+		page.Explain = &ex
+	}
+
+	return page, nil
+}
+
+// budget is the memory budget of the group tables of one aggregate.
+func (c *Collection) budget() *agg.Budget {
 	limit := c.groupLimit.Load()
 
 	if limit <= 0 {
 		limit = defaultGroupLimit
 	}
 
-	budget := agg.NewBudget(limit)
+	return agg.NewBudget(limit)
+}
+
+// aggTable runs the group stage of p over the collection: one table with
+// the groups of every unit, and the plan name.
+func (c *Collection) aggTable(ctx context.Context, p *agg.Pipeline, budget *agg.Budget) (aggPart, string, error) {
 	src := c.source(p.Query)
 
 	defer src.release()
@@ -70,31 +107,15 @@ func (c *Collection) Aggregate(ctx context.Context, p *agg.Pipeline) (Page, erro
 		return c.aggSegment(ctx, p, src.segs[i-1], budget)
 	})
 	if err != nil {
-		return Page{}, err
+		return aggPart{}, "", err
 	}
 
 	tbl, matched, ex, err := mergeAgg(parts)
 	if err != nil {
-		return Page{}, err
+		return aggPart{}, "", err
 	}
 
-	res, err := p.Finish(tbl.Rows())
-	if err != nil {
-		return Page{}, err
-	}
-
-	page := Page{Rows: res.Rows, Next: res.Next, Plan: src.plan, Examined: ex.RowsRead}
-
-	if p.Count {
-		page.Total = &res.Total
-	}
-
-	if p.Explain {
-		ex.Plan, ex.RowsMatched = src.plan, matched
-		page.Explain = &ex
-	}
-
-	return page, nil
+	return aggPart{tbl: tbl, matched: matched, ex: ex}, src.plan, nil
 }
 
 func mergeAgg(parts []aggPart) (*agg.Table, int, Explain, error) {

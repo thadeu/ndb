@@ -30,6 +30,7 @@ type reader interface {
 	ParseAggregate(body []byte) (*agg.Pipeline, error)
 	Aggregate(ctx context.Context, p *agg.Pipeline) (collection.Page, error)
 	SetGroupLimit(n int64)
+	Reader() *collection.Collection
 	EnsureIndex(field string) error
 	DropIndex(field string)
 	Indexes() []collection.IndexInfo

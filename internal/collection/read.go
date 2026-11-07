@@ -779,10 +779,18 @@ func copyPath(dst, src map[string]any, parts []string) {
 
 // withVersion adds "_v" as the first field of the doc object.
 func withVersion(doc json.RawMessage, v uint64) json.RawMessage {
-	out := make([]byte, 0, len(doc)+24)
+	return prependField(doc, "_v", strconv.AppendUint(nil, v, 10))
+}
 
-	out = append(out, `{"_v":`...)
-	out = strconv.AppendUint(out, v, 10)
+// prependField adds key with the JSON value val as the first field of the
+// doc object.
+func prependField(doc json.RawMessage, key string, val []byte) json.RawMessage {
+	out := make([]byte, 0, len(doc)+len(key)+len(val)+4)
+
+	out = append(out, '{')
+	out = strconv.AppendQuote(out, key)
+	out = append(out, ':')
+	out = append(out, val...)
 
 	body := bytes.TrimSpace(doc[1:])
 

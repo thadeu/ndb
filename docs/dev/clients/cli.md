@@ -189,6 +189,12 @@ $ ndb query posts '{}' -sort '{"likes":-1}'
 
 (The example is at 80 columns. At 160 columns, or piped, the title is whole.)
 
+A [collection pattern](../query.md#collection-patterns) reads many collections; quote it so the shell does not expand `*`. Each row has a `_coll` column.
+
+```
+$ ndb query 'logs-2026-*' '{"lvl":"error"}' -sort '{"at":-1}'
+```
+
 ## get
 
 `ndb get <collection> <_id>` calls `GET /v1/c/{coll}/{_id}` and prints the document with `_v`. A missing id exits with `not_found`.

@@ -8,6 +8,8 @@ Paths start with `/v1`. `/health` and `/metrics` have no version. Every data end
 |---|---|---|---|
 | POST | `/v1/c/{coll}/find` | find query | NDJSON rows + `X-Ndb-*` headers |
 | POST | `/v1/c/{coll}/aggregate` | `{"pipeline":[...]}` | NDJSON rows + `X-Ndb-*` headers |
+| POST | `/v1/c/{prefix}*/find`, `/v1/c/{prefix}*/aggregate` | as above | rows of every collection of the [pattern](query.md#collection-patterns), with `_coll` |
+| GET | `/v1/c/{prefix}*` | none | `{"collections":[...]}`: the names the pattern matches |
 | POST | `/v1/c/{coll}/insert` | `{"insert":[{...},...],"expire_in"}` | `{"results":[{"_id","v"}]}` |
 | POST | `/v1/c/{coll}/update?many&upsert&expire_in` | filter and write operators in one object | `{"matched","modified","doc"}` |
 | GET | `/v1/c/{coll}/{_id}` | none | the document with `_v` |
@@ -44,6 +46,7 @@ Details:
 - `update` and `delete` are [atomic update by filter](query.md#update-by-filter).
 - `PUT /v1/c/{coll}` is idempotent. Keys: `time`, `write`, `path`, `indexes`, `unique`, `durability`, `retention`, `wal_retention`, `ttl`, `expires_field`, `max_line_size`, `blob_threshold` (bytes). Merge rules: `indexes` are united; a different `write`, `path` or `time` is `catalog_conflict`; `id` is `catalog_invalid` (see [Document id](configuration.md#document-id)); `ndb.yml` wins for `durability`, `retention` and `wal_retention`.
 - `GET /v1/c/{coll}` answers like `PUT`: the final `definition` and the state of each index. An unknown name is `404 unknown_collection`.
+- `{coll}` can be a [collection pattern](query.md#collection-patterns) (`logs-2026-*`) for `find`, `aggregate` and `GET`. Any other route with a pattern is `400 pattern_read_only`.
 - Errors are described in [Errors](#errors).
 - `where` operators are in [Filters](query.md#filters). `{"field": {"$regex": "^abc", "$options": "i"}}` matches strings with Go RE2 (no backreferences, no look-around; flags `i`, `m`, `s`, `x`); a bad pattern or flag is `400 invalid_query`. An anchored literal prefix without `i`/`m` can use an index and zone maps, see [Regular expressions](query.md#regular-expressions).
 
@@ -133,6 +136,9 @@ The body is `{"error":{"code":"...","message":"..."}}`.
 | `unknown_operator`, `no_update`, `conflicting_update`, `invalid_field`, `unindexed_many`, `empty_filter` | 400 | The body of an update or delete breaks the [contract](query.md#contract-errors). |
 | `duplicate_id` | 409 | A document with this id exists. |
 | `unique_violation` | 409 | A `unique` field value exists. |
+| `invalid_pattern` | 400 | A collection pattern that is not a prefix and one `*` at the end. |
+| `pattern_read_only` | 400 | A write or admin call on a collection pattern. |
+| `pattern_too_wide` | 400 | The pattern matches more than 256 collections. |
 | `confirm_required` | 400 | `truncate` or `drop` without `confirm` equal to the collection name. |
 | `catalog_conflict` | 409 | Two declarations of the collection disagree (`write`, `path`, `time`). |
 | `direct_collection` | 409 | Write call on a direct-mode collection. |

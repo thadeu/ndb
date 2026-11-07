@@ -186,6 +186,24 @@ rows, err := calls.
 - `First(ctx)` returns the first row, or `ErrNotFound`.
 - The SDK has no explain call. To see the plan counters, send `"explain": true` in a raw `find` request and read the `X-Ndb-Explain` header. See the query language doc.
 
+### Collection patterns
+
+`ndb.Pattern[T]` reads every collection whose name starts with a prefix (see [Collection patterns](../query.md#collection-patterns)). It declares nothing; writes fail with `pattern_read_only`. A field tagged `ndb:"_coll"` gets the name of the collection of each row, and is never sent on writes.
+
+```go
+type Log struct {
+	ID   string    `ndb:"_id"`
+	At   time.Time `ndb:"at,time"`
+	Lvl  string    `ndb:"lvl,index"`
+	Coll string    `ndb:"_coll"`
+}
+
+logs, err := ndb.Pattern[Log](db, "logs-2026-*")
+
+rows, err := logs.Where(ndb.Eq("lvl", "error")).Sort(ndb.Desc("at")).Limit(50).All(ctx)
+n, err := logs.Where(ndb.Eq("lvl", "error")).Count(ctx)
+```
+
 ### Count
 
 ```go

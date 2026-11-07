@@ -40,7 +40,9 @@ export type Doc<F extends Fields> = {
 // daemon makes a UUIDv7.
 export type Input<F extends Fields> = { [K in keyof F]?: ValueOf<F[K]> } & { _id?: string }
 
-export type Row<F extends Fields> = Doc<F> & { _id: string; _v: number }
+// _coll is set on rows read through a collection pattern ("logs-2026-*"): the
+// name of the collection the row came from.
+export type Row<F extends Fields> = Doc<F> & { _id: string; _v: number; _coll?: string }
 
 export interface Ops<V> {
   $eq?: V

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/collection"
 	"github.com/thadeu/ndb/internal/engine"
+	ndbmetrics "github.com/thadeu/ndb/internal/metrics"
 )
 
 type writeResult struct {
@@ -33,52 +35,46 @@ type insertReq struct {
 // X-Ndb-Plan, X-Ndb-Examined and, with count: true, X-Ndb-Total. With
 // explain: true, X-Ndb-Explain is the JSON of the plan counters.
 func (s *Server) find(w http.ResponseWriter, r *http.Request, db *engine.DB) {
-	name := r.PathValue("coll")
-
-	col, err := db.Get(name)
+	col, err := db.Get(r.PathValue("coll"))
 	if err != nil {
 		writeError(w, err)
 
 		return
 	}
 
-	body, err := readBody(w, r, db.MaxLine(name))
-	if err != nil {
-		writeError(w, err)
+	s.read(w, r, db, &s.metrics.find, col.Find)
+}
 
-		return
-	}
-
-	began := time.Now()
-
-	page, err := col.Find(r.Context(), body)
-
-	s.metrics.find.Observe(time.Since(began))
-
-	if err != nil {
-		writeError(w, err)
-
-		return
-	}
-
-	s.metrics.rows.Add(int64(len(page.Rows)))
-
-	writePage(w, page)
+// findPattern is find over every collection of a pattern (logs-2026-*).
+func (s *Server) findPattern(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+	s.read(w, r, db, &s.metrics.find, func(ctx context.Context, body []byte) (collection.Page, error) {
+		return db.FindPattern(ctx, r.PathValue("coll"), body)
+	})
 }
 
 // aggregate streams the output rows of a pipeline as NDJSON, with the same
 // headers as find (plan §10.2, §10.6).
 func (s *Server) aggregate(w http.ResponseWriter, r *http.Request, db *engine.DB) {
-	name := r.PathValue("coll")
-
-	col, err := db.Get(name)
+	col, err := db.Get(r.PathValue("coll"))
 	if err != nil {
 		writeError(w, err)
 
 		return
 	}
 
-	body, err := readBody(w, r, db.MaxLine(name))
+	s.read(w, r, db, &s.metrics.aggregate, col.Aggregate)
+}
+
+// aggregatePattern is aggregate over every collection of a pattern.
+func (s *Server) aggregatePattern(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+	s.read(w, r, db, &s.metrics.aggregate, func(ctx context.Context, body []byte) (collection.Page, error) {
+		return db.AggregatePattern(ctx, r.PathValue("coll"), body)
+	})
+}
+
+// read runs a find or an aggregate body and writes the page.
+func (s *Server) read(w http.ResponseWriter, r *http.Request, db *engine.DB, took *ndbmetrics.Histogram, run func(context.Context, []byte) (collection.Page, error)) {
+	body, err := readBody(w, r, db.MaxLine(r.PathValue("coll")))
 	if err != nil {
 		writeError(w, err)
 
@@ -87,9 +83,9 @@ func (s *Server) aggregate(w http.ResponseWriter, r *http.Request, db *engine.DB
 
 	began := time.Now()
 
-	page, err := col.Aggregate(r.Context(), body)
+	page, err := run(r.Context(), body)
 
-	s.metrics.aggregate.Observe(time.Since(began))
+	took.Observe(time.Since(began))
 
 	if err != nil {
 		writeError(w, err)
@@ -410,6 +406,18 @@ func (s *Server) ensure(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 
 func (s *Server) list(w http.ResponseWriter, _ *http.Request, db *engine.DB) {
 	writeJSON(w, http.StatusOK, map[string]any{"collections": db.Definitions()})
+}
+
+// listPattern is GET /v1/c/{pattern}: the names a pattern matches.
+func (s *Server) listPattern(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+	names, err := db.Match(r.PathValue("coll"))
+	if err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"collections": append([]string{}, names...)})
 }
 
 func (s *Server) dropIndex(w http.ResponseWriter, r *http.Request, db *engine.DB) {

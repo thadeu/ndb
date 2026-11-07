@@ -133,6 +133,7 @@ Collections split by time (`calls_2026_11`, `logs_2026_w45`) are emptied or remo
 - **`ndb.yml`:** a collection declared there comes back, empty, at the next start after a drop. Remove it from `ndb.yml` too.
 - **Direct mode:** both are refused (`409 direct_collection`). The files belong to the app.
 - **Downgrade:** a WAL with a truncate marker cannot be read by ndb 0.3.2 or older.
+- **Reading many periods:** a [collection pattern](query.md#collection-patterns) such as `logs-2026-*` reads every partition in one call.
 
 ### Quarantine (direct mode)
 

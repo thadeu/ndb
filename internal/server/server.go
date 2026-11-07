@@ -95,8 +95,8 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("POST /v1/c/{coll}/find", s.ready(s.find))
-	mux.HandleFunc("POST /v1/c/{coll}/aggregate", s.ready(s.aggregate))
+	mux.HandleFunc("POST /v1/c/{coll}/find", s.readyOr(s.find, s.findPattern))
+	mux.HandleFunc("POST /v1/c/{coll}/aggregate", s.readyOr(s.aggregate, s.aggregatePattern))
 	mux.HandleFunc("POST /v1/c/{coll}/insert", s.ready(s.insert))
 	mux.HandleFunc("POST /v1/c/{coll}/update", s.ready(s.update))
 	mux.HandleFunc("POST /v1/c/{coll}/delete", s.ready(s.remove))
@@ -111,7 +111,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/c/{coll}/{id}/ttl", s.ready(s.ttl))
 	mux.HandleFunc("GET /v1/c", s.ready(s.list))
 	mux.HandleFunc("DELETE /v1/c/{coll}/indexes/{field}", s.ready(s.dropIndex))
-	mux.HandleFunc("GET /v1/c/{coll}", s.ready(s.getCollection))
+	mux.HandleFunc("GET /v1/c/{coll}", s.readyOr(s.getCollection, s.listPattern))
 	mux.HandleFunc("GET /v1/c/{coll}/stats", s.ready(s.stats))
 	mux.HandleFunc("POST /v1/c/{coll}/compact", s.ready(s.compact))
 	mux.HandleFunc("POST /v1/c/{coll}/truncate", s.ready(s.truncate))
@@ -128,13 +128,33 @@ func (s *Server) routes() http.Handler {
 	return s.count(mux)
 }
 
-// ready gives fn the engine, or answers 503 while recovery runs.
-func (s *Server) ready(fn func(http.ResponseWriter, *http.Request, *engine.DB)) http.HandlerFunc {
+type handler func(http.ResponseWriter, *http.Request, *engine.DB)
+
+// ready gives fn the engine, or answers 503 while recovery runs. A
+// collection pattern (logs-*) in the path is pattern_read_only.
+func (s *Server) ready(fn handler) http.HandlerFunc {
+	return s.readyOr(fn, nil)
+}
+
+// readyOr is ready, but a collection pattern in the path goes to many.
+func (s *Server) readyOr(one, many handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		db := s.db.Load()
 
 		if db == nil {
 			writeError(w, &apiError{status: http.StatusServiceUnavailable, code: "not_ready", msg: "ndb is recovering"})
+
+			return
+		}
+
+		fn := one
+
+		if engine.IsPattern(r.PathValue("coll")) {
+			fn = many
+		}
+
+		if fn == nil {
+			writeError(w, &apiError{status: http.StatusBadRequest, code: "pattern_read_only", msg: "a collection pattern only reads: find, aggregate, GET"})
 
 			return
 		}

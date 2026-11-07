@@ -158,8 +158,17 @@ module Ndb
         definition
       end
 
-      # Declares the collection once per process (and once per client).
+      # A collection pattern ("logs-2026-*") reads many collections and
+      # writes none.
+      def collection_pattern?
+        collection_name.include?("*")
+      end
+
+      # Declares the collection once per process (and once per client). A
+      # pattern declares nothing.
       def ensure_collection!
+        return if collection_pattern?
+
         client = Rails.client
 
         return if @ensured_client.equal?(client)

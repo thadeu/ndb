@@ -1,6 +1,16 @@
 # Collection patterns: `logs-2026-*` (backlog)
 
 > Decision (2026-11-07): next, as 0.4.0. Read only. No named aliases.
+> Built (2026-11-07, unreleased): `internal/collection/pattern.go`,
+> `internal/engine/pattern.go`, docs/dev/query.md#collection-patterns.
+> Changes from the draft:
+> - `snapshot: true` on a pattern is `invalid_query` (no snapshot over many
+>   collections yet).
+> - The cursor is one position (last row + its collection), not one per
+>   collection: the order is total, so each collection derives its start.
+> - `aggregate` merges one group table per collection (not a merged stream).
+> - `explain` sums the counters; no entry per collection yet.
+> - No `ndb ls <pattern>`; `ndb query 'logs-*'` works as is.
 
 ## Why
 

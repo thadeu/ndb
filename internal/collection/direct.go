@@ -92,6 +92,11 @@ func (d *Direct) Get(id string) (Doc, bool) {
 	return d.c.Get(id)
 }
 
+// Reader is the collection that answers the reads.
+func (d *Direct) Reader() *Collection {
+	return d.c
+}
+
 func (d *Direct) ParseQuery(body []byte) (*query.Query, error) {
 	return d.c.ParseQuery(body)
 }

@@ -162,6 +162,17 @@ const rows = await calls
 - `first()` returns the first row, or `null`.
 - The model has the same shortcuts: `calls.where(...)`, `calls.sort(...)`, `calls.all()`, `calls.count()`.
 
+### Collection patterns
+
+A model named with a [collection pattern](../query.md#collection-patterns) reads every matched collection. It sends no `PUT`, and its writes reject with code `pattern_read_only`. Each row has `_coll`, the name of its collection.
+
+```ts
+const logs = db.model('logs-2026-*', logSchema)
+
+const rows = await logs.where({ lvl: 'error' }).sort({ at: -1 }).limit(50).all()
+rows[0]._coll // 'logs-2026-11'
+```
+
 ### Count
 
 ```ts
