@@ -77,12 +77,14 @@ func (db *DB) Backup(ctx context.Context, w io.Writer, opts backup.Options) erro
 			continue
 		}
 
-		m, docs, err := col.eng.WALMarkSnapshot()
+		m, snap, err := col.eng.WALMarkSnapshot()
 		if err != nil {
 			return fmt.Errorf("backup: %s: %w", d.Name, err)
 		}
 
-		snaps[d.Name] = backup.Snapshot{Tx: m.Tx, Lines: snapshotLines(ctx, docs)}
+		defer snap.Close()
+
+		snaps[d.Name] = backup.Snapshot{Tx: m.Tx, Lines: snapshotLines(ctx, snap)}
 	}
 
 	src := backup.Source{
@@ -127,11 +129,11 @@ func (db *DB) engineCollections() map[string]*Collection {
 
 // snapshotLines encodes each document as a WAL put record, with its own tx
 // and _v, so the restore checks the same CRC as for a WAL line.
-func snapshotLines(ctx context.Context, docs []collection.SnapshotDoc) func(func([]byte) error) error {
+func snapshotLines(ctx context.Context, snap *collection.Snapshot) func(func([]byte) error) error {
 	return func(emit func([]byte) error) error {
 		var buf []byte
 
-		for _, d := range docs {
+		return snap.Each(func(d collection.SnapshotDoc) error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
@@ -148,12 +150,8 @@ func snapshotLines(ctx context.Context, docs []collection.SnapshotDoc) func(func
 				return err
 			}
 
-			if err := emit(buf); err != nil {
-				return err
-			}
-		}
-
-		return nil
+			return emit(buf)
+		})
 	}
 }
 

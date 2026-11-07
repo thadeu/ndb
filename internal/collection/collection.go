@@ -8,8 +8,10 @@
 package collection
 
 import (
+	"container/heap"
 	"context"
 	"encoding/json"
+	"errors"
 	"iter"
 	"log"
 	"maps"
@@ -669,14 +671,24 @@ func (d SnapshotDoc) Raw() ([]byte, error) {
 	return d.e.raw()
 }
 
-// WALMarkSnapshot is WALMark plus the live documents at exactly that mark,
-// in insertion order. Both are taken in the writer goroutine between two
-// commits, so the documents are the state after the mark's tx. A backup uses
-// it when the WAL no longer starts at tx 1 and cannot rebuild the state.
-func (c *Collection) WALMarkSnapshot() (WALMark, []SnapshotDoc, error) {
+// Snapshot is the live documents of a collection at one WAL mark: the
+// memtable entries and a copy of the live bits of each segment, which it
+// holds open until Close. It reads the documents when Each runs, so its
+// memory does not grow with the collection.
+type Snapshot struct {
+	cands []cand
+	segs  []segSnap
+	held  []*segRef
+}
+
+// WALMarkSnapshot is WALMark plus the live documents at exactly that mark.
+// Both are taken in the writer goroutine between two commits, so the
+// documents are the state after the mark's tx. A backup uses it when the WAL
+// no longer starts at tx 1 and cannot rebuild the state. Close the snapshot.
+func (c *Collection) WALMarkSnapshot() (WALMark, *Snapshot, error) {
 	var (
 		m    WALMark
-		docs []SnapshotDoc
+		snap = &Snapshot{}
 	)
 
 	err := c.w.Run(func(end writer.Pos) {
@@ -686,23 +698,107 @@ func (c *Collection) WALMarkSnapshot() (WALMark, []SnapshotDoc, error) {
 
 		defer c.mu.RUnlock()
 
-		for id, e := range c.durable.docs {
-			docs = append(docs, SnapshotDoc{ID: id, V: e.v, Tx: e.tx, Seq: e.seq, e: e})
-		}
-
 		src := c.scanSource()
 
-		err := eachLive(src.segs, func(id string, e *entry) error {
-			docs = append(docs, SnapshotDoc{ID: id, V: e.v, Seq: e.seq, e: e})
-
-			return nil
-		})
-		if err != nil {
-			c.fail(err)
-		}
+		snap.cands, snap.segs, snap.held = src.cands, src.segs, c.holdSegments()
 	})
 
-	sort.Slice(docs, func(a, b int) bool { return docs[a].Seq < docs[b].Seq })
+	sort.Slice(snap.cands, func(a, b int) bool { return snap.cands[a].e.seq < snap.cands[b].e.seq })
 
-	return m, docs, err
+	return m, snap, err
+}
+
+// Close releases the segments of the snapshot.
+func (s *Snapshot) Close() {
+	releaseAll(s.held)
+	s.held = nil
+}
+
+// Each calls fn with every document in insertion order: the memtable and
+// the rows of each segment (in order inside a segment) are merged by their
+// position.
+func (s *Snapshot) Each(fn func(SnapshotDoc) error) error {
+	var (
+		h    docHeap
+		errs = make([]error, len(s.segs)+1)
+		stop []func()
+	)
+
+	defer func() {
+		for _, f := range stop {
+			f()
+		}
+	}()
+
+	sources := []iter.Seq[SnapshotDoc]{func(yield func(SnapshotDoc) bool) {
+		for _, cd := range s.cands {
+			if !yield(SnapshotDoc{ID: cd.id, V: cd.e.v, Tx: cd.e.tx, Seq: cd.e.seq, e: cd.e}) {
+				return
+			}
+		}
+	}}
+
+	for i := range s.segs {
+		sources = append(sources, func(yield func(SnapshotDoc) bool) {
+			errs[i+1] = eachLive(s.segs[i:i+1], func(id string, e *entry) error {
+				if !yield(SnapshotDoc{ID: id, V: e.v, Seq: e.seq, e: e}) {
+					return errStopped
+				}
+
+				return nil
+			})
+		})
+	}
+
+	for _, src := range sources {
+		next, done := iter.Pull(src)
+		stop = append(stop, done)
+
+		if d, ok := next(); ok {
+			heap.Push(&h, docSource{d, next})
+		}
+	}
+
+	for h.Len() > 0 {
+		top := h[0]
+
+		if err := fn(top.doc); err != nil {
+			return err
+		}
+
+		if d, ok := top.next(); ok {
+			h[0].doc = d
+			heap.Fix(&h, 0)
+		} else {
+			heap.Pop(&h)
+		}
+	}
+
+	for _, err := range errs {
+		if err != nil && !errors.Is(err, errStopped) {
+			return err
+		}
+	}
+
+	return nil
+}
+
+type docSource struct {
+	doc  SnapshotDoc
+	next func() (SnapshotDoc, bool)
+}
+
+type docHeap []docSource
+
+func (h docHeap) Len() int           { return len(h) }
+func (h docHeap) Less(i, j int) bool { return h[i].doc.Seq < h[j].doc.Seq }
+func (h docHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *docHeap) Push(x any)        { *h = append(*h, x.(docSource)) }
+
+func (h *docHeap) Pop() any {
+	old := *h
+	last := old[len(old)-1]
+	*h = old[:len(old)-1]
+
+	return last
 }

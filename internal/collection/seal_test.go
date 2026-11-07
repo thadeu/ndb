@@ -13,6 +13,8 @@ import (
 	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/collection"
 	"github.com/thadeu/ndb/internal/fs"
+	"slices"
+	"strings"
 )
 
 var sealDef = catalog.Def{Name: "calls", Indexes: []string{"status"}}
@@ -708,5 +710,57 @@ func TestIndexAddedLaterBuildsKeyFilesForSealedSegments(t *testing.T) {
 
 	if len(files) != 1 {
 		t.Fatalf("key files of n: %v", files)
+	}
+}
+
+// A snapshot gives every live document once, in insertion order, across
+// the segments and the memtable, at its current version.
+func TestSnapshotMergesSegmentsAndMemtableInOrder(t *testing.T) {
+	c := openSealed(t, t.TempDir(), collection.Config{})
+
+	insertN(t, c, 0, 30)
+	mustSeal(t, c)
+	insertN(t, c, 30, 60)
+	update(t, c, "c0005", "moved")
+	remove(t, c, "c0006")
+	mustSeal(t, c)
+	insertN(t, c, 60, 70)
+	update(t, c, "c0040", "moved")
+
+	_, snap, err := c.WALMarkSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer snap.Close()
+
+	var ids []string
+
+	last := uint64(0)
+
+	err = snap.Each(func(d collection.SnapshotDoc) error {
+		if d.Seq <= last {
+			t.Fatalf("%s at seq %d after %d", d.ID, d.Seq, last)
+		}
+
+		last = d.Seq
+		ids = append(ids, d.ID)
+
+		if d.ID == "c0005" || d.ID == "c0040" {
+			raw, _ := d.Raw()
+
+			if !strings.Contains(string(raw), "moved") || d.V != 2 {
+				t.Fatalf("%s is not at its current version: v%d %s", d.ID, d.V, raw)
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(ids) != 69 || slices.Contains(ids, "c0006") {
+		t.Fatalf("snapshot ids: %d %v", len(ids), ids)
 	}
 }
