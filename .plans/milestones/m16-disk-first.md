@@ -20,6 +20,26 @@ The bench (2M docs × ~4 KB, 5 monthly partitions, 2026-11-07) breaks it:
 | idle after load | 3.1 GB | |
 | 362 B docs, after compaction | 5.7 GB | 1.5 GB |
 
+## Reference workload: the ESL outbox
+
+The first real use (M09 E9.4): an ESL app that talks to FreeSWITCH writes
+the call events to an outbox, and workers process them. Today it is Redis,
+with the fear of losing data or running out of memory.
+
+| Item | Value |
+|---|---|
+| Customers | ~400 |
+| Calls | up to millions a day; bench with **1M calls/day** |
+| Docs per call | 6 events + 1 `finishcall` = **7M docs/day** (~81/s average, ~400/s peak) |
+| Doc size | ~1 KB per event, ~4 KB per `finishcall` (assumed) |
+| Retention | **7 days** → ~49M live docs, ~70 GB of raw JSON |
+| Durability | `strict` (fsync before the answer) |
+| Consumer | `_watch` + `ack` with a stored cursor |
+| Layout | `partition_by: day`, `retention: 7d` |
+
+With today's id map alone, 49M docs need over 10 GB of RAM. The target is
+512 MB at any point of the 7 days.
+
 ## Where the RAM goes today
 
 1. **Every document id is in a Go map.** `state.docs map[string]*entry`
