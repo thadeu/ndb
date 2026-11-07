@@ -25,5 +25,5 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency "activemodel", ">= 7.1"
   spec.add_dependency "activesupport", ">= 7.1"
-  spec.add_dependency "ndb", "~> 0.1"
+  spec.add_dependency "ndb", "~> 1.0"
 end

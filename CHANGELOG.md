@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-07
+
 ndb 1.0 is the stable API. It breaks the 0.x API on purpose, with no compatibility layer: the routes take the shape of Elasticsearch (`/{coll}/_search`), the body keeps the query language of MongoDB, and the SDKs share one vocabulary. Upgrade the daemon, the SDKs and the console together. The data directory, the WAL and backups do not change.
 
 ### Changed
@@ -228,7 +230,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/thadeu/ndb/compare/v0.4.0...v1.0.0
 [0.4.0]: https://github.com/thadeu/ndb/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/thadeu/ndb/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/thadeu/ndb/compare/v0.3.1...v0.3.2
