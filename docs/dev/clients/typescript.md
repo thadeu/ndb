@@ -104,7 +104,10 @@ await calls.deleteBy({ status: 'failed' }, { many: true })
 - `update(id, ops, { guard, upsert, expireIn })`: `upsert` creates the document with that `_id`. `updateBy(query, ops, { many, upsert, expireIn })`: `many` needs `_id` or an indexed field in the query, and `upsert` creates the document from the equality fields of the query.
 - A key of the operators without `$` throws `InvalidUpdateError` before anything is sent. The daemon contract errors (`unknown_operator`, `no_update`, `conflicting_update`, `invalid_field`, `unindexed_many`, `empty_filter`) are `InvalidUpdateError` too.
 
-An insert with a duplicate `_id` throws `DuplicateIdError`. A duplicate `unique` value throws `UniqueViolationError`. An empty or non-string `_id` fails with code `invalid_id`.
+An insert with a duplicate `_id` throws `DuplicateIdError`.
+
+`upsert(doc)` and `upsertAll(docs)` create by `_id`, or merge into the stored document when the `_id` exists, in one transaction. See [Upsert](../http/documents.md#upsert).
+ A duplicate `unique` value throws `UniqueViolationError`. An empty or non-string `_id` fails with code `invalid_id`.
 
 ### Truncate and drop
 

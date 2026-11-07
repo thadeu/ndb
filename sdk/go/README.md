@@ -133,6 +133,7 @@ deleted, err = calls.DeleteBy(ctx, ndb.Eq("status", "failed"), ndb.Many())
 - `Many()` needs `_id` or an indexed field in the query (`ErrUnindexedMany`). An empty query is `ErrEmptyFilter`.
 - `Filter` is one condition; join several with `ndb.And`. `ndb.Eq("_v", n)` matches the version.
 - `Insert` and `InsertMany` fail with `ErrDuplicateID` when an `_id` exists. `InsertMany` writes nothing then.
+- `Upsert(ctx, doc)` and `UpsertMany(ctx, docs)` create by `_id`, or merge into the stored document when the `_id` exists (every field of `T` is set), in one transaction, like `doc_as_upsert` in Elasticsearch.
 
 ### Truncate and drop
 

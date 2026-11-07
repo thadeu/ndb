@@ -28,10 +28,12 @@ type indexBody struct {
 	Total int    `json:"total"`
 }
 
-// bulkReq is the body of POST /{coll}/_bulk.
+// bulkReq is the body of POST /{coll}/_bulk. With upsert, a document whose
+// _id exists is merged into the stored one instead of being duplicate_id.
 type bulkReq struct {
 	Docs     []json.RawMessage `json:"docs"`
 	ExpireIn json.RawMessage   `json:"expire_in"`
+	Upsert   bool              `json:"upsert"`
 }
 
 // updateReq is the body of _update/{id} and _update_by_query. query is the
@@ -200,13 +202,14 @@ func (s *Server) insertOne(w http.ResponseWriter, r *http.Request, db *engine.DB
 		return
 	}
 
-	res, ok := s.insertDocs(w, r, db, name, [][]byte{body}, 0)
+	res, ok := s.insertDocs(w, r, db, name, [][]byte{body}, 0, false)
 	if ok {
 		writeJSON(w, http.StatusOK, res[0])
 	}
 }
 
-// bulk is POST /{coll}/_bulk: {"docs": [...], "expire_in"}, all or nothing.
+// bulk is POST /{coll}/_bulk: {"docs": [...], "expire_in", "upsert"}, all
+// or nothing.
 func (s *Server) bulk(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
 
@@ -242,7 +245,7 @@ func (s *Server) bulk(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		docs[i] = d
 	}
 
-	res, ok := s.insertDocs(w, r, db, name, docs, expireIn)
+	res, ok := s.insertDocs(w, r, db, name, docs, expireIn, req.Upsert)
 	if ok {
 		writeJSON(w, http.StatusOK, map[string]any{"results": res})
 	}
@@ -250,7 +253,7 @@ func (s *Server) bulk(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 
 // insertDocs writes docs in one transaction. On an error it answers it and
 // returns false.
-func (s *Server) insertDocs(w http.ResponseWriter, r *http.Request, db *engine.DB, name string, docs [][]byte, expireIn time.Duration) ([]writeResult, bool) {
+func (s *Server) insertDocs(w http.ResponseWriter, r *http.Request, db *engine.DB, name string, docs [][]byte, expireIn time.Duration, upsert bool) ([]writeResult, bool) {
 	col, err := db.GetOrCreate(name)
 	if err != nil {
 		writeError(w, err)
@@ -260,9 +263,12 @@ func (s *Server) insertDocs(w http.ResponseWriter, r *http.Request, db *engine.D
 
 	var res []collection.Result
 
-	if expireIn > 0 {
+	switch {
+	case upsert:
+		res, err = col.Upsert(r.Context(), expireIn, docs...)
+	case expireIn > 0:
 		res, err = col.InsertIn(r.Context(), expireIn, docs...)
-	} else {
+	default:
 		res, err = col.Insert(r.Context(), docs...)
 	}
 

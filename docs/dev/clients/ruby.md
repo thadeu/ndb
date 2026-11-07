@@ -98,6 +98,7 @@ calls.delete_by({ status: "failed" }, many: true)    # by query
 - The query of `update_by` and `delete_by` takes the Ruby forms of [Search](#search) (Range, Array as `$in`, Regexp).
 - The contract errors are `Ndb::UnknownOperator`, `NoUpdate`, `ConflictingUpdate`, `InvalidField`, `UnindexedMany` and `EmptyFilter`, all under `Ndb::InvalidUpdate`.
 - A duplicate `_id` raises `Ndb::UniqueViolation` (code `duplicate_id`). A broken unique field raises it too (code `unique_violation`).
+- `upsert(doc)` and `upsert_all(docs)` create by `_id`, or merge into the stored document when the `_id` exists, in one transaction. See [Upsert](../http/documents.md#upsert).
 
 ### Truncate and drop
 

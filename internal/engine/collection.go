@@ -219,6 +219,23 @@ func (c *Collection) InsertIn(ctx context.Context, d time.Duration, docs ...[]by
 	return c.eng.InsertIn(ctx, d, docs...)
 }
 
+// Upsert inserts docs, or merges each one whose _id exists into the stored
+// document, in one transaction. d > 0 sets their expiry. See
+// collection.Upsert.
+func (c *Collection) Upsert(ctx context.Context, d time.Duration, docs ...[]byte) ([]collection.Result, error) {
+	if err := c.enter(); err != nil {
+		return nil, err
+	}
+
+	defer c.leave()
+
+	if c.eng == nil {
+		return nil, ErrDirect
+	}
+
+	return c.eng.Upsert(ctx, d, docs...)
+}
+
 // Expire sets the expiry of a document (EXPIRE).
 func (c *Collection) Expire(ctx context.Context, id string, e collection.Expiry) (uint64, time.Time, error) {
 	if err := c.enter(); err != nil {

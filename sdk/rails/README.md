@@ -102,6 +102,9 @@ end
 call = Call.create!(_id: "c1", status: "answered", caller: "a", at: Time.now.utc)
 Call.create!([{ _id: "c2", status: "failed", caller: "b" }, { _id: "c3", status: "answered", caller: "c" }])
 
+Call.upsert(id: "c2", status: "answered")      # create by id, or merge the given attributes; no callbacks
+Call.upsert_all([{ id: "c2", status: "done" }, { id: "c5", status: "new" }])
+
 call = Call.new(_id: "c4", status: "answered", caller: "d")
 call.save          # false when invalid
 call.save!         # raises Ndb::RecordInvalid

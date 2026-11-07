@@ -122,6 +122,7 @@ deleted, err = calls.DeleteBy(ctx, ndb.Eq("status", "failed"), ndb.Many())
 - `Many()` needs `_id` or an indexed field in the query (`ErrUnindexedMany`). `Upsert()` on `UpdateBy` creates the document from the equality fields of the query.
 - A `Filter` is one condition; join several with `ndb.And`. `ndb.Eq("_v", n)` matches the version.
 - `Insert` and `InsertMany` fail with `ErrDuplicateID` when an `_id` exists.
+- `Upsert(ctx, doc)` and `UpsertMany(ctx, docs)` create by `_id`, or merge into the stored document when the `_id` exists, in one transaction. See [Upsert](../http/documents.md#upsert).
 
 ### Truncate and drop
 

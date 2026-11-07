@@ -141,6 +141,7 @@ Call.where(status: "retry").destroy_all  # loads and destroys each record with i
 - `Call.truncate!` removes every document, with no callbacks, and keeps the definition and indexes. `Call.drop!` removes the collection, its definition and its watch consumers; the next use of the model declares it again. Both take the same time for 10 or 10 million documents, and watch consumers get one `"truncate"` event.
 - Setting an attribute to `nil` and saving removes the field from the document.
 - A duplicate id raises `RecordNotUnique` (code `duplicate_id`).
+- `Call.upsert(id: "c1", status: "done")` and `Call.upsert_all([...])` write by `_id` like ActiveRecord: they create the document, or merge the given attributes into the stored one (the others stay), in one transaction. No validations or callbacks run. See [Upsert](../http/documents.md#upsert).
 - `persisted?`, `new_record?`, `destroyed?`, `id` and `version` work as in ActiveRecord.
 
 ```ruby

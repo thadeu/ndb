@@ -93,6 +93,9 @@ calls.insert([                                                             # man
 ])
 # => [{"_id" => "c2", "_v" => 1}, {"_id" => "c3", "_v" => 1}]
 
+calls.upsert(_id: "c2", status: "answered")              # create by _id, or merge into the stored document
+calls.upsert_all([{ _id: "c2", duration: 9 }, { _id: "c4", status: "new" }])   # one transaction
+
 calls.get("c1")   # => {"_id" => "c1", ..., "_v" => 1}, or nil (GET /calls/_doc/c1)
 
 # Atomic update by _id (POST /calls/_update/c1): the id, then the write operators.

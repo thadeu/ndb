@@ -4,7 +4,7 @@ require "socket"
 require "uri"
 
 module Ndb
-  Response = Struct.new(:status, :headers, :body)
+  Response = Data.define(:status, :headers, :body)
 
   # Where the daemon listens: a unix socket path, or a TCP host and port.
   # The host name is resolved each time a connection opens, so a changed

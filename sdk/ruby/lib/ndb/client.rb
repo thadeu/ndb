@@ -8,7 +8,7 @@ module Ndb
   # One page of a search or an aggregate: the rows, the cursor of the next
   # page (nil on the last one), the plan, how many rows were examined, and
   # the total (with count: true).
-  Page = Struct.new(:rows, :next, :plan, :examined, :total)
+  Page = Data.define(:rows, :next, :plan, :examined, :total)
 
   # The HTTP API of the daemon, one method per route. It builds JSON and
   # reads the answers; it has no query semantics. Ndb::Collection is the
@@ -78,9 +78,14 @@ module Ndb
     # POST /{coll}/_bulk: many documents in one transaction, all or nothing.
     # expire_in (seconds, or "30m" / "1h" / "1d") sets the expires_field of
     # every document to now + expire_in. Returns the results.
-    def bulk(coll, docs, expire_in: nil)
+    #
+    # upsert: true merges a document whose _id exists into the stored one
+    # (its fields replace the fields of the same name; the other fields
+    # stay), like doc_as_upsert in Elasticsearch, instead of duplicate_id.
+    def bulk(coll, docs, expire_in: nil, upsert: false)
       body = { docs: docs }
       body[:expire_in] = expire_in if expire_in
+      body[:upsert] = true if upsert
 
       json(post(coll, "_bulk", body)).fetch("results")
     end

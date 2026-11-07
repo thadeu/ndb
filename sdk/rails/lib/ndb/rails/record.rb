@@ -19,7 +19,7 @@ module Ndb
     attribute :_id, :string
 
     # The answer of Model.search.
-    SearchResult = Struct.new(:records, :next_cursor, :total)
+    SearchResult = Data.define(:records, :next_cursor, :total)
 
     class << self
       QUERY_METHODS = %i[
@@ -37,6 +37,28 @@ module Ndb
 
       def all
         Relation.new(self)
+      end
+
+      # Writes a document by its _id, like ActiveRecord upsert: it creates
+      # the document when the _id is free, and merges the given attributes
+      # into the stored document when it exists (the others stay). No
+      # validations or callbacks run. id is an alias of _id. Returns
+      # {"_id", "_v"}.
+      #
+      #   User.upsert(id: "u1", plan: "pro")
+      def upsert(attributes = nil, expire_in: nil, **attrs)
+        upsert_all([attributes || attrs], expire_in: expire_in).first
+      end
+
+      # upsert for many documents in one transaction, all or nothing.
+      def upsert_all(attributes, expire_in: nil)
+        ensure_collection!
+
+        docs = attributes.map { |attrs| upsert_document(attrs) }
+
+        expire_in = expire_in.to_i if expire_in.is_a?(ActiveSupport::Duration)
+
+        Rails.client.bulk(collection_name, docs, expire_in: expire_in, upsert: true)
       end
 
       # Runs a find with a whole body built elsewhere, such as from a search
@@ -207,6 +229,16 @@ module Ndb
         ensure_collection!
 
         Rails.client.aggregate(collection_name, body)
+      end
+
+      # The given attributes, cast by their type, with id as _id.
+      def upsert_document(attrs)
+        attrs.to_h.each_with_object({}) do |(name, value), doc|
+          key = name.to_s == "id" ? primary_key : name.to_s
+          type = attribute_types[key]
+
+          doc[key] = Conditions.json_value(type ? type.serialize(type.cast(value)) : value)
+        end
       end
 
       def ndb_insert(doc, expire_in: nil)

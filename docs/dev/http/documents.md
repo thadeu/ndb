@@ -43,6 +43,7 @@ Inserts many documents in one transaction: all or nothing.
 |---|---|---|---|
 | `docs` | object[] | required | the documents, at least one |
 | `expire_in` | duration | none | every document expires this long from now (`"30m"`, `"1d"`, or seconds); needs `expires_field` |
+| `upsert` | bool | `false` | create or merge by `_id`, see [Upsert](#upsert) |
 
 **Answer:** `{"results":[{"_id","_v"},...]}`, in the order of `docs`.
 
@@ -69,6 +70,48 @@ const res = await calls.insert([{ _id: 'c1' }, { _id: 'c2' }], { expireIn: '1h' 
 ```
 
 :::
+
+### Upsert
+
+`insert` only creates: an `_id` that exists is `409 duplicate_id`. With `"upsert": true`, `_bulk` writes each document by its `_id`, like `doc_as_upsert` in Elasticsearch:
+
+- the `_id` is free: the document is created (`_v` 1);
+- the `_id` exists: its top-level fields **replace** the fields of the same name in the stored document; the other fields stay. `_v` goes up by one;
+- no `_id`: an insert with a generated id.
+
+The whole call is one transaction: a unique violation on any document leaves every document out. Use `_update/{id}` with `upsert` for operators (`$inc`, `$push`) instead of plain fields.
+
+::: code-group
+
+```bash [curl]
+curl --unix-socket /run/ndb/ndb.sock http://ndb/users/_bulk \
+  -d '{"docs":[{"_id":"u1","plan":"pro"},{"_id":"u2","name":"Bia"}],"upsert":true}'
+# {"results":[{"_id":"u1","_v":2},{"_id":"u2","_v":1}]}
+```
+
+```go [Go]
+res, err := users.Upsert(ctx, User{ID: "u1", Plan: "pro"})
+all, err := users.UpsertMany(ctx, []User{{ID: "u1", Plan: "pro"}, {ID: "u2", Name: "Bia"}})
+```
+
+```ruby [Ruby]
+users.upsert(_id: "u1", plan: "pro")
+users.upsert_all([{ _id: "u1", plan: "pro" }, { _id: "u2", name: "Bia" }])
+```
+
+```ruby [Rails]
+User.upsert(id: "u1", plan: "pro")
+User.upsert_all([{ id: "u1", plan: "pro" }, { id: "u2", name: "Bia" }])
+```
+
+```ts [TypeScript]
+await users.upsert({ _id: 'u1', plan: 'pro' })
+await users.upsertAll([{ _id: 'u1', plan: 'pro' }, { _id: 'u2', name: 'Bia' }])
+```
+
+:::
+
+In Go, a struct sends every field of `T`, so every field of `T` is set; fields of the stored document that `T` does not have stay. Rails sends only the attributes you pass, and runs no validations or callbacks, like `upsert` in ActiveRecord.
 
 ## `GET /{coll}/_doc/{id}`
 

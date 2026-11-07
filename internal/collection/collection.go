@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"iter"
 	"log"
+	"maps"
 	"sort"
 	"strings"
 	"sync"
@@ -396,6 +397,23 @@ func (c *Collection) insert(ctx context.Context, req insertReq) ([]Result, error
 type insertReq struct {
 	docs     [][]byte
 	expireIn time.Duration
+
+	// upsert merges a document whose _id exists into the stored one,
+	// instead of failing with duplicate_id.
+	upsert bool
+}
+
+// Upsert writes all docs in one transaction, all or nothing: a document whose
+// _id exists is merged into the stored one (its fields replace the fields of
+// the same name; the other fields stay), any other document is inserted.
+func (c *Collection) Upsert(ctx context.Context, expireIn time.Duration, docs ...[]byte) ([]Result, error) {
+	if expireIn > 0 {
+		if _, err := c.expiryField(); err != nil {
+			return nil, err
+		}
+	}
+
+	return c.insert(ctx, insertReq{docs: docs, expireIn: expireIn, upsert: true})
 }
 
 // prepare runs in the writer goroutine.
@@ -460,6 +478,11 @@ func (c *Collection) prepareInsert(v *view, r insertReq) ([]wal.Op, error) {
 		}
 
 		prior, err := c.priorVersion(v, id)
+
+		if r.upsert && isCode(err, "duplicate_id") {
+			prior, doc, err = c.mergeInto(v, id, doc)
+		}
+
 		if err != nil {
 			return nil, err
 		}
@@ -480,6 +503,37 @@ func (c *Collection) prepareInsert(v *view, r insertReq) ([]wal.Op, error) {
 	}
 
 	return ops, nil
+}
+
+// mergeInto merges doc into the stored document with this id: the top-level
+// fields of doc replace the fields of the same name. It returns the version
+// of the stored document.
+func (c *Collection) mergeInto(v *view, id string, doc json.RawMessage) (uint64, json.RawMessage, error) {
+	cur, err := current(v, id)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	raw, err := cur.raw()
+	if err != nil {
+		return 0, nil, err
+	}
+
+	var stored, fields map[string]json.RawMessage
+
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		return 0, nil, err
+	}
+
+	if err := json.Unmarshal(doc, &fields); err != nil {
+		return 0, nil, errf("invalid_doc", "%v", err)
+	}
+
+	maps.Copy(stored, fields)
+
+	merged, err := json.Marshal(stored)
+
+	return cur.v, merged, err
 }
 
 // priorVersion is the version that a new document with this id continues

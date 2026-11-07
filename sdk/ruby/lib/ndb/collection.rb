@@ -36,6 +36,20 @@ module Ndb
       client.insert(name, doc_or_docs)
     end
 
+    # Writes a document by its _id: creates it when the _id is free, and
+    # merges its fields into the stored document when it exists (the other
+    # fields stay), like doc_as_upsert in Elasticsearch. No _id is an insert.
+    # Returns {"_id", "_v"}.
+    def upsert(doc = nil, expire_in: nil, **fields)
+      upsert_all([doc || fields], expire_in: expire_in).first
+    end
+
+    # upsert for many documents in one transaction, all or nothing.
+    def upsert_all(docs, expire_in: nil)
+      ready!
+      client.bulk(name, docs, expire_in: expire_in, upsert: true)
+    end
+
     # The document with this _id, or nil.
     def get(id)
       ready!
@@ -94,12 +108,18 @@ module Ndb
       client.aggregate(name, { pipeline: pipeline }.merge(opts))
     end
 
+    # Each event Hash also has "consumer", so ack(event) needs nothing else.
     def watch(consumer, query: nil, from: nil, limit: nil, &block)
+      return enum_for(:watch, consumer, query: query, from: from, limit: limit) unless block
+
       ready!
-      client.watch(name, consumer, query: query, from: from, limit: limit, &block)
+      client.watch(name, consumer, query: query, from: from, limit: limit) do |event|
+        block.call(event.merge("consumer" => consumer))
+      end
     end
 
-    # Stores the position of an event (a Hash from watch) for its consumer.
+    # Stores the position of an event from watch for its consumer: the next
+    # watch with that consumer name starts after it.
     def ack(event, consumer = nil)
       client.ack(name, consumer || event.fetch("consumer"), event.fetch("pos"))
     end

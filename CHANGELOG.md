@@ -20,6 +20,8 @@ ndb 1.0 is the stable API. It breaks the 0.x API on purpose, with no compatibili
 ### Added
 
 - `POST /{coll}/_count` (`{"count": n}`), `POST /{coll}/_doc` (insert one document), `PUT /{coll}/_indexes/{field}`, the `X-Ndb-Took-Ms` header.
+- Upsert: `POST /{coll}/_bulk` with `"upsert": true` creates each document by its `_id`, or merges its fields into the stored one (the other fields stay), like `doc_as_upsert` in Elasticsearch, in one transaction. SDKs: Go `Upsert`/`UpsertMany`, Ruby `upsert`/`upsert_all`, Rails `Model.upsert`/`Model.upsert_all` (only the given attributes, no callbacks), TypeScript `upsert`/`upsertAll`.
+- Ruby: `Ndb::Page`, `Ndb::Response` and `Ndb::Rails::SearchResult` are `Data` objects (immutable) instead of `Struct`. Watch events of `Ndb::Collection#watch` carry `"consumer"`, so `ack(event)` needs nothing else.
 - Go: `Coll.Stats`, `Compact`, `EnsureIndex`, `DropIndex`, `Count`, `Name`; `DB.Health`, `Collections`, `Stats`, `Size`.
 - TypeScript: blobs (`putBlob`, `getBlob`), `collections`, `stats`, `size`, `compact`, `ensureIndex`, `dropIndex`.
 - Ruby: `Ndb.connect` and `Ndb::Collection` with a query builder (`Ndb::Query`); `count`, `bulk`, `update_by`, `delete_by`, `health`, `stats`, `size`, `compact`, index routes on `Ndb::Client`.

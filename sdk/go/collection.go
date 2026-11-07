@@ -85,6 +85,10 @@ func (c *Coll[T]) Insert(ctx context.Context, doc T, opts ...Option) (Result, er
 // InsertMany writes docs in one transaction, all or nothing
 // (POST /{coll}/_bulk). ExpireIn applies to every document.
 func (c *Coll[T]) InsertMany(ctx context.Context, docs []T, opts ...Option) ([]Result, error) {
+	return c.bulk(ctx, docs, false, opts)
+}
+
+func (c *Coll[T]) bulk(ctx context.Context, docs []T, upsert bool, opts []Option) ([]Result, error) {
 	o := newOptions(opts)
 	rows := make([]json.RawMessage, len(docs))
 
@@ -97,7 +101,7 @@ func (c *Coll[T]) InsertMany(ctx context.Context, docs []T, opts ...Option) ([]R
 		rows[i] = raw
 	}
 
-	body, err := json.Marshal(bulkBody{Docs: rows, ExpireIn: o.expireIn.seconds()})
+	body, err := json.Marshal(bulkBody{Docs: rows, ExpireIn: o.expireIn.seconds(), Upsert: upsert})
 	if err != nil {
 		return nil, err
 	}
@@ -107,6 +111,26 @@ func (c *Coll[T]) InsertMany(ctx context.Context, docs []T, opts ...Option) ([]R
 	}
 
 	return out.Results, c.call(ctx, http.MethodPost, "_bulk", body, &out)
+}
+
+// Upsert writes doc by its _id: it creates the document when the _id is
+// free, and merges doc into the stored one when it exists (every field of T
+// is set; fields of the stored document that T does not have stay), like
+// doc_as_upsert in Elasticsearch. An empty _id is an insert. It takes
+// ExpireIn.
+func (c *Coll[T]) Upsert(ctx context.Context, doc T, opts ...Option) (Result, error) {
+	res, err := c.UpsertMany(ctx, []T{doc}, opts...)
+	if err != nil {
+		return Result{}, err
+	}
+
+	return res[0], nil
+}
+
+// UpsertMany is Upsert for many documents in one transaction, all or nothing
+// (POST /{coll}/_bulk with "upsert": true).
+func (c *Coll[T]) UpsertMany(ctx context.Context, docs []T, opts ...Option) ([]Result, error) {
+	return c.bulk(ctx, docs, true, opts)
 }
 
 // Get returns the document with this _id, or ErrNotFound.
@@ -461,6 +485,7 @@ type ensureBody struct {
 type bulkBody struct {
 	Docs     []json.RawMessage `json:"docs"`
 	ExpireIn *float64          `json:"expire_in,omitempty"`
+	Upsert   bool              `json:"upsert,omitempty"`
 }
 
 type updateBody struct {

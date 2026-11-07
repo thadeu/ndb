@@ -85,6 +85,11 @@ const results = await calls.insert([
 ])
 // results: [{ _id: 'c2', _v: 1 }, { _id: 'c3', _v: 1 }]
 
+// Upsert: create by _id, or merge the fields into the stored document (the
+// others stay), like doc_as_upsert in Elasticsearch. One transaction.
+await calls.upsert({ _id: 'c2', status: 'answered' })
+await calls.upsertAll([{ _id: 'c2', status: 'answered' }, { _id: 'c4', status: 'new', at: new Date() }])
+
 // Get by _id (GET /calls/_doc/c1). Returns null when missing.
 const row = await calls.get('c1')
 

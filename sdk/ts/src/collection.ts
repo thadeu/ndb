@@ -83,6 +83,21 @@ export class Collection<F extends Fields> {
     return Array.isArray(docs) ? out.results : out.results[0]!
   }
 
+  // Writes a document by its _id: creates it when the _id is free, and
+  // merges its fields into the stored document when it exists (the other
+  // fields stay), like doc_as_upsert in Elasticsearch. No _id is an insert.
+  async upsert(doc: Input<F>, opts: InsertOptions = {}): Promise<WriteResult> {
+    return (await this.upsertAll([doc], opts))[0]!
+  }
+
+  // upsert for many documents in one transaction, all or nothing
+  // (POST /{coll}/_bulk with upsert).
+  async upsertAll(docs: Input<F>[], opts: InsertOptions = {}): Promise<WriteResult[]> {
+    const out = await this.send<{ results: WriteResult[] }>('POST', '_bulk', { docs, expire_in: opts.expireIn, upsert: true })
+
+    return out.results
+  }
+
   // Applies ops to the document with this _id, in one atomic step
   // (POST /{coll}/_update/{id}). guard adds conditions on the same document,
   // such as { _v: 7 }: matched is 0 when it fails. Matching nothing is not an
