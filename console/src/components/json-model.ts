@@ -294,16 +294,16 @@ export function isEmptyDiff(diff: Diff): boolean {
   return Object.keys(diff.set).length === 0 && diff.unset.length === 0;
 }
 
-// updateBody is the body of POST /v1/c/{coll}/{_id}/update: the version guard
-// plus the operators. An operator with no field is left out.
+// updateBody is the body of POST /{coll}/_update/{_id}: the version guard in
+// query, the operators in update. An operator with no field is left out.
 export function updateBody(version: number, diff: Diff): Record<string, unknown> {
-  const body: Record<string, unknown> = { _v: version };
+  const update: Record<string, unknown> = {};
 
-  if (Object.keys(diff.set).length > 0) body.$set = diff.set;
+  if (Object.keys(diff.set).length > 0) update.$set = diff.set;
 
-  if (diff.unset.length > 0) body.$unset = Object.fromEntries(diff.unset.map(name => [name, true]));
+  if (diff.unset.length > 0) update.$unset = Object.fromEntries(diff.unset.map(name => [name, true]));
 
-  return body;
+  return { query: { _v: version }, update };
 }
 
 // describeDiff is the label of the Save button.

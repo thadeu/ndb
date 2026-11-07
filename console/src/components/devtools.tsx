@@ -250,7 +250,7 @@ export const Devtools: FC<DevtoolsProps> = ({ name, collection, sendUrl, browser
 
   const run = async () => {
     if (!block || running) {
-      if (!block) say('Write a line like GET /v1/stats first.');
+      if (!block) say('Write a line like GET /_stats first.');
 
       return;
     }

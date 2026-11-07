@@ -17,8 +17,8 @@ export interface SendRequest {
 }
 
 // checkRequest says why a request may not go to ndb, or returns undefined.
-// Only /v1/ paths, /health and /metrics pass. The backup has its own tab, and
-// a watch is a stream that Dev Tools cannot show.
+// Every route of the API passes, except the backup (it has its own tab) and a
+// watch (a stream that Dev Tools cannot show).
 export function checkRequest(request: SendRequest): string | undefined {
   if (!METHODS.has(request.method)) return `Method ${request.method} is not supported. Use GET, POST, PUT, or DELETE.`;
 
@@ -34,15 +34,17 @@ export function checkRequest(request: SendRequest): string | undefined {
     return 'The path is not valid.';
   }
 
-  if (pathname.split('/').some(part => part === '..' || part === '.')) return 'The path must not contain . or .. segments.';
+  const segments = [...path.split(/[?#]/)[0]!.split('/'), ...pathname.split('/')];
 
-  if (pathname === '/v1/backup') return 'Backups have their own tab: use Backups to download a file.';
+  if (segments.some(part => part === '..' || part === '.')) return 'The path must not contain . or .. segments.';
 
-  if (/^\/v1\/c\/[^/]+\/watch$/.test(pathname)) return 'Watch is a stream. Use the Watch tab to tail changes.';
+  if (pathname === '/_backup') return 'Backups have their own tab: use Backups to download a file.';
 
-  if (pathname === '/health' || pathname === '/metrics' || pathname.startsWith('/v1/')) return undefined;
+  if (/^\/[^/]+\/_watch$/.test(pathname)) return 'Watch is a stream. Use the Watch tab to tail changes.';
 
-  return 'Dev Tools only sends paths that start with /v1/, plus /health and /metrics.';
+  if (pathname === '/') return 'Write a path, such as GET /_stats or POST /orders/_search.';
+
+  return undefined;
 }
 
 // readCapped reads a body up to the limit, so a huge answer cannot fill the

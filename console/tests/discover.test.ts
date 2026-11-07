@@ -37,7 +37,7 @@ describe('unixFromConfig', () => {
 
 describe('probe', () => {
   it('classifies answers', async () => {
-    const stats = (async (input: string) => (String(input).endsWith('/health') ? Response.json({ status: 'ok' }) : Response.json({ version: '0.3.0', totals: { collections: 4 } }))) as unknown as typeof fetch;
+    const stats = (async (input: string) => (String(input).endsWith('/_health') ? Response.json({ status: 'ok' }) : Response.json({ version: '0.3.0', totals: { collections: 4 } }))) as unknown as typeof fetch;
 
     expect(await probe('tcp://h:1', { fetch: stats })).toEqual({ url: 'tcp://h:1', state: 'ok', version: '0.3.0', collections: 4 });
     expect((await probe('tcp://h:1', { fetch: reply(401, { error: { code: 'unauthorized' } }) }))?.state).toBe('needs_token');

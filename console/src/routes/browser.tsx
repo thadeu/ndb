@@ -1,7 +1,7 @@
 import type { Hono } from 'hono';
 
 import { updateBody } from '@/components/json-model';
-import { NdbError, type Doc, type FindResult } from '@/ndb';
+import { NdbError, type Doc, type SearchResult } from '@/ndb';
 import type { Env } from '@/prefix';
 import { BrowserPage, browserHref } from '@/views/browser';
 import { OfflinePage } from '@/views/offline';
@@ -61,12 +61,12 @@ export function browserRoutes(app: Hono<Env>, deps: RouteDeps): void {
     const known = stats.collections.some(item => item.name === coll);
     const parsed = readWhere(query.where);
 
-    let found: FindResult = { rows: [] };
+    let found: SearchResult = { rows: [] };
     let whereError = parsed.error;
 
     if (known && parsed.where) {
       try {
-        found = await ndb.find(coll, { where: parsed.where, limit: PAGE, count: true, versions: true, ...(query.after ? { after: query.after } : {}) });
+        found = await ndb.search(coll, { query: parsed.where, limit: PAGE, count: true, versions: true, ...(query.after ? { after: query.after } : {}) });
       } catch (error) {
         whereError = deps.message(error);
       }

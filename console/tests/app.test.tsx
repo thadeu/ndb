@@ -39,9 +39,9 @@ beforeAll(async () => {
     await Bun.sleep(25);
   }
 
-  const insert = await fetch('http://ndb/v1/c/orders/insert', {
+  const insert = await fetch('http://ndb/orders/_bulk', {
     method: 'POST',
-    body: JSON.stringify({ insert: [{ _id: 'a', status: 'new' }, { _id: 'b', status: 'paid' }] }),
+    body: JSON.stringify({ docs: [{ _id: 'a', status: 'new' }, { _id: 'b', status: 'paid' }] }),
     unix: sock,
   } as RequestInit);
 
@@ -197,26 +197,26 @@ describe('browser tab', () => {
   });
 
   it('saves a diff, and a stale _v is a conflict', async () => {
-    const read = await ndbGet('/v1/c/orders/a');
+    const read = await ndbGet('/orders/_doc/a');
     const ok = await page('/c/local/browser/save', json({ coll: 'orders', id: 'a', _v: read._v, set: { status: 'shipped', 'customer.tier': 'gold' }, unset: [] }));
 
     expect(ok.status).toBe(200);
-    expect((await ndbGet('/v1/c/orders/a')).customer.tier).toBe('gold');
+    expect((await ndbGet('/orders/_doc/a')).customer.tier).toBe('gold');
 
     const stale = await page('/c/local/browser/save', json({ coll: 'orders', id: 'a', _v: read._v, set: { status: 'late' }, unset: [] }));
     const body = await stale.json();
 
     expect(stale.status).toBe(409);
     expect(body.conflict).toBe(true);
-    expect((await ndbGet('/v1/c/orders/a')).status).toBe('shipped');
+    expect((await ndbGet('/orders/_doc/a')).status).toBe('shipped');
   });
 
   it('unsets a field', async () => {
-    const read = await ndbGet('/v1/c/orders/a');
+    const read = await ndbGet('/orders/_doc/a');
 
     await page('/c/local/browser/save', json({ coll: 'orders', id: 'a', _v: read._v, set: {}, unset: ['customer'] }));
 
-    expect((await ndbGet('/v1/c/orders/a')).customer).toBeUndefined();
+    expect((await ndbGet('/orders/_doc/a')).customer).toBeUndefined();
   });
 
   it('inserts from json and from a form, then deletes', async () => {
@@ -231,7 +231,7 @@ describe('browser tab', () => {
     const removed = await page('/c/local/browser/delete', form({ coll: 'orders', id: 'n1' }));
 
     expect(removed.status).toBe(303);
-    expect((await fetch('http://ndb/v1/c/orders/n1', { unix: sock } as RequestInit)).status).toBe(404);
+    expect((await fetch('http://ndb/orders/_doc/n1', { unix: sock } as RequestInit)).status).toBe(404);
   });
 
   it('refuses a save without the right Origin', async () => {
@@ -254,25 +254,25 @@ describe('dev tools tab', () => {
   });
 
   it('forwards a request and returns status, headers, and body', async () => {
-    const response = await page('/c/local/devtools/send', json({ method: 'POST', path: '/v1/c/orders/find', body: '{"limit":1}' }));
+    const response = await page('/c/local/devtools/send', json({ method: 'POST', path: '/orders/_search', body: '{"limit":1}' }));
     const answer = await response.json();
 
     expect(answer.status).toBe(200);
     expect(answer.headers['x-ndb-plan']).toBeDefined();
-    expect(answer.headers['content-type']).toContain('ndjson');
+    expect(answer.headers['content-type']).toBe('application/json');
     expect(answer.body).toContain('"_id"');
     expect(answer.bytes).toBeGreaterThan(0);
   });
 
   it('passes an ndb error status through', async () => {
-    const answer = await (await page('/c/local/devtools/send', json({ method: 'GET', path: '/v1/c/nope/stats' }))).json();
+    const answer = await (await page('/c/local/devtools/send', json({ method: 'GET', path: '/nope/_stats' }))).json();
 
     expect(answer.status).toBe(404);
     expect(answer.body).toContain('unknown_collection');
   });
 
-  it('refuses the backup, a watch, and paths outside /v1', async () => {
-    for (const path of ['/v1/backup', '/v1/c/orders/watch', '/etc/passwd']) {
+  it('refuses the backup and a watch', async () => {
+    for (const path of ['/_backup', '/orders/_watch']) {
       const response = await page('/c/local/devtools/send', json({ method: 'POST', path }));
 
       expect(response.status).toBe(400);
@@ -307,7 +307,7 @@ describe('watch tab', () => {
     };
 
     await until('event: ready');
-    await ndbPost('/v1/c/orders/insert', { insert: [{ _id: 'w1', status: 'watch' }] });
+    await ndbPost('/orders/_bulk', { docs: [{ _id: 'w1', status: 'watch' }] });
     await until('"_id":"w1"');
 
     abort.abort();

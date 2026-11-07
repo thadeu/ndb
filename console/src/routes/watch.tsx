@@ -60,10 +60,10 @@ export function watchRoutes(app: Hono<Env>, deps: RouteDeps): void {
         const consumer = `ndb-ui-${crypto.randomUUID().slice(0, 8)}`;
         const request: Record<string, unknown> = { consumer, from };
 
-        if (parsed.where && Object.keys(parsed.where).length > 0) request.where = parsed.where;
+        if (parsed.where && Object.keys(parsed.where).length > 0) request.query = parsed.where;
 
         try {
-          const upstream = await deps.client(connection).stream(`/v1/c/${encodeURIComponent(coll)}/watch`, request, abort.signal);
+          const upstream = await deps.client(connection).stream(`/${encodeURIComponent(coll)}/_watch`, request, abort.signal);
 
           controller.enqueue(frame('ready', consumer));
 

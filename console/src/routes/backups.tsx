@@ -26,7 +26,7 @@ export function backupsRoutes(app: Hono<Env>, deps: RouteDeps): void {
     }
   });
 
-  // The download streams POST /v1/backup from ndb to the browser. ndb answers
+  // The download streams POST /_backup from ndb to the browser. ndb answers
   // 403 over TCP, so the console refuses a TCP connection before it asks.
   app.post('/c/:name/backups/download', async c => {
     const connection = connectionOf(deps, c);
@@ -42,7 +42,7 @@ export function backupsRoutes(app: Hono<Env>, deps: RouteDeps): void {
     const noBlobs = form.no_blobs === '1' || form.no_blobs === 'on';
 
     try {
-      const upstream = await deps.client(connection).stream('/v1/backup', { no_blobs: noBlobs }, c.req.raw.signal);
+      const upstream = await deps.client(connection).stream('/_backup', { no_blobs: noBlobs }, c.req.raw.signal);
       const source = upstream.body;
 
       if (!source) return back('ndb sent an empty backup.');

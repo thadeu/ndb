@@ -32,7 +32,7 @@ interface Frame {
   pos?: string;
   op?: string;
   _id?: string;
-  v?: number;
+  _v?: number;
   _expired?: boolean;
   doc?: Record<string, unknown>;
   heartbeat?: boolean;
@@ -107,7 +107,7 @@ export const Watch: FC<WatchProps> = ({ coll, where, streamUrl }) => {
 
       setStatus('Live');
       setSeq(current => current + 1);
-      setEvents(current => addEvent(current, { key: nextKey(), at: Date.now(), pos: frame.pos, op: frame.op as string, id: frame._id ?? '', v: frame.v, expired: frame._expired, doc: frame.doc }));
+      setEvents(current => addEvent(current, { key: nextKey(), at: Date.now(), pos: frame.pos, op: frame.op as string, id: frame._id ?? '', v: frame._v, expired: frame._expired, doc: frame.doc }));
     },
     onProblem: message => setProblem(message),
     onClose: () => {

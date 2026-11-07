@@ -44,7 +44,7 @@ describe('diffDocs', () => {
   it('builds the update body with the guard and the operators', () => {
     const diff = diffDocs({ a: 1, b: 2 }, { a: 5 });
 
-    expect(updateBody(3, diff)).toEqual({ _v: 3, $set: { a: 5 }, $unset: { b: true } });
+    expect(updateBody(3, diff)).toEqual({ query: { _v: 3 }, update: { $set: { a: 5 }, $unset: { b: true } } });
     expect(describeDiff(diff)).toBe('$set a · $unset b');
   });
 });
@@ -76,15 +76,15 @@ describe('json model edits', () => {
 });
 
 describe('devtools blocks', () => {
-  const text = ['# note', 'POST /v1/c/o/find', '{', '  "limit": 1', '}', '', 'GET /v1/stats', 'GET /health'].join('\n');
+  const text = ['# note', 'POST /o/_search', '{', '  "limit": 1', '}', '', 'GET /_stats', 'GET /_health'].join('\n');
 
   it('splits blocks at blank lines and method lines', () => {
     const blocks = parseBlocks(text);
 
     expect(blocks.map(block => [block.method, block.path, block.start, block.end])).toEqual([
-      ['POST', '/v1/c/o/find', 1, 4],
-      ['GET', '/v1/stats', 6, 6],
-      ['GET', '/health', 7, 7],
+      ['POST', '/o/_search', 1, 4],
+      ['GET', '/_stats', 6, 6],
+      ['GET', '/_health', 7, 7],
     ]);
     expect(blocks[0]?.body).toBe('{\n  "limit": 1\n}');
   });
@@ -92,53 +92,52 @@ describe('devtools blocks', () => {
   it('finds the block under the cursor, or the next one', () => {
     const blocks = parseBlocks(text);
 
-    expect(blockAt(blocks, 3)?.path).toBe('/v1/c/o/find');
-    expect(blockAt(blocks, 5)?.path).toBe('/v1/stats');
-    expect(blockAt(blocks, 0)?.path).toBe('/v1/c/o/find');
+    expect(blockAt(blocks, 3)?.path).toBe('/o/_search');
+    expect(blockAt(blocks, 5)?.path).toBe('/_stats');
+    expect(blockAt(blocks, 0)?.path).toBe('/o/_search');
   });
 
   it('formats the JSON body of a block and leaves bad JSON alone', () => {
-    const block = parseBlocks('POST /v1/x\n{"a":1,"b":[1,2]}')[0]!;
+    const block = parseBlocks('POST /x/_search\n{"a":1,"b":[1,2]}')[0]!;
 
-    expect(formatBlock('POST /v1/x\n{"a":1,"b":[1,2]}', block)).toBe('POST /v1/x\n{\n  "a": 1,\n  "b": [\n    1,\n    2\n  ]\n}');
-    expect(formatBlock('POST /v1/x\n{oops', parseBlocks('POST /v1/x\n{oops')[0]!)).toBeUndefined();
+    expect(formatBlock('POST /x/_search\n{"a":1,"b":[1,2]}', block)).toBe('POST /x/_search\n{\n  "a": 1,\n  "b": [\n    1,\n    2\n  ]\n}');
+    expect(formatBlock('POST /x/_search\n{oops', parseBlocks('POST /x/_search\n{oops')[0]!)).toBeUndefined();
   });
 
   it('maps an offset to a line and colors tokens', () => {
     expect(lineAt('a\nb\nc', 4)).toBe(2);
     expect(tokenize('  "$inc": { "qty": -1 }').map(token => token.tone)).toContain('op');
-    expect(tokenize('GET /v1/stats')[0]?.tone).toBe('method');
+    expect(tokenize('GET /_stats')[0]?.tone).toBe('method');
   });
 });
 
 describe('curl', () => {
   it('builds a unix line without a token', () => {
-    expect(buildCurl({ method: 'POST', path: '/v1/c/o/find', body: '{ "limit": 1 }', socket: '/run/ndb/ndb.sock' })).toBe(
-      `curl --unix-socket '/run/ndb/ndb.sock' -X POST 'http://ndb/v1/c/o/find' -d '{"limit":1}'`,
+    expect(buildCurl({ method: 'POST', path: '/o/_search', body: '{ "limit": 1 }', socket: '/run/ndb/ndb.sock' })).toBe(
+      `curl --unix-socket '/run/ndb/ndb.sock' -X POST 'http://ndb/o/_search' -d '{"limit":1}'`,
     );
   });
 
   it('builds a tcp line with the token placeholder', () => {
-    const line = buildCurl({ method: 'GET', path: '/v1/stats', base: 'http://10.0.0.1:7070' });
+    const line = buildCurl({ method: 'GET', path: '/_stats', base: 'http://10.0.0.1:7070' });
 
-    expect(line).toBe(`curl -H "Authorization: Bearer $NDB_TOKEN" 'http://10.0.0.1:7070/v1/stats'`);
+    expect(line).toBe(`curl -H "Authorization: Bearer $NDB_TOKEN" 'http://10.0.0.1:7070/_stats'`);
   });
 
   it('escapes a single quote in the body', () => {
-    expect(buildCurl({ method: 'POST', path: '/v1/x', body: `{"a":"it's"}`, socket: '/s' })).toContain(`'{"a":"it'\\''s"}'`);
+    expect(buildCurl({ method: 'POST', path: '/x/_search', body: `{"a":"it's"}`, socket: '/s' })).toContain(`'{"a":"it'\\''s"}'`);
   });
 });
 
 describe('routes helpers', () => {
   it('refuses paths that Dev Tools must not send', () => {
-    expect(checkRequest({ method: 'POST', path: '/v1/backup' })).toContain('Backups');
-    expect(checkRequest({ method: 'POST', path: '/v1/c/o/watch' })).toContain('Watch');
-    expect(checkRequest({ method: 'GET', path: '/etc/passwd' })).toContain('/v1/');
-    expect(checkRequest({ method: 'GET', path: '//evil/v1/x' })).toBeDefined();
-    expect(checkRequest({ method: 'GET', path: '/v1/../etc' })).toBeDefined();
-    expect(checkRequest({ method: 'PATCH', path: '/v1/stats' })).toBeDefined();
-    expect(checkRequest({ method: 'GET', path: '/v1/stats' })).toBeUndefined();
-    expect(checkRequest({ method: 'GET', path: '/health' })).toBeUndefined();
+    expect(checkRequest({ method: 'POST', path: '/_backup' })).toContain('Backups');
+    expect(checkRequest({ method: 'POST', path: '/o/_watch' })).toContain('Watch');
+    expect(checkRequest({ method: 'GET', path: '//evil/x/_search' })).toBeDefined();
+    expect(checkRequest({ method: 'GET', path: '/x/../etc' })).toBeDefined();
+    expect(checkRequest({ method: 'PATCH', path: '/_stats' })).toBeDefined();
+    expect(checkRequest({ method: 'GET', path: '/_stats' })).toBeUndefined();
+    expect(checkRequest({ method: 'GET', path: '/_health' })).toBeUndefined();
   });
 
   it('reads the where box', () => {

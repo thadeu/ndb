@@ -175,7 +175,7 @@ export async function probe(url: string, options: DiscoverOptions = {}): Promise
   const get = (path: string) => doFetch(base + path, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(timeoutMs), unix } as RequestInit);
 
   try {
-    const response = await get('/health');
+    const response = await get('/_health');
     const body = (await response.json().catch(() => null)) as { status?: unknown; error?: { code?: unknown } } | null;
 
     if (response.status === 401 && body?.error?.code === 'unauthorized') return { url, state: 'needs_token' };
@@ -184,7 +184,7 @@ export async function probe(url: string, options: DiscoverOptions = {}): Promise
 
     if (response.status !== 200 || body?.status !== 'ok') return undefined;
 
-    const stats = await get('/v1/stats')
+    const stats = await get('/_stats')
       .then(r => (r.ok ? r.json() : null))
       .catch(() => null) as { version?: string; totals?: { collections?: number } } | null;
 

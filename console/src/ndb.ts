@@ -66,7 +66,7 @@ export interface Definition {
 
 export type Doc = Record<string, unknown>;
 
-export interface FindResult {
+export interface SearchResult {
   rows: Doc[];
   plan?: string;
   examined?: number;
@@ -122,37 +122,35 @@ export class Ndb {
   ) {}
 
   health(): Promise<{ status: string }> {
-    return this.get('/health');
+    return this.get('/_health');
   }
 
   stats(): Promise<Stats> {
-    return this.get('/v1/stats');
+    return this.get('/_stats');
   }
 
   size(): Promise<Size> {
-    return this.get('/v1/size');
+    return this.get('/_size');
   }
 
   async collections(): Promise<Definition[]> {
-    const body = await this.get<{ collections: Definition[] }>('/v1/c');
+    const body = await this.get<{ collections: Definition[] }>('/_collections');
 
     return body.collections;
   }
 
   collection(name: string): Promise<{ definition: Definition; indexes: IndexState[] }> {
-    return this.get(`/v1/c/${encodeURIComponent(name)}`);
+    return this.get(`/${encodeURIComponent(name)}`);
   }
 
-  async find(collection: string, query: Record<string, unknown>): Promise<FindResult> {
-    const response = await this.open('POST', `/v1/c/${encodeURIComponent(collection)}/find`, { body: JSON.stringify(query) });
+  // search is POST /{coll}/_search. The rows come as a JSON array; the page
+  // data comes in X-Ndb-* headers.
+  async search(collection: string, body: Record<string, unknown>): Promise<SearchResult> {
+    const response = await this.open('POST', `/${encodeURIComponent(collection)}/_search`, { body: JSON.stringify(body) });
 
     if (!response.ok) throw await failure(response);
 
-    const text = await response.text();
-    const rows = text
-      .split('\n')
-      .filter(line => line.trim() !== '')
-      .map(line => JSON.parse(line) as Doc);
+    const rows = (await response.json()) as Doc[];
 
     const total = response.headers.get('x-ndb-total');
     const examined = response.headers.get('x-ndb-examined');
@@ -167,19 +165,19 @@ export class Ndb {
   }
 
   document(collection: string, id: string): Promise<Doc> {
-    return this.json('GET', `/v1/c/${encodeURIComponent(collection)}/${encodeURIComponent(id)}`);
+    return this.json('GET', `/${encodeURIComponent(collection)}/_doc/${encodeURIComponent(id)}`);
   }
 
   update(collection: string, id: string, body: Record<string, unknown>): Promise<UpdateResult> {
-    return this.json('POST', `/v1/c/${encodeURIComponent(collection)}/${encodeURIComponent(id)}/update`, JSON.stringify(body));
+    return this.json('POST', `/${encodeURIComponent(collection)}/_update/${encodeURIComponent(id)}`, JSON.stringify(body));
   }
 
-  insert(collection: string, docs: Doc[]): Promise<{ results: { _id: string; v: number }[] }> {
-    return this.json('POST', `/v1/c/${encodeURIComponent(collection)}/insert`, JSON.stringify({ insert: docs }));
+  insert(collection: string, docs: Doc[]): Promise<{ results: { _id: string; _v: number }[] }> {
+    return this.json('POST', `/${encodeURIComponent(collection)}/_bulk`, JSON.stringify({ docs }));
   }
 
   remove(collection: string, id: string): Promise<{ deleted: number }> {
-    return this.json('DELETE', `/v1/c/${encodeURIComponent(collection)}/${encodeURIComponent(id)}`);
+    return this.json('DELETE', `/${encodeURIComponent(collection)}/_doc/${encodeURIComponent(id)}`);
   }
 
   // forward sends a request as it is and returns the response, even when the
