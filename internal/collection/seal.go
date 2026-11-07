@@ -328,12 +328,8 @@ func (c *Collection) Seal() error {
 
 	name := fmt.Sprintf("%06d.parquet", s.next)
 
-	data, info, err := s.enc.Encode(snap.rows, c.def.Indexes)
+	info, err := segment.PublishRows(s.fs, s.path(name), segment.RowsOf(snap.rows), c.def.Indexes)
 	if err != nil {
-		return err
-	}
-
-	if err := segment.Publish(s.fs, s.path(name), data); err != nil {
 		return err
 	}
 

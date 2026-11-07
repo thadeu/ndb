@@ -32,46 +32,90 @@ var metaColumns = []Column{
 
 type parquetWriter struct{}
 
+// Rows is a source of rows that can be read more than once: encoding reads
+// it twice (first the columns, then the values), so a segment is never held
+// in memory, only one row group of it.
+type Rows func(fn func(Row) error) error
+
+// RowsOf is the source of rows already in memory.
+func RowsOf(rows []Row) Rows {
+	return func(fn func(Row) error) error {
+		for _, r := range rows {
+			if err := fn(r); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
+}
+
 func (parquetWriter) Encode(rows []Row, indexed []string) ([]byte, Info, error) {
-	columns, cells, err := infer(rows)
+	var buf bytes.Buffer
+
+	info, err := encodeTo(&buf, RowsOf(rows), indexed)
 	if err != nil {
 		return nil, Info{}, err
+	}
+
+	return buf.Bytes(), info, nil
+}
+
+// encodeTo writes the segment of rows to w, one row group at a time.
+func encodeTo(w io.Writer, rows Rows, indexed []string) (Info, error) {
+	columns, n, err := infer(rows)
+	if err != nil {
+		return Info{}, err
 	}
 
 	schema := buildSchema(columns)
 	enc := newEncoder(schema, columns)
-
-	out := make([]parquet.Row, 0, len(rows))
-
-	for i, r := range rows {
-		out = append(out, enc.row(r, cells[i]))
-	}
-
-	info := Info{Rows: len(rows), Columns: describe(columns)}
+	info := Info{Rows: n, Columns: describe(columns)}
 
 	meta, err := json.Marshal(info.Columns)
 	if err != nil {
-		return nil, Info{}, err
+		return Info{}, err
 	}
 
-	var buf bytes.Buffer
-
-	w := parquet.NewWriter(&buf, schema,
+	pw := parquet.NewWriter(w, schema,
 		parquet.Compression(&zstd.Codec{}),
 		parquet.MaxRowsPerRowGroup(rowGroupRows),
 		parquet.BloomFilters(bloomFilters(schema, indexed)...),
 		parquet.KeyValueMetadata(columnsKey, string(meta)),
 	)
 
-	if _, err := w.WriteRows(out); err != nil {
-		return nil, Info{}, err
+	batch := make([]parquet.Row, 0, rowGroupRows)
+
+	flush := func() error {
+		_, err := pw.WriteRows(batch)
+		batch = batch[:0]
+
+		return err
 	}
 
-	if err := w.Close(); err != nil {
-		return nil, Info{}, err
+	err = rows(func(r Row) error {
+		cells, err := cellsOf(r)
+		if err != nil {
+			return err
+		}
+
+		batch = append(batch, enc.row(r, cells))
+
+		if len(batch) < rowGroupRows {
+			return nil
+		}
+
+		return flush()
+	})
+	if err != nil {
+		return Info{}, err
 	}
 
-	return buf.Bytes(), info, nil
+	if err := flush(); err != nil {
+		return Info{}, err
+	}
+
+	return info, pw.Close()
 }
 
 func describe(columns []column) []Column {

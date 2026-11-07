@@ -107,12 +107,14 @@ func (c *Collection) compactRange(lo, hi int) error {
 		return err
 	}
 
-	rows, drop, err := c.buildRows(plan, lo)
+	drop, tombs, err := c.planDrops(plan, lo)
 	if err != nil {
 		return err
 	}
 
-	name, merged, info, err := c.publishMerged(rows)
+	count := len(tombs) + len(plan.live) - len(drop)
+
+	name, merged, info, err := c.publishMerged(c.mergedRows(plan, drop, tombs), count)
 	if err != nil {
 		return err
 	}
@@ -127,7 +129,7 @@ func (c *Collection) compactRange(lo, hi int) error {
 
 	s.step("committed")
 
-	if err := c.swap(plan, rows, drop, lo, hi, name, merged); err != nil {
+	if err := c.swap(plan, len(tombs), drop, lo, hi, name, merged); err != nil {
 		return err
 	}
 
@@ -197,22 +199,23 @@ func (c *Collection) planCompact(lo, hi int) (compactPlan, error) {
 	return plan, err
 }
 
-// buildRows makes the rows of the merged segment: tombstones first, then the
-// live rows in insertion order, as a seal does. drop holds the ids of live
-// entries that are left out because no read can see them.
-func (c *Collection) buildRows(plan compactPlan, lo int) ([]segment.Row, map[string]*entry, error) {
+// planDrops finds the live entries that no read can see any more (expired or
+// past the retention), and the tombstones the merged segment needs. Only a
+// collection with a TTL or a retention reads the documents here.
+func (c *Collection) planDrops(plan compactPlan, lo int) (map[string]*entry, []segment.Row, error) {
 	vis, err := c.visibility(plan.now)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	var (
-		kept []segment.Row
-		drop = map[string]*entry{}
-		gone = map[string]segment.Row{}
-	)
+	drop := map[string]*entry{}
+	gone := map[string]segment.Row{}
 
 	for i, lr := range plan.live {
+		if vis == nil {
+			break
+		}
+
 		if i&1023 == 0 && c.seal.stopping() {
 			return nil, nil, errStopped
 		}
@@ -222,14 +225,10 @@ func (c *Collection) buildRows(plan compactPlan, lo int) ([]segment.Row, map[str
 			return nil, nil, err
 		}
 
-		if vis != nil && !visibleTo(vis, raw) {
+		if !visibleTo(vis, raw) {
 			drop[lr.id] = lr.e
 			gone[lr.id] = segment.Row{ID: lr.id, Del: true, Tx: lr.e.tx}
-
-			continue
 		}
-
-		kept = append(kept, segment.Row{ID: lr.id, V: lr.e.v, Seq: lr.e.seq, Tx: lr.e.tx, Raw: raw})
 	}
 
 	if err := c.runTombstones(plan, gone); err != nil {
@@ -237,11 +236,42 @@ func (c *Collection) buildRows(plan compactPlan, lo int) ([]segment.Row, map[str
 	}
 
 	tombs, err := c.tombstonesFor(gone, lo)
-	if err != nil {
-		return nil, nil, err
-	}
 
-	return append(tombs, kept...), drop, nil
+	return drop, tombs, err
+}
+
+// mergedRows streams the rows of the merged segment: tombstones first, then
+// the kept rows in insertion order, as a seal does. Each document is read
+// from its segment when the encoder asks for it.
+func (c *Collection) mergedRows(plan compactPlan, drop map[string]*entry, tombs []segment.Row) segment.Rows {
+	return func(fn func(segment.Row) error) error {
+		for _, t := range tombs {
+			if err := fn(t); err != nil {
+				return err
+			}
+		}
+
+		for i, lr := range plan.live {
+			if i&1023 == 0 && c.seal.stopping() {
+				return errStopped
+			}
+
+			if _, dropped := drop[lr.id]; dropped {
+				continue
+			}
+
+			raw, err := lr.e.loc.seg.Raw(lr.e.loc.row)
+			if err != nil {
+				return err
+			}
+
+			if err := fn(segment.Row{ID: lr.id, V: lr.e.v, Seq: lr.e.seq, Tx: lr.e.tx, Raw: raw}); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
 }
 
 func visibleTo(vis *query.Query, raw []byte) bool {
@@ -307,21 +337,17 @@ func (c *Collection) tombstonesFor(gone map[string]segment.Row, lo int) ([]segme
 
 // publishMerged encodes and writes the merged segment. With no rows there is
 // no file: the run just leaves the checkpoint.
-func (c *Collection) publishMerged(rows []segment.Row) (string, *segRef, segment.Info, error) {
+func (c *Collection) publishMerged(rows segment.Rows, count int) (string, *segRef, segment.Info, error) {
 	s := c.seal
 
-	if len(rows) == 0 {
+	if count == 0 {
 		return "", nil, segment.Info{}, nil
 	}
 
 	name := fmt.Sprintf("%06d.parquet", s.next)
 
-	data, info, err := s.enc.Encode(rows, c.def.Indexes)
+	info, err := segment.PublishRows(s.fs, s.path(name), rows, c.def.Indexes)
 	if err != nil {
-		return "", nil, info, err
-	}
-
-	if err := segment.Publish(s.fs, s.path(name), data); err != nil {
 		return "", nil, info, err
 	}
 
@@ -402,12 +428,14 @@ func (c *Collection) commitSwap(lo, hi int, name string, info segment.Info, hasR
 
 // swap runs on the writer goroutine: it points the entries that still use the
 // run to the merged segment, and removes the dropped ones.
-func (c *Collection) swap(plan compactPlan, rows []segment.Row, drop map[string]*entry, lo, hi int, name string, merged *segRef) error {
+func (c *Collection) swap(plan compactPlan, tombs int, drop map[string]*entry, lo, hi int, name string, merged *segRef) error {
 	rowOf := map[string]int{}
+	row := tombs
 
-	for i, r := range rows {
-		if !r.Del {
-			rowOf[r.ID] = i
+	for _, lr := range plan.live {
+		if _, dropped := drop[lr.id]; !dropped {
+			rowOf[lr.id] = row
+			row++
 		}
 	}
 

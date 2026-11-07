@@ -4,6 +4,7 @@
 package segment
 
 import (
+	"bufio"
 	"io"
 	"path/filepath"
 
@@ -96,6 +97,34 @@ func Decode(ra io.ReaderAt, size int64) (Reader, error) {
 // the directory (plan §8.2). A failed write leaves only a tmp file, which
 // the next start removes.
 func Publish(fsys fs.FS, path string, data []byte) error {
+	return publish(fsys, path, func(w io.Writer) error {
+		_, err := w.Write(data)
+
+		return err
+	})
+}
+
+// PublishRows encodes rows straight into the file at path, atomically like
+// Publish. The segment is never held in memory: only one row group is.
+func PublishRows(fsys fs.FS, path string, rows Rows, indexed []string) (Info, error) {
+	var info Info
+
+	err := publish(fsys, path, func(w io.Writer) error {
+		bw := bufio.NewWriterSize(w, 1<<20)
+
+		var err error
+
+		if info, err = encodeTo(bw, rows, indexed); err != nil {
+			return err
+		}
+
+		return bw.Flush()
+	})
+
+	return info, err
+}
+
+func publish(fsys fs.FS, path string, write func(io.Writer) error) error {
 	tmp := path + ".tmp"
 
 	f, err := fsys.Create(tmp)
@@ -103,7 +132,7 @@ func Publish(fsys fs.FS, path string, data []byte) error {
 		return err
 	}
 
-	if _, err := f.Write(data); err != nil {
+	if err := write(f); err != nil {
 		f.Close()
 
 		return err

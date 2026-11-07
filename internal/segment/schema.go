@@ -63,53 +63,70 @@ type column struct {
 	mixed bool
 }
 
-// infer returns the columns of a segment and, per row, its cells.
-func infer(rows []Row) ([]column, []map[string]cell, error) {
-	cells := make([]map[string]cell, len(rows))
+// infer returns the columns of a segment and its number of rows. It keeps
+// only counts, not the cells: encodeTo flattens each row again.
+func infer(rows Rows) ([]column, int, error) {
 	bad := map[string]bool{}
+	counts := map[string]map[kind]int{}
+	n := 0
 
-	for i, r := range rows {
+	err := rows(func(r Row) error {
+		n++
+
 		if r.Del {
-			continue
+			return nil
 		}
 
-		c, paths, err := flatten(r.Raw)
+		cells, paths, err := flatten(r.Raw)
 		if err != nil {
-			return nil, nil, fmt.Errorf("segment: row %s: %w", r.ID, err)
+			return fmt.Errorf("segment: row %s: %w", r.ID, err)
 		}
-
-		cells[i] = c
 
 		for _, p := range paths {
 			bad[p] = true
 		}
-	}
 
-	counts := map[string]map[kind]int{}
-
-	for _, c := range cells {
-		for p, cl := range c {
-			if bad[p] || reserved[p] {
-				continue
-			}
-
+		for p, cl := range cells {
 			if counts[p] == nil {
 				counts[p] = map[kind]int{}
 			}
 
 			counts[p][cl.k]++
 		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, 0, err
 	}
 
 	columns := make([]column, 0, len(counts))
 
 	for p, byKind := range counts {
+		if bad[p] || reserved[p] {
+			continue
+		}
+
 		columns = append(columns, column{name: p, kind: dominant(byKind), mixed: len(byKind) > 1})
 	}
 
 	sort.Slice(columns, func(a, b int) bool { return columns[a].name < columns[b].name })
 
-	return columns, cells, nil
+	return columns, n, nil
+}
+
+// cellsOf returns the cells of one row; a tombstone has none.
+func cellsOf(r Row) (map[string]cell, error) {
+	if r.Del {
+		return nil, nil
+	}
+
+	cells, _, err := flatten(r.Raw)
+	if err != nil {
+		return nil, fmt.Errorf("segment: row %s: %w", r.ID, err)
+	}
+
+	return cells, nil
 }
 
 // dominant picks the kind seen most often; on a tie, the lower kind wins.
