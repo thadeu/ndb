@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-07
+
 ### Fixed
 
 - A `many` update or delete of more than about 25k documents failed with `line_too_large`, because the full write went into one WAL record. ndb now splits it into records of up to half of `max_line_size`, so a `many` write has no size limit. Each record is atomic, the write as a whole is not. See [Update by filter](docs/dev/query.md#which-documents).
