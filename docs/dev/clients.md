@@ -1,6 +1,6 @@
 # Clients
 
-Every SDK has two layers: a small transport (HTTP over a unix socket or TCP) and an idiomatic model layer that declares the collection (`PUT /v1/c/{coll}`) on first use and builds query JSON. The daemon decides what a query means. See [query.md](query.md).
+Every SDK has two layers: a small transport (HTTP over a unix socket or TCP) and an idiomatic model layer that declares the collection (`PUT /{coll}`) on first use and builds query JSON. The daemon decides what a query means. See [query.md](query.md).
 
 | Client | For | Guide |
 |---|---|---|
@@ -9,7 +9,7 @@ Every SDK has two layers: a small transport (HTTP over a unix socket or TCP) and
 | Rails | Rails apps, ActiveModel style (`Ndb::Record`) | [Rails](clients/rails.md) |
 | TypeScript | Node.js apps and workers | [TypeScript](clients/typescript.md) |
 | CLI | the terminal, shell scripts, admin | [CLI](clients/cli.md) |
-| `curl` | anything with HTTP | [HTTP API](http-api.md) |
+| `curl` | anything with HTTP | [HTTP API](http.md) |
 
 ## Install
 
@@ -37,7 +37,7 @@ When the daemon runs with `-token-file`, the TCP listener needs a bearer token (
 
 ## Retry while the daemon starts
 
-The daemon opens its socket before recovery ends and answers every request with HTTP 503 and the code `not_ready` ("ndb is recovering"; `/health` answers 503 `{"status":"recovering"}`, which the SDKs also read as `not_ready`). The socket is also missing or refuses connections while the daemon restarts. The Go, Ruby and TypeScript SDKs retry these cases by default:
+The daemon opens its socket before recovery ends and answers every request with HTTP 503 and the code `not_ready` ("ndb is recovering"; `/_health` answers 503 `{"status":"recovering"}`, which the SDKs also read as `not_ready`). The socket is also missing or refuses connections while the daemon restarts. The Go, Ruby and TypeScript SDKs retry these cases by default:
 
 - Backoff: start 50 ms, factor 2, cap 1 s, with jitter. Total deadline 10 s.
 - When the deadline passes, the last error surfaces unchanged (`ErrNotReady` / `NotReady` / `NdbError` with code `not_ready`, or the connect error).

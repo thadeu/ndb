@@ -43,7 +43,7 @@ The examples do not hide a missing feature. Where an SDK lacks one, the page say
 | Feature | Go | Ruby | Rails | TypeScript | curl |
 |---|---|---|---|---|---|
 | insert, update, delete, `_v` guard | yes | yes | yes | yes | yes |
-| find, sort, cursor pages, count | yes | yes | yes | yes | yes |
+| search, sort, cursor pages, count | yes | yes | yes | yes | yes |
 | `$regex` | yes | yes (also `Regexp`) | yes | yes | yes |
 | aggregate | yes | yes | yes (and `group`/`sum`) | yes | yes |
 | `watch` with `where`, `ack` | yes | yes | client only | yes | yes |

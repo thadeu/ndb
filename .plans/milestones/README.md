@@ -32,7 +32,7 @@ Deferred ideas: [`../backlog/`](../backlog/).
 | [M12](m12-compaction-blobs-metrics.md) | Compaction, retention, TTL, blobs, metrics | long-running operation; Redis-like document expiry | M05 | §7.5, phase 9 |
 | [M13](m13-packaging-adoption.md) | Packaging + adoption | release, Docker, docs, use in 3 apps | all | phase 10 |
 | [M14](m14-console.md) | Ndb Console | self-hosted web UI: connections, browser, dev tools | M07, M13 | — |
-| [M15](m15-api-1.0.md) | API 1.0 | ES-style routes (`/{coll}/_search`), `query` body key, JSON search envelope, one SDK vocabulary; breaking, release 1.0.0 | M07–M14 | — |
+| [M15](m15-api-1.0.md) | API 1.0 | ES-style routes (`/{coll}/_search`), `query` body key, JSON search envelope, one SDK vocabulary; breaking, release 1.0.0 (done, unreleased) | M07–M14 | — |
 
 ## Next (after 0.1.2)
 

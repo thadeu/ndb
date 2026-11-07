@@ -36,7 +36,7 @@ ndb runs on the db VM. Apps on other VMs reach it over TCP, inside a WireGuard t
 Check from the apps VM:
 
 ```bash
-curl -s -H "Authorization: Bearer $NDB_TOKEN" http://ndb.internal:7070/health
+curl -s -H "Authorization: Bearer $NDB_TOKEN" http://ndb.internal:7070/_health
 ```
 
 Without the header the answer is `401 unauthorized`.

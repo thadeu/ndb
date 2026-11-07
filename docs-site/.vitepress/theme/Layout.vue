@@ -27,10 +27,6 @@ const activeId = computed(() => {
     return 'aggregate'
   }
 
-  if (path.value === '/http-api' && (route.hash ?? '').startsWith('#watch')) {
-    return 'watch'
-  }
-
   return pageTab[path.value] ?? null
 })
 

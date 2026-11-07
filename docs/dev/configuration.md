@@ -112,9 +112,9 @@ collections:
 | Redis | ndb | Notes |
 |---|---|---|
 | `SET k v EX 3600` | `insert` with `"expire_in": "1h"` (or `3600`) | also on `update` |
-| `EXPIRE k 1800` | `POST /v1/c/sessions/expire {"_id","in":"30m"}` | `"at": "<RFC 3339>"` is `EXPIREAT` |
-| `PERSIST k` | `POST /v1/c/sessions/persist {"_id"}` | |
-| `TTL k` | `GET /v1/c/sessions/{_id}/ttl` | `-1` = never expires; `404` = missing or expired |
+| `EXPIRE k 1800` | `POST /sessions/_expire/{_id} {"in":"30m"}` | `"at": "<RFC 3339>"` is `EXPIREAT` |
+| `PERSIST k` | `POST /sessions/_persist/{_id}` | |
+| `TTL k` | `GET /sessions/_ttl/{_id}` | `-1` = never expires; `404` = missing or expired |
 
 - `expire_in` wins over a value of `expires_field` that the same call carries.
 - `ttl: 24h` + `time` (every document expires a fixed time after its `time` field) is a derived expiry: `expire` and `persist` fail with `ttl_derived`.
@@ -122,8 +122,8 @@ collections:
 - CLI: `ndb expire sessions s1 30m`, `ndb persist sessions s1`, `ndb ttl sessions s1`.
 
 ```bash
-curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/sessions/insert -d '{"insert":[{"_id":"s1"}],"expire_in":"1h"}'
-curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/sessions/s1/ttl
+curl --unix-socket /run/ndb/ndb.sock http://ndb/sessions/_bulk -d '{"docs":[{"_id":"s1"}],"expire_in":"1h"}'
+curl --unix-socket /run/ndb/ndb.sock http://ndb/sessions/_ttl/s1
 ```
 
 ```go
@@ -172,9 +172,9 @@ A WAL file is never deleted while a stored `watch` position still needs it. See 
 
 ## Authentication
 
-`-token-file /etc/ndb/token` makes the TCP listener require `Authorization: Bearer <token>` on every request, `/health` and `/metrics` included. A missing or wrong token is `401 unauthorized`. The file holds one token; ndb trims the spaces around it, and an empty file stops the start. The token is compared in constant time.
+`-token-file /etc/ndb/token` makes the TCP listener require `Authorization: Bearer <token>` on every request, `/_health` and `/_metrics` included. A missing or wrong token is `401 unauthorized`. The file holds one token; ndb trims the spaces around it, and an empty file stops the start. The token is compared in constant time.
 
-The unix socket never asks for a token: file permissions guard it (`listen.unix_mode`, default `0660`). `POST /v1/backup` stays unix-only.
+The unix socket never asks for a token: file permissions guard it (`listen.unix_mode`, default `0660`). `POST /_backup` stays unix-only.
 
 The token is defense in depth. Keep the listener on a private address (for example WireGuard) as well. SDKs take a `token` option or `NDB_TOKEN`; see [clients.md](clients.md).
 

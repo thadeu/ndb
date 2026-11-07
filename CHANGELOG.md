@@ -6,6 +6,64 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+ndb 1.0 is the stable API. It breaks the 0.x API on purpose, with no compatibility layer: the routes take the shape of Elasticsearch (`/{coll}/_search`), the body keeps the query language of MongoDB, and the SDKs share one vocabulary. Upgrade the daemon, the SDKs and the console together. The data directory, the WAL and backups do not change.
+
+### Changed
+
+- **Routes.** No `/v1/c` prefix. A path whose first segment starts with `_` is the system (`/_health`, `/_stats`); any other is a collection, and its actions start with `_` (`/{coll}/_search`). A document id always comes after an action (`/{coll}/_doc/{id}`), so an id never collides with a route. An unknown path is `404 unknown_route`; a known path with another method is `405 method_not_allowed`.
+- **`query` replaces `where`** in every body: `_search`, `_count`, `_watch`, `_update_by_query`, `_delete_by_query`, `_update/{id}` (guards). `where` is `invalid_query`.
+- **Update bodies** put the filter in `query` and the write operators in `update`. Options (`many`, `upsert`, `expire_in`) moved from the query string into the body. `$not` is allowed at the top of an update or delete query.
+- **Rows** of `_search` and `_aggregate` are a JSON array by default; `Accept: application/x-ndjson` gives NDJSON, as before. The page data stays in `X-Ndb-*` headers in both formats.
+- **`_v`** is the version everywhere: write results and watch events (was `v`).
+- **SDKs:** one vocabulary in Go, Ruby and TypeScript (table below). Rails keeps the Rails way.
+
+### Added
+
+- `POST /{coll}/_count` (`{"count": n}`), `POST /{coll}/_doc` (insert one document), `PUT /{coll}/_indexes/{field}`, the `X-Ndb-Took-Ms` header.
+- Go: `Coll.Stats`, `Compact`, `EnsureIndex`, `DropIndex`, `Count`, `Name`; `DB.Health`, `Collections`, `Stats`, `Size`.
+- TypeScript: blobs (`putBlob`, `getBlob`), `collections`, `stats`, `size`, `compact`, `ensureIndex`, `dropIndex`.
+- Ruby: `Ndb.connect` and `Ndb::Collection` with a query builder (`Ndb::Query`); `count`, `bulk`, `update_by`, `delete_by`, `health`, `stats`, `size`, `compact`, index routes on `Ndb::Client`.
+- Docs: an **HTTP** tab with one page per route group (system, collections, documents, queries, watch, errors) and the full protocol contract (transport, auth, formats, headers, consistency, retries, streams, limits). `llms.txt` now includes the HTTP and UI pages.
+
+### Migration
+
+| 0.x | 1.0 |
+|---|---|
+| `GET /health`, `GET /metrics` | `GET /_health`, `GET /_metrics` |
+| `GET /v1/c` | `GET /_collections` |
+| `GET /v1/stats`, `GET /v1/size`, `POST /v1/backup` | `GET /_stats`, `GET /_size`, `POST /_backup` |
+| `PUT /v1/blobs`, `GET /v1/blobs/{ref}` | `POST /_blobs`, `GET /_blobs/{ref}` |
+| `PUT`, `GET`, `DELETE /v1/c/{coll}` | `PUT`, `GET`, `DELETE /{coll}` |
+| `POST /v1/c/{coll}/truncate`, `/compact`; `GET .../stats`, `.../quarantine` | `POST /{coll}/_truncate`, `_compact`; `GET /{coll}/_stats`, `_quarantine` |
+| `DELETE /v1/c/{coll}/indexes/{field}` | `DELETE /{coll}/_indexes/{field}` (and new `PUT`) |
+| `POST /v1/c/{coll}/find` `{"where": ...}` | `POST /{coll}/_search` `{"query": ...}` |
+| `find` with `count: true` for a total | also `POST /{coll}/_count` |
+| `POST /v1/c/{coll}/aggregate` | `POST /{coll}/_aggregate` |
+| `POST /v1/c/{coll}/insert` `{"insert": [...]}` | `POST /{coll}/_bulk` `{"docs": [...]}`, or `POST /{coll}/_doc` with one document |
+| `GET`, `DELETE /v1/c/{coll}/{id}` | `GET`, `DELETE /{coll}/_doc/{id}` |
+| `POST /v1/c/{coll}/{id}/update?upsert` `{"_v":1,"$set":...}` | `POST /{coll}/_update/{id}` `{"query":{"_v":1},"update":{"$set":...},"upsert":true}` |
+| `POST /v1/c/{coll}/update?many` `{"status":"x","$set":...}` | `POST /{coll}/_update_by_query` `{"query":{"status":"x"},"update":{"$set":...},"many":true}` |
+| `POST /v1/c/{coll}/delete?many` `{"status":"x"}` | `POST /{coll}/_delete_by_query` `{"query":{"status":"x"},"many":true}` |
+| `POST /v1/c/{coll}/expire` `{"_id","in"}`, `/persist` `{"_id"}` | `POST /{coll}/_expire/{id}` `{"in"}`, `POST /{coll}/_persist/{id}` |
+| `GET /v1/c/{coll}/{id}/ttl` | `GET /{coll}/_ttl/{id}` |
+| `POST /v1/c/{coll}/watch` `{"where"}`, `/ack` | `POST /{coll}/_watch` `{"query"}`, `POST /{coll}/_ack` |
+| results and events `{"_id","v"}` | `{"_id","_v"}` |
+| rows as NDJSON | a JSON array (NDJSON with `Accept: application/x-ndjson`) |
+| CLI `ndb update <coll> '{filter + $ops}'` | `ndb update <coll> '<query>' '<update>'` |
+
+| SDK 0.x | Go 1.0 | Ruby 1.0 | TypeScript 1.0 |
+|---|---|---|---|
+| connect | `ndb.Open` → `ndb.Connect` | `Ndb::Client.new` → `Ndb.connect` (same client) | `connect` |
+| collection | `Collection[T](ctx, db, name)` → `Collection[T](db, name)`, declared on first call | new `db.collection(name, definition)` | `db.model` → `db.collection` |
+| pattern | `Pattern[T]` → `Collection[T](db, "logs-*")` | `db.collection("logs-*")` | `db.collection('logs-*', schema)` |
+| insert | `Insert(ctx, docs...)` → `Insert(ctx, doc)`, `InsertMany(ctx, docs)`; `InsertWith` gone | `client.insert(coll, docs)` → `insert(coll, doc)`, `bulk(coll, docs)`; `collection.insert(doc or docs)` | `insert(doc)` answers one result, `insert([docs])` an array; `create` gone |
+| update by id | `UpdateID` → `Update(ctx, id, ops, Guard(...))` | `update(coll, id, ops, guard:)` | `update(id, ops, { guard })` |
+| update by query | `Update(ctx, filter, ops)` → `UpdateBy` | `update(coll, filter, ops)` → `update_by` | `update(filter, ops)` → `updateBy` |
+| delete | `DeleteID` → `Delete`; `Delete(filter)` → `DeleteBy` | `delete(coll, filter)` → `delete_by` | `delete(filter)` → `deleteBy` |
+| query | `Where` → `Query`; `Raw`/`RawJSON` → `RawQuery`/`RawQueryJSON`; `Iter` → `Each`; `Find` → `Search` | `find` → `search`; new `query` / `raw_query` builder; `Page#next_cursor` → `next` | `where` → `query`; `whereRaw` → `rawQuery`; `iterate` → `each`; `find` → `search` |
+| watch filter | `WatchWhere` → `WatchQuery` | `where:` → `query:` | `{ where }` → `{ query }` |
+
+
 ## [0.4.0] - 2026-11-07
 
 ### Added

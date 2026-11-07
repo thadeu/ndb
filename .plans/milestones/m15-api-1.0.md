@@ -1,5 +1,13 @@
 # M15: API 1.0 (routes, query, SDK vocabulary)
 
+> Built (2026-11-07): server router (`internal/server/router.go`), the SDKs,
+> the console, the docs HTTP tab (`docs/dev/http.md`, `docs/dev/http/`).
+> Changes from this plan: Go inserts are `Insert(ctx, doc)` and
+> `InsertMany(ctx, docs)` (one Go method cannot take one doc or many); the
+> Ruby event ack is `ack(event, consumer)`; a write operator in `query` is
+> `unknown_operator` (not `invalid_query`); the console keeps its own URL
+> parameter `where` for its filter box (its calls to ndb send `query`).
+>
 > Decision (2026-11-07): ndb 1.0.0 is a breaking release. No compatibility
 > layer: nobody uses the HTTP API yet except our own console.
 > The mix: the URL shape of Elasticsearch (`/{coll}/_action`) and the query

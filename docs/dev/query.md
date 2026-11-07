@@ -2,19 +2,19 @@
 
 Queries are JSON. The same body works from every SDK and from `curl`. The daemon owns all query meaning. The SDKs only build JSON.
 
-This page has everything about reading and writing: `find`, the filter operators, the `/{_id}` routes, update and delete by filter with the write operators, and pagination. [Aggregate](aggregate.md) and [Watch](watch.md) have their own pages.
+This page is the language: search, the filter operators, update and delete by query with the write operators, and pagination. The routes, with every body key, answer and error, are on the [HTTP API](http.md) pages. [Aggregate](aggregate.md) and [Watch](watch.md) have their own pages.
 
-One rule covers every body: **a key that starts with `$` is an operator, any other key is a field.**
+Two words, as in Elasticsearch: the **query** is what matches (the filter), and a **search** is the whole request (query, sort, limit, cursor). One rule covers every query: **a key that starts with `$` is an operator, any other key is a field.**
 
-## find
+## Search
 
-`POST /v1/c/{coll}/find`
+`POST /{coll}/_search` ([route](http/queries.md#post-coll-search))
 
 ::: code-group
 
 ```bash [curl]
-curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/calls/find -d '{
-  "where": { "status": "answered", "duration": { "$gte": 30 } },
+curl --unix-socket /run/ndb/ndb.sock http://ndb/calls/_search -d '{
+  "query": { "status": "answered", "duration": { "$gte": 30 } },
   "sort": { "at": -1 },
   "fields": ["call_id", "status"],
   "limit": 50
@@ -23,7 +23,7 @@ curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/calls/find -d '{
 
 ```go [Go]
 rows, err := calls.
-	Where(ndb.Eq("status", "answered"), ndb.Gte("duration", 30)).
+	Query(ndb.Eq("status", "answered"), ndb.Gte("duration", 30)).
 	Sort(ndb.Desc("at")).
 	Fields("call_id", "status").
 	Limit(50).
@@ -31,13 +31,11 @@ rows, err := calls.
 ```
 
 ```ruby [Ruby]
-page = ndb.find("calls",
-                where: { status: "answered", duration: { "$gte" => 30 } },
-                sort: { at: -1 },
-                fields: %w[call_id status],
-                limit: 50)
-
-page.rows
+calls.query(status: "answered", duration: { "$gte" => 30 })
+     .sort(at: -1)
+     .fields(:call_id, :status)
+     .limit(50)
+     .all
 ```
 
 ```ruby [Rails]
@@ -49,10 +47,14 @@ Call.where(status: "answered", duration: { "$gte" => 30 })
 
 ```ts [TypeScript]
 const rows = await calls
-  .where({ status: 'answered', duration: { $gte: 30 } })
+  .query({ status: 'answered', duration: { $gte: 30 } })
   .sort({ at: -1 })
   .limit(50)
   .all()
+```
+
+```bash [CLI]
+ndb query calls '{"status":"answered","duration":{"$gte":30}}' -sort '{"at":-1}' -limit 50
 ```
 
 :::
@@ -61,7 +63,7 @@ The full body:
 
 ```json
 {
-  "where": { "status": "answered", "duration": { "$gte": 30 } },
+  "query": { "status": "answered", "duration": { "$gte": 30 } },
   "fields": ["_id", "status"],
   "sort": { "ts": -1 },
   "limit": 50,
@@ -78,29 +80,30 @@ All keys are optional. An unknown key is `invalid_query`.
 
 | Key | Meaning |
 |---|---|
-| `where` | filter object. See [Filters](#filters). No `where` matches every document. |
+| `query` | filter object. See [Filters](#filters). No `query` matches every document. |
 | `fields` | return only these paths (dot paths allowed). |
 | `sort` | object `field: 1` or `-1`. The key order is the sort order. The document id is always the last sort key. With no `sort`, the order is insertion order. |
 | `limit`, `skip` | non-negative integers. |
 | `after` | cursor from the previous page. See [Pagination](#pagination). |
-| `count` | add the total number of matches in header `X-Ndb-Total`. |
-| `versions` | add `_v`, the document version, to each row. Use it as `_v` in the filter of an [update](#update-by-filter). |
+| `count` | add the total number of matches in header `X-Ndb-Total`. `POST /{coll}/_count` answers only the number. |
+| `versions` | add `_v`, the document version, to each row. Use it as a guard in an [update](#update-by-query). |
 | `snapshot` | keep the first snapshot for 60 s, so all pages see the same data. |
 | `explain` | add header `X-Ndb-Explain` with the plan counters. |
 
-The answer is NDJSON, one row per line. The page data is in response headers (they are sent before the first row):
+The answer is the rows: a JSON array, or NDJSON with `Accept: application/x-ndjson`. The page data is in headers:
 
 | Header | Meaning |
 |---|---|
 | `X-Ndb-Next` | cursor of the next page. Absent on the last page. |
-| `X-Ndb-Plan` | `id`, `index:<field>`, `scan` or `snapshot`. |
-| `X-Ndb-Examined` | candidate rows whose `where` was evaluated. |
+| `X-Ndb-Plan` | `id`, `index:<field>`, `scan`, `snapshot` or `pattern`. |
+| `X-Ndb-Examined` | candidate rows whose `query` was evaluated. |
 | `X-Ndb-Total` | only with `count: true`. |
+| `X-Ndb-Took-Ms` | time spent by the daemon. |
 | `X-Ndb-Explain` | only with `explain: true`. JSON with `segments_read`, `segments_skipped`, `row_groups_read`, `row_groups_skipped`, `rows_read`, `rows_matched`, `raw_fetched`, `cache_hits`. |
 
 ## Filters
 
-A filter is the `where` of `find`, the `$match` of [aggregate](aggregate.md), the `where` of [watch](watch.md), and the non-`$` part of an [update](#update-by-filter) or [delete](#delete-by-filter) body. It is the same language everywhere.
+A filter is the `query` of a search, a count, a [watch](watch.md), an [update](#update-by-query) or a [delete](#delete-by-query), and the `$match` of [aggregate](aggregate.md). It is the same language everywhere.
 
 A field with a plain value means equality: `{"status": "answered"}`. Several fields in one object are ANDed.
 
@@ -136,7 +139,7 @@ Rules:
 ### Regular expressions
 
 ```json
-{ "where": { "title": { "$regex": "^alpha", "$options": "i" } } }
+{ "query": { "title": { "$regex": "^alpha", "$options": "i" } } }
 ```
 
 - `$regex` is a string pattern, at most 1 KiB. `$options` is optional and needs `$regex`. Flags: `i` (ignore case), `m` (`^` and `$` match at each line), `s` (`.` matches a newline), `x` (extended, see below). Any other flag is `invalid_query`.
@@ -171,8 +174,8 @@ units: s m h d w M y      (m = minute, M = month)
 | `now-1M/M` | 2026-10-01 00:00:00 |
 
 - `/<unit>` rounds down to the start of the unit, in UTC.
-- It works in `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin` and plain equality, so in `find`, `aggregate` `$match`, update and delete filters, and `watch` `where`. The result is a time value, so indexes and zone maps work as with an RFC 3339 string.
-- `now` is read once per request: every `now` of one query is the same instant. A `find` cursor keeps the `now` of its first page, so the pages of one walk see the same window. An aggregate reads `now` on each request. A `watch` reads it when the stream opens.
+- It works in `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin` and plain equality, so in every `query` (search, count, update, delete, watch) and in the `$match` of an aggregate. The result is a time value, so indexes and zone maps work as with an RFC 3339 string.
+- `now` is read once per request: every `now` of one query is the same instant. A search cursor keeps the `now` of its first page, so the pages of one walk see the same window. An aggregate reads `now` on each request. A `watch` reads it when the stream opens.
 - On any other field, `"now-1h"` is a plain string.
 - A broken expression (`now-7x`, `now--1d`, `now/`) is `invalid_query`.
 
@@ -193,26 +196,26 @@ Conditions on dot paths into an array match each on its own element: `{"items.sk
 
 ## By _id
 
-Every document has `_id` (see [Document id](configuration.md#document-id)). These routes reach one document by it, without a filter body:
+Every document has `_id` (see [Document id](configuration.md#document-id)). These routes reach one document by it; the id comes after the action, so any id works. See [Documents](http/documents.md).
 
 ::: code-group
 
 ```bash [curl]
-curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/calls/0192f3a4-7c1e-7b2a-9f3d-1a2b3c4d5e6f
-curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/stock/sku-a/update -d '{"qty":{"$gte":1},"$inc":{"qty":-1}}'
-curl --unix-socket /run/ndb/ndb.sock -X DELETE http://ndb/v1/c/calls/0192f3a4-7c1e-7b2a-9f3d-1a2b3c4d5e6f
+curl --unix-socket /run/ndb/ndb.sock http://ndb/calls/_doc/0192f3a4-7c1e-7b2a-9f3d-1a2b3c4d5e6f
+curl --unix-socket /run/ndb/ndb.sock http://ndb/stock/_update/sku-a -d '{"query":{"qty":{"$gte":1}},"update":{"$inc":{"qty":-1}}}'
+curl --unix-socket /run/ndb/ndb.sock -X DELETE http://ndb/calls/_doc/0192f3a4-7c1e-7b2a-9f3d-1a2b3c4d5e6f
 ```
 
 ```go [Go]
 call, err := calls.Get(ctx, id)
-res, err := stock.UpdateID(ctx, "sku-a", ndb.Ops{"$inc": {"qty": -1}}, ndb.Guard(ndb.Gte("qty", 1)))
-deleted, err := calls.DeleteID(ctx, id)
+res, err := stock.Update(ctx, "sku-a", ndb.Ops{"$inc": {"qty": -1}}, ndb.Guard(ndb.Gte("qty", 1)))
+deleted, err := calls.Delete(ctx, id)
 ```
 
 ```ruby [Ruby]
-ndb.get("calls", id)
-ndb.update("stock", "sku-a", { "$inc" => { qty: -1 } })   # a String is the _id
-ndb.delete("calls", id)
+calls.get(id)
+stock.update("sku-a", { "$inc" => { qty: -1 } }, guard: { qty: { "$gte" => 1 } })
+calls.delete(id)
 ```
 
 ```ruby [Rails]
@@ -222,7 +225,7 @@ call.destroy
 
 ```ts [TypeScript]
 const call = await calls.get(id)
-await stock.update('sku-a', { $inc: { qty: -1 } })   // a string is the _id
+await stock.update('sku-a', { $inc: { qty: -1 } }, { guard: { qty: { $gte: 1 } } })
 await calls.delete(id)
 ```
 
@@ -234,26 +237,25 @@ ndb delete calls 0192f3a4-7c1e-7b2a-9f3d-1a2b3c4d5e6f
 
 :::
 
-- `GET /v1/c/{coll}/{_id}` answers the document with `_v`, or `404 not_found`.
-- `POST /v1/c/{coll}/{_id}/update` takes write operators and optional guard filters in the body, like [update by filter](#update-by-filter) with `{"_id": ...}` added. `upsert` and `expire_in` work; `many` does not.
-- `DELETE /v1/c/{coll}/{_id}` answers `{"deleted":0}` or `{"deleted":1}`.
-- A fixed route wins: a document whose `_id` is `stats` or `find` is reached with `find`, not with `GET /{_id}`.
+- `GET /{coll}/_doc/{id}` answers the document with `_v`, or `404 not_found`.
+- `POST /{coll}/_update/{id}` takes `update` (the write operators) and an optional `query` of guards on the same document, like [update by query](#update-by-query) with `{"_id": ...}` added. `upsert` and `expire_in` work; `many` does not.
+- `DELETE /{coll}/_doc/{id}` answers `{"deleted":0}` or `{"deleted":1}`.
 
-## Update by filter
+## Update by query
 
-`POST /v1/c/{coll}/update` takes **one JSON object that mixes a filter and write operators**. The daemon matches the filter and writes the result inside the single writer of the collection, against the newest state. Two updates never interleave, so a guarded decrement or an `$inc` needs no retry.
+`POST /{coll}/_update_by_query` ([route](http/queries.md#post-coll-update-by-query)) takes a `query` and an `update` with the write operators. The daemon matches the query and writes the result inside the single writer of the collection, against the newest state. Two updates never interleave, so a guarded decrement or an `$inc` needs no retry.
 
 ::: code-group
 
 ```bash [curl]
 # take one unit of stock, only if there is one
-curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/stock/update \
-  -d '{"sku":"a","qty":{"$gte":1},"$inc":{"qty":-1}}'
+curl --unix-socket /run/ndb/ndb.sock http://ndb/stock/_update_by_query \
+  -d '{"query":{"sku":"a","qty":{"$gte":1}},"update":{"$inc":{"qty":-1}}}'
 # {"matched":1,"modified":1,"doc":{"sku":"a","qty":4,"_v":7}}
 ```
 
 ```go [Go]
-res, err := stock.Update(ctx,
+res, err := stock.UpdateBy(ctx,
 	ndb.And(ndb.Eq("sku", "a"), ndb.Gte("qty", 1)),
 	ndb.Ops{"$inc": {"qty": -1}},
 )
@@ -261,7 +263,7 @@ res, err := stock.Update(ctx,
 ```
 
 ```ruby [Ruby]
-ndb.update("stock", { sku: "a", qty: { "$gte" => 1 } }, { "$inc" => { qty: -1 } })
+stock.update_by({ sku: "a", qty: { "$gte" => 1 } }, { "$inc" => { qty: -1 } })
 # => {"matched" => 1, "modified" => 1, "doc" => {...}}
 ```
 
@@ -272,28 +274,29 @@ stock.decrement!(:qty)   # atomic $inc on the daemon, refreshes the attribute
 ```
 
 ```ts [TypeScript]
-const res = await stock.update({ sku: 'a', qty: { $gte: 1 } }, { $inc: { qty: -1 } })
+const res = await stock.updateBy({ sku: 'a', qty: { $gte: 1 } }, { $inc: { qty: -1 } })
 // { matched, modified, doc }
 ```
 
 ```bash [CLI]
-ndb update stock '{"sku":"a","qty":{"$gte":1},"$inc":{"qty":-1}}'
+ndb update stock '{"sku":"a","qty":{"$gte":1}}' '{"$inc":{"qty":-1}}'
 ```
 
 :::
 
-The SDKs take the filter and the operators as two arguments and send them as one body. A key of the operators without `$` is an error in the SDK, before anything is sent.
+A key of the operators without `$` is an error in the SDK, before anything is sent.
 
 ### Body keys
 
 | Key | Meaning |
 |---|---|
-| `$set`, `$setOnInsert`, `$unset`, `$inc`, `$push`, `$pull`, `$min`, `$max` | write operators, each an object of fields (dot paths allowed) |
-| `$and`, `$or`, `$nor` | filter, see [Filters](#filters) |
-| any key without `$` (the id field, `qty`, `_v`, `meta.k`) | filter |
-| any other `$...` key | `400 unknown_operator` |
+| `query` | the filter, see [Filters](#filters). It must not be empty. |
+| `update` | the write operators: `$set`, `$setOnInsert`, `$unset`, `$inc`, `$push`, `$pull`, `$min`, `$max`, each an object of fields (dot paths allowed) |
+| `many` | update every match, see [Which documents](#which-documents) |
+| `upsert` | create the document when nothing matches, see [Upsert](#upsert) |
+| `expire_in` | set `expires_field` to now + this duration |
 
-Options are in the query string: `many=true`, `upsert=true`, `expire_in=<duration>`.
+A write operator in `query`, or another key in `update`, is `400 unknown_operator`.
 
 ### Write operators
 
@@ -307,15 +310,17 @@ Options are in the query string: `many=true`, `upsert=true`, `expire_in=<duratio
 | `{"$pull": {"f": v}}` | remove every element equal to `v`. A condition removes the elements that match it: `{"$gte": 5}`, or `{"status": "done"}` for arrays of objects. |
 | `{"$min": {"f": v}}`, `{"$max": {"f": v}}` | set when the field is missing or `v` is lower (higher). Numbers, or strings in lexical order. A different type than the field is `invalid_field`. |
 
-Several operators can go in one body, on different fields:
+Several operators can go in one `update`, on different fields:
 
 ```json
 {
-  "_id": "order-1",
-  "$push": { "events": { "at": "2026-11-06T12:00:00Z", "kind": "paid" } },
-  "$inc": { "attempts": 1 },
-  "$max": { "last_seen": "2026-11-06T12:00:00Z" },
-  "$set": { "status": "paid" }
+  "query": { "_id": "order-1" },
+  "update": {
+    "$push": { "events": { "at": "2026-11-06T12:00:00Z", "kind": "paid" } },
+    "$inc": { "attempts": 1 },
+    "$max": { "last_seen": "2026-11-06T12:00:00Z" },
+    "$set": { "status": "paid" }
+  }
 }
 ```
 
@@ -325,15 +330,15 @@ Several operators can go in one body, on different fields:
 
 ```bash
 # append one event
-curl ... /v1/c/orders/update -d '{"_id":"o1","$push":{"events":{"kind":"paid"}}}'
+curl ... /orders/_update/o1 -d '{"update":{"$push":{"events":{"kind":"paid"}}}}'
 
 # append many
-curl ... /v1/c/orders/update -d '{"_id":"o1","$push":{"tags":{"$each":["vip","eu"]}}}'
+curl ... /orders/_update/o1 -d '{"update":{"$push":{"tags":{"$each":["vip","eu"]}}}}'
 
 # remove a value, or the elements that match a condition
-curl ... /v1/c/orders/update -d '{"_id":"o1","$pull":{"tags":"eu"}}'
-curl ... /v1/c/orders/update -d '{"_id":"o1","$pull":{"events":{"kind":"draft"}}}'
-curl ... /v1/c/orders/update -d '{"_id":"o1","$pull":{"scores":{"$lt":10}}}'
+curl ... /orders/_update/o1 -d '{"update":{"$pull":{"tags":"eu"}}}'
+curl ... /orders/_update/o1 -d '{"update":{"$pull":{"events":{"kind":"draft"}}}}'
+curl ... /orders/_update/o1 -d '{"update":{"$pull":{"scores":{"$lt":10}}}}'
 ```
 
 ### Answers
@@ -342,45 +347,47 @@ Always HTTP 200 when the body is valid:
 
 - One document: `{"matched":1,"modified":1,"doc":{...}}`. `doc` is the new document with `_v`.
 - Nothing matched: `{"matched":0,"modified":0}`. That is not an error. For a guarded decrement it means "sold out".
-- With `many=true`: `{"matched":N,"modified":N}`, with no `doc`.
+- With `many`: `{"matched":N,"modified":N}`, with no `doc`.
 - `modified` is 0 when the operators leave the document as it is (for example `$max` with a lower value). No new version is written then.
 
 ### Which documents
 
-- Without `many`, a filter with the id field uses the id lookup. Without the id, the first matching document is used.
-- With `many=true`, the filter must be served by the id or a ready secondary index. Otherwise the call is `400 unindexed_many`, so a big update never blocks the writer on a full scan.
-- A filter must not be empty (`400 empty_filter`). Expired documents are never matched.
+- Without `many`, a query with the id field uses the id lookup. Without the id, the first matching document is used.
+- With `"many": true`, the query must be served by the id or a ready secondary index. Otherwise the call is `400 unindexed_many`, so a big update never blocks the writer on a full scan.
+- A query must not be empty (`400 empty_filter`). Expired documents are never matched.
 - A `many` write has no size limit. ndb lists the matches one time, then writes them in WAL records of up to half of `max_line_size`. Other writes to the collection run between two records. Each record is atomic, but the write as a whole is not: after a crash, the records already written stay, and you can send the same call again. Each document is written at most one time, so an `$inc` never runs two times on the same document.
 
 ```bash
-curl ... '/v1/c/calls/update?many=true' -d '{"status":"failed","$set":{"status":"retry"}}'
+curl ... /calls/_update_by_query -d '{"query":{"status":"failed"},"update":{"$set":{"status":"retry"}},"many":true}'
 # {"matched":3,"modified":3}
 ```
 
 ### Optimistic concurrency
 
-`_v` in the filter is the version of the document. Read with `versions: true`, then write with that `_v`. `matched: 0` means somebody else wrote first.
+`_v` in the query is the version of the document. Read with `versions: true`, then write with that `_v`. `matched: 0` means somebody else wrote first.
 
 ```json
-{ "_id": "c1", "_v": 7, "$set": { "note": "checked" } }
+{ "query": { "_v": 7 }, "update": { "$set": { "note": "checked" } } }
 ```
+
+That is the body of `POST /{coll}/_update/c1`; the SDKs call it a guard (`Guard(Eq("_v", 7))`, `guard: { _v: 7 }`).
 
 ### Upsert
 
-With `upsert=true` and no match, a document is created from the plain equality fields of the filter (dot paths too). Then the operators run on it: `$inc` starts from 0, `$push` creates the array, `$min` and `$max` set the value. Without the id field in the filter, an id is generated like `insert` does.
+With `"upsert": true` and no match, a document is created from the plain equality fields of the query (dot paths too). Then the operators run on it: `$inc` starts from 0, `$push` creates the array, `$min` and `$max` set the value. Without the id field in the query, an id is generated like an insert does.
 
-The answer is `matched: 0`, `modified: 1` and the `doc`. If the id exists but the rest of the filter does not match, the call is `409 duplicate_id`.
+The answer is `matched: 0`, `modified: 1` and the `doc`. If the id exists but the rest of the query does not match, the call is `409 duplicate_id`.
 
-Create once, never overwrite: the filter finds the document, `$setOnInsert` fills it only when it is new. Two racing calls make one document.
+Create once, never overwrite: the query finds the document, `$setOnInsert` fills it only when it is new. Two racing calls make one document.
 
 ```bash
-curl ... '/v1/c/users/update?upsert=true' -d '{"email":"a@b.c","$setOnInsert":{"name":"Ana","plan":"free"}}'
+curl ... /users/_update_by_query -d '{"query":{"email":"a@b.c"},"update":{"$setOnInsert":{"name":"Ana","plan":"free"}},"upsert":true}'
 ```
 
 A counter that expires, as a rate limit:
 
 ```bash
-curl ... '/v1/c/hits/update?upsert=true&expire_in=60s' -d '{"_id":"ip:1.2.3.4","$inc":{"n":1}}'
+curl ... /hits/_update/ip:1.2.3.4 -d '{"update":{"$inc":{"n":1}},"upsert":true,"expire_in":"60s"}'
 ```
 
 ### Contract errors
@@ -389,47 +396,47 @@ HTTP 400:
 
 | Code | Cause |
 |---|---|
-| `unknown_operator` | a top-level `$` key that is neither a write operator nor `$and`, `$or`, `$nor` |
+| `unknown_operator` | a key of `update` that is not a write operator, a write operator in `query`, or an unknown `$` key |
 | `no_update` | no write operator |
 | `conflicting_update` | the same field, or a field and its parent (`a` and `a.b`), in two operators |
 | `invalid_field` | a field name that starts with `$`, or a value of the wrong type |
-| `unindexed_many` | `many=true` without the id or an indexed field in the filter |
-| `empty_filter` | no filter |
+| `unindexed_many` | `many` without the id or an indexed field in the query |
+| `empty_filter` | no query |
 | `immutable_id` | an operator on the id field. `_v` cannot be written either. |
 
-The WAL line of each changed document is the resulting document with the next version, so replay and `watch` need no operators. In direct mode, `update` and `delete` are `409 direct_collection`.
+The WAL line of each changed document is the resulting document with the next version, so replay and `watch` need no operators. In direct mode, updates and deletes are `409 direct_collection`.
 
-## Delete by filter
+## Delete by query
 
-`POST /v1/c/{coll}/delete` takes a filter as the body and answers `{"deleted":N}`. Nothing matched is `{"deleted":0}`. `many=true` follows the same index and size rules as update. A write operator in a delete body is `unknown_operator`. To remove every document of a collection, use [truncate](operations.md#truncate-and-drop): an empty filter is `empty_filter`.
+`POST /{coll}/_delete_by_query` ([route](http/queries.md#post-coll-delete-by-query)) takes `{"query": {...}, "many": false}` and answers `{"deleted":N}`. Nothing matched is `{"deleted":0}`. `many` follows the same index and size rules as update. To remove every document of a collection, use [truncate](operations.md#truncate-and-drop): an empty query is `empty_filter`.
 
-When the index alone answers the filter (one indexed field, with `$eq`, `$in` or a range, and no `null`), ndb deletes the matches without reading them. This is the fast path for sealed data. Example: on 1M documents, a delete of 868k sealed documents by an indexed `status` takes about 3 s. A filter that also has a field with no index still works, but ndb reads each candidate to test it.
+When the index alone answers the query (one indexed field, with `$eq`, `$in` or a range, and no `null`), ndb deletes the matches without reading them. This is the fast path for sealed data. Example: on 1M documents, a delete of 868k sealed documents by an indexed `status` takes about 3 s. A query that also has a field with no index still works, but ndb reads each candidate to test it.
 
 ::: code-group
 
 ```bash [curl]
-curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/calls/delete -d '{"call_id":"c2"}'
-curl --unix-socket /run/ndb/ndb.sock 'http://ndb/v1/c/calls/delete?many=true' -d '{"status":"expired"}'
+curl --unix-socket /run/ndb/ndb.sock http://ndb/calls/_delete_by_query -d '{"query":{"call_id":"c2"}}'
+curl --unix-socket /run/ndb/ndb.sock http://ndb/calls/_delete_by_query -d '{"query":{"status":"expired"},"many":true}'
 ```
 
 ```go [Go]
-deleted, err := calls.Delete(ctx, ndb.Eq("call_id", "c2"))
-deleted, err = calls.Delete(ctx, ndb.Eq("status", "expired"), ndb.Many())
+deleted, err := calls.DeleteBy(ctx, ndb.Eq("call_id", "c2"))
+deleted, err = calls.DeleteBy(ctx, ndb.Eq("status", "expired"), ndb.Many())
 ```
 
 ```ruby [Ruby]
-ndb.delete("calls", { call_id: "c2" })                  # => {"deleted" => 1}
-ndb.delete("calls", { status: "expired" }, many: true)
+calls.delete_by(call_id: "c2")                         # => {"deleted" => 1}
+calls.delete_by({ status: "expired" }, many: true)
 ```
 
 ```ruby [Rails]
 call.destroy
-Call.where(status: "expired").delete   # returns how many it deleted
+Call.where(status: "expired").delete_all   # returns how many it deleted
 ```
 
 ```ts [TypeScript]
-await calls.delete({ call_id: 'c2' })
-await calls.delete({ status: 'expired' }, { many: true })
+await calls.deleteBy({ call_id: 'c2' })
+await calls.deleteBy({ status: 'expired' }, { many: true })
 ```
 
 ```bash [CLI]
@@ -440,58 +447,28 @@ ndb delete calls '{"status":"expired"}' --many
 
 ## Collection patterns
 
-A path with a name prefix and one `*` at the end reads every collection whose name starts with that prefix. It is made for collections split by time: write to `logs-2026-11`, read a year with `logs-2026-*` and everything with `logs-*`, and [drop](operations.md#truncate-and-drop) a whole period when it ends.
-
-```bash
-curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/logs-2026-*/find -d '{
-  "where": { "lvl": "error" },
-  "sort": { "at": -1 },
-  "limit": 50
-}'
-# {"_coll":"logs-2026-11","_id":"...","at":"2026-11-07T10:00:00Z","lvl":"error"}
-# {"_coll":"logs-2026-10","_id":"...","at":"2026-10-31T23:59:00Z","lvl":"error"}
-```
-
-| Call | On a pattern |
-|---|---|
-| `find` | One result over every matched collection, in the `sort` order. |
-| `count: true` | `X-Ndb-Total` is the sum over the collections. |
-| `aggregate` | The pipeline runs as if the collections were one. |
-| `GET /v1/c/{pattern}` | `{"collections":[...]}`: the matched names. |
-| everything else | `400 pattern_read_only`: insert, update, delete, expire, persist, watch, truncate, drop, `PUT`. |
-
-Rules:
-
-- **Pattern:** a prefix and one `*` at the end: `logs-2026-*`, `logs-*`. `*` alone, a `*` in the middle or an upper-case prefix is `invalid_pattern`. A name never has `*`, so a pattern never means a real collection.
-- **Plain prefix:** `logs-*` also matches `logs-archive`. Name the partitions so their prefix is unique.
-- **`_coll`:** each row starts with `_coll`, the name of its collection. A `_coll` field stored in the document is replaced.
-- **Order:** the `sort` keys, then `_coll`, then `_id`. With no `sort`: collections by name, then insertion order.
-- **Plans:** each collection uses its own indexes and zone maps, so a time filter on `logs-*` skips old row groups. `X-Ndb-Plan` is `pattern`; `X-Ndb-Examined` and `X-Ndb-Explain` add up the collections.
-- **Pagination:** `skip`, `limit` and `after` work over the whole result. A cursor is bound to its pattern: used with another pattern or with one collection, it is `cursor_mismatch`. `snapshot: true` is `invalid_query` on a pattern.
-- **Set of collections:** taken when the call starts. A pattern with no match answers no rows (and `X-Ndb-Total: 0`), not `unknown_collection`. At most 256 collections, else `pattern_too_wide`.
-- **Consistency:** each collection is read at its own point in time; there is no snapshot over many collections. A truncate or drop of a matched collection waits for the call.
-- **Definitions:** keep the same `time` field in every partition, so that time values sort the same way.
+A collection name with one `*` at the end (`logs-2026-*`) reads every collection whose name starts with the prefix, for collections split by time: `_search`, `_count` and `_aggregate` work over all of them, and each row has `_coll`, the name of its collection. The rules are on [Collection patterns](http/queries.md#collection-patterns).
 
 ## Pagination
 
-Both modes work on `find` and [aggregate](aggregate.md).
+Both modes work on `_search` and [aggregate](aggregate.md).
 
 **Offset**: `skip` + `limit`. Simple, good for page numbers. The cost grows with `skip`, and rows can move between pages when data changes.
 
 ```json
-{ "where": { "status": "answered" }, "sort": { "ts": -1 }, "skip": 100, "limit": 50 }
+{ "query": { "status": "answered" }, "sort": { "ts": -1 }, "skip": 100, "limit": 50 }
 ```
 
 **Cursor**: `limit`, then pass the `X-Ndb-Next` header back as `after`.
 
 ```json
-{ "where": { "status": "answered" }, "sort": { "ts": -1 }, "limit": 50, "after": "eyJz..." }
+{ "query": { "status": "answered" }, "sort": { "ts": -1 }, "limit": 50, "after": "eyJz..." }
 ```
 
 - The token is opaque. Do not parse or build it.
-- It is bound to the `where` and `sort` (or to the pipeline). A token used with another query is `cursor_mismatch`. A broken token is `cursor_invalid`.
+- It is bound to the `query` and `sort` (or to the pipeline). A token used with another query is `cursor_mismatch`. A broken token is `cursor_invalid`.
 - Rows inserted during the walk do not move pages already read.
 - With `snapshot: true`, the cursor keeps one snapshot for 60 s. After that the error is `cursor_expired`.
 - An aggregate cursor runs the pipeline again for each page.
 
-Error codes are listed in [HTTP API](http-api.md#errors).
+Error codes are listed in [Errors](http/errors.md).

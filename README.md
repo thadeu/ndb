@@ -45,30 +45,29 @@ Keep the daemon running, and open a second terminal.
 alias nq='curl -s --unix-socket /tmp/ndb/ndb.sock -H "Content-Type: application/json"'
 
 # 1. Is it ready?
-nq http://ndb/health
+nq http://ndb/_health
 # {"status":"ok"}
 
 # 2. Insert. The first insert creates the collection.
-nq -X POST http://ndb/v1/c/calls/insert -d '{"insert":[
+nq -X POST http://ndb/calls/_bulk -d '{"docs":[
   {"_id":"c1","status":"answered","dnis":"1133","duration":42,"ts":"2026-11-04T12:00:00Z"},
   {"_id":"c2","status":"failed","dnis":"1144","duration":0,"ts":"2026-11-04T12:30:00Z"},
   {"_id":"c3","status":"answered","dnis":"1133","duration":90,"ts":"2026-11-04T13:10:00Z"}]}'
-# {"results":[{"id":"c1","v":1},{"id":"c2","v":1},{"id":"c3","v":1}]}
+# {"results":[{"_id":"c1","_v":1},{"_id":"c2","_v":1},{"_id":"c3","_v":1}]}
 
-# 3. Find. The answer is one JSON document per line.
-nq -X POST http://ndb/v1/c/calls/find -d '{"where":{"status":"answered"},"sort":{"ts":-1},"limit":10}'
-# {"_id":"c3","status":"answered",...}
-# {"_id":"c1","status":"answered",...}
+# 3. Search. The answer is a JSON array of documents.
+nq -X POST http://ndb/calls/_search -d '{"query":{"status":"answered"},"sort":{"ts":-1},"limit":10}'
+# [{"_id":"c3","status":"answered",...},{"_id":"c1","status":"answered",...}]
 
 # 4. Aggregate: calls by status and hour.
-nq -X POST http://ndb/v1/c/calls/aggregate -d '{"pipeline":[
+nq -X POST http://ndb/calls/_aggregate -d '{"pipeline":[
   {"$group":{"_id":{"status":"$status","hour":{"$dateTrunc":{"date":"$ts","unit":"hour"}}},
              "n":{"$count":{}},"avg":{"$avg":"$duration"}}},
   {"$sort":{"_id":1}}]}'
 
 # 5. Declare an index (optional), then look at the collection.
-nq -X PUT http://ndb/v1/c/calls -d '{"time":"ts","indexes":["status"]}'
-nq http://ndb/v1/c/calls/stats
+nq -X PUT http://ndb/calls -d '{"time":"ts","indexes":["status"]}'
+nq http://ndb/calls/_stats
 ```
 
 Stop the daemon with Ctrl-C. It finishes the running requests, then closes. Start it again with the same `-data-dir` and the data is there.
@@ -102,14 +101,14 @@ A hosted version is planned for later. See [docs/dev/ui.md](docs/dev/ui.md).
 
 ## Features
 
-- NoSQL `find` with `$eq $ne $gt $gte $lt $lte $in $nin $exists $and $or $not`, sort, offset and cursor pagination.
+- Search with `$eq $ne $gt $gte $lt $lte $in $nin $exists $regex $elemMatch $and $or $not`, date math (`now-7d/d`), sort, offset and cursor pagination, and collection patterns (`logs-2026-*`).
 - `aggregate` with `$match $group $sort $limit $skip $project`, `$dateTrunc` for time buckets.
-- Two write modes: direct (apps append NDJSON files, ndb follows them) and engine (`insert`, atomic `update` and `delete` by filter with a WAL).
-- `watch` and `ack` for outbox-style consumers, with an optional `where` filter and `wal_retention` to trim the WAL.
+- Two write modes: direct (apps append NDJSON files, ndb follows them) and engine (insert, atomic update and delete by id or by query, with a WAL).
+- `watch` and `ack` for outbox-style consumers, with an optional `query` filter and `wal_retention` to trim the WAL.
 - Optional bearer token on the TCP listener (`-token-file`); the unix socket needs none.
 - Secondary and unique indexes, built in the background.
 - TTL per document, retention, compaction, and a blob store for large values.
-- Quarantine for bad lines in direct mode. Online backup. Prometheus `/metrics`.
+- Quarantine for bad lines in direct mode. Online backup. Prometheus `/_metrics`.
 - One static binary, one data directory.
 
 ## Documentation
@@ -118,7 +117,7 @@ A hosted version is planned for later. See [docs/dev/ui.md](docs/dev/ui.md).
 - [docs/dev/query.md](docs/dev/query.md): find, filters, update and delete by filter, pagination.
 - [docs/dev/aggregate.md](docs/dev/aggregate.md): the aggregate pipeline.
 - [docs/dev/watch.md](docs/dev/watch.md): watch and ack for outbox consumers.
-- [docs/dev/http-api.md](docs/dev/http-api.md): HTTP endpoints.
+- [docs/dev/http.md](docs/dev/http.md): the HTTP API, the contract of ndb (routes in [docs/dev/http/](docs/dev/http/)).
 - [docs/dev/configuration.md](docs/dev/configuration.md): `ndb.yml`, flags, durability.
 - [docs/dev/storage.md](docs/dev/storage.md): On-disk layout.
 - [docs/dev/wal.md](docs/dev/wal.md): The NDJSON write-ahead log, fsync, recovery, truncation.

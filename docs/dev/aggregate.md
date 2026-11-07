@@ -1,11 +1,11 @@
 # Aggregate
 
-`POST /v1/c/{coll}/aggregate` groups documents and computes counts, sums, averages and more, inside the daemon. The rows come back as NDJSON, with the same headers and [pagination](query.md#pagination) as `find`.
+`POST /{coll}/_aggregate` ([route](http/queries.md#post-coll-aggregate)) groups documents and computes counts, sums, averages and more, inside the daemon. The rows come back like the rows of a search (a JSON array, or NDJSON with `Accept`), with the same headers and [pagination](query.md#pagination).
 
 ::: code-group
 
 ```bash [curl]
-curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/calls/aggregate -d '{
+curl --unix-socket /run/ndb/ndb.sock http://ndb/calls/_aggregate -d '{
   "pipeline": [
     { "$match": { "duration": { "$gte": 1 } } },
     { "$group": { "_id": "$status", "n": { "$count": {} }, "avg": { "$avg": "$duration" } } },
@@ -13,8 +13,7 @@ curl --unix-socket /run/ndb/ndb.sock http://ndb/v1/c/calls/aggregate -d '{
   ],
   "limit": 100
 }'
-# {"_id":"answered","n":2,"avg":35.5}
-# {"_id":"failed","n":1,"avg":3}
+# [{"_id":"answered","n":2,"avg":35.5},{"_id":"failed","n":1,"avg":3}]
 ```
 
 ```go [Go]
@@ -32,17 +31,16 @@ res, err := calls.Aggregate(ctx, ndb.Pipeline{
 ```
 
 ```ruby [Ruby]
-page = ndb.aggregate("calls",
-                     pipeline: [
-                       { "$match" => { "duration" => { "$gte" => 1 } } },
-                       { "$group" => {
-                         "_id" => "$status",
-                         "n" => { "$count" => {} },
-                         "avg" => { "$avg" => "$duration" }
-                       } },
-                       { "$sort" => { "n" => -1 } }
-                     ],
-                     limit: 100)
+page = calls.aggregate([
+                         { "$match" => { "duration" => { "$gte" => 1 } } },
+                         { "$group" => {
+                           "_id" => "$status",
+                           "n" => { "$count" => {} },
+                           "avg" => { "$avg" => "$duration" }
+                         } },
+                         { "$sort" => { "n" => -1 } }
+                       ],
+                       limit: 100)
 
 page.rows   # => [{"_id" => "answered", "n" => 2, "avg" => 35.5}, ...]
 ```
@@ -88,7 +86,7 @@ const res = await calls.aggregate<{ _id: string; n: number; avg: number }>(
 }
 ```
 
-`limit`, `skip`, `after` and `count` page the result rows, like in [find](query.md#find).
+`limit`, `skip`, `after` and `count` page the result rows, like in a [search](query.md#search).
 
 ## Pipeline shape
 
@@ -147,4 +145,4 @@ Missing and `null` are the same key. Groups come out sorted by `_id`.
 
 - The group table is limited in memory. Over the limit the answer is `group_limit_exceeded` (HTTP 422): add a `$match` or use fewer group keys.
 - An aggregate cursor runs the pipeline again for each page.
-- A bad pipeline is `400 invalid_pipeline`. See [HTTP API](http-api.md#errors) for every code.
+- A bad pipeline is `400 invalid_pipeline`. See [Errors](http/errors.md) for every code.

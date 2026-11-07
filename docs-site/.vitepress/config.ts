@@ -45,6 +45,8 @@ const docsRoots = [
   { dir: resolve(here, '../../docs/dev'), prefix: '' },
   { dir: resolve(here, '../../docs/dev/clients'), prefix: 'clients/' },
   { dir: resolve(here, '../../docs/dev/deploy'), prefix: 'deploy/' },
+  { dir: resolve(here, '../../docs/dev/http'), prefix: 'http/' },
+  { dir: resolve(here, '../../docs/dev/ui'), prefix: 'ui/' },
   { dir: resolve(here, '../../docs/examples'), prefix: 'examples/' },
 ]
 const siteUrl = (process.env.DOCS_URL ?? '').replace(/\/$/, '')
@@ -196,6 +198,7 @@ export default defineConfig({
     'docs/dev/clients/:page.md': 'clients/:page.md',
     'docs/dev/deploy/:page.md': 'deploy/:page.md',
     'docs/dev/ui/:page.md': 'ui/:page.md',
+    'docs/dev/http/:page.md': 'http/:page.md',
     'docs/dev/:page.md': ':page.md',
     'docs/examples/index.md': 'examples.md',
     'docs/examples/:page.md': 'examples/:page.md',

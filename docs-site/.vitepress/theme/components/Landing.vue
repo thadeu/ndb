@@ -26,22 +26,22 @@ const sections: Section[] = [
       {
         icon: 'search',
         title: 'Query',
-        text: 'NoSQL find with operators, sort, and cursor pagination.',
-        command: 'POST /v1/c/calls/find',
+        text: 'Search with operators, date math, sort, and cursor pagination.',
+        command: 'POST /calls/_search',
         link: '/query',
       },
       {
         icon: 'chart',
         title: 'Aggregate',
         text: 'Group, match, and bucket by time with $dateTrunc.',
-        command: 'POST /v1/c/calls/aggregate',
+        command: 'POST /calls/_aggregate',
         link: '/aggregate',
       },
       {
         icon: 'bell',
         title: 'Watch',
-        text: 'Outbox consumers with ack, a where filter, and wal_retention.',
-        command: 'POST /v1/c/calls/watch',
+        text: 'Outbox consumers with ack, a query filter, and wal_retention.',
+        command: 'POST /calls/_watch',
         link: '/watch',
       },
       {
@@ -107,8 +107,8 @@ const useCases: UseCase[] = [
   {
     icon: 'bell',
     title: 'Outbox and queues',
-    text: 'watch with ack and a where filter: a reliable consumer without Kafka or Redis.',
-    snippet: 'POST /v1/c/outbox/watch\n{"consumer":"mailer","where":{"type":"email"}}',
+    text: 'watch with ack and a query filter: a reliable consumer without Kafka or Redis.',
+    snippet: 'POST /outbox/_watch\n{"consumer":"mailer","query":{"type":"email"}}',
     link: '/examples/outbox',
   },
   {
@@ -189,12 +189,12 @@ const steps: Step[] = [
   {
     title: 'Query and aggregate',
     text: 'The new line is visible right away, with filters, sort and groups.',
-    code: `# find where status answered, sort ts -1
-{"_id":"4",...,"status":"answered","duration":10}
+    code: `# _search: query status answered, sort ts -1
+[{"_id":"4",...,"status":"answered","duration":10}]
 
-# aggregate: $group by status, $sum and $avg
-{"_id":"answered","avg":49,"calls":3}
-{"_id":"missed","avg":0,"calls":1}`,
+# _aggregate: $group by status, $sum and $avg
+[{"_id":"answered","avg":49,"calls":3},
+ {"_id":"missed","avg":0,"calls":1}]`,
   },
 ]
 

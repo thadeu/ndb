@@ -18,17 +18,17 @@ The `ndb` binary is the daemon and the CLI. `ndb` with only flags still runs the
 | `ndb truncate <collection>` | Remove every document; keep the definition and indexes. Asks you to type the name, or `-yes`. |
 | `ndb drop <collection>` | Remove the collection, its definition and its watch consumers. Asks you to type the name, or `-yes`. |
 | `ndb quarantine <collection>` | The bad lines of a direct collection. |
-| `ndb query <collection> ['<where>']` | Find rows (`-aggregate` for a pipeline). |
+| `ndb query <collection> ['<query>']` | Search rows (`-aggregate` for a pipeline). A pattern (`'logs-*'`) reads many collections. |
 | `ndb get <collection> <_id>` | One document by `_id`. |
-| `ndb update <collection> '<json>'` | [Atomic update by filter](../query.md#update-by-filter): the JSON mixes the filter and the write operators. `--many`, `--upsert`, `--expire-in 60s`. `ndb update <collection> <_id> '<ops>'` updates one by `_id`. |
-| `ndb delete <collection> '<json>'` | Delete the documents that the JSON filter matches. `--many`. `ndb delete <collection> <_id>` deletes one by `_id`. |
+| `ndb update <collection> '<query>' '<update>'` | [Atomic update by query](../query.md#update-by-query): the query, then the write operators. `--many`, `--upsert`, `--expire-in 60s`. `ndb update <collection> <_id> '<update>'` updates one by `_id`. |
+| `ndb delete <collection> '<query>'` | Delete the documents that the query matches. `--many`. `ndb delete <collection> <_id>` deletes one by `_id`. |
 | `ndb health` | Exit 0 and print `ok` when the daemon is ready; exit 1 otherwise. For container health checks. |
 | `ndb version` | Print the version. `ndb -version` still works. |
 | `ndb help` | List the commands. |
 
 ## Connect and flags
 
-Every command except `backup`, `restore`, `serve`, `version` and `help` is a thin client of the [HTTP API](../http-api.md#stats-size-and-admin). They share these flags:
+Every command except `backup`, `restore`, `serve`, `version` and `help` is a thin client of the [HTTP API](../http.md). They share these flags:
 
 - `-url unix:///run/ndb/ndb.sock` or `tcp://host:7070` picks the daemon. The default is `NDB_URL`, then the `listen.unix` socket of `ndb.yml` when something answers on it. `NDB_TOKEN` is the bearer token for TCP.
 - `-config FILE` and `-data-dir DIR`. `-data-dir` and `-url` together are an error.
@@ -72,7 +72,7 @@ restore: the backup is cut in the middle of line 4 (offset 240); /tmp/x is untou
 
 ## stats
 
-`ndb stats [-data-dir DIR | -url URL] [-json]` calls `GET /v1/stats`.
+`ndb stats [-data-dir DIR | -url URL] [-json]` calls `GET /_stats`.
 
 ```
 ┌────────────┬────────┬──────┬───────────┬──────────┬─────┬─────────────┬────────────────┐
@@ -104,7 +104,7 @@ Offline (`-data-dir`, or no daemon) the table shows `-` for rows, mode, quaranti
 
 ## size
 
-`ndb size [-data-dir DIR | -url URL] [-json]` calls `GET /v1/size`: bytes per collection split in `wal`, `segments` and `meta` (`meta.bolt`), plus the shared `blobs`, `cursors.bolt` and catalog (`meta` of the `(shared)` row). It only stats files, so it takes no lock.
+`ndb size [-data-dir DIR | -url URL] [-json]` calls `GET /_size`: bytes per collection split in `wal`, `segments` and `meta` (`meta.bolt`), plus the shared `blobs`, `cursors.bolt` and catalog (`meta` of the `(shared)` row). It only stats files, so it takes no lock.
 
 ```
 ┌──────────┬───────┬──────────┬───────────┬───────┬───────────┬───────────┐
@@ -120,7 +120,7 @@ Offline (`-data-dir`, or no daemon) the table shows `-` for rows, mode, quaranti
 
 ## collections
 
-`ndb collections [name] [-json]` calls `GET /v1/c`, or `GET /v1/c/{name}` for one collection (every definition field and the index state).
+`ndb collections [name] [-json]` calls `GET /_collections`, or `GET /{name}` for one collection (every definition field and the index state).
 
 ```
 ┌───────┬────────┬─────────┬──────┬─────────┬─────┬───────────┬─────────────────────────┐
@@ -133,7 +133,7 @@ Offline (`-data-dir`, or no daemon) the table shows `-` for rows, mode, quaranti
 
 ## truncate and drop
 
-`ndb truncate <collection> [-yes] [-json]` calls `POST /v1/c/{coll}/truncate`, and `ndb drop <collection> [-yes] [-json]` calls `DELETE /v1/c/{coll}`. See [Truncate and drop](../operations.md#truncate-and-drop).
+`ndb truncate <collection> [-yes] [-json]` calls `POST /{coll}/_truncate`, and `ndb drop <collection> [-yes] [-json]` calls `DELETE /{coll}`. See [Truncate and drop](../operations.md#truncate-and-drop).
 
 Without `-yes`, the command asks you to type the collection name. When stdin is not a terminal (a script, CI), it stops and asks for `-yes`.
 
@@ -148,7 +148,7 @@ calls_2026_09: dropped
 
 ## compact
 
-`ndb compact <collection> [-json]` calls `POST /v1/c/{coll}/compact`: it seals the memtable and merges all segments into one. It waits for the end (up to 10 minutes). A direct collection fails with `not_supported`.
+`ndb compact <collection> [-json]` calls `POST /{coll}/_compact`: it seals the memtable and merges all segments into one. It waits for the end (up to 10 minutes). A direct collection fails with `not_supported`.
 
 ```
 ┌────────────┬──────────┬────────────────────┬──────┐
@@ -160,7 +160,7 @@ calls_2026_09: dropped
 
 ## quarantine
 
-`ndb quarantine <collection> [-limit N] [-json]` calls `GET /v1/c/{coll}/quarantine`. The default `-limit` is 20. See [Quarantine](#quarantine).
+`ndb quarantine <collection> [-limit N] [-json]` calls `GET /{coll}/_quarantine`. The default `-limit` is 20. See [Quarantine](#quarantine).
 
 ```
 ┌─────────────────────────┬────────┬───────────────────────────────────────────┬──────────┐
@@ -173,7 +173,7 @@ showing 1 of 1 quarantined lines (newest last)
 
 ## query
 
-`ndb query <collection> ['<where-json>'] [-sort JSON] [-fields a,b] [-limit N] [-json|-ndjson]` calls `POST /v1/c/{coll}/find`. `ndb query <collection> -aggregate '<pipeline-json>'` calls `aggregate`. Flags may come before or after the positional arguments. The table has one column per top-level key of the first 200 rows, in order of appearance; nested values are compact JSON; number columns are right-aligned. With `-json` (or `-ndjson`) the output is the NDJSON of the API, ready for `jq`.
+`ndb query <collection> ['<query-json>'] [-sort JSON] [-fields a,b] [-limit N] [-json|-ndjson]` calls `POST /{coll}/_search`. `ndb query <collection> -aggregate '<pipeline-json>'` calls `_aggregate`. Flags may come before or after the positional arguments. The table has one column per top-level key of the first 200 rows, in order of appearance; nested values are compact JSON; number columns are right-aligned. With `-json` (or `-ndjson`) the output is the NDJSON of the API, ready for `jq`.
 
 ```
 $ ndb query posts '{}' -sort '{"likes":-1}'
@@ -197,7 +197,7 @@ $ ndb query 'logs-2026-*' '{"lvl":"error"}' -sort '{"at":-1}'
 
 ## get
 
-`ndb get <collection> <_id>` calls `GET /v1/c/{coll}/{_id}` and prints the document with `_v`. A missing id exits with `not_found`.
+`ndb get <collection> <_id>` calls `GET /{coll}/_doc/{_id}` and prints the document with `_v`. A missing id exits with `not_found`.
 
 ```
 $ ndb get calls 0192f3a4-7c1e-7b2a-9f3d-1a2b3c4d5e6f
@@ -205,18 +205,18 @@ $ ndb get calls 0192f3a4-7c1e-7b2a-9f3d-1a2b3c4d5e6f
 
 ## update
 
-`ndb update <collection> '<json>' [--many] [--upsert] [--expire-in 60s]` calls `POST /v1/c/{coll}/update`. The JSON mixes the filter and the write operators, as in [Update by filter](../query.md#update-by-filter).
+`ndb update <collection> '<query>' '<update>' [--many] [--upsert] [--expire-in 60s]` calls `POST /{coll}/_update_by_query` with the query and the write operators, as in [Update by query](../query.md#update-by-query). `ndb update <collection> <_id> '<update>'` calls `POST /{coll}/_update/{_id}`.
 
 ```
-$ ndb update stock '{"sku":"a","qty":{"$gte":1},"$inc":{"qty":-1}}'
-$ ndb update calls '{"status":"failed","$set":{"status":"retry"}}' --many
-$ ndb update hits '{"_id":"ip:1.2.3.4","$inc":{"n":1}}' --upsert --expire-in 60s
+$ ndb update stock '{"sku":"a","qty":{"$gte":1}}' '{"$inc":{"qty":-1}}'
+$ ndb update calls '{"status":"failed"}' '{"$set":{"status":"retry"}}' --many
+$ ndb update hits ip:1.2.3.4 '{"$inc":{"n":1}}' --upsert --expire-in 60s
 $ ndb update stock sku-a '{"$inc":{"qty":-1}}'          # by _id
 ```
 
 ## delete
 
-`ndb delete <collection> '<json>' [--many]` calls `POST /v1/c/{coll}/delete` with the JSON as the filter, and prints how many documents it deleted.
+`ndb delete <collection> '<query>' [--many]` calls `POST /{coll}/_delete_by_query`, and prints how many documents it deleted. `ndb delete <collection> <_id>` calls `DELETE /{coll}/_doc/{_id}`.
 
 ```
 $ ndb delete sessions '{"status":"expired"}' --many

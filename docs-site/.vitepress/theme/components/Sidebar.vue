@@ -18,7 +18,7 @@ const repo = 'https://github.com/thadeu/ndb'
 const siteLinks = [
   { text: 'Docs', link: '/architecture' },
   { text: 'Guides', link: '/clients' },
-  { text: 'Reference', link: '/http-api' },
+  { text: 'Reference', link: '/http' },
   { text: 'UI', link: '/ui' },
 ]
 const anchor = useActiveAnchor()

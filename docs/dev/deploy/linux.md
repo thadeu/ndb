@@ -62,7 +62,7 @@ Add collections and the other keys from [Configuration](../configuration.md).
 ```bash
 systemctl status ndb
 journalctl -u ndb -f
-curl --unix-socket /run/ndb/ndb.sock http://ndb/health
+curl --unix-socket /run/ndb/ndb.sock http://ndb/_health
 ndb stats
 ```
 

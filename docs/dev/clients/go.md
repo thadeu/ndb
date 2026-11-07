@@ -20,16 +20,16 @@ The module needs a running ndb daemon. See the repository for how to run one. Re
 
 ```go
 // Unix socket.
-db, err := ndb.Open("unix:///run/ndb/ndb.sock")
+db, err := ndb.Connect("unix:///run/ndb/ndb.sock")
 
 // TCP with a bearer token.
-db, err := ndb.Open("tcp://10.0.0.5:7070", ndb.WithToken("secret"))
+db, err := ndb.Connect("tcp://10.0.0.5:7070", ndb.WithToken("secret"))
 
 // Address and token from the environment: NDB_URL and NDB_TOKEN.
-db, err := ndb.Open("")
+db, err := ndb.Connect("")
 
 // Retry for up to 5 s while the daemon starts or recovers.
-db, err := ndb.Open("unix:///run/ndb/ndb.sock", ndb.WithReadyTimeout(5*time.Second))
+db, err := ndb.Connect("unix:///run/ndb/ndb.sock", ndb.WithReadyTimeout(5*time.Second))
 
 defer db.Close()
 ```
@@ -58,7 +58,7 @@ type Call struct {
 	Internal  string    `ndb:"-"`
 }
 
-calls, err := ndb.Collection[Call](ctx, db, "calls")
+calls, err := ndb.Collection[Call](db, "calls")
 ```
 
 | Option | Meaning |
@@ -72,54 +72,56 @@ calls, err := ndb.Collection[Call](ctx, db, "calls")
 - The primary key is the field named `_id` (`ndb:"_id"` or `json:"_id"`). If it is empty on insert, it is not sent and the daemon makes a UUIDv7. For a natural key (email, SKU) keep `_id` and add `unique` to that field. `ndb.NewID()` makes the same kind of id on the client.
 - A field without an `ndb` tag uses its `json` name, or its Go name. `ndb:"-"` or `json:"-"` skips a field.
 - Only one `time` and `expires` field are allowed. An unknown option is an error (the old `id` option too).
-- `Collection` sends `ensure_collection` the first time for a name on one `*DB`. Later calls send nothing. A definition that disagrees with the stored one (time, ttl) returns `ErrCatalogConflict`.
+- `Collection` sends nothing. The first call on the collection sends `ensure_collection` (`PUT /calls`) once per name on one `*DB`. A name with `*` (a [pattern](#collection-patterns)) never declares. A definition that disagrees with the stored one (time, ttl) returns `ErrCatalogConflict`.
 
 ## Insert, get, update, delete
 
 ```go
-// Insert. All documents go in one transaction.
-results, err := calls.Insert(ctx,
-	Call{ID: "c1", Status: "answered", Caller: "a", At: time.Now().UTC()},
-	Call{ID: "c2", Status: "failed", Caller: "b", At: time.Now().UTC()},
-)
-// results[i].ID and results[i].V (the new version).
+// Insert one document (POST /calls/_doc), or many in one transaction (_bulk).
+res, err := calls.Insert(ctx, Call{ID: "c1", Status: "answered", Caller: "a", At: time.Now().UTC()})
+// res.ID and res.V (the new version).
 
-// Get by _id (GET /v1/c/calls/c1). A missing id returns ErrNotFound.
+results, err := calls.InsertMany(ctx, []Call{
+	{ID: "c2", Status: "failed", Caller: "b", At: time.Now().UTC()},
+	{ID: "c3", Status: "answered", Caller: "c", At: time.Now().UTC()},
+})
+
+// Get by _id (GET /calls/_doc/c1). A missing id returns ErrNotFound.
 call, err := calls.Get(ctx, "c1")
 
-// Atomic update by filter. The daemon matches the filter and writes the
-// operators in one step. A _v in the filter is an optimistic lock.
-res, err := calls.Update(ctx,
-	ndb.And(ndb.Eq("_id", "c1"), ndb.Eq("_v", call.Version)),
+// Update one document by _id, in one atomic step. Guard adds conditions on the
+// same document: a _v guard is an optimistic lock.
+upd, err := calls.Update(ctx, "c1",
 	ndb.Ops{"$set": {"status": "done"}, "$unset": {"duration": true}},
+	ndb.Guard(ndb.Eq("_v", call.Version)),
 )
-// res.Matched, res.Modified, res.Doc (the new document, nil for Many).
+// upd.Matched, upd.Modified, upd.Doc (the new document).
 
-if err == nil && res.Matched == 0 {
+if err == nil && upd.Matched == 0 {
 	// Someone else wrote first, or the document is gone. Read again and retry.
 }
 
-// The same by _id. Guard adds filter keys: exactly one of two racing calls wins.
-res, err = calls.UpdateID(ctx, "c1",
+// Atomic update by query: exactly one of two racing calls wins.
+upd, err = calls.UpdateBy(ctx,
+	ndb.And(ndb.Eq("_id", "c1"), ndb.Gte("duration", 1)),
 	ndb.Ops{"$inc": {"duration": -1}},
-	ndb.Guard(ndb.Gte("duration", 1)),
 )
 
-// Every match (the filter needs the id or an indexed field), or create it.
-_, err = calls.Update(ctx, ndb.Eq("status", "failed"), ndb.Ops{"$set": {"status": "retry"}}, ndb.Many())
-_, err = calls.Update(ctx, ndb.Eq("_id", "c9"), ndb.Ops{"$inc": {"duration": 1}}, ndb.Upsert())
+// Every match (the query needs the id or an indexed field), or create it.
+_, err = calls.UpdateBy(ctx, ndb.Eq("status", "failed"), ndb.Ops{"$set": {"status": "retry"}}, ndb.Many())
+_, err = calls.Update(ctx, "c9", ndb.Ops{"$inc": {"duration": 1}}, ndb.Upsert())
 
-// Delete by filter, or by _id. Both return how many they removed.
-deleted, err := calls.Delete(ctx, ndb.Eq("status", "failed"), ndb.Many())
-deleted, err = calls.DeleteID(ctx, "c2")
+// Delete by _id, or by query. Both return how many they removed.
+deleted, err := calls.Delete(ctx, "c2")
+deleted, err = calls.DeleteBy(ctx, ndb.Eq("status", "failed"), ndb.Many())
 ```
 
 - Operators: `$set`, `$setOnInsert` (like `$set`, but only when an upsert creates the document), `$unset`, `$inc`, `$push` (with `{"$each": [...]}`), `$pull`, `$min`, `$max`. Field names can be dot paths, as they are in the document (the tag names). A key of `Ops` without `$` is an error before anything is sent.
 - Nothing matched is not an error: `Matched` is 0. `Modified` is 0 when the operators leave the document as it is.
-- `UpdateID` does not take `Many()`; `Upsert()` creates the document with that `_id`. `ExpireIn` works on both.
-- `Many()` needs `_id` or an indexed field in the filter (`ErrUnindexedMany`). `Upsert()` creates the document from the equality fields of the filter.
-- `Filter` is one condition; join several with `ndb.And`. `ndb.Eq("_v", n)` matches the version.
-- `Insert` fails with `ErrDuplicateID` when the `_id` exists.
+- `Update` (by `_id`) takes `Guard`, `Upsert()` (creates the document with that `_id`) and `ExpireIn`. `UpdateBy` takes `Many()`, `Upsert()` and `ExpireIn`.
+- `Many()` needs `_id` or an indexed field in the query (`ErrUnindexedMany`). `Upsert()` on `UpdateBy` creates the document from the equality fields of the query.
+- A `Filter` is one condition; join several with `ndb.And`. `ndb.Eq("_v", n)` matches the version.
+- `Insert` and `InsertMany` fail with `ErrDuplicateID` when an `_id` exists.
 
 ### Truncate and drop
 
@@ -141,9 +143,8 @@ type Session struct {
 	ExpiresAt time.Time `ndb:"expires_at,expires"`
 }
 
-// Insert takes no options (it is variadic); InsertWith does.
-_, err = sessions.InsertWith(ctx, []Session{{ID: "s1"}}, ndb.ExpireIn(time.Hour))
-_, err = sessions.Update(ctx, ndb.Eq("_id", "s1"), ndb.Ops{"$set": {"x": 1}}, ndb.ExpireIn(30*time.Minute))
+_, err = sessions.Insert(ctx, Session{ID: "s1"}, ndb.ExpireIn(time.Hour))
+_, err = sessions.Update(ctx, "s1", ndb.Ops{"$set": {"x": 1}}, ndb.ExpireIn(30*time.Minute))
 
 _, err = sessions.Expire(ctx, "s1", 30*time.Minute)         // EXPIRE
 _, err = sessions.ExpireAt(ctx, "s1", time.Now().Add(time.Hour))
@@ -160,11 +161,11 @@ _, err = sessions.Persist(ctx, "s1")                        // PERSIST
 ## Query
 
 ```go
-// Every document: Where with no filter.
-all, err := calls.Where().All(ctx)
+// Every document: Query with no filter.
+all, err := calls.Query().All(ctx)
 
 rows, err := calls.
-	Where(
+	Query(
 		ndb.Eq("status", "answered"),
 		ndb.Gte("duration", 30),
 		ndb.In("caller", "a", "b"),
@@ -178,7 +179,7 @@ rows, err := calls.
 	All(ctx)
 ```
 
-- Filters: `Eq`, `Ne`, `Gt`, `Gte`, `Lt`, `Lte`, `In`, `Exists`, `Regex`, `Or`, `Not`. The filters in one `Where` are ANDed. Dot paths such as `"agent.id"` work.
+- Filters: `Eq`, `Ne`, `Gt`, `Gte`, `Lt`, `Lte`, `In`, `Exists`, `Regex`, `ElemMatch`, `And`, `Or`, `Not`, `RawQuery`. The filters in one `Query` are ANDed. Dot paths such as `"agent.id"` work.
 - `ElemMatch(field, filters...)` matches when one element of an array matches every filter: `ElemMatch("items", Eq("sku", "a"), Gt("qty", 2))`. For an array of scalars, use an empty field name: `ElemMatch("scores", Gte("", 10), Lt("", 20))`.
 - On the time field, a string that starts with `now` is [date math](../query.md#date-math): `Gte("ts", "now-7d/d")`.
 - `Regex(field, pattern, ndb.IgnoreCase, ...)` matches strings with Go RE2 (no backreferences, no look-around). An anchored prefix such as `^abc` can use an index. For other operators, see the [query language](../query.md).
@@ -190,13 +191,13 @@ rows, err := calls.
 
 ### Queries built elsewhere
 
-For a search form or a saved search, take the JSON as is. `ndb.RawJSON` (or `ndb.Raw` with a map) is a `Filter` that mixes with the others; `Find` takes a whole find body and returns one page.
+For a search form or a saved search, take the JSON as is. `ndb.RawQueryJSON` (or `ndb.RawQuery` with a map) is a `Filter` that mixes with the others; `Search` takes a whole search body and returns one page.
 
 ```go
-form, err := ndb.RawJSON([]byte(`{"status":{"$in":["answered","failed"]},"ts":{"$gte":"now-7d"}}`))
-rows, err := calls.Where(form, ndb.Eq("dnis", "1000")).Sort(ndb.Desc("ts")).All(ctx)
+form, err := ndb.RawQueryJSON([]byte(`{"status":{"$in":["answered","failed"]},"ts":{"$gte":"now-7d"}}`))
+rows, err := calls.Query(form, ndb.Eq("dnis", "1000")).Sort(ndb.Desc("ts")).All(ctx)
 
-page, err := calls.Find(ctx, []byte(`{"where":{"status":"answered"},"sort":{"ts":-1},"limit":50,"count":true}`))
+page, err := calls.Search(ctx, []byte(`{"query":{"status":"answered"},"sort":{"ts":-1},"limit":50,"count":true}`))
 page.Rows   // []Call
 page.Next   // cursor for {"after": ...}; "" on the last page
 page.Total  // with "count": true
@@ -206,7 +207,7 @@ Rows decode like any other query. The daemon validates the JSON (`invalid_query`
 
 ### Collection patterns
 
-`ndb.Pattern[T]` reads every collection whose name starts with a prefix (see [Collection patterns](../query.md#collection-patterns)). It declares nothing; writes fail with `pattern_read_only`. A field tagged `ndb:"_coll"` gets the name of the collection of each row, and is never sent on writes.
+A collection name with `*` at the end reads every collection whose name starts with the prefix (see [Collection patterns](../http/queries.md#collection-patterns)). It declares nothing; writes fail with `pattern_read_only`. A field tagged `ndb:"_coll"` gets the name of the collection of each row, and is never sent on writes.
 
 ```go
 type Log struct {
@@ -216,16 +217,16 @@ type Log struct {
 	Coll string    `ndb:"_coll"`
 }
 
-logs, err := ndb.Pattern[Log](db, "logs-2026-*")
+logs, err := ndb.Collection[Log](db, "logs-2026-*")
 
-rows, err := logs.Where(ndb.Eq("lvl", "error")).Sort(ndb.Desc("at")).Limit(50).All(ctx)
-n, err := logs.Where(ndb.Eq("lvl", "error")).Count(ctx)
+rows, err := logs.Query(ndb.Eq("lvl", "error")).Sort(ndb.Desc("at")).Limit(50).All(ctx)
+n, err := logs.Count(ctx, ndb.Eq("lvl", "error"))
 ```
 
 ### Count
 
 ```go
-n, err := calls.Where(ndb.Eq("status", "answered")).Count(ctx)
+n, err := calls.Count(ctx, ndb.Eq("status", "answered")) // POST /calls/_count
 ```
 
 `Limit`, `Skip` and `Sort` do not change the count.
@@ -235,19 +236,19 @@ n, err := calls.Where(ndb.Eq("status", "answered")).Count(ctx)
 Offset pages get slower as `Skip` grows. Use a cursor for deep pages.
 
 ```go
-q := calls.Where(ndb.Eq("status", "answered")).Sort(ndb.Asc("_id")).Limit(100)
+q := calls.Query(ndb.Eq("status", "answered")).Sort(ndb.Asc("_id")).Limit(100)
 page, err := q.All(ctx)
 token := q.NextCursor() // "" on the last page
 
-next, err := calls.Where(ndb.Eq("status", "answered")).Sort(ndb.Asc("_id")).Limit(100).After(token).All(ctx)
+next, err := calls.Query(ndb.Eq("status", "answered")).Sort(ndb.Asc("_id")).Limit(100).After(token).All(ctx)
 ```
 
-A token works only with the same `Where` and `Sort`. Another query shape returns `ErrCursorMismatch`.
+A token works only with the same `Query` and `Sort`. Another query shape returns `ErrCursorMismatch`.
 
 To walk every row, use `Iter`. It follows the cursor, with `Limit` as the batch size:
 
 ```go
-for call, err := range calls.Where(ndb.Eq("status", "answered")).Sort(ndb.Asc("_id")).Limit(500).Iter(ctx) {
+for call, err := range calls.Query(ndb.Eq("status", "answered")).Sort(ndb.Asc("_id")).Limit(500).Each(ctx) {
 	if err != nil {
 		return err
 	}
@@ -297,7 +298,7 @@ Options: `AggLimit`, `AggSkip`, `AggAfter(token)`, `AggCount()`. `$dateTrunc` un
 A watch streams the changes of a collection to a named consumer. First it sends the events after the last `Ack`. Then it sends new events as they happen.
 
 ```go
-for ev, err := range calls.Watch(ctx, "relay", ndb.WatchWhere(ndb.Eq("status", "answered"))) {
+for ev, err := range calls.Watch(ctx, "relay", ndb.WatchQuery(ndb.Eq("status", "answered"))) {
 	if errors.Is(err, ndb.ErrWatchLagged) {
 		break // call Watch again. It continues after the last Ack.
 	}
@@ -320,10 +321,26 @@ for ev, err := range calls.Watch(ctx, "relay", ndb.WatchWhere(ndb.Eq("status", "
 
 - Delivery is at least once. After a restart an event can come again, so make the work safe to repeat.
 - `Ack` stores the position of the event. An older `Ack` is ignored.
-- Options: `ndb.FromNow()` (a new consumer starts at the end), `ndb.Limit(n)` (stop after n events), `ndb.WatchWhere(filters...)`.
-- A delete event has no document (`ev.Doc` is the zero value). With `WatchWhere`, a delete is sent only if the same stream saw an earlier matching put of that id.
+- Options: `ndb.FromNow()` (a new consumer starts at the end), `ndb.Limit(n)` (stop after n events), `ndb.WatchQuery(filters...)`.
+- A delete event has no document (`ev.Doc` is the zero value). With `WatchQuery`, a delete is sent only if the same stream saw an earlier matching put of that id.
 - `ErrWatchLagged` means the consumer was too slow. `ErrHistoryTruncated` means the WAL files for its position were deleted (`wal_retention`).
 - The stream ends when `ctx` is cancelled.
+
+## Admin
+
+```go
+err := db.Health(ctx)                  // nil when ready (GET /_health)
+defs, err := db.Collections(ctx)       // the catalog (GET /_collections)
+stats, err := db.Stats(ctx)            // every collection and totals (GET /_stats)
+size, err := db.Size(ctx)              // disk use (GET /_size)
+
+stats, err = calls.Stats(ctx)          // GET /calls/_stats
+report, err := calls.Compact(ctx)      // POST /calls/_compact
+fields, err := calls.EnsureIndex(ctx, "dnis") // PUT /calls/_indexes/dnis
+fields, err = calls.DropIndex(ctx, "dnis")
+```
+
+The answers are the JSON of the [HTTP routes](../http/system.md), as `map[string]any`.
 
 ## Blobs
 
@@ -332,7 +349,7 @@ Large values live in the blob store. The document keeps only a reference. The sa
 ```go
 blob, err := db.PutBlob(ctx, file, "audio/wav") // file is an io.Reader
 
-_, err = calls.Update(ctx, ndb.Eq("_id", "c1"), ndb.Ops{"$set": {"recording": blob}})
+_, err = calls.Update(ctx, "c1", ndb.Ops{"$set": {"recording": blob}})
 
 call, err := calls.Get(ctx, "c1") // call.Recording is *ndb.Blob
 

@@ -16,5 +16,5 @@ One Go process, `ndb`. It listens on a unix socket (and optional TCP), answers H
 - A query sees the data as of its start. Writes that happen while it runs do not change its answer.
 - A write in engine mode is answered only after it is on disk (`durability: strict`), and a crash never leaves half a write.
 - The SDKs and `curl` give the same answer, because the daemon owns the meaning of every operator.
-- `/health` answers `503 recovering` until the data directory is open, so a load balancer waits for you.
+- `/_health` answers `503 recovering` until the data directory is open, so a load balancer waits for you.
 - Version 1 is one node: no replication, no clustering, no joins, no SQL.

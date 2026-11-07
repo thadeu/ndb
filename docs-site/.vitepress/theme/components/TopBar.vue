@@ -48,7 +48,7 @@ onMounted(() => {
     <nav class="main-links" aria-label="Main">
       <a :href="withBase('/architecture')">Docs</a>
       <a :href="withBase('/clients')">Guides</a>
-      <a :href="withBase('/http-api')">Reference</a>
+      <a :href="withBase('/http')">Reference</a>
       <a :href="withBase('/ui')">UI</a>
       <a class="icon-link" :href="repo" target="_blank" rel="noopener" aria-label="GitHub">
         <Icon name="github" :size="20" />

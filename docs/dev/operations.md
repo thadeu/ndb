@@ -6,15 +6,15 @@ The day-to-day runbook for a running ndb: is it healthy, how to back it up, what
 
 ### Health
 
-`ndb health` (exit 0 when ready) and `GET /health` answer the same question. `GET /health` is `200 {"status":"ok"}` after recovery and `503` before. Use it for readiness. Clients should retry `not_ready` and reconnect after a daemon restart.
+`ndb health` (exit 0 when ready) and `GET /_health` answer the same question. `GET /_health` is `200 {"status":"ok"}` after recovery and `503` before. Use it for readiness. Clients should retry `not_ready` and reconnect after a daemon restart.
 
 ```bash
-curl --unix-socket /run/ndb/ndb.sock http://ndb/health
+curl --unix-socket /run/ndb/ndb.sock http://ndb/_health
 ```
 
 ### Metrics
 
-`GET /metrics` is Prometheus text.
+`GET /_metrics` is Prometheus text (set `metrics_path: /_metrics` in the Prometheus scrape config).
 
 | Metric | Type | Meaning |
 |---|---|---|
@@ -98,7 +98,7 @@ Recovery runs at every start, and needs no command. After a crash (SIGKILL, powe
 3. continues each source file from its saved cursor;
 4. removes orphan temporary files and segments.
 
-While it runs, `/health` is `503`. For a large WAL this takes seconds, not minutes. A corrupt line in the middle of a sealed WAL file stops the start with an error (`recovery: corrupt line in a sealed WAL segment`): restore from backup. If the derived data looks wrong, stop the daemon, delete `segments/` and `meta.bolt` of the collection, and start again: they are rebuilt from the NDJSON. In direct mode, deleting `meta.bolt` makes ndb read the source files again, so bad lines are added to quarantine again.
+While it runs, `/_health` is `503`. For a large WAL this takes seconds, not minutes. A corrupt line in the middle of a sealed WAL file stops the start with an error (`recovery: corrupt line in a sealed WAL segment`): restore from backup. If the derived data looks wrong, stop the daemon, delete `segments/` and `meta.bolt` of the collection, and start again: they are rebuilt from the NDJSON. In direct mode, deleting `meta.bolt` makes ndb read the source files again, so bad lines are added to quarantine again.
 
 If an `fsync` fails, the daemon exits on purpose, and recovery gives the right state when it is started again.
 
@@ -122,7 +122,7 @@ Collections split by time (`calls_2026_11`, `logs_2026_w45`) are emptied or remo
 | Documents | removed | removed |
 | Definition and indexes | kept | removed |
 | Watch consumers | kept; each gets one `truncate` event | removed |
-| HTTP | `POST /v1/c/{coll}/truncate?confirm={coll}` | `DELETE /v1/c/{coll}?confirm={coll}` |
+| HTTP | `POST /{coll}/_truncate?confirm={coll}` | `DELETE /{coll}?confirm={coll}` |
 | CLI | `ndb truncate <coll>` | `ndb drop <coll>` |
 | Go, Ruby, Rails, TS | `Truncate(ctx)`, `truncate(coll)`, `Model.truncate!`, `truncate()` | `Drop(ctx)`, `drop(coll)`, `Model.drop!`, `drop()` |
 
@@ -143,13 +143,13 @@ In direct mode, a line that is not a JSON object, has a bad id, or is over `max_
 {"ts":"2026-11-05T16:00:18Z","file":"/data/logs/app-1.ndjson","offset":63,"reason":"invalid_doc: a line must be a JSON object","line":"not json"}
 ```
 
-Find the writer that produced the line with `file` and `offset`, fix it, and watch `ndb_quarantined_total`. ndb does not read the quarantine file back to recover; delete it when you are done. `stats` shows the count as `quarantined`, and `ndb quarantine <collection>` (or `GET /v1/c/{coll}/quarantine`) lists the last lines. A direct collection is rebuilt from offset 0 at each start, but a line already in the file (same `file` and `offset`) is not written again, so the file has one entry per bad line however often the daemon restarts. The count (`quarantined`, `ndb_quarantined_total`) is the number of distinct lines in the file: it is read from the file at start, so a restart does not raise it, and it drops if you delete the file. A file written by an older version may still hold repeats; the API shows each line once.
+Find the writer that produced the line with `file` and `offset`, fix it, and watch `ndb_quarantined_total`. ndb does not read the quarantine file back to recover; delete it when you are done. `stats` shows the count as `quarantined`, and `ndb quarantine <collection>` (or `GET /{coll}/_quarantine`) lists the last lines. A direct collection is rebuilt from offset 0 at each start, but a line already in the file (same `file` and `offset`) is not written again, so the file has one entry per bad line however often the daemon restarts. The count (`quarantined`, `ndb_quarantined_total`) is the number of distinct lines in the file: it is read from the file at start, so a restart does not raise it, and it drops if you delete the file. A file written by an older version may still hold repeats; the API shows each line once.
 
 ## Change
 
 ### Upgrade
 
-Replace the binary and restart. Take a backup first. API paths start with `/v1`, so a newer daemon serves older SDKs.
+Replace the binary and restart. Take a backup first. Within a major version the API only grows, so a newer daemon serves older SDKs. A major release (such as 1.0) changes routes or keys: upgrade the SDKs with the daemon, and read the migration table in the CHANGELOG.
 
 ### Version and token
 
