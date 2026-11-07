@@ -89,9 +89,9 @@
 
 | Method | Path | Body | Answer |
 |---|---|---|---|
-| POST | `/{coll}/_search` | `{"query","sort","fields","limit","skip","after","count","snapshot","explain","versions"}` | search envelope |
+| POST | `/{coll}/_search` | `{"query","sort","fields","limit","skip","after","count","snapshot","explain","versions"}` | rows (JSON array or NDJSON) + `X-Ndb-*` headers |
 | POST | `/{coll}/_count` | `{"query"}` | `{"count":n}` (new) |
-| POST | `/{coll}/_aggregate` | `{"pipeline","limit","skip","after","count","explain"}` | search envelope |
+| POST | `/{coll}/_aggregate` | `{"pipeline","limit","skip","after","count","explain"}` | rows (JSON array or NDJSON) + `X-Ndb-*` headers |
 | POST | `/{coll}/_update_by_query` | `{"query","update","many","upsert","expire_in"}` | `{"matched","modified","doc"}` |
 | POST | `/{coll}/_delete_by_query` | `{"query","many"}` | `{"deleted"}` |
 | POST | `/{coll}/_watch` | `{"consumer","from","limit","query"}` | NDJSON stream |
@@ -105,30 +105,30 @@
   `many` needs `_id` or an indexed field (`unindexed_many`), an empty
   `query` is `empty_filter`.
 
-### Search envelope
+### Search answer
 
-`_search` and `_aggregate` answer JSON:
+`_search` and `_aggregate` answer the rows, and nothing else, in the body.
+The format of the rows is the same in JSON and NDJSON; only the framing
+changes:
 
-```json
-{
-  "hits": [ { "_id": "c1", "status": "answered" } ],
-  "total": 1234,
-  "next": "eyJ…",
-  "plan": "index:status",
-  "examined": 1500,
-  "took_ms": 3,
-  "explain": { }
-}
+```
+Accept: application/json (default)     [ {"_id":"c1","status":"answered"}, {"_id":"c2",...} ]
+Accept: application/x-ndjson           {"_id":"c1","status":"answered"}
+                                       {"_id":"c2",...}
 ```
 
-- `total` only with `count: true`; `next` absent on the last page;
-  `explain` only with `explain: true`. Rows of a pattern carry `_coll`.
-- `Accept: application/x-ndjson` gives the rows as NDJSON with the
-  `X-Ndb-*` headers of today (exports, `jq`, `ndb query -json`).
+- The page data is always in headers, in both formats: `X-Ndb-Next`
+  (absent on the last page), `X-Ndb-Total` (with `count: true`),
+  `X-Ndb-Plan`, `X-Ndb-Examined`, `X-Ndb-Took-Ms` (new), `X-Ndb-Explain`
+  (with `explain: true`).
+- `Access-Control-Expose-Headers` lists the `X-Ndb-*` headers, so `fetch`
+  in a browser (the console) can read them.
+- Rows of a pattern carry `_coll`, in both formats.
 - Why JSON by default: the server builds the page in memory anyway
-  (`collection.Page.Rows`), so NDJSON saves little on a page; metadata in
-  the body is easier for `fetch`, the console, curl and Postman (no CORS
-  header exposure). `_watch` stays NDJSON: it is a real stream.
+  (`collection.Page.Rows`), so NDJSON saves little on a page, and a JSON
+  array is what `fetch(...).json()`, curl and Postman expect. NDJSON stays
+  for exports and `jq` (`ndb query -json`). `_watch` stays NDJSON: it is a
+  real stream.
 
 ### Errors
 
@@ -154,7 +154,7 @@ One name per action, after the route. Each language keeps its case:
 | query built elsewhere | `ndb.RawQuery(map)`, `ndb.RawQueryJSON(b)` | `c.raw_query(hash)` | `c.rawQuery(obj)` | `_search` |
 | builder steps | `.Sort .Limit .Skip .After .Fields .Page` | same, snake | same, camel | |
 | terminals | `.All .First .Count .Each` | `.all .first .count .each` | `.all .first .count .each` | `_search`, `_count` |
-| whole body | `c.Search(ctx, body)` → `{Hits, Next, Total}` | `c.search(body)` | `c.search(body)` | `_search` |
+| whole body | `c.Search(ctx, body)` → `{Rows, Next, Total}` | `c.search(body)` | `c.search(body)` | `_search` |
 | aggregate | `c.Aggregate(ctx, p, opts...)` | `c.aggregate(pipeline, **opts)` | `c.aggregate(pipeline, opts)` | `_aggregate` |
 | watch / ack | `c.Watch(ctx, consumer, opts...)` / `c.Ack(ctx, ev)` | `watch(consumer, query:, from:, limit:)` / `ack(ev)` | `watch(consumer, opts)` / `ack(ev)` | `_watch` / `_ack` |
 | ttl | `Expire(ctx, id, d)`, `ExpireAt`, `Persist`, `TTL` | `expire(id, in:\|at:)`, `persist`, `ttl` | `expire`, `expireAt`, `persist`, `ttl` | `_expire` `_persist` `_ttl` |
@@ -171,7 +171,7 @@ Changes per SDK:
   `Insert` with options, `WatchWhere` → `WatchQuery`, `Ack(consumer,pos)` →
   `Ack(event)`. New: `Count` on the collection, `Stats`, `Compact`,
   `EnsureIndex`, `DropIndex`, `db.Collections`, `db.Stats`, `db.Size`,
-  `db.Health`. Results: `FindResult` → `SearchResult{Hits, Next, Total}`.
+  `db.Health`. Results: `FindResult` → `SearchResult{Rows, Next, Total}`.
 - **TypeScript:** `db.model` → `db.collection`. `where` → `query`,
   `whereRaw` → `rawQuery`, `find` → `search`, `iterate` → `each`,
   `update(idOrFilter)` → `update(id)`/`updateBy`, same for delete; alias
@@ -180,8 +180,7 @@ Changes per SDK:
 - **Ruby:** new `Ndb.connect` and `Ndb::Collection` with the builder and the
   table above. `Ndb::Client` stays as the low-level layer, one method per
   route (`search`, `count`, `aggregate`, `get`, `insert`, `bulk`, `update`,
-  `update_by`, `delete`, `delete_by`, ...). `Page#next_cursor` → `next`,
-  `rows` → `hits`.
+  `update_by`, `delete`, `delete_by`, ...). `Page#next_cursor` → `next`.
 - **Rails:** the Rails way does not change (`where`, `where.not`, `order`,
   `limit`, `find_by`, `where_raw`, `Model.search`). Inside it moves to the
   new routes and keys (`query`, `update`). `Model.search` takes `query`.
@@ -193,9 +192,9 @@ Changes per SDK:
   `routes/backups.tsx`, and the tests. The devtools examples show the new
   routes and `query`.
 - **CLI** (`cmd/ndb`): about 20 calls; flags and output stay. `ndb query`
-  reads the envelope (or NDJSON with `-json`).
+  reads the JSON rows and headers (NDJSON with `-json`).
 - **Spec cases** (`spec/cases`): shared by the SDK suites; `where` →
-  `query`, routes, envelope.
+  `query`, routes, JSON rows.
 - **Smoke and golden tests** (`test/`).
 - **Docs:** `http-api.md` rewritten from the tables above; `query.md`,
   `watch.md`, `aggregate.md`, `operations.md`, the client guides, the
@@ -205,8 +204,8 @@ Changes per SDK:
 
 1. Server: router (system `_` routes, `/{coll}/_action`, `unknown_route`),
    `query`/`update` bodies, options in the body, `_v` in write results,
-   `_count`, `PUT _indexes`, search envelope + NDJSON by `Accept`. Tests
-   first: a route table test, the envelope, the body errors.
+   `_count`, `PUT _indexes`, JSON rows by default + NDJSON by `Accept`, exposed
+   headers. Tests first: a route table test, both formats, the body errors.
 2. CLI and the smoke/golden tests.
 3. Spec cases.
 4. Go SDK, then TS, then Ruby (new `Collection`), then Rails.
@@ -224,8 +223,8 @@ before the next.
   `GET /{coll}/_doc/{id}`.
 - `{"where": ...}` is `invalid_query` (unknown key).
 - `_update_by_query` with a `$set` inside `query` is `invalid_query`.
-- `_search` JSON envelope and NDJSON with `Accept` give the same rows and
-  cursor.
+- `_search` in JSON and in NDJSON (`Accept`) give the same rows, in the
+  same shape, and the same headers.
 - `_count` equals `total` of a search with `count: true`.
 - Write results have `_v`, never `v`.
 - Each SDK passes the shared spec cases with the new vocabulary; the
