@@ -4,13 +4,15 @@
 // It starts its own daemon in a temp dir and runs four phases in about two
 // minutes:
 //
-//  1. live: concurrent calls write one doc at a time (strict), a _watch
-//     consumer acks them;
-//  2. crash: kill -9 while writing, restart, read back every acked write;
-//  3. load: bulk load of calls into a daily partition;
-//  4. reads: by id, by indexed fields, counts, aggregates.
+//  1. stress load: concurrent calls write one doc at a time (strict) while
+//     a _watch consumer acks them; a kill -9 while writing, then every acked
+//     write read back; a bulk load of calls into a daily partition;
+//  2. queries: by id, by indexed fields, sorted pages, counts;
+//  3. aggregations: the dashboards of the ESL.
 //
-// The daemon RSS is sampled all the time.
+// Options pick the parts (none is all of them). The queries and the
+// aggregations load the calls first without measuring it. The daemon RSS is
+// sampled all the time.
 package bench
 
 import (
@@ -36,7 +38,8 @@ import (
 	"time"
 )
 
-// Options of a run. Bin is the ndb binary the daemon runs from.
+// Options of a run. Bin is the ndb binary the daemon runs from. Stress,
+// Query and Aggs pick the parts to measure; none of them is all.
 type Options struct {
 	Bin   string
 	Live  time.Duration
@@ -44,7 +47,13 @@ type Options struct {
 	Calls int
 	Dir   string
 	Keep  bool
+
+	Stress bool
+	Query  bool
+	Aggs   bool
 }
+
+func (o Options) all() bool { return !o.Stress && !o.Query && !o.Aggs }
 
 // Defaults run in about two minutes.
 func Defaults() Options {
@@ -96,10 +105,29 @@ func Run(o Options, w io.Writer) (err error) {
 
 	var report []string
 
-	report = append(report, live(d)...)
-	report = append(report, crash(d)...)
-	report = append(report, load(d)...)
-	report = append(report, reads(d)...)
+	if o.Stress || o.all() {
+		report = append(report, "| **stress load** | |")
+		report = append(report, live(d)...)
+		report = append(report, crash(d)...)
+	}
+
+	loaded := load(d)
+
+	if o.Stress || o.all() {
+		report = append(report, loaded...)
+	} else {
+		report = append(report, loaded[0])
+	}
+
+	if o.Query || o.all() {
+		report = append(report, "| **queries** (median of 5, min–max) | |")
+		report = append(report, timed(d, "queries", queries(d))...)
+	}
+
+	if o.Aggs || o.all() {
+		report = append(report, "| **aggregations** (median of 5, min–max) | |")
+		report = append(report, timed(d, "aggregations", aggregations())...)
+	}
 
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "ndb bench, ESL outbox, %s/%s, %d CPU\n\n", runtime.GOOS, runtime.GOARCH, runtime.NumCPU())
@@ -277,7 +305,7 @@ func load(d *daemon) []string {
 	d.must("PUT", "/events", `{"time":"ts","indexes":["call_id","customer","type"],"partition_by":"day","retention":"7d","max_line_size":16777216}`)
 
 	peak := d.phase()
-	day := time.Now().UTC().Truncate(24 * time.Hour).Add(-24 * time.Hour)
+	day := day()
 	start := time.Now()
 
 	const writers = 4
@@ -320,7 +348,7 @@ func load(d *daemon) []string {
 	settle := d.settle("/events-" + day.Format("2006-01-02"))
 
 	return []string{
-		fmt.Sprintf("| load | %d docs in %.0f s, %.0f docs/s |", *calls*7, el, float64(*calls*7)/el),
+		fmt.Sprintf("| load | %d calls, %d docs in %.0f s, %.0f docs/s |", *calls, *calls*7, el, float64(*calls*7)/el),
 		fmt.Sprintf("| load settle | seals and compactions done %.0f s after the load |", settle.Seconds()),
 		fmt.Sprintf("| load RSS | peak %d MB, after %d MB |", peak(), d.rss()),
 	}
@@ -355,50 +383,85 @@ func (d *daemon) settle(coll string) time.Duration {
 	return time.Since(start) - 3*time.Second
 }
 
-// reads: the queries of the ESL, the median of 3 runs each.
-func reads(d *daemon) []string {
-	fmt.Fprintln(out, "reads")
+// probe is one read of the queries or aggregations parts.
+type probe struct{ name, method, path, body string }
 
-	peak := d.phase()
-	part := "/events-" + time.Now().UTC().Add(-24*time.Hour).Format("2006-01-02")
+// day is the daily partition the load fills: yesterday, in UTC.
+func day() time.Time {
+	return time.Now().UTC().Truncate(24 * time.Hour).Add(-24 * time.Hour)
+}
+
+// queries are the reads of the ESL: lookups, pages and counts.
+func queries(d *daemon) []probe {
+	part := "/events-" + day().Format("2006-01-02")
 
 	var row struct {
-		ID     string `json:"_id"`
-		CallID string `json:"call_id"`
+		ID       string `json:"_id"`
+		CallID   string `json:"call_id"`
+		Customer string `json:"customer"`
 	}
 
 	check(json.Unmarshal(bytes.TrimSpace(d.must("POST", part+"/_search", `{"limit":1}`)), &row))
 
-	queries := []struct{ name, method, path, body string }{
+	hour := fmt.Sprintf(`{"$gte":%q,"$lt":%q}`, day().Add(10*time.Hour).Format(time.RFC3339), day().Add(11*time.Hour).Format(time.RFC3339))
+
+	return []probe{
 		{"get by id", "GET", part + "/_doc/" + row.ID, ""},
-		{"search call_id (indexed)", "POST", "/events/_search", fmt.Sprintf(`{"query":{"call_id":%q}}`, row.CallID)},
+		{"get by id, missing", "GET", part + "/_doc/none", ""},
+		{"events of a call (indexed call_id)", "POST", "/events/_search", fmt.Sprintf(`{"query":{"call_id":%q},"sort":{"seq":1}}`, row.CallID)},
 		{"last 20 of a customer", "POST", "/events/_search", `{"query":{"customer":"cust-042"},"sort":{"ts":-1},"limit":20}`},
+		{"page 3 of a customer's finishcalls", "POST", "/events/_search", `{"query":{"customer":"cust-042","type":"finishcall"},"sort":{"ts":-1},"limit":20,"skip":40}`},
+		{"a customer in one hour", "POST", "/events/_search", fmt.Sprintf(`{"query":{"customer":"cust-042","ts":%s},"limit":100}`, hour)},
+		{"long calls, not indexed", "POST", "/events/_search", `{"query":{"type":"finishcall","duration":{"$gte":590}},"limit":50}`},
 		{"count of a customer", "POST", "/events/_count", `{"query":{"customer":"cust-042"}}`},
-		{"count finishcall", "POST", "/events/_count", `{"query":{"type":"finishcall"}}`},
-		{"count all", "POST", "/events/_count", `{}`},
-		{"calls per customer, top 5", "POST", "/events/_aggregate", `{"pipeline":[{"$match":{"type":"finishcall"}},{"$group":{"_id":"$customer","n":{"$count":{}}}},{"$sort":{"n":-1}},{"$limit":5}]}`},
-		{"avg duration per hour", "POST", "/events/_aggregate", `{"pipeline":[{"$match":{"type":"finishcall"}},{"$group":{"_id":{"$dateTrunc":{"date":"$ts","unit":"hour"}},"avg":{"$avg":"$duration"}}}]}`},
+		{"count of the finishcalls", "POST", "/events/_count", `{"query":{"type":"finishcall"}}`},
+		{"count of one hour", "POST", "/events/_count", fmt.Sprintf(`{"query":{"ts":%s}}`, hour)},
+		{"count of all", "POST", "/events/_count", `{}`},
+	}
+}
+
+// aggregations are the dashboards of the ESL.
+func aggregations() []probe {
+	agg := func(name, pipeline string) probe {
+		return probe{name, "POST", "/events/_aggregate", `{"pipeline":` + pipeline + `}`}
 	}
 
-	var out []string
+	return []probe{
+		agg("calls per customer, top 5", `[{"$match":{"type":"finishcall"}},{"$group":{"_id":"$customer","n":{"$count":{}}}},{"$sort":{"n":-1}},{"$limit":5}]`),
+		agg("events per type", `[{"$group":{"_id":"$type","n":{"$count":{}}}}]`),
+		agg("avg duration per hour", `[{"$match":{"type":"finishcall"}},{"$group":{"_id":{"$dateTrunc":{"date":"$ts","unit":"hour"}},"avg":{"$avg":"$duration"}}}]`),
+		agg("talk time per customer, top 10", `[{"$match":{"type":"finishcall"}},{"$group":{"_id":"$customer","total":{"$sum":"$duration"},"max":{"$max":"$duration"}}},{"$sort":{"total":-1}},{"$limit":10}]`),
+		agg("hangup causes", `[{"$match":{"type":"finishcall"}},{"$group":{"_id":"$hangup_cause","n":{"$count":{}}}}]`),
+		agg("one customer per hour", `[{"$match":{"customer":"cust-042"}},{"$group":{"_id":{"$dateTrunc":{"date":"$ts","unit":"hour"}},"n":{"$count":{}}}}]`),
+	}
+}
 
-	for _, q := range queries {
+// timed runs each probe 5 times and gives one line per probe: the median,
+// the min and the max; then the RSS peak of the part.
+func timed(d *daemon, part string, probes []probe) []string {
+	fmt.Fprintln(out, part)
+
+	peak := d.phase()
+
+	var lines []string
+
+	for _, p := range probes {
 		var times []time.Duration
 
-		for range 3 {
-			code, body, took := d.call(q.method, q.path, []byte(q.body))
-			if code >= 300 {
-				check(fmt.Errorf("%s: %d %s", q.name, code, body))
+		for range 5 {
+			code, body, took := d.call(p.method, p.path, []byte(p.body))
+			if code >= 300 && code != http.StatusNotFound {
+				check(fmt.Errorf("%s: %d %s", p.name, code, body))
 			}
 
 			times = append(times, took)
 		}
 
 		slices.Sort(times)
-		out = append(out, fmt.Sprintf("| %s | %.1f ms |", q.name, ms(times[1])))
+		lines = append(lines, fmt.Sprintf("| %s | %.1f ms (%.1f–%.1f) |", p.name, ms(times[2]), ms(times[0]), ms(times[4])))
 	}
 
-	return append(out, fmt.Sprintf("| reads RSS | peak %d MB |", peak()))
+	return append(lines, fmt.Sprintf("| %s RSS | peak %d MB |", part, peak()))
 }
 
 // writer is the live writers and the consumer of one phase.

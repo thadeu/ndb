@@ -120,7 +120,8 @@ Usage:
   ndb truncate <collection>     remove every document; keep the definition and indexes
   ndb drop <collection>         remove the collection, its definition and watch consumers
   ndb health                    exit 0 when the daemon is ready (for container health checks)
-  ndb bench [-calls n]          the ESL benchmark on a daemon of its own, about 2 minutes
+  ndb bench [-stress-load] [-query] [-aggs]
+                                the ESL benchmark on a daemon of its own; none = all, about 2 minutes
   ndb get <coll> <_id>          one document by _id
   ndb update <coll> '<query>' '<update>'
                                 atomic update by query; update holds the write operators
