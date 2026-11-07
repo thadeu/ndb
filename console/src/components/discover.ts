@@ -1,4 +1,5 @@
 import { type DiscoverView, type Found, useDiscover } from '@/hooks/useDiscover';
+import { formatVersion } from '@/format';
 
 export function describe(found: Found): string {
   if (found.state === 'needs_token') return 'needs a token';
@@ -7,7 +8,7 @@ export function describe(found: Found): string {
 
   const parts = ['ok'];
 
-  if (found.version) parts.push(/^\d/.test(found.version) ? `v${found.version}` : found.version);
+  if (found.version) parts.push(formatVersion(found.version));
 
   if (found.collections !== undefined) parts.push(`${found.collections} ${found.collections === 1 ? 'collection' : 'collections'}`);
 

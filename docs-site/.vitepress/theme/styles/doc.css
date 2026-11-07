@@ -260,3 +260,41 @@ h3:hover .header-anchor {
     align-items: flex-start;
   }
 }
+
+/* part: UI screenshots (gallery on /ui, single shots in the guide) */
+.doc-content .ui-gallery {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 24px 0 8px;
+}
+
+.doc-content .ui-shot {
+  margin: 0;
+}
+
+.doc-content .ui-shot.wide {
+  grid-column: 1 / -1;
+}
+
+.doc-content .ui-shot img,
+.doc-content p > img[src*='/img/'] {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--ndb-line);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 6%);
+  margin: 0;
+}
+
+.doc-content .ui-shot figcaption {
+  margin-top: 8px;
+  color: var(--ndb-muted);
+  font-size: 13px;
+}
+
+@media (max-width: 860px) {
+  .doc-content .ui-gallery {
+    grid-template-columns: 1fr;
+  }
+}

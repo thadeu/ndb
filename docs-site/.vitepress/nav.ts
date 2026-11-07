@@ -173,6 +173,33 @@ export const tabs: Tab[] = [
     ],
   },
   {
+    id: 'ui',
+    text: 'UI',
+    icon: 'monitor',
+    link: '/ui',
+    groups: [
+      {
+        text: 'Start',
+        items: [
+          { text: 'Overview', link: '/ui' },
+          { text: 'Install', link: '/ui/install' },
+          { text: 'Docker', link: '/ui/docker' },
+        ],
+      },
+      {
+        text: 'Guide',
+        items: [
+          { text: 'Connections', link: '/ui/guide#connections' },
+          { text: 'Overview', link: '/ui/guide#overview' },
+          { text: 'Browser', link: '/ui/guide#browser' },
+          { text: 'Dev Tools', link: '/ui/guide#dev-tools' },
+          { text: 'Watch', link: '/ui/guide#watch' },
+          { text: 'Backups', link: '/ui/guide#backups' },
+        ],
+      },
+    ],
+  },
+  {
     id: 'deploy',
     text: 'Deploy',
     icon: 'rocket',
@@ -189,10 +216,6 @@ export const tabs: Tab[] = [
           { text: 'Docker', link: '/deploy/docker' },
           { text: 'Voodu', link: '/deploy/voodu' },
         ],
-      },
-      {
-        text: 'Tools',
-        items: [{ text: 'Console (ndb-ui)', link: '/console' }],
       },
       {
         text: 'Topologies',
@@ -240,7 +263,10 @@ export const pageTab: Record<string, string> = {
   '/deploy/voodu': 'deploy',
   '/deploy/single-vm': 'deploy',
   '/deploy/cross-vm': 'deploy',
-  '/console': 'deploy',
+  '/ui': 'ui',
+  '/ui/install': 'ui',
+  '/ui/docker': 'ui',
+  '/ui/guide': 'ui',
   '/releasing': 'deploy',
   '/development': 'deploy',
 }

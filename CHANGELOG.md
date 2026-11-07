@@ -6,11 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- Docs: the console has its own **UI** section (top menu and tab): an overview with a screenshot gallery, Install, Docker (TCP, unix socket, Compose), and a guide with one part per screen. The old `/console` page is gone.
+- Docs site on phones: the logo stays on the left and the menu button moves to the right; the sidebar opens from the right.
+- Console: a build version such as `dev` shows as is, not as `vdev`.
+
 ## [0.3.1] - 2026-11-06
 
 ### Added
 
-- Console: a Discover row in the New connection form finds ndb daemons on this machine (unix sockets and `127.0.0.1`) or on another host, and fills the URL. See [Console](docs/dev/console.md#discover).
+- Console: a Discover row in the New connection form finds ndb daemons on this machine (unix sockets and `127.0.0.1`) or on another host, and fills the URL. See [UI guide](docs/dev/ui/guide.md#new-connection-and-discover).
 
 ### Changed
 
@@ -21,7 +27,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
-- Ndb Console (`ndb-ui`): a web console in `console/` (Bun, Hono). Connections and Overview; a Browser with `where` filter, paging, a JSON tree editor (save as `$set`/`$unset` guarded by `_v`), insert and delete; Dev Tools to send raw requests; a read-only Watch tail; and Backups (download over the unix socket, restore command). The Dev Tools editor auto-indents, closes pairs, and indents with Tab; a hover button formats the JSON body. Release binaries for linux and darwin (`ndb-ui-<tag>-<os>-<arch>.tar.gz` with `ndb-ui-checksums.txt`) and the image `ghcr.io/thadeu/ndb-ui`. `install.sh --ui` installs it. See [Console](docs/dev/console.md).
+- Ndb Console (`ndb-ui`): a web console in `console/` (Bun, Hono). Connections and Overview; a Browser with `where` filter, paging, a JSON tree editor (save as `$set`/`$unset` guarded by `_v`), insert and delete; Dev Tools to send raw requests; a read-only Watch tail; and Backups (download over the unix socket, restore command). The Dev Tools editor auto-indents, closes pairs, and indents with Tab; a hover button formats the JSON body. Release binaries for linux and darwin (`ndb-ui-<tag>-<os>-<arch>.tar.gz` with `ndb-ui-checksums.txt`) and the image `ghcr.io/thadeu/ndb-ui`. `install.sh --ui` installs it. See [UI](docs/dev/ui.md).
 
 ### Fixed
 

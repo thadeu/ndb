@@ -35,3 +35,9 @@ export function formatUptime(seconds: number): string {
 
   return `${minutes}m`;
 }
+
+// formatVersion adds "v" to a release number (0.3.1 → v0.3.1) and keeps a
+// build name such as dev as it is.
+export function formatVersion(version: string): string {
+  return /^\d/.test(version) ? `v${version}` : version;
+}

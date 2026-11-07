@@ -1,7 +1,7 @@
 import type { FC } from 'hono/jsx';
 
 import { Layout, type Current } from '@/html/layout';
-import { formatBytes, formatCount, formatUptime } from '@/format';
+import { formatBytes, formatCount, formatUptime, formatVersion } from '@/format';
 import type { Definition, Size, Stats } from '@/ndb';
 import { Badge } from '@/ui/badge';
 import { Card, CardHeader } from '@/ui/card';
@@ -48,7 +48,7 @@ export const OverviewPage: FC<OverviewPageProps> = ({ current, stats, size, defi
       <div class="grid-stats">
         <Stat label="Rows" value={formatCount(stats.totals.rows)} sub={`${stats.totals.collections} collections`} />
         <Stat label="Collections" value={String(stats.totals.collections)} sub={quarantined > 0 ? `${quarantined} quarantined lines` : 'no quarantined lines'} />
-        <Stat label="Version" value={`v${stats.version}`} sub={`up ${formatUptime(stats.uptime_seconds)}`} />
+        <Stat label="Version" value={formatVersion(stats.version)} sub={`up ${formatUptime(stats.uptime_seconds)}`} />
         <Stat label="Disk" value={formatBytes(stats.totals.bytes)} sub={`${stats.totals.segments} segments · ${stats.totals.wal_files} WAL files`} />
       </div>
 

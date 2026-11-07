@@ -43,16 +43,13 @@ onMounted(() => {
 
 <template>
   <header class="topbar">
-    <button class="icon-button menu-button" type="button" aria-label="Open the menu" @click="$emit('toggle-drawer')">
-      <Icon :name="drawerOpen ? 'x' : 'menu'" :size="20" />
-    </button>
-
     <Logo />
 
     <nav class="main-links" aria-label="Main">
       <a :href="withBase('/architecture')">Docs</a>
       <a :href="withBase('/clients')">Guides</a>
       <a :href="withBase('/http-api')">Reference</a>
+      <a :href="withBase('/ui')">UI</a>
       <a class="icon-link" :href="repo" target="_blank" rel="noopener" aria-label="GitHub">
         <Icon name="github" :size="20" />
       </a>
@@ -78,5 +75,9 @@ onMounted(() => {
     </button>
 
     <a class="install-button" :href="`${repo}/releases`" target="_blank" rel="noopener">Install</a>
+
+    <button class="icon-button menu-button" type="button" aria-label="Open the menu" @click="$emit('toggle-drawer')">
+      <Icon :name="drawerOpen ? 'x' : 'menu'" :size="20" />
+    </button>
   </header>
 </template>

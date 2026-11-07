@@ -2,7 +2,7 @@ import type { FC } from 'hono/jsx';
 
 import { Layout } from '@/html/layout';
 import type { Connection } from '@/connections';
-import { formatBytes, formatCount } from '@/format';
+import { formatBytes, formatCount, formatVersion } from '@/format';
 import type { Stats } from '@/ndb';
 import { Badge, Dot } from '@/ui/badge';
 import { Button } from '@/ui/button';
@@ -80,7 +80,7 @@ const ConnectionCard: FC<{ item: ConnectionStatus; fixed: boolean }> = ({ item, 
           <span>{stats ? `${stats.totals.collections} collections` : '— collections'}</span>
           <span>{stats ? `${formatCount(stats.totals.rows)} rows` : '— rows'}</span>
           <span>{stats ? formatBytes(stats.totals.bytes) : '—'}</span>
-          <span>{stats ? `v${stats.version}` : '—'}</span>
+          <span>{stats ? formatVersion(stats.version) : '—'}</span>
         </div>
 
         {item.error && <span class="conn-error">{item.error}</span>}

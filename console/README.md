@@ -2,7 +2,7 @@
 
 A web console for [ndb](../README.md): open a local socket or a remote daemon, see its collections and disk use. One binary, `ndb-ui`, with the styles and scripts inside.
 
-Tabs: Overview, Browser (filter, JSON tree editor, insert, delete), Dev Tools (raw requests), Watch (live tail, read-only), and Backups (download over the unix socket). See [docs/dev/console.md](../docs/dev/console.md).
+Tabs: Overview, Browser (filter, JSON tree editor, insert, delete), Dev Tools (raw requests), Watch (live tail, read-only), and Backups (download over the unix socket). See [docs/dev/ui.md](../docs/dev/ui.md).
 
 ## Run
 

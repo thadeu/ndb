@@ -5,6 +5,7 @@ import { prefix } from '@/prefix';
 
 import { Dot } from '@/ui/badge';
 import { Logo } from '@/ui/logo';
+import { formatVersion } from '@/format';
 
 export type Tab = 'overview' | 'browser' | 'devtools' | 'watch' | 'backups';
 
@@ -64,7 +65,7 @@ export const Layout: FC<LayoutProps> = ({ title, current, tab, scripts = [], ble
 );
 
 const Header: FC<{ current?: Current }> = ({ current }) => {
-  const meta = current?.version ? `ndb v${current.version}${current.uptime ? ` · up ${current.uptime}` : ''}` : undefined;
+  const meta = current?.version ? `ndb ${formatVersion(current.version)}${current.uptime ? ` · up ${current.uptime}` : ''}` : undefined;
 
   return (
     <header class="top">

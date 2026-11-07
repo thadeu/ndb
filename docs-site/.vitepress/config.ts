@@ -184,6 +184,7 @@ export default defineConfig({
     'brand/**',
     'sdk/**',
     'examples/**',
+    'console/**',
     'deploy/**',
     'spec/**',
     'test/**',
@@ -194,6 +195,7 @@ export default defineConfig({
   rewrites: {
     'docs/dev/clients/:page.md': 'clients/:page.md',
     'docs/dev/deploy/:page.md': 'deploy/:page.md',
+    'docs/dev/ui/:page.md': 'ui/:page.md',
     'docs/dev/:page.md': ':page.md',
     'docs/examples/index.md': 'examples.md',
     'docs/examples/:page.md': 'examples/:page.md',

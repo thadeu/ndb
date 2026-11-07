@@ -89,7 +89,7 @@ The socket is `/run/ndb/ndb.sock`. Share the `/run/ndb` volume with your app con
 
 `curl -fsSL https://ndb.clowk.in/install.sh | bash` installs the latest release (`NDB_VERSION=0.1.0` pins one; `uninstall.sh` removes it). Each `v*` tag publishes static binaries (no CGO) for Linux amd64/arm64 and macOS arm64, with a `checksums.txt`, at [Releases](https://github.com/thadeu/ndb/releases). The binary also has a CLI: `ndb stats`, `ndb size`, `ndb collections`, `ndb query`, `ndb compact`, `ndb quarantine`, `ndb restore`, `ndb backup`, `ndb help` ([docs/dev/clients/cli.md](docs/dev/clients/cli.md)). A systemd unit is in [deploy/systemd/](deploy/systemd/). The image is `ghcr.io/thadeu/ndb`. Client SDKs: Go `github.com/thadeu/ndb/sdk/go`, Ruby gems `ndb` (plain client) and `ndb-rails` (Rails), npm `@thadeu/ndb`. See [CHANGELOG.md](CHANGELOG.md).
 
-## Console
+## UI (console)
 
 `ndb-ui` is a self-hosted web console: connections (local socket or TCP with a token), Overview, a Browser with a JSON tree editor, Dev Tools for raw requests, a live Watch, and Backups. It runs on your side, with no account.
 
@@ -98,7 +98,7 @@ curl -fsSL https://ndb.clowk.in/install.sh | bash -s -- --ui && ndb-ui     # htt
 docker run -p 127.0.0.1:4321:4321 -e NDB_URL=tcp://10.10.0.1:7070 -e NDB_TOKEN=... ghcr.io/thadeu/ndb-ui
 ```
 
-A hosted version is planned for later. See [docs/dev/console.md](docs/dev/console.md).
+A hosted version is planned for later. See [docs/dev/ui.md](docs/dev/ui.md).
 
 ## Features
 
@@ -123,7 +123,7 @@ A hosted version is planned for later. See [docs/dev/console.md](docs/dev/consol
 - [docs/dev/storage.md](docs/dev/storage.md): On-disk layout.
 - [docs/dev/wal.md](docs/dev/wal.md): The NDJSON write-ahead log, fsync, recovery, truncation.
 - [docs/dev/clients.md](docs/dev/clients.md): the clients: Go, Ruby, Rails, TypeScript and the CLI, one page each.
-- [docs/dev/console.md](docs/dev/console.md): the self-hosted web console (`ndb-ui`).
+- [docs/dev/ui.md](docs/dev/ui.md): the self-hosted web console (`ndb-ui`), with [install](docs/dev/ui/install.md), [Docker](docs/dev/ui/docker.md) and the [guide](docs/dev/ui/guide.md).
 - [docs/dev/operations.md](docs/dev/operations.md): Backup, metrics, quarantine, recovery, compaction.
 - [docs/dev/deployment.md](docs/dev/deployment.md): choose a setup: Linux (systemd), Docker, Single VM, Cross-VM, Voodu.
 - [docs/dev/development.md](docs/dev/development.md): Tests and release.
