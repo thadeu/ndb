@@ -281,6 +281,11 @@
   }
 }
 
+/* part: phone menu of the home page (no sidebar there on desktop) */
+.home-nav {
+  display: none;
+}
+
 /* part: mobile, sidebar becomes a drawer */
 @media (max-width: 860px) {
   .topbar {
@@ -289,6 +294,10 @@
 
   .menu-button {
     display: inline-flex;
+  }
+
+  .home-nav {
+    display: block;
   }
 
   .main-links {

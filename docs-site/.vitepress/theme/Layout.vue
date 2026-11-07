@@ -34,6 +34,16 @@ const activeId = computed(() => {
   return pageTab[path.value] ?? null
 })
 
+// homeTab is the phone menu of the home page, which has no sidebar: one link
+// per docs tab, and the UI.
+const homeTab = {
+  id: 'home',
+  text: 'Home',
+  icon: 'server',
+  link: '/',
+  groups: [{ text: 'Docs', items: tabs.map((tab) => ({ text: tab.text, link: tab.link })) }],
+}
+
 const activeTab = computed(() => tabs.find((tab) => tab.id === activeId.value) ?? tabs[0])
 
 function copyCode(event: MouseEvent) {
@@ -67,6 +77,12 @@ watch(
     <TopBar :drawer-open="drawerOpen" @toggle-drawer="drawerOpen = !drawerOpen" />
 
     <TabsBar :active-id="isHome ? null : activeId" />
+
+    <div v-if="isHome" class="home-nav">
+      <Sidebar :tab="homeTab" :open="drawerOpen" @close="drawerOpen = false" />
+
+      <div class="scrim" @click="drawerOpen = false" />
+    </div>
 
     <Landing v-if="isHome" />
 
