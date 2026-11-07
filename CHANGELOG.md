@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- TypeScript SDK on Bun: the undici `Pool` of Bun cannot dial a unix socket, so every call failed (`statusCode` of undefined). On Bun the transport now uses its `fetch` (unix socket and TCP); Node keeps undici.
+
 ### Added
 
 - Partitioned collections: `partition_by: day | week | month | year` (with `time`) makes a logical collection whose documents go to one partition per period (`calls-2026-11`), created at first use. Reads (`_search`, `_count`, `_aggregate`) go over every live partition; writes go to the partition of the time field; routes by id find the partition that holds the id; update and delete by query run on each partition. With `retention`, a partition whose period ended more than `retention` ago leaves reads at once and a background sweep drops it. See [Partitioned collections](docs/dev/http/collections.md#partitioned-collections).

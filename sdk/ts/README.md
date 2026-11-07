@@ -4,7 +4,7 @@
 
 TypeScript client for [ndb](https://github.com/thadeu/ndb), an NDJSON query daemon. Typed collections, a chainable query builder, aggregate, watch and blobs. The client builds JSON. The daemon decides what every query means.
 
-Node 24 or newer. ESM and CJS. One runtime dependency (`undici`).
+Node 24 or newer, or Bun. ESM and CJS. One runtime dependency (`undici`, used on Node; Bun uses its `fetch`).
 
 Docs: [client guide](https://github.com/thadeu/ndb/blob/main/docs/dev/clients.md#typescript-package-thadeundb), [query language](https://github.com/thadeu/ndb/blob/main/docs/dev/query.md), [HTTP API](https://github.com/thadeu/ndb/blob/main/docs/dev/http.md).
 

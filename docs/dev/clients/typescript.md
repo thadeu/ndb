@@ -13,7 +13,7 @@ npm install @thadeu/ndb
 bun add @thadeu/ndb
 ```
 
-You also need a running ndb daemon. See the repository for how to run one.
+It runs on Node 24 or newer (with `undici`) and on Bun (with its own `fetch`), over a unix socket or TCP. You also need a running ndb daemon. See the repository for how to run one.
 
 ## Connect
 
