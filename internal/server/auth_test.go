@@ -20,6 +20,13 @@ import (
 func tokenServer(t *testing.T, token string) (unix, tcp *http.Client, tcpAddr string) {
 	t.Helper()
 
+	return authServer(t, func(srv *server.Server) { srv.SetToken(token) })
+}
+
+// authServer is tokenServer with the tokens that setup gives the server.
+func authServer(t *testing.T, setup func(*server.Server)) (unix, tcp *http.Client, tcpAddr string) {
+	t.Helper()
+
 	db, err := engine.Open(config.Config{DataDir: t.TempDir(), AllowImplicit: true}, slog.Default())
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +50,7 @@ func tokenServer(t *testing.T, token string) (unix, tcp *http.Client, tcpAddr st
 	}
 
 	srv := server.New()
-	srv.SetToken(token)
+	setup(srv)
 	srv.Attach(db)
 
 	go srv.Serve(ul)

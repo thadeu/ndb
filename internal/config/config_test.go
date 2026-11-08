@@ -245,3 +245,40 @@ func TestFindPath(t *testing.T) {
 		t.Fatalf("flag: got %q", got)
 	}
 }
+
+func TestLoadTokens(t *testing.T) {
+	path := write(t, `
+tokens:
+  - name: esl
+    file: tokens/esl.token
+    write: [outbox, "calls*"]
+  - name: dash
+    file: /etc/ndb/dash.token
+    read: ["calls*"]
+`)
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(cfg.Tokens) != 2 || cfg.Tokens[0].Name != "esl" || len(cfg.Tokens[0].Write) != 2 || cfg.Tokens[1].Read[0] != "calls*" {
+		t.Fatalf("tokens = %+v", cfg.Tokens)
+	}
+
+	if want := filepath.Join(filepath.Dir(path), "tokens", "esl.token"); cfg.Tokens[0].File != want {
+		t.Fatalf("file = %s, want %s (relative to ndb.yml)", cfg.Tokens[0].File, want)
+	}
+
+	for _, bad := range []string{
+		"tokens:\n  - file: a\n    read: [x]\n",
+		"tokens:\n  - name: a\n    read: [x]\n",
+		"tokens:\n  - name: a\n    file: a\n",
+		"tokens:\n  - name: a\n    file: a\n    read: [x]\n  - name: a\n    file: b\n    read: [y]\n",
+		"tokens:\n  - name: a\n    file: a\n    read: [\"[\"]\n",
+	} {
+		if _, err := config.Load(write(t, bad)); !errors.Is(err, config.ErrInvalid) {
+			t.Fatalf("%q: err = %v, want ErrInvalid", bad, err)
+		}
+	}
+}

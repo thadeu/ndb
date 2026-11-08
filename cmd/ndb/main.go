@@ -138,10 +138,31 @@ func readTokenFile(path string) (string, error) {
 	return token, nil
 }
 
+// scopedTokens reads the secret of each token of ndb.yml.
+func scopedTokens(tokens []config.Token) ([]server.Token, error) {
+	out := make([]server.Token, 0, len(tokens))
+
+	for _, t := range tokens {
+		secret, err := readTokenFile(t.File)
+		if err != nil {
+			return nil, fmt.Errorf("token %s: %w", t.Name, err)
+		}
+
+		out = append(out, server.Token{Name: t.Name, Secret: secret, Read: t.Read, Write: t.Write, Admin: t.Admin})
+	}
+
+	return out, nil
+}
+
 // serve listens, recovers the data dir, and stops in order when ctx ends:
 // no new requests, in-flight requests finish, then the collections close.
 func serve(ctx context.Context, cfg config.Config, token string) error {
 	log := slog.Default()
+
+	scoped, err := scopedTokens(cfg.Tokens)
+	if err != nil {
+		return err
+	}
 
 	listeners, err := listen(cfg.Listen)
 	if err != nil {
@@ -153,6 +174,7 @@ func serve(ctx context.Context, cfg config.Config, token string) error {
 	srv.SetVersion(version)
 	srv.SetBlobLimit(cfg.BlobMaxSize)
 	srv.SetToken(token)
+	srv.SetTokens(scoped)
 
 	errc := make(chan error, len(listeners))
 

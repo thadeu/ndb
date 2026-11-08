@@ -36,8 +36,8 @@ type Server struct {
 	version string
 	started time.Time
 
-	// token, when set, is the bearer token every non-unix request must carry.
-	token []byte
+	// tokens are the bearer tokens of the non-unix requests; none = open.
+	tokens []Token
 }
 
 func New() *Server {
@@ -56,9 +56,18 @@ func New() *Server {
 }
 
 // SetToken makes every request that does not come in on the unix socket carry
-// "Authorization: Bearer <token>". Call it before Serve. Empty = no token.
+// "Authorization: Bearer <token>", with every right. Call it before Serve.
+// Empty = no token.
 func (s *Server) SetToken(token string) {
-	s.token = []byte(token)
+	if token != "" {
+		s.tokens = append(s.tokens, Token{Name: "token-file", Secret: token, Full: true})
+	}
+}
+
+// SetTokens adds the scoped tokens of ndb.yml. With any token, a non-unix
+// request must carry one. Call it before Serve.
+func (s *Server) SetTokens(tokens []Token) {
+	s.tokens = append(s.tokens, tokens...)
 }
 
 // SetVersion is the daemon version that GET /_stats reports.

@@ -75,6 +75,21 @@ type Config struct {
 	AllowImplicit bool   `yaml:"allow_implicit"`
 
 	Collections map[string]catalog.Def `yaml:"-"`
+
+	// Tokens are the bearer tokens of the TCP listener, each with what it
+	// may do. The secret of each is in a file.
+	Tokens []Token `yaml:"tokens"`
+}
+
+// Token is one bearer token of ndb.yml: a name, the file that holds the
+// secret, and the collections (names or globs, such as calls*) it may read,
+// write or administer. Write includes read; admin includes both.
+type Token struct {
+	Name  string   `yaml:"name"`
+	File  string   `yaml:"file"`
+	Read  []string `yaml:"read"`
+	Write []string `yaml:"write"`
+	Admin []string `yaml:"admin"`
 }
 
 // file is the YAML shape; sizes are strings like "1GiB".
@@ -165,9 +180,42 @@ func Load(path string) (Config, error) {
 		cfg.Collections[name] = def
 	}
 
+	if err := checkTokens(cfg.Tokens); err != nil {
+		return Config{}, err
+	}
+
 	cfg.resolve(filepath.Dir(path))
 
 	return cfg, nil
+}
+
+func checkTokens(tokens []Token) error {
+	seen := map[string]bool{}
+
+	for i, t := range tokens {
+		switch {
+		case t.Name == "":
+			return fmt.Errorf("%w: tokens[%d]: name is required", ErrInvalid, i)
+		case seen[t.Name]:
+			return fmt.Errorf("%w: tokens: the name %q is used twice", ErrInvalid, t.Name)
+		case t.File == "":
+			return fmt.Errorf("%w: token %s: file is required", ErrInvalid, t.Name)
+		case len(t.Read)+len(t.Write)+len(t.Admin) == 0:
+			return fmt.Errorf("%w: token %s: give it read, write or admin collections", ErrInvalid, t.Name)
+		}
+
+		for _, list := range [][]string{t.Read, t.Write, t.Admin} {
+			for _, g := range list {
+				if _, err := filepath.Match(g, ""); err != nil || g == "" {
+					return fmt.Errorf("%w: token %s: bad collection pattern %q", ErrInvalid, t.Name, g)
+				}
+			}
+		}
+
+		seen[t.Name] = true
+	}
+
+	return nil
 }
 
 // resolve anchors the relative paths of the file to dir, the directory of
@@ -183,6 +231,10 @@ func (c *Config) resolve(dir string) {
 	for name, def := range c.Collections {
 		def.Path = anchor(dir, def.Path)
 		c.Collections[name] = def
+	}
+
+	for i := range c.Tokens {
+		c.Tokens[i].File = anchor(dir, c.Tokens[i].File)
 	}
 }
 
