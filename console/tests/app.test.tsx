@@ -459,10 +459,22 @@ describe('pitr tab', () => {
   });
 
   it('reads a datetime-local value as UTC', async () => {
-    const { utc } = await import('@/routes/pitr');
+    const { defaultUntil, utc } = await import('@/routes/pitr');
+    const now = Date.parse('2026-11-12T14:10:00Z');
+
+    expect(defaultUntil(undefined, now)).toBe('2026-11-12T14:05:00');
+    expect(defaultUntil('2026-11-12T14:08:00Z', now)).toBe('2026-11-12T14:08:01');
 
     expect(utc('2026-11-12T14:04')).toBe('2026-11-12T14:04:00Z');
     expect(utc('2026-11-12T14:04:05')).toBe('2026-11-12T14:04:05Z');
     expect(utc('2026-11-12T14:04:05Z')).toBe('2026-11-12T14:04:05Z');
+  });
+});
+
+describe('native forms', () => {
+  it('send their Origin: the referrer policy is same-origin, not no-referrer', async () => {
+    const response = await page('/c/local/pitr');
+
+    expect(response.headers.get('referrer-policy')).toBe('same-origin');
   });
 });

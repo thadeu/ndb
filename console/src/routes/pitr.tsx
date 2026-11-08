@@ -24,6 +24,7 @@ export function pitrRoutes(app: Hono<Env>, deps: RouteDeps): void {
     try {
       const [stats, pitr] = await Promise.all([client.stats(), client.pitr()]);
       const q = c.req.query();
+      const selected = pitr.collections.find(item => item.collection === q.collection) ?? pitr.collections.find(item => !item.dropped);
 
       return c.html(
         <PitrPage
@@ -31,7 +32,7 @@ export function pitrRoutes(app: Hono<Env>, deps: RouteDeps): void {
           window={pitr.default}
           collections={pitr.collections}
           selected={q.collection}
-          until={q.until ?? untilValue(new Date(Date.now() - DEFAULT_AGO_MS))}
+          until={q.until ?? defaultUntil(selected?.oldest)}
           renameFrom={q.from}
           renameTo={q.to}
           notice={q.notice}
@@ -82,6 +83,13 @@ export function pitrRoutes(app: Hono<Env>, deps: RouteDeps): void {
       return back({ error: error instanceof NdbError ? error.message : 'The rename failed.', from, to });
     }
   });
+}
+
+// defaultUntil is a few minutes ago, but not before the window starts.
+export function defaultUntil(oldest?: string, now = Date.now()): string {
+  const start = oldest ? Date.parse(oldest) + 1000 : 0;
+
+  return untilValue(new Date(Math.min(now, Math.max(now - DEFAULT_AGO_MS, start))));
 }
 
 // utc reads the value of a datetime-local input as UTC.

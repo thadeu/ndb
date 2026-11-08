@@ -14,6 +14,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Console: the native forms (no script) were refused with 403: `Referrer-Policy: no-referrer` made the browser send `Origin: null`. It is `same-origin` now.
 - A truncated or dropped collection no longer frees its disk at once when PITR is on: its dir stays in `<data_dir>/trash/` for the window. Set `pitr: off` for the old behavior.
 
 ## [1.2.2] - 2026-11-08

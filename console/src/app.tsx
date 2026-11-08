@@ -88,7 +88,7 @@ export function createApp(connections: Connections, assets: Assets, options: App
     await next();
   });
 
-  app.use(secureHeaders({ contentSecurityPolicy: { defaultSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'], fontSrc: ['https://fonts.gstatic.com'], formAction: ["'self'"], scriptSrc: ["'self'"] } }));
+  app.use(secureHeaders({ referrerPolicy: 'same-origin', contentSecurityPolicy: { defaultSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'], fontSrc: ['https://fonts.gstatic.com'], formAction: ["'self'"], scriptSrc: ["'self'"] } }));
 
   app.get('/healthz', c => c.json({ status: 'ok' }));
   app.get('/assets/app.css', () => assets.css());
