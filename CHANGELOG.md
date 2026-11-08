@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-11-07
+
 ## [1.1.2] - 2026-11-08
 
 The releases of 1.1.0 and 1.1.1 did not publish the `ndb-ui` binaries, and the SDKs of 1.1.1 still had version 1.1.0. 1.1.2 publishes everything with one version. The daemon and the SDKs do not change.
@@ -274,7 +276,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.1.2...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.1.3...HEAD
+[1.1.3]: https://github.com/thadeu/ndb/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/thadeu/ndb/compare/v1.1.0...v1.1.2
 [1.1.0]: https://github.com/thadeu/ndb/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/thadeu/ndb/compare/v0.4.0...v1.0.0
