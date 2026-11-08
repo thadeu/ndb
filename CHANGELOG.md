@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-11-08
+
 ### Added
 
 - **`per` in `_search`**: `{"per": {"field": "customer_id", "limit": 5}}` gives the first `limit` rows (in `sort` order) of each value of the field, in one search: the last 5 orders of each customer. Each value keeps its own top rows while the rows are read, and only the rows returned read their document, across segments and partitions.
@@ -489,7 +491,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.11.1...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.12.0...HEAD
+[1.12.0]: https://github.com/thadeu/ndb/compare/v1.11.1...v1.12.0
 [1.11.1]: https://github.com/thadeu/ndb/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/thadeu/ndb/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/thadeu/ndb/compare/v1.9.0...v1.10.0
