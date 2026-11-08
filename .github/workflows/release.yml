@@ -80,6 +80,8 @@ jobs:
       - name: Build
         working-directory: console
         run: |
+          bun run client
+
           mkdir -p release
 
           for target in linux-x64:linux-amd64 linux-arm64:linux-arm64 darwin-x64:darwin-amd64 darwin-arm64:darwin-arm64; do
