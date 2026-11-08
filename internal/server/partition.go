@@ -156,9 +156,9 @@ func (s *Server) partCount(w http.ResponseWriter, r *http.Request, db *engine.DB
 }
 
 func (s *Server) partAggregate(w http.ResponseWriter, r *http.Request, db *engine.DB, def catalog.Def) {
-	s.read(w, r, db, &s.metrics.aggregate, func(ctx context.Context, body []byte) (collection.Page, error) {
+	s.read(w, r, db, &s.metrics.aggregate, s.withLookupStages(r, db, func(ctx context.Context, body []byte) (collection.Page, error) {
 		return db.AggregatePartitioned(ctx, def, body)
-	})
+	}))
 }
 
 // partInsertOne sends the document to the partition of its time field.

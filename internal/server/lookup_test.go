@@ -74,3 +74,28 @@ func TestLookupNeedsReadOnEveryCollection(t *testing.T) {
 		t.Fatalf("status = %d, want 403", resp.StatusCode)
 	}
 }
+
+func TestLookupStageInAggregate(t *testing.T) {
+	_, h := newHandler(t)
+
+	expectStatus(t, call(h, "POST", "/customers/_bulk", `{"docs":[{"_id":"c1","name":"Ana"},{"_id":"c2","name":"Bruno"}]}`), http.StatusOK)
+	expectStatus(t, call(h, "POST", "/orders/_bulk", `{"docs":[{"customer_id":"c1","total":10},{"customer_id":"c1","total":5},{"customer_id":"c2","total":7}]}`), http.StatusOK)
+
+	rec := call(h, "POST", "/orders/_aggregate", `{"pipeline":[
+		{"$group":{"_id":"$customer_id","total":{"$sum":"$total"}}},
+		{"$sort":{"total":-1}},
+		{"$lookup":{"from":"customers","localField":"_id","foreignField":"_id","as":"customer"}},
+		{"$lookup":{"who":{"belongs_to":"customers","fk":"_id","fields":["name"]}}}]}`)
+
+	expectStatus(t, rec, http.StatusOK)
+
+	lines := strings.Split(strings.TrimSpace(rec.Body.String()), "\n")
+
+	if len(lines) != 2 || !strings.Contains(lines[0], `"customer":[{"_id":"c1","name":"Ana"}]`) || !strings.Contains(lines[0], `"who":{"name":"Ana"}`) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+
+	if got := errorCode(t, call(h, "POST", "/orders/_aggregate", `{"pipeline":[{"$lookup":{"from":"customers","localField":"customer_id","foreignField":"_id","as":"c"}},{"$group":{"_id":"$c"}}]}`)); got != "lookup_invalid" {
+		t.Fatalf("$lookup first: %q", got)
+	}
+}

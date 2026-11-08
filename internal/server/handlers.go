@@ -88,14 +88,14 @@ func (s *Server) aggregate(w http.ResponseWriter, r *http.Request, db *engine.DB
 		return
 	}
 
-	s.read(w, r, db, &s.metrics.aggregate, col.Aggregate)
+	s.read(w, r, db, &s.metrics.aggregate, s.withLookupStages(r, db, col.Aggregate))
 }
 
 // aggregatePattern is aggregate over every collection of a pattern.
 func (s *Server) aggregatePattern(w http.ResponseWriter, r *http.Request, db *engine.DB) {
-	s.read(w, r, db, &s.metrics.aggregate, func(ctx context.Context, body []byte) (collection.Page, error) {
+	s.read(w, r, db, &s.metrics.aggregate, s.withLookupStages(r, db, func(ctx context.Context, body []byte) (collection.Page, error) {
 		return db.AggregatePattern(ctx, r.PathValue("coll"), body)
-	})
+	}))
 }
 
 // read runs a find or an aggregate body and writes the page.

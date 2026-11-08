@@ -3,6 +3,7 @@ package lookup_test
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/thadeu/ndb/internal/lookup"
@@ -168,5 +169,24 @@ func TestRowHelpers(t *testing.T) {
 
 	if _, ok := m["customer_id"]; ok {
 		t.Fatalf("without = %s", out)
+	}
+}
+
+func TestSplitStages(t *testing.T) {
+	rest, specs, _, err := lookup.SplitStages([]byte(`{"pipeline":[{"$group":{"_id":"$customer_id","n":{"$sum":1}}},{"$sort":{"n":-1}},{"$lookup":{"from":"customers","localField":"_id","foreignField":"_id","as":"customer"}}],"limit":5}`))
+	if err != nil || len(specs) != 1 || specs[0].Name != "customer" || !specs[0].Batched {
+		t.Fatalf("split = %+v, %v", specs, err)
+	}
+
+	if strings.Contains(string(rest), "$lookup") || !strings.Contains(string(rest), `"limit":5`) {
+		t.Fatalf("rest = %s", rest)
+	}
+
+	_, _, _, err = lookup.SplitStages([]byte(`{"pipeline":[{"$lookup":{"from":"c","localField":"a","foreignField":"_id","as":"x"}},{"$group":{"_id":"$a"}}]}`))
+
+	var coded interface{ Code() string }
+
+	if !errors.As(err, &coded) || coded.Code() != "lookup_invalid" {
+		t.Fatalf("lookup before group: %v", err)
 	}
 }

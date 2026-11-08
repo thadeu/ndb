@@ -588,3 +588,58 @@ func Without(row json.RawMessage, paths []string) json.RawMessage {
 
 	return build(slices.DeleteFunc(ms, func(m member) bool { return drop[m.key] }))
 }
+
+// SplitStages takes the $lookup stages off the end of an _aggregate
+// pipeline: they run on the output rows. A $lookup before another stage is
+// lookup_invalid.
+func SplitStages(body []byte) (rest []byte, specs []Spec, added []string, err error) {
+	if !bytes.Contains(body, []byte(`"$lookup"`)) {
+		return body, nil, nil, nil
+	}
+
+	var top map[string]json.RawMessage
+
+	if err := json.Unmarshal(body, &top); err != nil {
+		return body, nil, nil, nil
+	}
+
+	var stages []map[string]json.RawMessage
+
+	if err := json.Unmarshal(top["pipeline"], &stages); err != nil {
+		return body, nil, nil, nil
+	}
+
+	cut := len(stages)
+
+	for cut > 0 && stages[cut-1]["$lookup"] != nil {
+		cut--
+	}
+
+	for _, st := range stages[:cut] {
+		if st["$lookup"] != nil {
+			return nil, nil, nil, invalid("$lookup goes at the end of the pipeline, after $group and the stages that follow it")
+		}
+	}
+
+	for _, st := range stages[cut:] {
+		if len(st) != 1 {
+			return nil, nil, nil, invalid("a $lookup stage has one key")
+		}
+
+		spec, err := ParseStage(st["$lookup"])
+		if err != nil {
+			return nil, nil, nil, err
+		}
+
+		specs = append(specs, spec)
+	}
+
+	top["pipeline"], err = json.Marshal(stages[:cut])
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	rest, err = json.Marshal(top)
+
+	return rest, specs, nil, err
+}

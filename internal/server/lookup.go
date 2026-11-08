@@ -13,8 +13,18 @@ import (
 // without it, then the rows get the relations. A scoped token must read
 // every collection of the lookup.
 func (s *Server) withLookup(r *http.Request, db *engine.DB, run func(context.Context, []byte) (collection.Page, error)) func(context.Context, []byte) (collection.Page, error) {
+	return s.lookupWith(lookup.Split, r, db, run)
+}
+
+// withLookupStages is withLookup for _aggregate: the $lookup stages at the
+// end of the pipeline run on the output rows.
+func (s *Server) withLookupStages(r *http.Request, db *engine.DB, run func(context.Context, []byte) (collection.Page, error)) func(context.Context, []byte) (collection.Page, error) {
+	return s.lookupWith(lookup.SplitStages, r, db, run)
+}
+
+func (s *Server) lookupWith(split func([]byte) ([]byte, []lookup.Spec, []string, error), r *http.Request, db *engine.DB, run func(context.Context, []byte) (collection.Page, error)) func(context.Context, []byte) (collection.Page, error) {
 	return func(ctx context.Context, body []byte) (collection.Page, error) {
-		rest, specs, added, err := lookup.Split(body)
+		rest, specs, added, err := split(body)
 		if err != nil || len(specs) == 0 {
 			if err != nil {
 				return collection.Page{}, err

@@ -68,7 +68,7 @@
     "body": {
       "pipeline": [
         {
-          "$lookup": {}
+          "$facet": {}
         },
         {
           "$group": {
