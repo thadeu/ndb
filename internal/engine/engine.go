@@ -5,12 +5,14 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -334,15 +336,18 @@ func (db *DB) open(def catalog.Def) (*Collection, error) {
 	return &Collection{name: def.Name, dir: dir, write: catalog.Engine, eng: eng, rd: eng, wm: wm}, nil
 }
 
-// openDirect loads the files once before it returns, so a ready daemon
-// answers from the full data. The memtable is not persisted, so the tailer
-// starts from offset 0 (Rebuild).
+// openDirect reads the files up to their end before it returns, so a ready
+// daemon answers from the full data. The rows live in segments (disk first),
+// and the tailer goes on from the file positions of the last checkpoint.
 func (db *DB) openDirect(def catalog.Def, dir string) (*Collection, error) {
-	mem := collection.NewDirect(collection.DirectConfig{Def: def})
+	mem, err := collection.OpenDirect(collection.DirectConfig{Def: def, Data: dir, FS: fs.OS{}, Shared: db.shared})
+	if err != nil {
+		return nil, err
+	}
 
 	mem.SetGroupLimit(db.groupLimit)
 
-	tail, err := tailer.Open(tailer.Config{Dir: dir, Def: def, Sink: mem, Rebuild: true, Logger: db.log})
+	tail, err := tailer.Open(tailer.Config{Dir: dir, Def: def, Sink: mem, Store: sourceStore{mem}, Logger: db.log})
 	if err != nil {
 		mem.Close()
 
@@ -369,6 +374,45 @@ func (db *DB) openDirect(def catalog.Def, dir string) (*Collection, error) {
 
 	return col, nil
 }
+
+// sourceStore keeps the tailer cursors of a direct collection in its
+// checkpoint: a cursor is saved only with the rows it covers.
+type sourceStore struct{ d *collection.Direct }
+
+func (s sourceStore) Load() (map[uint64]tailer.Cursor, error) {
+	out := map[uint64]tailer.Cursor{}
+
+	for _, raw := range s.d.Sources() {
+		var c tailer.Cursor
+
+		if err := json.Unmarshal(raw, &c); err != nil {
+			return nil, err
+		}
+
+		out[c.Inode] = c
+	}
+
+	return out, nil
+}
+
+func (s sourceStore) Save(c tailer.Cursor) error {
+	raw, err := json.Marshal(c)
+	if err != nil {
+		return err
+	}
+
+	s.d.MarkSource(strconv.FormatUint(c.Inode, 10), raw)
+
+	return nil
+}
+
+func (s sourceStore) Remove(inode uint64) error {
+	s.d.ForgetSource(strconv.FormatUint(inode, 10))
+
+	return nil
+}
+
+func (s sourceStore) Close() error { return nil }
 
 // AllStats is the Stats of every open collection, sorted by name.
 func (db *DB) AllStats() []Stats {

@@ -5,10 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/thadeu/ndb/internal/agg"
 	"github.com/thadeu/ndb/internal/catalog"
+	"github.com/thadeu/ndb/internal/fs"
 	"github.com/thadeu/ndb/internal/query"
 	"github.com/thadeu/ndb/internal/wal"
 )
@@ -20,37 +24,93 @@ var ErrFull = errors.New("collection: memtable full")
 type DirectConfig struct {
 	Def catalog.Def
 
-	// MaxBytes is the memtable limit in document bytes (0 = no limit).
+	// MaxBytes is the memtable limit in document bytes (0 = no limit), for
+	// a collection with no Data. With Data the seal size limits it.
 	MaxBytes int64
 
 	// WatchBuffer is how many live events one watcher may hold before it is
 	// dropped as lagged (default 4096).
 	WatchBuffer int
+
+	// Data is the dir of the segments and meta.bolt. Empty keeps every row
+	// in memory (tests, tools). FS, Shared and the Seal and Compact settings
+	// are as in Config.
+	Data       string
+	FS         fs.FS
+	Shared     *Shared
+	SealBytes  int64
+	SealAge    time.Duration
+	SealTick   time.Duration
+	CompactMin int
 }
 
 // Direct is a read-only direct-mode collection. The tailer feeds it with
 // the lines the apps wrote; ndb never writes to it (plan §6.1). It shares
-// the read core of Collection (durable state, reader, indexes), so queries,
-// indexes and pagination behave the same in both modes.
+// the read core of Collection (state, reader, indexes), so queries, indexes
+// and pagination behave the same in both modes.
+//
+// With Data it is disk first, like an engine collection (M16), with the
+// files of the apps in place of a WAL: the memtable is sealed to segments,
+// and each checkpoint saves the read position of every file (sources). After
+// a restart the tailer goes on from the positions of the last checkpoint; the
+// lines after them are read again, which is safe because the last line of an
+// _id wins.
 type Direct struct {
 	c *Collection
 
 	// guarded by c.mu
-	seq   uint64
 	bytes int64
 	max   int64
+
+	srcMu   sync.Mutex
+	sources map[string]json.RawMessage
 
 	feed *directFeed
 }
 
+// NewDirect is a direct collection that keeps every row in memory.
 func NewDirect(cfg DirectConfig) *Direct {
-	c := &Collection{def: cfg.Def, durable: newState(cfg.Def.Unique), rd: newReader()}
+	cfg.Data = ""
+
+	d, _ := OpenDirect(cfg)
+
+	return d
+}
+
+// OpenDirect opens a direct collection; with cfg.Data, its segments and the
+// read positions of its files.
+func OpenDirect(cfg DirectConfig) (*Direct, error) {
+	c := &Collection{def: cfg.Def, head: newState(cfg.Def.Unique), durable: newState(cfg.Def.Unique), rd: newReader(), shared: cfg.Shared}
+
+	d := &Direct{c: c, max: cfg.MaxBytes, sources: map[string]json.RawMessage{}}
+
+	if cfg.Data != "" {
+		c.tombs = map[string]uint64{}
+
+		_, err := c.openSegments(Config{
+			Data: cfg.Data, FS: fsOrOS(cfg.FS), Def: cfg.Def, Shared: cfg.Shared,
+			SealBytes: cfg.SealBytes, SealAge: cfg.SealAge, SealTick: cfg.SealTick, CompactMin: cfg.CompactMin,
+		})
+		if err != nil {
+			c.closeSegments()
+
+			return nil, err
+		}
+
+		if len(c.savedSources) > 0 {
+			if err := json.Unmarshal(c.savedSources, &d.sources); err != nil {
+				c.closeSegments()
+
+				return nil, err
+			}
+		}
+
+		c.sources = d.sourcesJSON
+	}
 
 	for _, f := range cfg.Def.Indexes {
 		_ = c.EnsureIndex(f)
 	}
-
-	d := &Direct{c: c, max: cfg.MaxBytes}
 
 	d.feed = &directFeed{d: d, buf: cfg.WatchBuffer, maxLine: int(cfg.Def.MaxLineSize), ends: map[string]dpos{}}
 
@@ -62,11 +122,66 @@ func NewDirect(cfg DirectConfig) *Direct {
 		d.feed.maxLine = defaultMaxLine
 	}
 
-	return d
+	if c.seal != nil {
+		c.startSealer()
+	}
+
+	return d, nil
+}
+
+func fsOrOS(f fs.FS) fs.FS {
+	if f == nil {
+		return fs.OS{}
+	}
+
+	return f
 }
 
 func (d *Direct) Close() error {
 	return d.c.Close()
+}
+
+// Sources are the read positions saved by the last checkpoint, by key (the
+// tailer uses the inode). Without Data there are none.
+func (d *Direct) Sources() map[string]json.RawMessage {
+	d.srcMu.Lock()
+	defer d.srcMu.Unlock()
+
+	return maps.Clone(d.sources)
+}
+
+// MarkSource records the read position of one file: every line before it is
+// applied. The next checkpoint saves it.
+func (d *Direct) MarkSource(key string, pos json.RawMessage) {
+	d.srcMu.Lock()
+	d.sources[key] = pos
+	d.srcMu.Unlock()
+}
+
+// ForgetSource drops the position of a file that is gone.
+func (d *Direct) ForgetSource(key string) {
+	d.srcMu.Lock()
+	delete(d.sources, key)
+	d.srcMu.Unlock()
+}
+
+func (d *Direct) sourcesJSON() json.RawMessage {
+	d.srcMu.Lock()
+	defer d.srcMu.Unlock()
+
+	raw, _ := json.Marshal(d.sources)
+
+	return raw
+}
+
+// Seal writes the memtable to a segment now (with Data).
+func (d *Direct) Seal() error {
+	return d.c.Seal()
+}
+
+// Segments is the number of live segments.
+func (d *Direct) Segments() int {
+	return d.c.Segments()
 }
 
 func (d *Direct) SetMaxBytes(n int64) {
@@ -76,10 +191,7 @@ func (d *Direct) SetMaxBytes(n int64) {
 }
 
 func (d *Direct) Len() int {
-	d.c.mu.RLock()
-	defer d.c.mu.RUnlock()
-
-	return len(d.c.durable.docs)
+	return d.c.Len()
 }
 
 func (d *Direct) Find(id string) (Doc, bool) {
@@ -137,18 +249,26 @@ func (d *Direct) Apply(file string, off int64, line []byte) error {
 		return err
 	}
 
-	d.c.mu.Lock()
-	defer d.c.mu.Unlock()
+	c := d.c
 
-	if d.max > 0 && d.bytes >= d.max && hasPut(ops) {
+	c.applyMu.Lock()
+	defer c.applyMu.Unlock()
+
+	if hasPut(ops) && d.full() {
 		return ErrFull
 	}
 
-	for _, op := range ops {
-		d.seq++
-		op.V = d.seq
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-		if old, ok := d.c.durable.docs[op.ID]; ok {
+	for i, op := range ops {
+		if old, ok := c.durable.get(op.ID); ok {
+			ops[i].V = old.v + 1
+		} else {
+			ops[i].V = 1
+		}
+
+		if old, ok := c.durable.docs[op.ID]; ok {
 			d.bytes -= int64(len(old.doc))
 		}
 
@@ -156,12 +276,40 @@ func (d *Direct) Apply(file string, off int64, line []byte) error {
 			d.bytes += int64(len(op.Doc))
 		}
 
-		d.c.applyDurable(op, 0)
+		c.applyDurable(ops[i], 0)
 	}
 
 	d.feed.publish(file, off, ops)
 
 	return nil
+}
+
+// full tells if the memtable has no room: over MaxBytes without Data, or
+// over writeHold times its seal size with Data (it wakes the sealer). The
+// tailer waits and tries the line again.
+func (d *Direct) full() bool {
+	c := d.c
+
+	c.mu.RLock()
+	mem, max, bytes := c.memBytes, d.max, d.bytes
+	c.mu.RUnlock()
+
+	s := c.seal
+
+	if s == nil {
+		return max > 0 && bytes >= max
+	}
+
+	if mem < writeHold*min(s.bytes, c.shared.budget()) {
+		return false
+	}
+
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
+
+	return true
 }
 
 func hasPut(ops []wal.Op) bool {

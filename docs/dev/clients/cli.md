@@ -149,7 +149,7 @@ calls_2026_09: dropped
 
 ## compact
 
-`ndb compact <collection> [-json]` calls `POST /{coll}/_compact`: it seals the memtable and merges all segments into one. It waits for the end (up to 10 minutes). A direct collection fails with `not_supported`.
+`ndb compact <collection> [-json]` calls `POST /{coll}/_compact`: it seals the memtable and merges all segments into one. It waits for the end (up to 10 minutes). It works for direct collections too.
 
 ```
 ┌────────────┬──────────┬────────────────────┬──────┐

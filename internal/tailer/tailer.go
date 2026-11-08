@@ -59,6 +59,9 @@ type Config struct {
 	// (the memtable is in memory only).
 	Rebuild bool
 
+	// Store keeps the cursors instead of meta.bolt (see Store).
+	Store Store
+
 	Logger *slog.Logger
 }
 
@@ -78,7 +81,7 @@ type file struct {
 type Tailer struct {
 	cfg     Config
 	log     *slog.Logger
-	cursors *cursorStore
+	cursors Store
 	quar    *quarantine
 	maxLine int
 	base    string
@@ -112,7 +115,7 @@ func Open(cfg Config) (*Tailer, error) {
 		cfg.Logger = slog.Default()
 	}
 
-	cursors, saved, err := openCursors(cfg.Dir, cfg.Rebuild)
+	cursors, saved, err := openStore(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -135,6 +138,17 @@ func Open(cfg Config) (*Tailer, error) {
 	t.base, t.depth = globBase(cfg.Def.Path)
 
 	return t, nil
+}
+
+// openStore opens the cursor store of cfg and loads its cursors.
+func openStore(cfg Config) (Store, map[uint64]Cursor, error) {
+	if cfg.Store == nil {
+		return openCursors(cfg.Dir, cfg.Rebuild)
+	}
+
+	saved, err := cfg.Store.Load()
+
+	return cfg.Store, saved, err
 }
 
 // Lag is how many bytes the tailer has not read yet, over all files. It is
@@ -179,7 +193,7 @@ func (t *Tailer) Close() error {
 
 	t.quar.close()
 
-	return t.cursors.close()
+	return t.cursors.Close()
 }
 
 // Run follows the files until ctx ends: one scan at start, then a scan on
@@ -275,7 +289,7 @@ func (t *Tailer) Sync(ctx context.Context) error {
 		delete(t.files, ino)
 		delete(t.saved, ino)
 
-		if err := t.cursors.remove(ino); err != nil {
+		if err := t.cursors.Remove(ino); err != nil {
 			return err
 		}
 	}
@@ -530,5 +544,5 @@ func (t *Tailer) save(fl *file, size int64) error {
 
 	t.saved[fl.ino] = cur
 
-	return t.cursors.save(cur)
+	return t.cursors.Save(cur)
 }

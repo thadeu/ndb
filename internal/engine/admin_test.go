@@ -1,7 +1,6 @@
 package engine_test
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/thadeu/ndb/internal/catalog"
-	"github.com/thadeu/ndb/internal/engine"
 )
 
 func TestCompactMergesSegmentsAndReportsBeforeAndAfter(t *testing.T) {
@@ -64,7 +62,9 @@ func TestCompactSealsTheMemtableFirst(t *testing.T) {
 	}
 }
 
-func TestCompactOnDirectCollectionIsNotSupported(t *testing.T) {
+// A direct collection has segments too (disk first): compact seals and
+// merges them.
+func TestCompactOnDirectCollectionMergesItsSegments(t *testing.T) {
 	root := t.TempDir()
 	files := filepath.Join(root, "calls")
 
@@ -80,8 +80,8 @@ func TestCompactOnDirectCollectionIsNotSupported(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := col.Compact(); !errors.Is(err, engine.ErrNotSupported) {
-		t.Fatalf("want ErrNotSupported, got %v", err)
+	if _, err := col.Compact(); err != nil {
+		t.Fatalf("compact of a direct collection: %v", err)
 	}
 }
 

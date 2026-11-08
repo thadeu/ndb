@@ -28,6 +28,17 @@ type Cursor struct {
 	FP     uint64 `json:"fp"`
 }
 
+// Store keeps the cursors. The default (cfg.Store nil) is meta.bolt in the
+// collection dir, saved as the tailer goes. A disk-first direct collection
+// passes its own: it saves the cursors with each checkpoint, so they never
+// run ahead of the rows a crash keeps.
+type Store interface {
+	Load() (map[uint64]Cursor, error)
+	Save(c Cursor) error
+	Remove(inode uint64) error
+	Close() error
+}
+
 type cursorStore struct {
 	db *bolt.DB
 }
@@ -60,7 +71,7 @@ func openCursors(dir string, reset bool) (*cursorStore, map[uint64]Cursor, error
 		return nil, nil, err
 	}
 
-	cur, err := s.load()
+	cur, err := s.Load()
 	if err != nil {
 		db.Close()
 
@@ -70,7 +81,7 @@ func openCursors(dir string, reset bool) (*cursorStore, map[uint64]Cursor, error
 	return s, cur, nil
 }
 
-func (s *cursorStore) load() (map[uint64]Cursor, error) {
+func (s *cursorStore) Load() (map[uint64]Cursor, error) {
 	out := map[uint64]Cursor{}
 
 	err := s.db.Update(func(tx *bolt.Tx) error {
@@ -95,7 +106,7 @@ func (s *cursorStore) load() (map[uint64]Cursor, error) {
 	return out, err
 }
 
-func (s *cursorStore) save(c Cursor) error {
+func (s *cursorStore) Save(c Cursor) error {
 	data, err := json.Marshal(c)
 	if err != nil {
 		return err
@@ -106,13 +117,13 @@ func (s *cursorStore) save(c Cursor) error {
 	})
 }
 
-func (s *cursorStore) remove(inode uint64) error {
+func (s *cursorStore) Remove(inode uint64) error {
 	return s.db.Update(func(tx *bolt.Tx) error {
 		return tx.Bucket(cursorBucket).Delete(inodeKey(inode))
 	})
 }
 
-func (s *cursorStore) close() error {
+func (s *cursorStore) Close() error {
 	return s.db.Close()
 }
 
@@ -123,7 +134,7 @@ func LoadCursors(dir string) (map[uint64]Cursor, error) {
 		return nil, err
 	}
 
-	return cur, s.close()
+	return cur, s.Close()
 }
 
 func inodeKey(inode uint64) []byte {

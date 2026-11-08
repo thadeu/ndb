@@ -158,9 +158,8 @@ func TestCompactCommandReportsBeforeAndAfter(t *testing.T) {
 
 	var out strings.Builder
 
-	err := compact(append([]string{"calls"}, base...), &out)
-	if err == nil || !strings.Contains(err.Error(), "not_supported") {
-		t.Fatalf("direct compact error = %v", err)
+	if err := compact(append([]string{"calls"}, base...), &out); err != nil {
+		t.Fatalf("direct compact: %v", err)
 	}
 
 	if err := compact(base, &out); err == nil {

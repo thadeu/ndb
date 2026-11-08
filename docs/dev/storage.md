@@ -37,6 +37,8 @@ Look at it with `ls`; do not edit it by hand while the daemon runs.
 
 ndb finds files by the glob, with fsnotify and a 5 s poll (bind mounts and overlays can miss events). It keeps a cursor per file (inode, offset, fingerprint of the first KiB) and reads only up to the last `\n`.
 
+A direct collection is disk first, like an engine one: its rows are sealed to segments, and each checkpoint saves the cursor of every file with them. After a restart the tailer goes on from the cursors of the last checkpoint, not from offset 0; the few lines after them are read again, which changes nothing because the last line of an `_id` wins. While the memtable is full the tailer waits for a seal, so a large backlog does not grow the memory.
+
 ## Segments and compaction
 
 The recent rows live in memory (the memtable). They are sealed to an immutable Parquet segment when the memtable of a collection reaches its share of `write_buffer` (32 MiB for the whole daemon, the largest memtable goes first) or 10 minutes since the last seal. Segments hold per-row-group min/max (zone maps), so queries skip what cannot match. DuckDB, Spark and pandas can read them. When 4 or more small segments are adjacent, compaction merges them (at most 512k rows at a time), and drops old versions, tombstones, expired rows and rows past `retention`. A segment whose rows are mostly replaced is rewritten alone. A seal can run while a compaction builds its segment.

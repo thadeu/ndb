@@ -153,6 +153,34 @@ type Collection struct {
 	// maxLine and cursors are what TruncateWAL needs.
 	walKeep time.Duration
 	cursors func() ([]string, error)
+
+	// applyMu: a direct collection has no writer goroutine. Its tailer
+	// applies under applyMu, and the seal and compaction steps that run on
+	// the writer goroutine of an engine collection take it instead
+	// (exclusive).
+	applyMu sync.Mutex
+
+	// sources gives the read positions of a direct collection in its files,
+	// saved with each checkpoint; savedSources is what the checkpoint held
+	// at open. Engine collections have none.
+	sources      func() json.RawMessage
+	savedSources json.RawMessage
+}
+
+// exclusive runs fn where no write is applied at the same time: on the
+// writer goroutine (with the WAL end), or under applyMu for a direct
+// collection (no WAL).
+func (c *Collection) exclusive(fn func(writer.Pos)) error {
+	if c.w != nil {
+		return c.w.Run(fn)
+	}
+
+	c.applyMu.Lock()
+	defer c.applyMu.Unlock()
+
+	fn(writer.Pos{})
+
+	return nil
 }
 
 // Doc is a document and its version.

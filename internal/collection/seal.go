@@ -102,6 +102,10 @@ type checkpoint struct {
 	Segments []string          `json:"segments"`
 	Next     int               `json:"next"`
 	Format   int               `json:"format,omitempty"`
+
+	// Sources are the read positions of a direct collection in its files,
+	// as of the seal (opaque to this package).
+	Sources json.RawMessage `json:"sources,omitempty"`
 }
 
 type sealItem struct {
@@ -117,6 +121,10 @@ type sealSnap struct {
 	rows   []segment.Row
 	tombs  map[string]uint64
 	fields []indexField
+
+	// sources are the read positions of a direct collection, as of the
+	// capture.
+	sources json.RawMessage
 
 	// bits are the live bits that changed since meta.bolt saved them, as of
 	// the capture; gens is the gen of each such segment.
@@ -178,6 +186,7 @@ func (c *Collection) openSegments(cfg Config) (recovery.Position, error) {
 	}
 
 	s.next = cp.Next
+	c.savedSources = cp.Sources
 
 	if err := s.removeOrphans(cp.Segments); err != nil {
 		return recovery.Position{}, err
@@ -520,7 +529,7 @@ func (c *Collection) Seal() error {
 	bits := s.liveOnly(snap.bits)
 	bits[name] = reader.live.bytes()
 
-	cp := checkpoint{Pos: snap.pos, Segments: append(slices.Clone(s.names), name), Next: s.peekNext(), Format: formatSidecars}
+	cp := checkpoint{Pos: snap.pos, Segments: append(slices.Clone(s.names), name), Next: s.peekNext(), Format: formatSidecars, Sources: snap.sources}
 
 	if err := s.commit(info, name, cp, bits); err != nil {
 		reader.closeFiles()
@@ -605,7 +614,7 @@ func snapRows(rows []segment.Row) func(fn func(sideRow) error) error {
 func (c *Collection) capture() (sealSnap, error) {
 	var snap sealSnap
 
-	err := c.w.Run(func(end writer.Pos) {
+	err := c.exclusive(func(end writer.Pos) {
 		snap.pos = recovery.Position{Seq: end.Seq, Offset: end.Offset, Tx: end.Tx}
 		snap.tombs = map[string]uint64{}
 
@@ -638,6 +647,10 @@ func (c *Collection) capture() (sealSnap, error) {
 
 		snap.fields = c.indexFields()
 		snap.bits, snap.gens = c.changedBits()
+
+		if c.sources != nil {
+			snap.sources = c.sources()
+		}
 	})
 
 	return snap, err
@@ -691,7 +704,7 @@ func rowOf(it sealItem, tombs map[string]uint64) segment.Row {
 // the capture keeps its memtable version, and its row in the segment is not
 // live; a tombstone that was captured is cleared.
 func (c *Collection) adopt(snap sealSnap, r *segRef, name string) error {
-	err := c.w.Run(func(writer.Pos) {
+	err := c.exclusive(func(writer.Pos) {
 		c.mu.Lock()
 
 		defer c.mu.Unlock()

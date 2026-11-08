@@ -212,7 +212,7 @@ const stats = await calls.stats()
 
 Seals the memtable, then merges every segment into one, and waits for the end. The sealer also compacts in the background; this route is for maintenance.
 
-**Answer:** `{"collection","before":{"segments","bytes"},"after":{"segments","bytes"},"duration_ms"}`. **Errors:** `400 not_supported` for a direct collection.
+**Answer:** `{"collection","before":{"segments","bytes"},"after":{"segments","bytes"},"duration_ms"}`. **Errors:** `404 unknown_collection`. A direct collection is compacted like an engine one.
 
 ::: code-group
 

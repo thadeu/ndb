@@ -417,3 +417,81 @@ func TestDirectLineWithoutIDHasNoIDAndSurvivesRestart(t *testing.T) {
 		db.Close()
 	}
 }
+
+// A direct collection keeps its rows in segments and the file positions in
+// its checkpoint: after a restart it goes on from them, and the lines
+// appended, replaced or deleted since are read once.
+func TestDirectCollectionGoesOnFromItsCheckpoint(t *testing.T) {
+	root := t.TempDir()
+	files := filepath.Join(root, "calls")
+
+	if err := os.MkdirAll(files, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	file := filepath.Join(files, "a.ndjson")
+
+	var lines strings.Builder
+
+	for i := range 500 {
+		fmt.Fprintf(&lines, `{"_id":"c%03d","status":"new","n":%d}`+"\n", i, i)
+	}
+
+	if err := os.WriteFile(file, []byte(lines.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	def := catalog.Def{Name: "calls", Write: catalog.Direct, Path: filepath.Join(files, "*.ndjson"), Indexes: []string{"status"}}
+	c := cfg(filepath.Join(root, "data"), map[string]catalog.Def{"calls": def})
+
+	db := open(t, c)
+
+	col, err := db.Get("calls")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := col.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	db.Close()
+
+	f, err := os.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fmt.Fprintln(f, `{"_id":"c010","status":"done","n":10}`)
+	fmt.Fprintln(f, `{"_id":"c020","_deleted":true}`)
+	fmt.Fprintln(f, `{"_id":"c900","status":"new","n":900}`)
+	f.Close()
+
+	db = open(t, c)
+
+	col, err = db.Get("calls")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if st := col.Stats(); st.Rows != 500 || st.Segments == 0 {
+		t.Fatalf("stats = %+v, want 500 rows in segments", st)
+	}
+
+	if doc, ok := col.Get("c010"); !ok || !strings.Contains(string(doc.Doc), `"done"`) {
+		t.Fatalf("c010 = %s, %v", doc.Doc, ok)
+	}
+
+	if _, ok := col.Get("c020"); ok {
+		t.Fatal("a deleted line came back")
+	}
+
+	if doc, ok := col.Get("c001"); !ok || doc.V != 1 {
+		t.Fatalf("c001 is at v%d: the restart read the file again from 0", doc.V)
+	}
+
+	page, err := col.Find(ctx, []byte(`{"query":{"status":"new"},"count":true}`))
+	if err != nil || *page.Total != 499 {
+		t.Fatalf("status new = %d, %v; want 499", *page.Total, err)
+	}
+}

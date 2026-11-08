@@ -227,7 +227,7 @@ func (c *Collection) planCompact(lo, hi int) (compactPlan, error) {
 
 	var failed error
 
-	err := c.w.Run(func(writer.Pos) {
+	err := c.exclusive(func(writer.Pos) {
 		c.mu.RLock()
 
 		defer c.mu.RUnlock()
@@ -576,7 +576,7 @@ func (c *Collection) commitSwap(lo, hi int, name string, info segment.Info, merg
 		return err
 	}
 
-	cp := checkpoint{Pos: cur.Pos, Segments: names, Next: s.peekNext(), Format: formatSidecars}
+	cp := checkpoint{Pos: cur.Pos, Segments: names, Next: s.peekNext(), Format: formatSidecars, Sources: cur.Sources}
 
 	return s.meta.Update(func(tx *bolt.Tx) error {
 		segs, err := tx.CreateBucketIfNotExists(bucketSegments)
@@ -616,7 +616,7 @@ func (c *Collection) commitSwap(lo, hi int, name string, info segment.Info, merg
 // swap runs on the writer goroutine: the merged segment takes the place of
 // the run, and a row that changed since the plan is not live in it.
 func (c *Collection) swap(plan compactPlan, lo, hi int, name string, merged *segRef) error {
-	return c.w.Run(func(writer.Pos) {
+	return c.exclusive(func(writer.Pos) {
 		c.mu.Lock()
 
 		defer c.mu.Unlock()

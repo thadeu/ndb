@@ -305,11 +305,25 @@ func (c *Collection) Seal() error {
 
 	defer c.leave()
 
-	if c.eng == nil {
+	if c.store() == nil {
 		return nil
 	}
 
-	return c.eng.Seal()
+	return c.store().Seal()
+}
+
+// store is the collection that holds the segments: the engine collection,
+// or the one inside a direct collection.
+func (c *Collection) store() *collection.Collection {
+	if c.eng != nil {
+		return c.eng
+	}
+
+	if c.mem != nil {
+		return c.mem.Reader()
+	}
+
+	return nil
 }
 
 // TruncateWAL deletes the WAL files that wal_retention, the checkpoint and
@@ -356,17 +370,19 @@ func (c *Collection) Compact() (CompactResult, error) {
 
 	defer c.leave()
 
-	if c.eng == nil {
+	st := c.store()
+
+	if st == nil {
 		return CompactResult{}, ErrNotSupported
 	}
 
-	if err := c.eng.Seal(); err != nil {
+	if err := st.Seal(); err != nil {
 		return CompactResult{}, err
 	}
 
 	res := CompactResult{Before: c.segmentSize()}
 
-	if err := c.eng.Compact(); err != nil {
+	if err := st.Compact(); err != nil {
 		return res, err
 	}
 
@@ -378,7 +394,7 @@ func (c *Collection) Compact() (CompactResult, error) {
 func (c *Collection) segmentSize() CompactSize {
 	bytes, _ := diskusage.TreeSize(filepath.Join(c.dir, "segments"))
 
-	return CompactSize{Segments: c.eng.Segments(), Bytes: bytes}
+	return CompactSize{Segments: c.store().Segments(), Bytes: bytes}
 }
 
 // Quarantine is the last limit lines that the tailer of a direct collection
@@ -404,6 +420,11 @@ func (c *Collection) Stats() Stats {
 
 	s := Stats{Name: c.name, Write: c.write, Rows: c.rd.Len(), Indexes: c.rd.Indexes()}
 
+	if st := c.store(); st != nil {
+		s.MemBytes = st.MemBytes()
+		s.Segments = st.Segments()
+	}
+
 	if c.tail != nil {
 		s.Quarantined = c.tail.Quarantined()
 		s.TailerLag = c.tail.Lag()
@@ -411,8 +432,6 @@ func (c *Collection) Stats() Stats {
 	}
 
 	if c.eng != nil {
-		s.MemBytes = c.eng.MemBytes()
-		s.Segments = c.eng.Segments()
 		s.Subscribers = c.eng.Subscribers()
 		s.Writer = c.wm
 	}

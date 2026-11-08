@@ -267,17 +267,10 @@ func TestCompactEndpointMergesSegments(t *testing.T) {
 	}
 }
 
-func TestCompactEndpointRefusesDirectAndUnknownCollections(t *testing.T) {
+func TestCompactEndpointCompactsDirectAndRefusesUnknownCollections(t *testing.T) {
 	h := adminHandler(t)
 
-	rec := call(h, "POST", "/calls/_compact", "")
-
-	expectStatus(t, rec, http.StatusBadRequest)
-
-	if code := errorCode(t, rec); code != "not_supported" {
-		t.Fatalf("code = %q", code)
-	}
-
+	expectStatus(t, call(h, "POST", "/calls/_compact", ""), http.StatusOK)
 	expectStatus(t, call(h, "POST", "/nope/_compact", ""), http.StatusNotFound)
 }
 
