@@ -33,7 +33,8 @@ The SDKs turn each code into a typed error: Go `ndb.ErrUnknownCollection` (`erro
 | `invalid_doc`, `missing_id`, `invalid_id`, `immutable_id`, `invalid_batch`, `invalid_path`, `invalid_index` | 400 | A document or a definition is not valid. |
 | `invalid_blob_ref` | 400 | The blob reference is not `sha256:<64 hex>`. |
 | `invalid_position` | 400 | The watch position is not valid. |
-| `unauthorized` | 401 | A TCP request without the right bearer token (`-token-file`). |
+| `unauthorized` | 401 | A TCP request without a known bearer token (`-token-file` or `tokens:`). |
+| `forbidden` | 403 | A scoped token without the right for this route and collection; `POST /_backup` over TCP. |
 | `forbidden` | 403 | For example, `/_backup` over TCP. |
 | `not_found` | 404 | No document (or blob) with this id. |
 | `unknown_collection` | 404 | The collection does not exist. |

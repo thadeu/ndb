@@ -35,7 +35,7 @@ defer db.Close()
 ```
 
 - `Open` does not connect. The first call does.
-- The address must be `unix:///path` or `tcp://host:port`. Anything else returns an error.
+- The address must be `unix:///path`, `tcp://host:port`, or `https://host[:port]` (ndb behind a TLS proxy; `http://` works too). Anything else returns an error.
 - The token goes only in the `Authorization` header. A unix socket does not need it.
 - `WithReadyTimeout` sets how long a call retries when the daemon is not ready (HTTP 503 `not_ready`, or the socket is missing or refuses). The default is `ndb.DefaultReadyTimeout` (10 s). Zero turns the retry off. Writes are retried only when the daemon certainly did not process them. Reads are also retried after a dropped connection.
 - The pool keeps up to 16 idle connections per host. There is no setting for it.

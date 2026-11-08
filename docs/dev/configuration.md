@@ -187,6 +187,46 @@ chown ndb:ndb /etc/ndb/token && chmod 600 /etc/ndb/token
 ndb -config /etc/ndb/ndb.yml -token-file /etc/ndb/token
 ```
 
+### Scoped tokens
+
+`tokens:` in `ndb.yml` gives each app its own token, limited to some collections. The token of `-token-file` keeps every right; both can be set.
+
+```yaml
+tokens:
+  - name: esl
+    file: /etc/ndb/esl.token      # relative paths start at the folder of ndb.yml
+    write: [outbox, "calls*"]
+  - name: dashboards
+    file: /etc/ndb/dash.token
+    read: ["calls*"]
+  - name: ops
+    file: /etc/ndb/ops.token
+    admin: ["*"]
+```
+
+| Level | Routes |
+|---|---|
+| `read` | `GET /{coll}`, `_search`, `_count`, `_aggregate`, `_watch`, `GET _doc/{id}`, `_ttl`, `_stats`, `_quarantine`; the system reads (`/_health`, `/_stats`, `/_collections`, `/_size`, `GET /_blobs/{ref}`) with any read right |
+| `write` | `POST _doc`, `_bulk`, `_update`, `_update_by_query`, `_delete_by_query`, `DELETE _doc/{id}`, `_expire`, `_persist`, `_ack`; `POST /_blobs` with any write right; and all of `read` |
+| `admin` | `PUT /{coll}` (declare), `DELETE /{coll}` (drop), `_truncate`, `_compact`, `_indexes`; and all of `write` |
+
+- Each list holds collection names or globs: `calls*` covers `calls` and its partitions (`calls-2026-11`), `*` covers every collection. A pattern read (`/logs-2026-*/_search`) needs a glob that covers the whole pattern (`logs*` or `*`).
+- An unknown token is `401 unauthorized`; a token without the right is `403 forbidden`, with the token name in the message.
+- `name` and `file` are required, names are unique, and a token needs at least one list. A missing or empty file stops the start.
+- A write to a collection that does not exist creates it (with `allow_implicit`): the write right is enough.
+
+## TLS
+
+ndb serves plain HTTP. For TLS, put a proxy in front of the TCP listener; Caddy gets and renews the certificate:
+
+```
+ndb.example.com {
+  reverse_proxy 127.0.0.1:7070
+}
+```
+
+Keep `listen.tcp` on `127.0.0.1` (or a private address), and give the apps `NDB_URL=https://ndb.example.com` with their token. The SDKs take `https://host[:port]`; see [clients.md](clients.md).
+
 ## Code and file together
 
 An app can also declare its collection from code (`ensure_collection`: the SDKs do it on boot). Merge rules: `indexes` are united; a different `write`, `path` or `time` is `catalog_conflict`; for `durability` and `retention`, `ndb.yml` wins.

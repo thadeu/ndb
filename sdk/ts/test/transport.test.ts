@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, inject, it } from 'vitest'
 import { InvalidUpdateError, NdbError, NotFoundError, connect } from '../src/index.js'
 import { collName, tcpDb, unixDb } from './helpers.js'
 
@@ -52,4 +52,22 @@ describe.each([
 
 it('rejects a bad address', () => {
   expect(() => connect('ftp://x')).toThrow(/unix:\/\//)
+})
+
+describe('addresses', () => {
+  it('talks over http://host:port (ndb behind a proxy)', async () => {
+    const db = connect(inject('tcpAddr').replace('tcp://', 'http://'))
+
+    try {
+      await expect(db.health()).resolves.toBeUndefined()
+    } finally {
+      await db.close()
+    }
+  })
+
+  it('refuses other schemes', () => {
+    for (const bad of ['ftp://h', 'https://', 'h:1']) {
+      expect(() => connect(bad)).toThrow(TypeError)
+    }
+  })
 })

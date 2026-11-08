@@ -55,7 +55,7 @@ end
 ```
 
 - The address is, in order: `url`, `socket`, env `NDB_URL`, then the default socket `/var/run/ndb/ndb.sock`.
-- The address is `unix:///path`, `tcp://host:port`, or a bare path that starts with `/`.
+- The address is `unix:///path`, `tcp://host:port`, `https://host[:port]` (ndb behind a TLS proxy), or a bare path that starts with `/`.
 - The token is `token`, or env `NDB_TOKEN`. It goes only in the `Authorization` header. A unix socket does not need it.
 - `ready_timeout` is how long a call retries while the daemon is not ready (`not_ready`, or the socket is missing or refuses). It uses backoff with jitter. A write is retried only when the daemon certainly did not process it. A read is also retried after a dropped connection. A timeout is never retried.
 - The pool drops its connections after a `fork`.

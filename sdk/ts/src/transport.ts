@@ -40,7 +40,8 @@ export class Transport {
   private readonly token: string | undefined
   private readonly readyTimeout: number
 
-  // addr: unix:///path or tcp://host:port. Default: env NDB_URL.
+  // addr: unix:///path, tcp://host:port, or https://host[:port] (ndb behind
+  // a TLS proxy such as Caddy; http:// works too). Default: env NDB_URL.
   constructor(addr?: string, opts: ConnectOptions = {}) {
     const target = addr || process.env.NDB_URL || ''
     const url = new URL(target)
@@ -53,8 +54,10 @@ export class Transport {
       this.socketPath = decodeURIComponent(url.pathname)
     } else if (url.protocol === 'tcp:' && url.host !== '') {
       this.base = `http://${url.host}`
+    } else if ((url.protocol === 'https:' || url.protocol === 'http:') && url.host !== '') {
+      this.base = `${url.protocol}//${url.host}`
     } else {
-      throw new TypeError(`ndb: address "${target}" must be unix:///path or tcp://host:port`)
+      throw new TypeError(`ndb: address "${target}" must be unix:///path, tcp://host:port or https://host`)
     }
 
     if (!onBun) {

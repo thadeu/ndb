@@ -11,7 +11,7 @@ import (
 )
 
 func TestOpenRejectsUnknownAddress(t *testing.T) {
-	for _, addr := range []string{"http://127.0.0.1:7070", "unix://", "/run/ndb.sock"} {
+	for _, addr := range []string{"ftp://127.0.0.1:7070", "unix://", "/run/ndb.sock", "https://"} {
 		if _, err := Connect(addr); err == nil {
 			t.Errorf("Connect(%q): want an error", addr)
 		}

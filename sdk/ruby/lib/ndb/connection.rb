@@ -1,18 +1,23 @@
 # frozen_string_literal: true
 
+require "openssl"
 require "socket"
 require "uri"
 
 module Ndb
   Response = Data.define(:status, :headers, :body)
 
-  # Where the daemon listens: a unix socket path, or a TCP host and port.
-  # The host name is resolved each time a connection opens, so a changed
-  # DNS record is followed after a reconnect.
+  # Where the daemon listens: a unix socket path, a TCP host and port, or an
+  # https:// URL (ndb behind a TLS proxy such as Caddy). The host name is
+  # resolved each time a connection opens, so a changed DNS record is
+  # followed after a reconnect.
   class Endpoint
+    INVALID = "must be unix:///path, tcp://host:port or https://host"
+
     attr_reader :path, :host, :port
 
-    # "unix:///path", "tcp://host:port", or a bare socket path.
+    # "unix:///path", "tcp://host:port", "https://host[:port]",
+    # "http://host[:port]", or a bare socket path.
     def self.parse(address)
       address = address.to_s
 
@@ -23,13 +28,14 @@ module Ndb
       case uri.scheme
       when "unix" then new(path: uri.path)
       when "tcp" then new(host: uri.host, port: uri.port)
-      else raise ArgumentError, "ndb address #{address.inspect} must be unix:///path or tcp://host:port"
+      when "https", "http" then new(host: uri.host, port: uri.port, tls: uri.scheme == "https")
+      else raise ArgumentError, "ndb address #{address.inspect} #{INVALID}"
       end
     rescue URI::InvalidURIError
-      raise ArgumentError, "ndb address #{address.inspect} must be unix:///path or tcp://host:port"
+      raise ArgumentError, "ndb address #{address.inspect} #{INVALID}"
     end
 
-    def initialize(path: nil, host: nil, port: nil)
+    def initialize(path: nil, host: nil, port: nil, tls: false)
       if path.to_s.empty? && (host.to_s.empty? || port.nil?)
         raise ArgumentError, "ndb address needs a socket path or a host and port"
       end
@@ -37,18 +43,49 @@ module Ndb
       @path = path
       @host = host
       @port = port
+      @tls = tls
     end
 
     def unix? = !@path.to_s.empty?
 
-    def to_s = unix? ? "unix://#{@path}" : "tcp://#{@host}:#{@port}"
+    def tls? = @tls
+
+    def to_s
+      return "unix://#{@path}" if unix?
+
+      tls? ? "https://#{@host}:#{@port}" : "tcp://#{@host}:#{@port}"
+    end
 
     def host_header = unix? ? "ndb" : "#{@host}:#{@port}"
 
     def connect(timeout)
       return UNIXSocket.new(@path) if unix?
 
-      TCPSocket.new(@host, @port, connect_timeout: timeout).tap { |sock| sock.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, 1) }
+      sock = TCPSocket.new(@host, @port, connect_timeout: timeout)
+      sock.setsockopt(Socket::IPPROTO_TCP, Socket::TCP_NODELAY, 1)
+      sock.timeout = timeout
+
+      tls? ? secure(sock) : sock
+    end
+
+    private
+
+    # Wraps sock in TLS with the system certificates (SSL_CERT_FILE adds a
+    # private CA), the host name for SNI, and a check that the certificate is
+    # for that host.
+    def secure(sock)
+      store = OpenSSL::X509::Store.new
+      store.set_default_paths
+
+      ctx = OpenSSL::SSL::SSLContext.new
+      ctx.set_params(verify_mode: OpenSSL::SSL::VERIFY_PEER, cert_store: store)
+
+      ssl = OpenSSL::SSL::SSLSocket.new(sock, ctx)
+      ssl.hostname = @host
+      ssl.sync_close = true
+      ssl.connect
+      ssl.post_connection_check(@host)
+      ssl
     end
   end
 
@@ -130,8 +167,8 @@ module Ndb
 
     def open_socket
       @socket = @endpoint.connect(@timeout)
-      @socket.timeout = @timeout
-    rescue SystemCallError, SocketError => e
+      @socket.timeout = @timeout if @socket.respond_to?(:timeout=)
+    rescue SystemCallError, SocketError, OpenSSL::SSL::SSLError => e
       raise ConnectError, "cannot reach ndb at #{@endpoint}: #{e.message}"
     end
 

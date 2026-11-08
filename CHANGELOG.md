@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **Scoped tokens.** `tokens:` in `ndb.yml` gives each app a token with the collections (names or globs, such as `calls*`) it may `read`, `write` or `admin`. A token without the right is `403 forbidden`. The token of `-token-file` keeps every right. See [Scoped tokens](docs/dev/configuration.md#scoped-tokens).
+- **SDKs over HTTPS.** The Go, Ruby and TypeScript SDKs take `https://host[:port]` (and `http://`), for ndb behind a TLS proxy such as Caddy. The Ruby SDK checks the certificate with the system CAs (`SSL_CERT_FILE` adds a private CA). See [TLS](docs/dev/configuration.md#tls).
+
 ## [1.2.1] - 2026-11-07
 
 ## [1.2.0] - 2026-11-07

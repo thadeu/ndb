@@ -73,8 +73,10 @@ Any other path is `404 unknown_route`. A known path with another method is `405 
 
 ## Authentication
 
-- With `-token-file`, every TCP request needs `Authorization: Bearer <token>`, or the answer is `401 unauthorized`.
+- With `-token-file` or `tokens:`, every TCP request needs `Authorization: Bearer <token>`, or the answer is `401 unauthorized`.
+- A scoped token without the right for the route and collection is `403 forbidden`. See [Scoped tokens](configuration.md#scoped-tokens).
 - The unix socket needs no token: file permissions protect it.
+- ndb serves plain HTTP; TLS comes from a proxy in front (Caddy). See [TLS](configuration.md#tls).
 - `POST /_backup` works on the unix socket only; over TCP it is `403 forbidden`.
 
 See [Authentication](configuration.md#authentication).

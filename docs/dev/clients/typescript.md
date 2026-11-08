@@ -21,7 +21,7 @@ It runs on Node 24 or newer (with `undici`) and on Bun (with its own `fetch`), o
 import { connect } from '@thadeu/ndb'
 
 // Unix socket.
-const ndb = connect('unix:///run/ndb/ndb.sock')
+const ndb = connect('unix:///run/ndb/ndb.sock') // or tcp://host:port, https://host
 
 // TCP with a bearer token.
 const remote = connect('tcp://10.0.0.5:7070', { token: 'secret' })

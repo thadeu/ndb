@@ -51,9 +51,10 @@ func WithReadyTimeout(d time.Duration) ConnectOption {
 	return func(db *DB) { db.readyTimeout = d }
 }
 
-// Connect returns a handle for addr: unix:///path/to/ndb.sock or
-// tcp://host:port. An empty addr reads NDB_URL. It does not dial; the first
-// call does, and waits while the daemon starts (WithReadyTimeout).
+// Connect returns a handle for addr: unix:///path/to/ndb.sock,
+// tcp://host:port, or https://host[:port] (ndb behind a TLS proxy such as
+// Caddy; http:// works too). An empty addr reads NDB_URL. It does not dial;
+// the first call does, and waits while the daemon starts (WithReadyTimeout).
 func Connect(addr string, opts ...ConnectOption) (*DB, error) {
 	if addr == "" {
 		addr = os.Getenv("NDB_URL")
@@ -87,8 +88,10 @@ func Connect(addr string, opts ...ConnectOption) (*DB, error) {
 		db.base = "http://ndb"
 	case u.Scheme == "tcp" && u.Host != "":
 		db.base = "http://" + u.Host
+	case (u.Scheme == "https" || u.Scheme == "http") && u.Host != "":
+		db.base = u.Scheme + "://" + u.Host
 	default:
-		return nil, fmt.Errorf("ndb: address %q must be unix:///path or tcp://host:port", addr)
+		return nil, fmt.Errorf("ndb: address %q must be unix:///path, tcp://host:port or https://host", addr)
 	}
 
 	db.client = &http.Client{Transport: tr}

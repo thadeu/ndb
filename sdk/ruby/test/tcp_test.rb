@@ -145,7 +145,7 @@ class TcpTest < Minitest::Test
   end
 
   def test_bad_address_is_rejected
-    ["http://127.0.0.1:7070", "tcp://", "unix://", "tcp://host"].each do |bad|
+    ["ftp://127.0.0.1:7070", "tcp://", "unix://", "tcp://host", "https://"].each do |bad|
       assert_raises(ArgumentError, bad) { Ndb::Client.new(url: bad) }
     end
   end
