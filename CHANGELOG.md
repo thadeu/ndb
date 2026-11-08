@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-08
+
 ## [1.4.6] - 2026-11-08
 
 ### Added
@@ -405,7 +407,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.4.6...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/thadeu/ndb/compare/v1.3.0...v1.4.0
 [1.4.6]: https://github.com/thadeu/ndb/compare/v1.4.5...v1.4.6
 [1.4.5]: https://github.com/thadeu/ndb/compare/v1.4.4...v1.4.5
 [1.4.4]: https://github.com/thadeu/ndb/compare/v1.4.3...v1.4.4
