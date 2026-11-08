@@ -299,7 +299,6 @@ type parquetReader struct {
 	n       int
 	closer  io.Closer
 	columns map[string]Column
-
 }
 
 type readCols struct {
