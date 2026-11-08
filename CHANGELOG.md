@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-11-08
+
 ### Added
 
 - **Idle collections close.** An engine collection with no call for `idle_close` (ndb.yml, default `10m`, `off` to keep all open) seals its memtable and closes its files; the next call opens it again (0.6 ms in `ndb bench`). 1 000 collections and 365 daily partitions at rest hold no open file (it was 2 per collection) and use no CPU. A `_watch` consumer keeps a collection open; `_stats` and `/metrics` read a sleeping collection without opening it (`asleep` in `_stats`, with a total), and the daily PITR check opens only the ones written since their newest snapshot. A `kill -9` while writes wake collections loses no acked write.
@@ -432,7 +434,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/thadeu/ndb/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/thadeu/ndb/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/thadeu/ndb/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/thadeu/ndb/compare/v1.4.0...v1.5.0
