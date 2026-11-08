@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.2.6] - 2026-11-08
+
 ### Added
 
 - **`@thadeu/ui`** (`console/lib/ui`): the date picker and the popover of the console as a package of their own, for npm: plain TypeScript and DOM, ESM + CommonJS + types (tsup), its own CSS themed by `--dp-*` variables, months and weekdays from `Intl` (`locale`), labels for i18n, `datePickerHTML` for a server and `createDatePicker`/`mountDatePickers` for the browser. The console imports it as `@/lib/ui/...`.
@@ -327,7 +329,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.2.5...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.2.6...HEAD
+[1.2.6]: https://github.com/thadeu/ndb/compare/v1.2.5...v1.2.6
 [1.2.5]: https://github.com/thadeu/ndb/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/thadeu/ndb/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/thadeu/ndb/compare/v1.2.2...v1.2.3
