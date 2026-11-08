@@ -135,7 +135,7 @@ func (db *DB) engineList() []*Collection {
 	var out []*Collection
 
 	for _, col := range db.cols {
-		if col.eng != nil {
+		if col.engine() {
 			out = append(out, col)
 		}
 	}
@@ -150,6 +150,21 @@ func (db *DB) snapshotOne(col *Collection, now time.Time) error {
 	}
 
 	win := db.window(def)
+
+	if tx, asleep := col.restingTx(); asleep {
+		snaps, err := collection.Snaps(col.dir)
+		if err != nil {
+			return err
+		}
+
+		if win == 0 {
+			return removeSnaps(snaps)
+		}
+
+		if !snapDue(snaps, tx, now, min(win, maxSnapEvery)) {
+			return removeSnaps(unneeded(snaps, now.Add(-win)))
+		}
+	}
 
 	if err := col.enter(); err != nil {
 		return nil

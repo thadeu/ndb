@@ -130,7 +130,17 @@ func (db *DB) liveBlobs(ctx context.Context) (iter.Seq[string], error) {
 // is not a source of truth for the GC (the live documents are), so it is not
 // scanned.
 func (c *Collection) walBlobRefs() ([]string, error) {
-	if c.eng == nil || !c.eng.KeepsWAL() {
+	if !c.engine() {
+		return nil, nil
+	}
+
+	if err := c.enter(); err != nil {
+		return nil, err
+	}
+
+	defer c.leave()
+
+	if !c.eng.KeepsWAL() {
 		return nil, nil
 	}
 

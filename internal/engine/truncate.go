@@ -55,13 +55,10 @@ func (db *DB) Truncate(name, confirm string) error {
 		return fmt.Errorf("%w: %s", catalog.ErrUnknown, name)
 	}
 
-	// Close syncs and publishes every record first (relaxed mode too), so
-	// LastTx after it is the real last tx.
-	if err := col.eng.Close(); err != nil {
+	last, err := col.closeForSwap()
+	if err != nil {
 		return err
 	}
-
-	last := col.eng.LastTx()
 
 	staged := col.dir + newSuffix
 
@@ -110,7 +107,7 @@ func (db *DB) Drop(name, confirm string) error {
 		return fmt.Errorf("%w: %s", catalog.ErrUnknown, name)
 	}
 
-	if err := col.eng.Close(); err != nil {
+	if _, err := col.closeForSwap(); err != nil {
 		return err
 	}
 
@@ -150,7 +147,7 @@ func (db *DB) swapTarget(name, confirm string) (*Collection, error) {
 		return nil, err
 	}
 
-	if col.eng == nil {
+	if !col.engine() {
 		return nil, ErrDirect
 	}
 
@@ -175,6 +172,7 @@ func (db *DB) reopen(col *Collection, cause error) error {
 	}
 
 	col.eng, col.rd, col.wm = fresh.eng, fresh.rd, fresh.wm
+	col.asleep = false
 
 	return cause
 }

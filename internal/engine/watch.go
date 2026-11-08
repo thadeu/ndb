@@ -10,7 +10,7 @@ import (
 
 // source is the change feed of the collection, in either mode.
 func (c *Collection) source() feed.Source {
-	if c.eng != nil {
+	if c.engine() {
 		return c.eng.Feed()
 	}
 

@@ -72,6 +72,7 @@ An unknown key is an error at start (the file is read in strict mode). Sizes are
 | `blob_max_size` | largest blob. Default 1 GiB. |
 | `allow_implicit` | `false` forbids creating a collection by the first `insert`. Default `true`. |
 | `pitr` | the [point in time recovery](pitr.md) window of every engine collection: `off`, or a duration up to `7d`. Default `1d`. |
+| `idle_close` | how long an engine collection goes without a call before it is closed: its memtable is sealed, and its files, memory and disk reserve are given back. The next call opens it again (a few ms). A collection with a `_watch` consumer stays open. `off` keeps every collection open. Default `10m`. |
 
 ### Document id
 

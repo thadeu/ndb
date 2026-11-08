@@ -59,6 +59,12 @@ func (db *DB) Backup(ctx context.Context, w io.Writer, opts backup.Options) erro
 			return fmt.Errorf("backup: collection %s is not open", d.Name)
 		}
 
+		if err := col.enter(); err != nil {
+			return fmt.Errorf("backup: %s: %w", d.Name, err)
+		}
+
+		defer col.leave()
+
 		dir := filepath.Join(db.dir, "collections", d.Name)
 
 		first, has, err := backup.FirstTx(dir)
@@ -119,7 +125,7 @@ func (db *DB) engineCollections() map[string]*Collection {
 	out := map[string]*Collection{}
 
 	for name, col := range db.cols {
-		if col.eng != nil {
+		if col.engine() {
 			out[name] = col
 		}
 	}

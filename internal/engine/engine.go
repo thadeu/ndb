@@ -81,6 +81,10 @@ type DB struct {
 	// that is being deleted.
 	pitr   string
 	pitrMu sync.Mutex
+
+	// idleClose is how long an engine collection goes unused before it
+	// sleeps (idle.go); 0 keeps every collection open.
+	idleClose time.Duration
 }
 
 // Open takes the lock on cfg.DataDir, opens the catalog, declares the
@@ -134,6 +138,7 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		shared:     collection.NewShared(cfg.WriteBuffer),
 		cols:       map[string]*Collection{},
 		pitr:       pitrDefault(cfg),
+		idleClose:  idleCloseOf(cfg),
 	}
 
 	if err := db.finishSwaps(); err != nil {
@@ -168,10 +173,11 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		}
 	}
 
-	db.gcWait.Add(2)
+	db.gcWait.Add(3)
 
 	go db.sweepPartitionsLoop()
 	go db.pitrLoop()
+	go db.idleLoop()
 
 	return db, nil
 }
@@ -260,8 +266,9 @@ func (db *DB) DropIndex(name, field string) (catalog.Def, error) {
 		return catalog.Def{}, err
 	}
 
-	if col, ok := db.cols[name]; ok {
+	if col, ok := db.cols[name]; ok && col.enter() == nil {
 		col.rd.DropIndex(field)
+		col.leave()
 	}
 
 	return def, nil
@@ -302,6 +309,12 @@ func (db *DB) attach(def catalog.Def) error {
 	}
 
 	if col, ok := db.cols[def.Name]; ok {
+		if err := col.enter(); err != nil {
+			return err
+		}
+
+		defer col.leave()
+
 		for _, f := range def.Indexes {
 			if err := col.rd.EnsureIndex(f); err != nil {
 				return err
@@ -332,8 +345,12 @@ func (db *DB) open(def catalog.Def) (*Collection, error) {
 		return db.openDirect(def, dir)
 	}
 
-	wm := &metrics.Writer{}
+	return db.openEngine(def, dir, &metrics.Writer{})
+}
 
+// openEngine opens an engine collection with the writer metrics wm (a
+// collection that wakes keeps its own, so the counters go on).
+func (db *DB) openEngine(def catalog.Def, dir string, wm *metrics.Writer) (*Collection, error) {
 	eng, err := collection.Open(collection.Config{
 		Dir:        dir,
 		Data:       dir,
@@ -352,7 +369,11 @@ func (db *DB) open(def catalog.Def) (*Collection, error) {
 		return nil, err
 	}
 
-	return &Collection{name: def.Name, dir: dir, write: catalog.Engine, eng: eng, rd: eng, wm: wm}, nil
+	col := &Collection{name: def.Name, dir: dir, write: catalog.Engine, eng: eng, rd: eng, wm: wm, db: db}
+
+	col.used.Store(time.Now().UnixNano())
+
+	return col, nil
 }
 
 // openDirect reads the files up to their end before it returns, so a ready

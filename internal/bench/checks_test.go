@@ -21,7 +21,7 @@ func TestGatesPassAndFail(t *testing.T) {
 }
 
 func TestVerifyPrintsOnlyWhatWasMeasured(t *testing.T) {
-	measured = map[string]float64{"crash.missing": 2, "idle.fds": 2}
+	measured = map[string]float64{"crash.missing": 2, "idle.fds": 0}
 
 	var out bytes.Buffer
 

@@ -8,7 +8,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **Idle collections close.** An engine collection with no call for `idle_close` (ndb.yml, default `10m`, `off` to keep all open) seals its memtable and closes its files; the next call opens it again (0.6 ms in `ndb bench`). 1 000 collections and 365 daily partitions at rest hold no open file (it was 2 per collection) and use no CPU. A `_watch` consumer keeps a collection open; `_stats` and `/metrics` read a sleeping collection without opening it (`asleep` in `_stats`, with a total), and the daily PITR check opens only the ones written since their newest snapshot. A `kill -9` while writes wake collections loses no acked write.
+- `ndb bench -idle` adds a partitioned collection with 365 daily partitions, the time of the first call on a sleeping collection, and a `kill -9` while collections wake; its budgets are 0 open files per idle collection and 128 KB of disk.
 - **`ndb bench` logs as it runs.** Each step logs to stderr when it starts, every 5 s while it runs (docs written, docs loaded, collections made) and when it ends with what it found, with the elapsed time and the ETA of the run. The report stays on stdout.
+
+### Fixed
+
+- A data race (1.7.0) on the period of the write buffer check, when a collection opened while others were written.
 
 ## [1.7.0] - 2026-11-08
 

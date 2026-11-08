@@ -246,7 +246,7 @@ await calls.dropIndex('dnis')
 
 ## `GET /{coll}/_stats`
 
-One element of [GET /_stats](system.md#get-stats): `name`, `write`, `rows`, `quarantined`, `indexes` (each `building` or `ready`, with `done` and `total`), `segments`, `wal_files`, `bytes` and `total`.
+One element of [GET /_stats](system.md#get-stats): `name`, `write`, `rows`, `quarantined`, `indexes` (each `building` or `ready`, with `done` and `total`), `segments`, `wal_files`, `bytes`, `total` and `asleep`.
 
 ::: code-group
 

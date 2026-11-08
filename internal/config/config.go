@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.yaml.in/yaml/v3"
 
@@ -65,6 +66,9 @@ func ParseUnixMode(s string) (os.FileMode, error) {
 // DefaultPITR is the PITR window when ndb.yml does not set pitr.
 const DefaultPITR = "1d"
 
+// DefaultIdleClose is idle_close when ndb.yml does not set it.
+const DefaultIdleClose = "10m"
+
 // DefaultMemoryLimit is the Go heap soft limit when memory_limit is not set.
 const DefaultMemoryLimit = 384 << 20
 
@@ -80,6 +84,11 @@ type Config struct {
 	// PITR is the point in time recovery window of every engine collection
 	// that does not set its own: "off", or a duration up to 7d (default 1d).
 	PITR string `yaml:"pitr"`
+
+	// IdleClose is how long an engine collection goes unused before it is
+	// closed (its files, memory and WAL reserve given back); the next call
+	// opens it again. "off" keeps every collection open (default 10m).
+	IdleClose string `yaml:"idle_close"`
 
 	Collections map[string]catalog.Def `yaml:"-"`
 
@@ -123,6 +132,7 @@ func defaults() Config {
 		Listen:        Listen{Unix: "/run/ndb/ndb.sock", UnixMode: 0o660},
 		AllowImplicit: true,
 		PITR:          DefaultPITR,
+		IdleClose:     DefaultIdleClose,
 		Collections:   map[string]catalog.Def{},
 	}
 }
@@ -190,6 +200,10 @@ func Load(path string) (Config, error) {
 
 	if _, err := catalog.ParsePITR(cfg.PITR); err != nil {
 		return Config{}, fmt.Errorf("%w: pitr: %v", ErrInvalid, err)
+	}
+
+	if _, err := ParseIdleClose(cfg.IdleClose); err != nil {
+		return Config{}, fmt.Errorf("%w: idle_close: %v", ErrInvalid, err)
 	}
 
 	if err := checkTokens(cfg.Tokens); err != nil {
@@ -294,4 +308,26 @@ func parseSize(s string) (int64, error) {
 	}
 
 	return strconv.ParseInt(s, 10, 64)
+}
+
+// ParseIdleClose reads idle_close: "off" is 0 (never close), empty is the
+// default, else a duration of at least a second (10m, 1h, 1d).
+func ParseIdleClose(s string) (time.Duration, error) {
+	switch s {
+	case "off":
+		return 0, nil
+	case "":
+		s = DefaultIdleClose
+	}
+
+	d, err := catalog.ParseDuration(s)
+	if err != nil {
+		return 0, err
+	}
+
+	if d < time.Second {
+		return 0, fmt.Errorf("%q is under a second; use off to keep collections open", s)
+	}
+
+	return d, nil
 }

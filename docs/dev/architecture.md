@@ -6,7 +6,7 @@ One Go process, `ndb`. It listens on a unix socket (and optional TCP), answers H
 
 - **Direct mode:** your app appends lines to its own `.ndjson` file. The tailer picks them up (fsnotify plus a 5 s poll). ndb never writes these files.
 - **Engine mode:** an SDK sends `insert`, `update` or `delete` over the unix socket or TCP. The writer group-commits them to the WAL with `fsync` before it answers.
-- Both feed the in-memory table and its indexes. The sealer moves old rows into Parquet segments by size or age. One scheduler runs the seals and compactions of every collection when they are due, so an idle collection costs no CPU ([storage.md](storage.md#segments-and-compaction)).
+- Both feed the in-memory table and its indexes. The sealer moves old rows into Parquet segments by size or age. One scheduler runs the seals and compactions of every collection when they are due, so an idle collection costs no CPU, and a collection not used for `idle_close` closes until the next call ([storage.md](storage.md#segments-and-compaction)).
 - `find`, `aggregate` and `watch` read memory and segments over HTTP. The newest version of each id wins.
 
 ## Guarantees

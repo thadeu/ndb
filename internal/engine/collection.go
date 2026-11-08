@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/thadeu/ndb/internal/agg"
@@ -61,20 +62,41 @@ type Collection struct {
 	// wait for the calls in flight, and new calls wait for the swap.
 	live    sync.RWMutex
 	dropped bool
+
+	// asleep is an engine collection closed for idle_close (idle.go): eng
+	// and rd are closed, and rest is what Stats tells meanwhile. Guarded by
+	// live; used is when a call last entered (unix ns).
+	db     *DB
+	asleep bool
+	rest   resting
+	used   atomic.Int64
 }
 
 // enter starts a call on the collection; leave ends it. A collection that
-// was dropped while the caller held it is unknown.
+// was dropped while the caller held it is unknown; one that sleeps is
+// opened again first.
 func (c *Collection) enter() error {
-	c.live.RLock()
+	for {
+		c.live.RLock()
 
-	if c.dropped {
+		if c.dropped {
+			c.live.RUnlock()
+
+			return fmt.Errorf("%w: %s", catalog.ErrUnknown, c.name)
+		}
+
+		if !c.asleep {
+			c.used.Store(time.Now().UnixNano())
+
+			return nil
+		}
+
 		c.live.RUnlock()
 
-		return fmt.Errorf("%w: %s", catalog.ErrUnknown, c.name)
+		if err := c.wake(); err != nil {
+			return err
+		}
 	}
-
-	return nil
 }
 
 func (c *Collection) leave() {
@@ -96,6 +118,9 @@ type Stats struct {
 	Subscribers int
 	TailerLag   int64
 	Writer      *metrics.Writer
+
+	// Asleep: closed for idle_close; the next call opens it.
+	Asleep bool
 }
 
 func (c *Collection) Find(ctx context.Context, body []byte) (collection.Page, error) {
@@ -315,7 +340,7 @@ func (c *Collection) Seal() error {
 // store is the collection that holds the segments: the engine collection,
 // or the one inside a direct collection.
 func (c *Collection) store() *collection.Collection {
-	if c.eng != nil {
+	if c.engine() {
 		return c.eng
 	}
 
@@ -336,7 +361,7 @@ func (c *Collection) TruncateWAL() (int, error) {
 
 	defer c.leave()
 
-	if c.eng == nil {
+	if !c.engine() {
 		return 0, nil
 	}
 
@@ -418,6 +443,10 @@ func (c *Collection) Stats() Stats {
 	c.live.RLock()
 	defer c.live.RUnlock()
 
+	if c.asleep {
+		return Stats{Name: c.name, Write: c.write, Rows: c.rest.rows, Indexes: c.rest.indexes, Segments: c.rest.segments, Writer: c.wm, Asleep: true}
+	}
+
 	s := Stats{Name: c.name, Write: c.write, Rows: c.rd.Len(), Indexes: c.rd.Indexes()}
 
 	if st := c.store(); st != nil {
@@ -431,7 +460,7 @@ func (c *Collection) Stats() Stats {
 		s.Subscribers = c.mem.Subscribers()
 	}
 
-	if c.eng != nil {
+	if c.engine() {
 		s.Subscribers = c.eng.Subscribers()
 		s.Writer = c.wm
 	}
@@ -441,6 +470,10 @@ func (c *Collection) Stats() Stats {
 
 // close stops the tailer (if any) and closes the collection.
 func (c *Collection) close() error {
+	if c.asleep {
+		return nil
+	}
+
 	if c.tail == nil {
 		return c.eng.Close()
 	}
@@ -449,6 +482,12 @@ func (c *Collection) close() error {
 	<-c.done
 
 	return errors.Join(c.tail.Close(), c.mem.Close())
+}
+
+// engine tells an engine-mode collection (a WAL of its own) from a direct
+// one.
+func (c *Collection) engine() bool {
+	return c.write != catalog.Direct
 }
 
 // Name is the collection name.

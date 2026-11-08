@@ -94,7 +94,8 @@ func (o Options) plan() []planned {
 	}
 
 	if o.Idle || o.all() {
-		steps = append(steps, planned{"idle: create", sec(float64(o.Collections) / 40)}, planned{"idle: at rest", sec(14)})
+		steps = append(steps, planned{"idle: create", sec(float64(o.Collections)/40 + 2)}, planned{"idle: sleep", sec(4)},
+			planned{"idle: at rest", sec(10)}, planned{"idle: wake", sec(0.2)}, planned{"idle: crash", sec(5)})
 	}
 
 	return steps

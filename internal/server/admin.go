@@ -39,6 +39,7 @@ type statsBody struct {
 	WALFiles    int               `json:"wal_files"`
 	Bytes       partBytes         `json:"bytes"`
 	Total       int64             `json:"total"`
+	Asleep      bool              `json:"asleep"`
 }
 
 func collectionStats(st engine.Stats, du diskusage.Collection) statsBody {
@@ -52,6 +53,7 @@ func collectionStats(st engine.Stats, du diskusage.Collection) statsBody {
 		WALFiles:    du.WALFiles,
 		Bytes:       partBytes{WAL: du.Bytes.WAL, Segments: du.Bytes.Segments, Meta: du.Bytes.Meta},
 		Total:       du.Total,
+		Asleep:      st.Asleep,
 	}
 }
 
@@ -76,6 +78,7 @@ func (s *Server) globalStats(w http.ResponseWriter, _ *http.Request, db *engine.
 
 	var totals struct {
 		Collections int   `json:"collections"`
+		Asleep      int   `json:"asleep"`
 		Rows        int   `json:"rows"`
 		Quarantined int64 `json:"quarantined"`
 		Segments    int   `json:"segments"`
@@ -94,6 +97,11 @@ func (s *Server) globalStats(w http.ResponseWriter, _ *http.Request, db *engine.
 		cols = append(cols, body)
 
 		totals.Collections++
+
+		if body.Asleep {
+			totals.Asleep++
+		}
+
 		totals.Rows += body.Rows
 		totals.Quarantined += body.Quarantined
 		totals.Segments += body.Segments

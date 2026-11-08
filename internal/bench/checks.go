@@ -34,10 +34,13 @@ var gates = []gate{
 	{metric: "load.rss", what: "load RSS peak", max: 600, unit: "MB"},
 	{metric: "queries.worst", what: "slowest query (median)", max: 700, unit: "ms"},
 	{metric: "aggregations.worst", what: "slowest aggregation (median)", max: 600, unit: "ms"},
-	{metric: "idle.disk_kb", what: "disk per idle collection", max: 256, unit: "KB"},
+	{metric: "idle.asleep", what: "idle collections still open after idle_close", max: 0},
+	{metric: "idle.wake_ms", what: "first call on a sleeping collection (median)", max: 50, unit: "ms"},
+	{metric: "idle.missing", what: "acked writes lost by a kill -9 while collections wake", max: 0},
+	{metric: "idle.disk_kb", what: "disk per idle collection", max: 128, unit: "KB"},
 	{metric: "idle.cpu_pct", what: "CPU of the idle collections", max: 0.5, unit: "% core"},
-	{metric: "idle.rss_mb", what: "RSS of the idle collections", max: 60, unit: "MB"},
-	{metric: "idle.fds", what: "open files per idle collection", max: 3},
+	{metric: "idle.rss_kb", what: "RSS per idle collection", max: 256, unit: "KB"},
+	{metric: "idle.fds", what: "open files per idle collection", max: 0.1},
 }
 
 var (

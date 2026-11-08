@@ -3,6 +3,7 @@ package collection
 import (
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -23,7 +24,9 @@ type Shared struct {
 	mu   sync.Mutex
 	mem  map[*Collection]int64
 	slot chan struct{}
-	tick time.Duration
+
+	// tick is the budget check period, the shortest seal tick (ns).
+	tick atomic.Int64
 
 	budgetJob *job
 }
@@ -35,7 +38,9 @@ func NewShared(writeBuffer int64) *Shared {
 		writeBuffer = DefaultWriteBuffer
 	}
 
-	s := &Shared{writeBuffer: writeBuffer, mem: map[*Collection]int64{}, slot: make(chan struct{}, 1), tick: defaultSealTick}
+	s := &Shared{writeBuffer: writeBuffer, mem: map[*Collection]int64{}, slot: make(chan struct{}, 1)}
+
+	s.tick.Store(int64(defaultSealTick))
 
 	s.budgetJob = newJob(s.checkBudget)
 
@@ -51,7 +56,7 @@ func (s *Shared) join(c *Collection, tick time.Duration) {
 
 	s.mu.Lock()
 	s.mem[c] = 0
-	s.tick = min(s.tick, tick)
+	s.tick.Store(min(s.tick.Load(), int64(tick)))
 	s.mu.Unlock()
 }
 
@@ -61,7 +66,7 @@ func (s *Shared) written() {
 		return
 	}
 
-	s.budgetJob.poke(time.Now().Add(s.tick))
+	s.budgetJob.poke(time.Now().Add(time.Duration(s.tick.Load())))
 }
 
 // checkBudget reads the memtable sizes and, over the write buffer, gives
@@ -76,7 +81,7 @@ func (s *Shared) checkBudget() time.Time {
 		cols = append(cols, c)
 	}
 
-	tick := s.tick
+	tick := time.Duration(s.tick.Load())
 
 	s.mu.Unlock()
 

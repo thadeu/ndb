@@ -84,14 +84,16 @@ Every collection, the totals, the version and the uptime.
       "name": "posts", "write": "engine", "rows": 4, "quarantined": 0,
       "indexes": [{"field": "author", "state": "ready", "done": 0, "total": 0}],
       "segments": 1, "wal_files": 1,
-      "bytes": {"wal": 805, "segments": 3965, "meta": 131072}, "total": 135842
+      "bytes": {"wal": 805, "segments": 3965, "meta": 131072}, "total": 135842,
+      "asleep": false
     }
   ],
-  "totals": {"collections": 2, "rows": 7, "quarantined": 1, "segments": 1, "wal_files": 1, "bytes": 529315},
+  "totals": {"collections": 2, "asleep": 0, "rows": 7, "quarantined": 1, "segments": 1, "wal_files": 1, "bytes": 529315},
   "blobs_bytes": 0, "cursors_bytes": 131072, "shared_bytes": 262144
 }
 ```
 
+- `asleep` is a collection closed by `idle_close` (no call for 10 minutes by default): it holds no open file and no memory, and the next call opens it again. Its `rows`, `indexes` and `segments` are as of when it slept; reading `_stats` does not open it.
 - `segments` and `wal_files` count files, not live rows. A direct collection has no segments and no WAL; its `meta` is `meta.bolt` and `quarantine/`.
 - `totals.bytes` includes `shared_bytes` (blobs, `cursors.bolt`, catalog and the other files of the data dir).
 - One element of `collections` is [GET /{coll}/_stats](collections.md#get-coll-stats).

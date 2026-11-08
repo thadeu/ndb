@@ -45,6 +45,8 @@ The recent rows live in memory (the memtable). They are sealed to an immutable P
 
 The seals, compactions, WAL truncation and TTL sweeps of every collection run from one scheduler, not from a timer per collection. Each job has a deadline: a write gives the seal one (when the memtable turns 10 minutes old, or now when it passed its size), a seal gives the compaction one, and a job with nothing left to do gives none. A collection that is not written costs no CPU: 1 000 idle collections use 0 ms of CPU in 10 s (`ndb bench -idle`). Work that comes with time and not with writes (segments past `retention`, WAL files a reader still holds) is checked once a minute, only for the collections that have it.
 
+An engine collection with no call for `idle_close` (default 10 minutes) sleeps: it seals its memtable and closes its WAL file, `meta.bolt` and segments, so it holds no open file and no disk reserve. The next call opens it again (under a millisecond for a small collection). `_stats` and the metrics answer from what it held when it slept, and the daily PITR check opens it only if it was written since its newest snapshot. A collection with a `_watch` consumer stays open; direct collections never sleep. 1 000 collections and 365 daily partitions at rest: no open file, 0 ms of CPU (`ndb bench -idle`).
+
 ## Memory
 
 ndb keeps data on disk; memory has a fixed size, whatever the number of documents, collections or partitions:
