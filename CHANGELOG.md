@@ -11,6 +11,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **Direct mode is disk first.** A direct collection (apps append NDJSON files, ndb tails them) kept every row in memory and read every file again from offset 0 at each start. It now seals its rows to segments like an engine collection, with the same bounded memory (~20 bytes per sealed row), and each checkpoint saves the read position of every file. After a restart the tailer goes on from the last checkpoint. While the memtable is full the tailer waits for a seal. The first start of this version reads the files once, as before, and seals them.
 - `ndb compact` and `POST /{coll}/_compact` work on direct collections (they were `not_supported`).
 
+## [1.1.4] - 2026-11-07
+
 ## [1.1.3] - 2026-11-07
 
 ## [1.1.2] - 2026-11-08
@@ -281,7 +283,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.1.3...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.1.4...HEAD
+[1.1.4]: https://github.com/thadeu/ndb/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/thadeu/ndb/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/thadeu/ndb/compare/v1.1.0...v1.1.2
 [1.1.0]: https://github.com/thadeu/ndb/compare/v1.0.0...v1.1.0

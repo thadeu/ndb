@@ -65,7 +65,14 @@ func retained(t *testing.T, dir string) (*engine.DB, map[string]uint64) {
 		t.Fatal(err)
 	}
 
+	// The feed publishes a commit after its fsync, so "now" can be before the
+	// delete of p3, and the stream then gives that delete first. Read up to
+	// p31, so "late" is at the last tx.
 	ev := nextEvent(t, live)
+
+	for ev.ID != "p31" {
+		ev = nextEvent(t, live)
+	}
 
 	if err := db.Ack("posts", "late", ev.Pos); err != nil {
 		t.Fatal(err)
