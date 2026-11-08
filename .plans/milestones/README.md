@@ -9,31 +9,34 @@ Deferred ideas: [`../backlog/`](../backlog/).
 - Each milestone ends with something usable and tested.
 - Test first (TDD). Each epic starts with its failing tests.
 - A milestone is done only when all its **exit criteria** pass.
-- Performance numbers are measured with the benchmarks of M00, on the
+- Performance numbers are measured with `ndb bench` (or `make bench`), on the
   benchmark machine. A miss is recorded, not hidden.
 - Status values: `not started`, `in progress`, `done`.
 
 ## List
 
-| ID | Milestone | Goal | Depends on | Plan |
-|---|---|---|---|---|
-| [M00](m00-bootstrap.md) | Bootstrap | repo, tooling, `fs` interface, test harnesses | — | §14 |
-| [M01](m01-wal-catalog-writes.md) | WAL, catalog, writes | durable engine-mode writes + catalog | M00 | §5, §7.2, §8, phase 1 |
-| [M02](m02-tailer.md) | Tailer | direct-mode ingestion of NDJSON folders | M01 | §6.1, §9, phase 2 |
-| [M03](m03-query-indexes.md) | Query + indexes | `find`, operators, indexes, pagination | M01 | §10, §11.1, phase 3 |
-| [M04](m04-segments.md) | Columnar segments | sealer, schema rules, Parquet | M03 | §7.3, §7.4, phase 4 |
-| [M05](m05-planner-scan.md) | Planner + scan | pruning, column scan, parallel | M04 | §11.2, §11.4, phase 5 |
-| [M06](m06-aggregation.md) | Aggregation | pipeline, `$group`, `$dateTrunc` | M05 | §10.2, §11.3, phase 6 |
-| [M07](m07-http-api.md) | HTTP API + daemon | the `ndb` daemon on unix socket + TCP | M03 (M04–M06 for full surface) | §12.1, phase 7 |
-| [M08](m08-client-go.md) | Go client | `ndb.Collection[T]` | M07 | §12.2 |
-| [M09](m09-watch-outbox.md) | Watch + first real use | `watch`/`ack`; fsw-esl outbox-sweeper | M08 | §10.4, phase 8 |
-| [M10](m10-client-ruby.md) | Ruby client | gem `ndb-rails`, `Ndb::Record` | M07 | §12.2 |
-| [M11](m11-client-ts.md) | TS client | package `ndb`, `ndb.model` | M07 | §12.2 |
-| [M12](m12-compaction-blobs-metrics.md) | Compaction, retention, TTL, blobs, metrics | long-running operation; Redis-like document expiry | M05 | §7.5, phase 9 |
-| [M13](m13-packaging-adoption.md) | Packaging + adoption | release, Docker, docs, use in 3 apps | all | phase 10 |
-| [M14](m14-console.md) | Ndb Console | self-hosted web UI: connections, browser, dev tools | M07, M13 | — |
-| [M15](m15-api-1.0.md) | API 1.0 | ES-style routes (`/{coll}/_search`), `query` body key, JSON search envelope, one SDK vocabulary; breaking, release 1.0.0 (done, 1.0.0) | M07–M14 | — |
-| [M16](m16-disk-first.md) | Disk first | the daemon stays under 512 MB of RSS at any data size: ids, live bits and indexes per segment on disk, one write budget, streaming seal and compaction (done) | M15 | — |
+Done milestones are removed from this folder (git history keeps them); the
+docs in `docs/dev/` describe what they built.
+
+| ID | Milestone | Goal | Status |
+|---|---|---|---|
+| M00 | Bootstrap | repo, tooling, `fs` interface, test harnesses | done |
+| M01 | WAL, catalog, writes | durable engine-mode writes + catalog | done |
+| M02 | Tailer | direct-mode ingestion of NDJSON folders | done |
+| M03 | Query + indexes | `find`, operators, indexes, pagination | done |
+| M04 | Columnar segments | sealer, schema rules, Parquet | done |
+| M05 | Planner + scan | pruning, column scan, parallel | done |
+| M06 | Aggregation | pipeline, `$group`, `$dateTrunc` | done |
+| M07 | HTTP API + daemon | the `ndb` daemon on unix socket + TCP | done |
+| M08 | Go client | `ndb.Collection[T]` | done |
+| M09 | Watch + first real use | `watch`/`ack` (the fsw-esl outbox-sweeper moved to M13) | done |
+| M10 | Ruby client | gem `ndb-rails`, `Ndb::Record` | done |
+| M11 | TS client | package `ndb`, `ndb.model` | done |
+| M12 | Compaction, retention, TTL, blobs, metrics | long-running operation; document expiry | done |
+| [M13](m13-packaging-adoption.md) | Packaging + adoption | release, Docker, docs, use in 3 apps | in progress |
+| M14 | Ndb Console | self-hosted web UI: connections, browser, dev tools | done |
+| M15 | API 1.0 | ES-style routes, `query` body key, one SDK vocabulary (1.0.0) | done |
+| M16 | Disk first | bounded memory at any data size (1.1.0; direct mode 1.2.0) | done |
 
 ## Next (after 0.1.2)
 
@@ -47,23 +50,6 @@ Deferred ideas: [`../backlog/`](../backlog/).
 | Date math and `$elemMatch` | `now-7d/d` in ranges on the time field; one array element matches many conditions | done (0.4.0) | docs/dev/query.md#date-math |
 | Relationships | `include` in find | not now | [backlog/relationships.md](../backlog/relationships.md) |
 | Anway job history | the jobs that ended, searchable, through direct mode | proposal | [backlog/anway-job-history.md](../backlog/anway-job-history.md) |
-
-## Dependencies
-
-```
-M00 ─▶ M01 ─┬─▶ M02
-            └─▶ M03 ─▶ M04 ─▶ M05 ─┬─▶ M06
-                 │                  └─▶ M12
-                 └─▶ M07 ─┬─▶ M08 ─▶ M09
-                          ├─▶ M10
-                          └─▶ M11
-                                         all ─▶ M13
-```
-
-- M02 and M03 can run in parallel after M01.
-- M07 can start after M03 with `find` only, and grow as M04–M06 land.
-- M10 and M11 can run in parallel after M07.
-- `attribute :blob` in M10/M11 waits for M12.
 
 ## Milestone file template
 

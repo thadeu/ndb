@@ -1,6 +1,6 @@
 # M13 — Packaging + adoption
 
-Status: in progress (E13.1, E13.3, E13.5 done; E13.2, E13.4, E13.6 open) · Depends on: all · Plan: phase 10
+Status: in progress (E13.1, E13.2, E13.3, E13.5, E13.6 done; E13.4 open) · Depends on: all · Plan: phase 10
 
 ## Goal
 
@@ -18,9 +18,9 @@ fsw-esl, anway and voodu-webui.
 
 ### E13.2 Clients release
 
-- [ ] Go module tagged
-- [ ] Gem `ndb-rails` published
-- [ ] npm package `ndb` (name to confirm) published
+- [x] Go module tagged (`sdk/go/vX.Y.Z`, by the release)
+- [x] Gems `ndb` and `ndb-rails` published (`publish-gem.yml`)
+- [x] npm package published (`publish-npm.yml`)
 
 ### E13.3 Docs
 
@@ -79,7 +79,7 @@ fsw-esl, anway and voodu-webui.
 ### E13.4 Adoption
 
 - [ ] fsw-esl: outbox-sweeper (from M09) + one report or chart query
-- [ ] anway: logs collection (direct mode) + outbox steps
+- [ ] anway: job history (direct mode), see [backlog/anway-job-history.md](../backlog/anway-job-history.md)
 - [ ] voodu-webui: replace one in-memory filter class with ndb
 - [ ] Record what was hard in each app → new backlog items
 
@@ -92,3 +92,12 @@ fsw-esl, anway and voodu-webui.
 ## Out of scope
 
 - Hosted service. Multi-server.
+
+## Open items from done milestones
+
+- M12: an `expires_field` with no index still scans; skip it with the zone
+  map of the field.
+- M16: a restore holds the rows of a snapshot in memory
+  (`collection.WriteSnapshot` takes a slice); stream them in two passes.
+- M16: a scan of the memtable decodes each document (a `_count` right
+  after a bulk load); keep the time value of each memtable entry.

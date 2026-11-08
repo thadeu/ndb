@@ -1,6 +1,6 @@
 # Project Instructions
 
-Web console for the ndb daemon ("Ndb Console"). Bun, Hono, and server-rendered JSX, compiled into one binary (`ndb-ui`). Read `README.md` first. The API contract is the HTTP reference in `docs/dev/http.md` and `docs/dev/http/` in this repo. The plan is `.plans/milestones/m14-console.md`.
+Web console for the ndb daemon ("Ndb Console"). Bun, Hono, and server-rendered JSX, compiled into one binary (`ndb-ui`). Read `README.md` first. The API contract is the HTTP reference in `docs/dev/http.md` and `docs/dev/http/` in this repo. The plan was `.plans/milestones/m14-console.md` (built; in git history).
 
 ## Rules
 
