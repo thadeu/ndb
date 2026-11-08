@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-11-08
+
 ### Changed
 
 - **Concurrent reads of the same segments are 5 to 12 times faster.** Each segment kept one decoded row group, so queries that read rows of different groups at once decoded them again and again: 4 sorted searches at once took 3.1 s (0.6 s one after another), and a `has_many` lookup of 20 rows took 12.3 s. The decoded groups now share one cache of the daemon, at most 32 MiB: 4 at once take 0.26 s, the lookup 1.1 s. Memory stays bounded.
@@ -447,7 +449,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/thadeu/ndb/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/thadeu/ndb/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/thadeu/ndb/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/thadeu/ndb/compare/v1.5.0...v1.6.0
