@@ -1,24 +1,26 @@
 import { useConnectionTest } from '@/hooks/useConnectionTest';
 
-// mount upgrades the Test button of the connection form. Without the script,
-// the button posts the form and the page shows the result after a redirect.
+// mount upgrades the Test button of each connection form (New and Edit).
+// Without the script, the button posts the form and the page shows the
+// result after a redirect.
 export function mount(): void {
-  const button = document.querySelector<HTMLButtonElement>('[data-test]');
-  const result = document.querySelector<HTMLElement>('[data-test-result]');
-  const form = button?.form;
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-test]')) {
+    const form = button.form;
+    const result = form?.querySelector<HTMLElement>('[data-test-result]');
 
-  if (!button || !result || !form) return;
+    if (!form || !result) continue;
 
-  const test = useConnectionTest(button.getAttribute('formaction') ?? 'connections/test');
+    const test = useConnectionTest(button.getAttribute('formaction') ?? 'connections/test');
 
-  button.addEventListener('click', async event => {
-    event.preventDefault();
-    result.textContent = 'Testing…';
-    result.className = 'test-result';
+    button.addEventListener('click', async event => {
+      event.preventDefault();
+      result.textContent = 'Testing…';
+      result.className = 'test-result';
 
-    const answer = await test(form);
+      const answer = await test(form);
 
-    result.textContent = answer.message;
-    result.className = answer.ok ? 'test-result ok' : 'test-result bad';
-  });
+      result.textContent = answer.message;
+      result.className = answer.ok ? 'test-result ok' : 'test-result bad';
+    });
+  }
 }

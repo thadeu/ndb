@@ -25,9 +25,14 @@ export interface ConnectionsPageProps {
   error?: string;
   tested?: { ok: boolean; message: string };
   adding?: boolean;
+  editing?: string;
 }
 
-export const ConnectionsPage: FC<ConnectionsPageProps> = ({ items, fixed, notice, error, tested, adding = false }) => (
+type Tested = { ok: boolean; message: string };
+
+const editId = (name: string) => `edit-${name}`;
+
+export const ConnectionsPage: FC<ConnectionsPageProps> = ({ items, fixed, notice, error, tested, adding = false, editing }) => (
   <Layout title="Connections">
     <div class="page-head">
       <div class="page-head-text">
@@ -38,7 +43,7 @@ export const ConnectionsPage: FC<ConnectionsPageProps> = ({ items, fixed, notice
     </div>
 
     {notice && <p class="note ok">{notice}</p>}
-    {error && <p class="note bad">{error}</p>}
+    {error && !adding && !editing && <p class="note bad">{error}</p>}
 
     <div class="grid-cards">
       {items.map(item => (
@@ -48,7 +53,23 @@ export const ConnectionsPage: FC<ConnectionsPageProps> = ({ items, fixed, notice
       {!fixed && <AddCard />}
     </div>
 
-    {!fixed && <NewConnection tested={tested} open={adding} />}
+    {!fixed && (
+      <ConnectionDrawer
+        open={adding}
+        tested={adding ? tested : undefined}
+        error={adding ? error : undefined}
+      />
+    )}
+
+    {!fixed &&
+      items.map(({ connection }) => (
+        <ConnectionDrawer
+          connection={connection}
+          open={editing === connection.name}
+          tested={editing === connection.name ? tested : undefined}
+          error={editing === connection.name ? error : undefined}
+        />
+      ))}
   </Layout>
 );
 
@@ -90,55 +111,103 @@ const ConnectionCard: FC<{ item: ConnectionStatus; fixed: boolean }> = ({ item, 
         <Badge>{connection.token ? 'token set' : 'no token'}</Badge>
 
         {!fixed && (
-          <form method="post" action={`connections/${encodeURIComponent(connection.name)}/delete`}>
-            <Button variant="ghost" size="sm" type="submit">
-              Remove
+          <div class="conn-actions">
+            <Button
+              variant="ghost"
+              size="sm"
+              href={`?edit=${encodeURIComponent(connection.name)}`}
+              {...openDialog(editId(connection.name))}
+            >
+              Edit
             </Button>
-          </form>
+
+            <form method="post" action={`connections/${encodeURIComponent(connection.name)}/delete`}>
+              <Button variant="ghost" size="sm" type="submit">
+                Remove
+              </Button>
+            </form>
+          </div>
         )}
       </div>
     </div>
   );
 };
 
-const NewConnection: FC<{ tested?: { ok: boolean; message: string }; open: boolean }> = ({ tested, open }) => {
-  const resultClass = tested ? (tested.ok ? 'test-result ok' : 'test-result bad') : 'test-result';
+const resultClass = (tested?: Tested) => (tested ? (tested.ok ? 'test-result ok' : 'test-result bad') : 'test-result');
+
+const TestRow: FC<{ tested?: Tested; submit: string }> = ({ tested, submit }) => (
+  <div class="form-actions">
+    <Button type="submit" formaction="connections/test" data-test>
+      Test
+    </Button>
+
+    <span class={resultClass(tested)} data-test-result>
+      {tested?.message}
+    </span>
+
+    <span class="grow" />
+
+    <Button variant="primary" type="submit">
+      {submit}
+    </Button>
+  </div>
+);
+
+interface ConnectionDrawerProps {
+  connection?: Connection;
+  tested?: Tested;
+  error?: string;
+  open: boolean;
+}
+
+// ConnectionDrawer is the one connection form, for New and for Edit. Edit
+// fills it with the saved connection, but never with the token: an empty
+// Token field keeps the saved one.
+const ConnectionDrawer: FC<ConnectionDrawerProps> = ({ connection, tested, error, open }) => {
+  const id = connection ? editId(connection.name) : 'new-connection';
+  const action = connection ? `connections/${encodeURIComponent(connection.name)}/edit` : 'connections';
+  const title = connection ? `Edit ${connection.name}` : 'New connection';
+
+  const tokenHint = connection?.token ? 'empty keeps the saved token' : 'only for TCP with a token';
 
   return (
     <Drawer
-      id="new-connection"
+      id={id}
       side="right"
-      title="New connection"
+      title={title}
       description="Discover an ndb on this machine or on a server, or type its URL."
       open={open}
       closeHref="./"
     >
-      <form method="post" action="connections" class="stack">
-        <Field id="conn-name" label="Name">
-          <Input id="conn-name" name="name" placeholder="optional — taken from the URL" maxlength={64} />
+      <form method="post" action={action} class="stack">
+        {connection && <input type="hidden" name="current" value={connection.name} />}
+
+        {error && <p class="note bad">{error}</p>}
+
+        <Field id={`${id}-name`} label="Name">
+          <Input
+            id={`${id}-name`}
+            name="name"
+            value={connection?.name}
+            placeholder="optional — taken from the URL"
+            maxlength={64}
+          />
         </Field>
 
-        <Discover />
+        <Discover id={`${id}-url`} value={connection?.url} />
 
-        <Field id="conn-token" label="Token">
-          <Input id="conn-token" name="token" type="password" placeholder="only for TCP with a token" autocomplete="off" />
+        <Field id={`${id}-token`} label="Token">
+          <Input id={`${id}-token`} name="token" type="password" placeholder={tokenHint} autocomplete="off" />
         </Field>
 
-        <div class="form-actions">
-          <Button type="submit" formaction="connections/test" data-test>
-            Test
-          </Button>
+        {connection?.token && (
+          <label class="check">
+            <input type="checkbox" name="clear_token" value="1" />
+            <span>Remove the saved token</span>
+          </label>
+        )}
 
-          <span class={resultClass} data-test-result>
-            {tested?.message}
-          </span>
-
-          <span class="grow" />
-
-          <Button variant="primary" type="submit">
-            Save and open
-          </Button>
-        </div>
+        <TestRow tested={tested} submit="Save and open" />
       </form>
 
       <p class="hint">
@@ -148,16 +217,17 @@ const NewConnection: FC<{ tested?: { ok: boolean; message: string }; open: boole
   );
 };
 
-const Discover: FC = () => (
+const Discover: FC<{ id: string; value?: string }> = ({ id, value }) => (
   <div class="discover" data-discover>
-    <label class="label" for="conn-url">
+    <label class="label" for={id}>
       URL or host
     </label>
 
     <div class="discover-bar">
       <Input
-        id="conn-url"
+        id={id}
         name="url"
+        value={value}
         mono
         placeholder="unix:///run/ndb/ndb.sock, tcp://10.10.0.1:7070, or localhost"
         autocomplete="off"

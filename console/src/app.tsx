@@ -104,6 +104,7 @@ export function createApp(connections: Connections, assets: Assets, options: App
   app.get('/', async c => {
     const items = await Promise.all(connections.list().map(status));
     const tested = c.req.query('tested');
+    const editing = c.req.query('edit');
 
     return c.html(
       <ConnectionsPage
@@ -111,19 +112,26 @@ export function createApp(connections: Connections, assets: Assets, options: App
         fixed={connections.fixed}
         notice={c.req.query('notice')}
         error={c.req.query('error')}
-        adding={c.req.query('new') === '1' || Boolean(tested) || Boolean(c.req.query('error'))}
+        adding={!editing && (c.req.query('new') === '1' || Boolean(tested) || Boolean(c.req.query('error')))}
+        editing={editing}
         tested={tested ? { ok: tested === 'ok', message: c.req.query('msg') ?? '' } : undefined}
       />,
     );
   });
 
-  async function readForm(c: Context<Env>): Promise<Connection> {
+  // readForm reads the connection form. In the edit form, `current` names the
+  // saved connection: an empty token keeps its token, unless `clear_token`.
+  async function readForm(c: Context<Env>): Promise<Connection & { current?: string }> {
     const form = await c.req.parseBody().catch(() => ({}) as Record<string, unknown>);
 
     const url = String(form.url ?? '').trim();
     const name = String(form.name ?? '').trim() || suggestName(url);
 
-    return { name, url, token: String(form.token ?? '') || undefined };
+    const current = String(form.current ?? '') || undefined;
+    const typed = String(form.token ?? '') || undefined;
+    const kept = current && !form.clear_token ? connections.get(current)?.token : undefined;
+
+    return { name, url, token: typed ?? kept, current };
   }
 
   function back(c: Context<Env>, params: Record<string, string>) {
@@ -161,7 +169,7 @@ export function createApp(connections: Connections, assets: Assets, options: App
 
     if ((c.req.header('accept') ?? '').includes('json')) return c.json(result);
 
-    return back(c, { tested: result.ok ? 'ok' : 'bad', msg: result.message });
+    return back(c, { tested: result.ok ? 'ok' : 'bad', msg: result.message, ...(connection.current ? { edit: connection.current } : {}) });
   });
 
   app.post('/connections/discover', async c => {
@@ -178,6 +186,22 @@ export function createApp(connections: Connections, assets: Assets, options: App
 
       throw error;
     }
+  });
+
+  app.post('/connections/:name/edit', async c => {
+    if (connections.fixed) return c.text('The connection is fixed by NDB_URL.', 403);
+
+    const name = c.req.param('name');
+    const { current: _current, ...connection } = await readForm(c);
+
+    try {
+      target(connection.url);
+      connections.update(name, connection);
+    } catch (error) {
+      return back(c, { edit: name, error: error instanceof Error ? error.message : 'Cannot save.' });
+    }
+
+    return c.redirect(`${c.var.prefix}/c/${encodeURIComponent(connection.name)}`, 303);
   });
 
   app.post('/connections/:name/delete', c => {

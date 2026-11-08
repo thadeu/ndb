@@ -146,6 +146,40 @@ describe('pages', () => {
     expect(store.get('extra')).toBeUndefined();
   });
 
+  it('edits a connection and keeps its token when the field is empty', async () => {
+    store.add({ name: 'edit-me', url, token: 'kept-token' });
+
+    const html = await (await page('/?edit=edit-me')).text();
+
+    expect(html).toContain('Edit edit-me');
+    expect(html).not.toContain('kept-token');
+
+    const saved = await page('/connections/edit-me/edit', form({ current: 'edit-me', name: 'edited', url, token: '' }));
+
+    expect(saved.status).toBe(303);
+    expect(store.get('edit-me')).toBeUndefined();
+    expect(store.get('edited')).toEqual({ name: 'edited', url, token: 'kept-token' });
+
+    await page('/connections/edited/edit', form({ current: 'edited', name: 'edited', url, clear_token: '1' }));
+
+    expect(store.get('edited')?.token).toBeUndefined();
+
+    await page('/connections/edited/delete', form({}));
+  });
+
+  it('refuses to rename a connection to a name in use', async () => {
+    store.add({ name: 'one', url });
+    store.add({ name: 'two', url });
+
+    const response = await page('/connections/one/edit', form({ current: 'one', name: 'two', url }));
+
+    expect(response.headers.get('location')).toContain('edit=one');
+    expect(store.get('one')).toBeDefined();
+
+    store.remove('one');
+    store.remove('two');
+  });
+
   it('uses the mount prefix in the base tag', async () => {
     const html = await (await page('/', { headers: { 'x-forwarded-prefix': '/ndb' } })).text();
 

@@ -13,6 +13,12 @@ export interface Block {
 
 const METHOD_LINE = /^\s*(GET|POST|PUT|DELETE|PATCH|HEAD)\s+(\S+)\s*$/i;
 
+// normalizePath adds the leading slash when the line omits it, as in Kibana:
+// `POST orders/_search` sends `POST /orders/_search`.
+export function normalizePath(path: string): string {
+  return path.startsWith('/') ? path : `/${path}`;
+}
+
 export function isMethodLine(line: string): boolean {
   return METHOD_LINE.test(line);
 }
@@ -40,7 +46,7 @@ export function parseBlocks(text: string): Block[] {
     if (match) {
       close();
 
-      current = { method: (match[1] as string).toUpperCase(), path: match[2] as string, body: '', start: index, end: index };
+      current = { method: (match[1] as string).toUpperCase(), path: normalizePath(match[2] as string), body: '', start: index, end: index };
 
       return;
     }

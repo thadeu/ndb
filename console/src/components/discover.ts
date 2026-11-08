@@ -72,25 +72,26 @@ function resultItem(found: Found, onUse: () => void): HTMLElement {
   return item;
 }
 
-// mount upgrades the Discover row of the connection form. It needs the
-// script: without it, a note asks for the URL by hand.
+// mount upgrades each Discover row of the connection forms (New and Edit).
+// It needs the script: without it, a note asks for the URL by hand.
 export function mount(): void {
-  const root = document.querySelector<HTMLElement>('[data-discover]');
-  const button = root?.querySelector<HTMLButtonElement>('[data-discover-run]');
-  const host = root?.querySelector<HTMLInputElement>('[data-discover-host]');
-  const status = root?.querySelector<HTMLElement>('[data-discover-status]');
-  const list = root?.querySelector<HTMLElement>('[data-discover-list]');
+  for (const root of document.querySelectorAll<HTMLElement>('[data-discover]')) mountOne(root);
+}
 
-  if (!root || !button || !host || !status || !list) return;
+function mountOne(root: HTMLElement): void {
+  const button = root.querySelector<HTMLButtonElement>('[data-discover-run]');
+  const host = root.querySelector<HTMLInputElement>('[data-discover-host]');
+  const status = root.querySelector<HTMLElement>('[data-discover-status]');
+  const list = root.querySelector<HTMLElement>('[data-discover-list]');
 
-  const form = (host.closest('dialog') ?? document).querySelector<HTMLFormElement>('form[action="connections"]');
+  if (!button || !host || !status || !list) return;
+
+  const form = host.form;
   const name = form?.querySelector<HTMLInputElement>('[name=name]');
   const url = host;
   const token = form?.querySelector<HTMLInputElement>('[name=token]');
 
   const use = (found: Found) => {
-    if (!url) return;
-
     url.value = found.url;
 
     if (name && name.value === '') name.value = suggestName(found.url);

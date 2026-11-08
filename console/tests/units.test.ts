@@ -89,6 +89,12 @@ describe('devtools blocks', () => {
     expect(blocks[0]?.body).toBe('{\n  "limit": 1\n}');
   });
 
+  it('adds the leading slash when the path omits it', () => {
+    const blocks = parseBlocks('POST orders/_search\n{"limit":1}\n\nGET _stats\n\nGET /_health');
+
+    expect(blocks.map(block => block.path)).toEqual(['/orders/_search', '/_stats', '/_health']);
+  });
+
   it('finds the block under the cursor, or the next one', () => {
     const blocks = parseBlocks(text);
 

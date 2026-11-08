@@ -66,6 +66,27 @@ export class Connections {
     this.write([...rest, { name: connection.name, url: connection.url, ...(connection.token ? { token: connection.token } : {}) }]);
   }
 
+  // update replaces the connection `name` in place, so the list keeps its
+  // order. The new name can differ, but not match another connection.
+  update(name: string, connection: Connection): void {
+    if (this.fixed) throw new Error('The connection list is fixed by NDB_URL.');
+
+    if (!NAME.test(connection.name)) throw new Error('Name: use letters, digits, dot, dash, or underscore.');
+
+    const list = this.list();
+    const index = list.findIndex(item => item.name === name);
+
+    if (index < 0) throw new Error(`No connection named ${name}.`);
+
+    if (connection.name !== name && list.some(item => item.name === connection.name)) {
+      throw new Error(`A connection named ${connection.name} already exists.`);
+    }
+
+    list[index] = { name: connection.name, url: connection.url, ...(connection.token ? { token: connection.token } : {}) };
+
+    this.write(list);
+  }
+
   remove(name: string): void {
     if (this.fixed) throw new Error('The connection list is fixed by NDB_URL.');
 
