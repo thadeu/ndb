@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 )
 
 // Parts is the disk usage of a data dir, split by what the bytes are for.
@@ -18,11 +19,16 @@ type Parts struct {
 	Meta     int64 `json:"meta"`
 	Blobs    int64 `json:"blobs"`
 	Cursors  int64 `json:"cursors"`
+
+	// PITR is what the PITR snapshots and the trash hold beyond the live
+	// files: a snapshot links the live segments, which costs nothing until
+	// a compaction replaces them.
+	PITR int64 `json:"pitr"`
 }
 
 // Total is the sum of all parts.
 func (p Parts) Total() int64 {
-	return p.WAL + p.Segments + p.Meta + p.Blobs + p.Cursors
+	return p.WAL + p.Segments + p.Meta + p.Blobs + p.Cursors + p.PITR
 }
 
 // Add adds o to p.
@@ -32,6 +38,7 @@ func (p *Parts) Add(o Parts) {
 	p.Meta += o.Meta
 	p.Blobs += o.Blobs
 	p.Cursors += o.Cursors
+	p.PITR += o.PITR
 }
 
 // Collection is the usage of one collection dir.
@@ -73,6 +80,8 @@ func Scan(dataDir string) (Usage, error) {
 			u.Shared.Blobs, _ = TreeSize(path)
 		case e.Name() == "cursors.bolt":
 			u.Shared.Cursors, _ = TreeSize(path)
+		case e.Name() == "trash" && e.IsDir():
+			u.Shared.PITR = UniqueSize(path, "")
 		default:
 			size, _ := TreeSize(path)
 			u.Shared.Meta += size
@@ -140,6 +149,8 @@ func ScanCollection(dir, name string) Collection {
 		case strings.HasSuffix(e.Name(), ".ndjson"):
 			c.Bytes.WAL += size
 			c.WALFiles += files
+		case e.IsDir() && e.Name() == "pitr":
+			c.Bytes.PITR += UniqueSize(path, filepath.Join(dir, "segments"))
 		default:
 			c.Bytes.Meta += size
 		}
@@ -189,4 +200,52 @@ func (u Usage) Sum() Parts {
 	}
 
 	return sum
+}
+
+// UniqueSize is the byte size of the files under path, each inode once,
+// leaving out the inodes that the tree except also has (its hard links
+// cost nothing). An empty except leaves out nothing.
+func UniqueSize(path, except string) int64 {
+	seen := map[uint64]bool{}
+
+	if except != "" {
+		walkInodes(except, func(ino uint64, _ int64) { seen[ino] = true })
+	}
+
+	var total int64
+
+	walkInodes(path, func(ino uint64, size int64) {
+		if !seen[ino] {
+			seen[ino] = true
+			total += size
+		}
+	})
+
+	return total
+}
+
+// walkInodes calls fn for every file under root. Without inode numbers (not
+// unix), each file is its own inode.
+func walkInodes(root string, fn func(ino uint64, size int64)) {
+	next := uint64(1) << 63
+
+	_ = filepath.WalkDir(root, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+
+		if st, ok := info.Sys().(*syscall.Stat_t); ok {
+			fn(uint64(st.Ino), info.Size())
+		} else {
+			next++
+			fn(next, info.Size())
+		}
+
+		return nil
+	})
 }

@@ -31,7 +31,26 @@ func (db *DB) GCBlobs(ctx context.Context, grace time.Duration) (blob.GCResult, 
 		return blob.GCResult{}, err
 	}
 
+	db.blobs.SetHold(db.longestWindow())
+
 	return db.blobs.GC(live, grace)
+}
+
+// longestWindow is the longest PITR window of the collections: an orphan
+// blob stays at least that long, since a restore may bring back its
+// document.
+func (db *DB) longestWindow() time.Duration {
+	var out time.Duration
+
+	for _, def := range db.cat.List() {
+		out = max(out, db.window(def))
+	}
+
+	for _, t := range db.trashed() {
+		out = max(out, t.Window)
+	}
+
+	return out
 }
 
 // compacted is the OnCompact hook of every engine collection. A compaction

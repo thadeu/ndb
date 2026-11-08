@@ -108,6 +108,10 @@ func (db *DB) DropPartitioned(def catalog.Def, drop bool) error {
 		return nil
 	}
 
+	if err := db.keepLogical(def); err != nil {
+		return err
+	}
+
 	db.mu.Lock()
 	defer db.mu.Unlock()
 

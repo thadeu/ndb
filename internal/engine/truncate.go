@@ -84,7 +84,9 @@ func (db *DB) Truncate(name, confirm string) error {
 		return err
 	}
 
-	db.deleteLater(trash)
+	def, _ := db.cat.Get(name)
+
+	db.discard(trash, def)
 
 	return db.reopen(col, nil)
 }
@@ -126,7 +128,9 @@ func (db *DB) Drop(name, confirm string) error {
 		return err
 	}
 
-	db.deleteLater(trash)
+	def, _ := db.cat.Get(name)
+
+	db.discard(trash, def)
 
 	if err := db.cursors.DeleteCollection(name); err != nil {
 		return err
@@ -242,19 +246,6 @@ func (db *DB) deleteLater(path string) {
 	}()
 }
 
-// emptyTrash deletes, in the background, what a truncate or drop left in
-// the trash before a restart.
-func (db *DB) emptyTrash() {
-	entries, err := os.ReadDir(filepath.Join(db.dir, trashDir))
-	if err != nil {
-		return
-	}
-
-	for _, e := range entries {
-		db.deleteLater(filepath.Join(db.dir, trashDir, e.Name()))
-	}
-}
-
 // finishSwaps ends a truncate that a crash stopped. <name>~new next to
 // <name> means the old dir was not moved yet: the truncate did not happen
 // (it was never acked), so ~new goes. <name>~new alone means the old dir is
@@ -268,6 +259,10 @@ func (db *DB) finishSwaps() error {
 			return nil
 		}
 
+		return err
+	}
+
+	if err := removeStaged(root); err != nil {
 		return err
 	}
 

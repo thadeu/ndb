@@ -65,6 +65,11 @@ type Def struct {
 	ExpiresField string     `json:"expires_field,omitempty" yaml:"expires_field"`
 	MaxLineSize  int64      `json:"max_line_size,omitempty" yaml:"-"`
 
+	// PITR is the point in time recovery window ("off", "6h", at most 7d).
+	// Empty uses the daemon default (pitr in ndb.yml, 1d). A partition uses
+	// the window of its logical collection.
+	PITR string `json:"pitr,omitempty" yaml:"pitr"`
+
 	// PartitionBy makes a logical collection that splits its documents by
 	// the period of the time field (day, week, month, year) into partitions
 	// named {name}-{period}. PartitionOf is set on each partition.
@@ -336,7 +341,7 @@ func withDefaults(d Def, src Source) Def {
 
 	d.Indexes = normIndexes(d.Indexes)
 	d.Unique = normIndexes(d.Unique)
-	d.OpsFromYAML = src == FromYAML && (d.Durability != Strict || d.Retention != "" || d.WALRetention != "")
+	d.OpsFromYAML = src == FromYAML && (d.Durability != Strict || d.Retention != "" || d.WALRetention != "" || d.PITR != "")
 
 	return d
 }
@@ -386,7 +391,7 @@ func merge(cur, decl Def, src Source) (Def, error) {
 	return next, nil
 }
 
-// mergeOps applies durability, retention and wal_retention. ndb.yml wins: they are operator
+// mergeOps applies durability, retention, wal_retention and pitr. ndb.yml wins: they are operator
 // decisions.
 func mergeOps(next *Def, decl Def, src Source) {
 	if src != FromYAML && next.OpsFromYAML {
@@ -405,7 +410,11 @@ func mergeOps(next *Def, decl Def, src Source) {
 		next.WALRetention = decl.WALRetention
 	}
 
-	if src == FromYAML && (decl.Durability != "" || decl.Retention != "" || decl.WALRetention != "") {
+	if decl.PITR != "" {
+		next.PITR = decl.PITR
+	}
+
+	if src == FromYAML && (decl.Durability != "" || decl.Retention != "" || decl.WALRetention != "" || decl.PITR != "") {
 		next.OpsFromYAML = true
 	}
 }
@@ -464,6 +473,12 @@ func validateDurations(d Def) error {
 		}
 	}
 
+	if d.PITR != "" {
+		if _, err := ParsePITR(d.PITR); err != nil {
+			return fmt.Errorf("%w: pitr: %v", ErrInvalid, err)
+		}
+	}
+
 	return nil
 }
 
@@ -472,6 +487,8 @@ func validateFinal(d Def) error {
 	switch {
 	case d.Write == Direct && d.Path == "":
 		return fmt.Errorf("%w: direct mode needs a path", ErrInvalid)
+	case d.Write == Direct && d.PITR != "" && d.PITR != "off":
+		return fmt.Errorf("%w: pitr is for engine mode (the app files of a direct collection are its history)", ErrInvalid)
 	case d.Write == Direct && d.WALRetention != "":
 		return fmt.Errorf("%w: wal_retention is for engine mode (direct mode has no WAL)", ErrInvalid)
 	case d.Write == Engine && d.Path != "":

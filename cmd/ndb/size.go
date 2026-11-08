@@ -80,6 +80,7 @@ func printUsage(out io.Writer, u diskusage.Usage) {
 			{Title: "meta", Align: tui.Right},
 			{Title: "blobs", Align: tui.Right},
 			{Title: "cursors", Align: tui.Right},
+			{Title: "pitr", Align: tui.Right},
 			{Title: "total", Align: tui.Right},
 		},
 	}
@@ -97,6 +98,6 @@ func printUsage(out io.Writer, u diskusage.Usage) {
 func partsRow(name string, p diskusage.Parts) []string {
 	return []string{
 		name, tui.HumanBytes(p.WAL), tui.HumanBytes(p.Segments), tui.HumanBytes(p.Meta),
-		tui.HumanBytes(p.Blobs), tui.HumanBytes(p.Cursors), tui.HumanBytes(p.Total()),
+		tui.HumanBytes(p.Blobs), tui.HumanBytes(p.Cursors), tui.HumanBytes(p.PITR), tui.HumanBytes(p.Total()),
 	}
 }

@@ -62,6 +62,9 @@ func ParseUnixMode(s string) (os.FileMode, error) {
 	return os.FileMode(n), nil
 }
 
+// DefaultPITR is the PITR window when ndb.yml does not set pitr.
+const DefaultPITR = "1d"
+
 // DefaultMemoryLimit is the Go heap soft limit when memory_limit is not set.
 const DefaultMemoryLimit = 384 << 20
 
@@ -73,6 +76,10 @@ type Config struct {
 	GroupLimit    int64  `yaml:"-"`
 	BlobMaxSize   int64  `yaml:"-"`
 	AllowImplicit bool   `yaml:"allow_implicit"`
+
+	// PITR is the point in time recovery window of every engine collection
+	// that does not set its own: "off", or a duration up to 7d (default 1d).
+	PITR string `yaml:"pitr"`
 
 	Collections map[string]catalog.Def `yaml:"-"`
 
@@ -115,6 +122,7 @@ func defaults() Config {
 		DataDir:       "/var/lib/ndb",
 		Listen:        Listen{Unix: "/run/ndb/ndb.sock", UnixMode: 0o660},
 		AllowImplicit: true,
+		PITR:          DefaultPITR,
 		Collections:   map[string]catalog.Def{},
 	}
 }
@@ -178,6 +186,10 @@ func Load(path string) (Config, error) {
 		}
 
 		cfg.Collections[name] = def
+	}
+
+	if _, err := catalog.ParsePITR(cfg.PITR); err != nil {
+		return Config{}, fmt.Errorf("%w: pitr: %v", ErrInvalid, err)
 	}
 
 	if err := checkTokens(cfg.Tokens); err != nil {

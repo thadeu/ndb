@@ -227,7 +227,9 @@ func (db *DB) aside(name string) error {
 				return err
 			}
 
-			db.deleteLater(trash)
+			def, _ := db.cat.Get(n)
+
+			db.discard(trash, def)
 		}
 
 		if err := db.cursors.DeleteCollection(n); err != nil {

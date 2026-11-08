@@ -31,6 +31,8 @@ func (s *Server) partitionRoutes() map[string]partitionHandler {
 		"DELETE ":               s.partDrop,
 		"POST _truncate":        s.partTruncate,
 		"POST _rename":          func(w http.ResponseWriter, r *http.Request, db *engine.DB, _ catalog.Def) { s.rename(w, r, db) },
+		"POST _restore":         func(w http.ResponseWriter, r *http.Request, db *engine.DB, _ catalog.Def) { s.restore(w, r, db) },
+		"GET _pitr":             func(w http.ResponseWriter, r *http.Request, db *engine.DB, _ catalog.Def) { s.pitr(w, r, db) },
 		"POST _search":          s.partSearch,
 		"POST _count":           s.partCount,
 		"POST _aggregate":       s.partAggregate,

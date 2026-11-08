@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/thadeu/ndb/internal/blob"
 	"github.com/thadeu/ndb/internal/catalog"
@@ -74,6 +75,12 @@ type DB struct {
 	// trashWait waits for the background delete of truncated and dropped
 	// collection dirs.
 	trashWait sync.WaitGroup
+
+	// pitr is the default PITR window ("off", "1d"). pitrMu serializes the
+	// snapshot loop and the restores, so a restore never reads a snapshot
+	// that is being deleted.
+	pitr   string
+	pitrMu sync.Mutex
 }
 
 // Open takes the lock on cfg.DataDir, opens the catalog, declares the
@@ -126,6 +133,7 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		groupLimit: cfg.GroupLimit,
 		shared:     collection.NewShared(cfg.WriteBuffer),
 		cols:       map[string]*Collection{},
+		pitr:       pitrDefault(cfg),
 	}
 
 	if err := db.finishSwaps(); err != nil {
@@ -140,7 +148,11 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		return nil, err
 	}
 
-	db.emptyTrash()
+	if err := db.sweepTrash(time.Now()); err != nil {
+		db.Close()
+
+		return nil, err
+	}
 
 	if err := cfg.Apply(cat); err != nil {
 		db.Close()
@@ -156,9 +168,10 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		}
 	}
 
-	db.gcWait.Add(1)
+	db.gcWait.Add(2)
 
 	go db.sweepPartitionsLoop()
+	go db.pitrLoop()
 
 	return db, nil
 }

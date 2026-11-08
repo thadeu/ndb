@@ -60,6 +60,8 @@ func TestRenameMovesDocumentsIndexesAndCursors(t *testing.T) {
 		t.Fatalf("rows = %d, want 1200", n)
 	}
 
+	indexReady(t, renamed, "n")
+
 	page, err := renamed.Find(ctx, []byte(`{"query":{"n":7},"explain":true}`))
 	if err != nil || len(page.Rows) != 1 || page.Plan != "index:n" {
 		t.Fatalf("find by index: rows=%d plan=%q err=%v", len(page.Rows), page.Plan, err)

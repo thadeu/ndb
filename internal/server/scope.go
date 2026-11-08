@@ -90,6 +90,8 @@ func required(method string, segs []string) (string, access) {
 		switch segs[0] {
 		case "_backup":
 			return "*", accessAdmin
+		case "_restore":
+			return "", accessAdmin
 		case "_blobs":
 			if method == "POST" {
 				return "", accessWrite
@@ -112,7 +114,7 @@ func required(method string, segs []string) (string, access) {
 		}
 
 		return coll, accessAdmin
-	case "_truncate", "_indexes", "_compact", "_rename":
+	case "_truncate", "_indexes", "_compact", "_rename", "_restore":
 		return coll, accessAdmin
 	case "_doc":
 		if method == "GET" {

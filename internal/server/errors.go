@@ -72,6 +72,10 @@ func codeOf(err error) string {
 		return "direct_collection"
 	case errors.Is(err, engine.ErrNotSupported):
 		return "not_supported"
+	case errors.Is(err, engine.ErrOutOfWindow):
+		return "out_of_window"
+	case errors.Is(err, engine.ErrPITROff):
+		return "pitr_off"
 	case errors.Is(err, engine.ErrExists):
 		return "collection_exists"
 	case errors.Is(err, engine.ErrConfirm):

@@ -22,7 +22,7 @@ import (
 var ctx = context.Background()
 
 func cfg(dir string, cols map[string]catalog.Def) config.Config {
-	return config.Config{DataDir: dir, AllowImplicit: true, Collections: cols}
+	return config.Config{DataDir: dir, AllowImplicit: true, Collections: cols, PITR: "off"}
 }
 
 func open(t *testing.T, c config.Config) *engine.DB {

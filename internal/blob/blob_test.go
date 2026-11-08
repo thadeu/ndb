@@ -339,3 +339,29 @@ func TestExternalize(t *testing.T) {
 		t.Fatalf("same content must be stored once, count = %d", count)
 	}
 }
+
+// With a hold (PITR), an old unreferenced blob goes only on a GC that runs
+// the hold after the GC that first found it unreferenced.
+func TestGCHoldKeepsANewOrphanForTheHold(t *testing.T) {
+	s, dir := openStore(t, fs.OS{})
+
+	ref, err := s.Put(strings.NewReader("orphan"), "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h := strings.TrimPrefix(ref.Blob, "sha256:")
+
+	age(t, dir, h, 48*time.Hour)
+	s.SetHold(20 * time.Millisecond)
+
+	if res, err := s.GC(seq(), 24*time.Hour); err != nil || res.Deleted != 0 {
+		t.Fatalf("first gc = %+v, %v (the orphan must wait for the hold)", res, err)
+	}
+
+	time.Sleep(30 * time.Millisecond)
+
+	if res, err := s.GC(seq(), 24*time.Hour); err != nil || res.Deleted != 1 {
+		t.Fatalf("gc after the hold = %+v, %v", res, err)
+	}
+}

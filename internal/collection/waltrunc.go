@@ -21,7 +21,9 @@ import (
 //  2. no watch consumer needs it: every stored cursor, and every stream that
 //     reads the WAL now, is at a tx after the last tx of the file;
 //  3. it is older than wal_retention, by the _ts of the first record of the
-//     next file (the moment it was closed).
+//     next file (the moment it was closed);
+//  4. no PITR snapshot needs it: it is before the WAL position of the
+//     oldest snapshot (pitr.go).
 //
 // The files go in order from the oldest and the walk stops at the first file
 // that stays, so the kept files are always contiguous. The active (last) file
@@ -134,10 +136,16 @@ func (c *Collection) TruncateWAL() (int, error) {
 		return 0, err
 	}
 
+	sealSeq := cp.Pos.Seq
+
+	if seq, ok := c.pitrFloor(); ok {
+		sealSeq = min(sealSeq, seq)
+	}
+
 	deleted := 0
 
 	for i := 0; i+1 < len(files); i++ {
-		if !c.deletable(files[i], files[i+1], cp.Pos.Seq, cp.Pos.Tx, floor) {
+		if !c.deletable(files[i], files[i+1], sealSeq, cp.Pos.Tx, floor) {
 			break
 		}
 

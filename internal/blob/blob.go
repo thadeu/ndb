@@ -74,6 +74,14 @@ type Store struct {
 
 	count atomic.Int64
 	bytes atomic.Int64
+
+	// orphans holds, with a hold set (SetHold), when GC first found each
+	// unreferenced blob. A blob goes only once it has been unreferenced for
+	// the hold: a PITR restore may bring back a document that refers to it.
+	// After a restart the clock starts again, which only delays the delete.
+	gcMu    sync.Mutex
+	hold    time.Duration
+	orphans map[string]time.Time
 }
 
 // Open creates the store dir if needed, removes the tmp files that a crash
