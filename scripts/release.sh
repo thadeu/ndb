@@ -49,8 +49,16 @@ fi
 
 git fetch --quiet --tags origin main
 
-if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
-  fail "main is not the same as origin/main. Pull or push first."
+# Local commits that are not pushed are fine: the push at the end sends them
+# with the tag. Stop only when origin/main has commits that main does not.
+if ! git merge-base --is-ancestor origin/main HEAD; then
+  fail "origin/main has commits that main does not have. Pull first."
+fi
+
+ahead="$(git rev-list --count origin/main..HEAD)"
+
+if [ "$ahead" -gt 0 ]; then
+  echo "release: main has $ahead commit(s) that are not pushed. The push sends them too."
 fi
 
 # Next version, from the latest v* tag.
