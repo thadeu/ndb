@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-08
+
 ### Added
 
 - **Lookup.** `lookup` in `_search` reads, in the same call, the documents of other collections that the rows point to, inside the daemon: `belongs_to` (the foreign key is here; an object or `null`), `has_many` (the foreign key is there; an array, with its own `query`, `sort` and `limit`) and `has_one`, with `foreign_key`/`fk` and `primary_key`/`pk` (default `_id`), `fields`, and a nested `lookup` (two levels). An array foreign key matches each element. The other side must be indexed (`lookup_unindexed`), one answer attaches 10 000 documents at most (`lookup_too_large`, 422), and a scoped token must read every collection of it. Works on plain, partitioned and pattern searches. See [Lookup](docs/dev/query.md#lookup).
@@ -359,7 +361,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/thadeu/ndb/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/thadeu/ndb/compare/v1.2.1...v1.3.0
 [1.2.9]: https://github.com/thadeu/ndb/compare/v1.2.8...v1.2.9
 [1.2.8]: https://github.com/thadeu/ndb/compare/v1.2.7...v1.2.8
