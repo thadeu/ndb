@@ -31,6 +31,12 @@ func runBench(args []string) error {
 	fl.IntVar(&o.Collections, "collections", o.Collections, "collections of the idle part")
 	fl.StringVar(&o.PITR, "pitr", "", "pitr of the daemon: off, 1d (default: the daemon default, 1d)")
 
+	fl.Func("yml", "a line for the ndb.yml of the daemon, to compare settings (repeat it): -yml 'memory_limit: 512MiB'", func(s string) error {
+		o.YML = append(o.YML, s)
+
+		return nil
+	})
+
 	if err := fl.Parse(args); err != nil {
 		return err
 	}

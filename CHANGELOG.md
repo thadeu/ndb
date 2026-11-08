@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- `ndb bench -yml 'key: value'` adds a line to the ndb.yml of the daemon (repeat it), to compare settings such as `memory_limit`; the report header lists them.
+
 ## [1.9.0] - 2026-11-08
 
 ### Changed

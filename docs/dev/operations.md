@@ -167,6 +167,7 @@ Find the writer that produced the line with `file` and `offset`, fix it, and wat
 ndb bench                      # everything
 ndb bench -query -aggs         # only the reads
 ndb bench -stress-load -calls 100000
+ndb bench -yml 'memory_limit: 512MiB'   # compare a setting of ndb.yml
 ```
 
 While it runs, the bench logs each step to stderr: a line when it starts, one every 5 s with where it is, and one when it ends with what it found, each with the time since the start and the ETA of the run. The report goes to stdout, so `ndb bench > report.md` keeps the log on the terminal:

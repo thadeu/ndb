@@ -67,12 +67,24 @@ type Options struct {
 	// PITR is the pitr of the daemon (off, 1d); empty keeps its default.
 	PITR string
 
+	// YML are lines added to the ndb.yml of the daemon (memory_limit:
+	// 512MiB), to compare settings.
+	YML []string
+
 	// Log gets a line per step as the run goes, with the ETA (stderr in
 	// ndb bench); nil logs nothing.
 	Log io.Writer
 }
 
 func (o Options) all() bool { return !o.Stress && !o.Query && !o.Aggs && !o.Lookup && !o.Idle }
+
+func settings(yml []string) string {
+	if len(yml) == 0 {
+		return ""
+	}
+
+	return ", " + strings.Join(yml, ", ")
+}
 
 // plan is the steps of the run with a first estimate of each, for the ETA.
 func (o Options) plan() []planned {
@@ -161,6 +173,10 @@ func Run(o Options, w io.Writer) (err error) {
 		conf += "pitr: " + o.PITR + "\n"
 	}
 
+	for _, line := range o.YML {
+		conf += line + "\n"
+	}
+
 	check(os.WriteFile(filepath.Join(dir, "ndb.yml"), []byte(conf), 0o644))
 
 	prog = newProgress(cmp.Or[io.Writer](o.Log, io.Discard), o.plan())
@@ -225,7 +241,7 @@ func Run(o Options, w io.Writer) (err error) {
 	}
 
 	fmt.Fprintln(out)
-	fmt.Fprintf(out, "ndb bench, ESL outbox, %s/%s, %d CPU, pitr %s\n\n", runtime.GOOS, runtime.GOARCH, runtime.NumCPU(), cmp.Or(o.PITR, "default"))
+	fmt.Fprintf(out, "ndb bench, ESL outbox, %s/%s, %d CPU, pitr %s%s\n\n", runtime.GOOS, runtime.GOARCH, runtime.NumCPU(), cmp.Or(o.PITR, "default"), settings(o.YML))
 	fmt.Fprintln(out, "| Phase | Result |")
 	fmt.Fprintln(out, "|---|---|")
 
