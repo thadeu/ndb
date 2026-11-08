@@ -64,6 +64,10 @@ module Ndb
   # restore of a collection with pitr: off.
   class PitrOff < Error; end
 
+  # A lookup that is not valid, whose other side has no index, or that
+  # attaches too many documents.
+  class LookupError < Error; end
+
   # The daemon error code -> the Ruby class.
   CODE_TO_ERROR = {
     "unauthorized" => Unauthorized,
@@ -93,7 +97,10 @@ module Ndb
     "confirm_required" => ConfirmRequired,
     "collection_exists" => CollectionExists,
     "out_of_window" => OutOfWindow,
-    "pitr_off" => PitrOff
+    "pitr_off" => PitrOff,
+    "lookup_invalid" => LookupError,
+    "lookup_unindexed" => LookupError,
+    "lookup_too_large" => LookupError
   }.freeze
 
   def self.error_for(code, message, status)

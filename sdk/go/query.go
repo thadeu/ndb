@@ -67,6 +67,8 @@ type findBody struct {
 
 	// Versions asks the daemon for "_v" in each row, for a version field.
 	Versions bool `json:"versions,omitempty"`
+
+	Lookup map[string]Relation `json:"lookup,omitempty"`
 }
 
 // Query builds a find on the collection of T. It builds JSON only: the
@@ -81,6 +83,7 @@ type Query[T any] struct {
 	skip    int
 	after   string
 	next    string
+	lookup  map[string]Relation
 }
 
 // Query starts a search with filters (POST /{coll}/_search). The filters
@@ -229,6 +232,7 @@ func (q *Query[T]) body() findBody {
 		Skip:     q.skip,
 		After:    q.after,
 		Versions: q.wantsVersions(),
+		Lookup:   q.lookup,
 	}
 }
 

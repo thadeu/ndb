@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 )
 
@@ -16,8 +17,9 @@ const collField = "_coll"
 
 // schema is the mapping from a Go struct to a document, read from the
 // `ndb:"name[,option...]"` tags. Options: id, time, expires (the field
-// holds the expiry time of the document), index, unique, and version (the
-// field holds "_v"). A field without an ndb tag uses its json
+// holds the expiry time of the document), index, unique, version (the
+// field holds "_v"), and lookup (the field gets a relation of Lookup; it is
+// read, never written). A field without an ndb tag uses its json
 // name or its Go name; `ndb:"-"` or `json:"-"` skips it.
 //
 // The primary key is the field named _id (`ndb:"_id"` or `json:"_id"`). An
@@ -33,6 +35,10 @@ type schema struct {
 	// version is the field that holds "_v". It is filled on reads and
 	// never sent on writes.
 	version string
+
+	// lookups are the fields that only a Lookup fills: insert and update
+	// leave them out.
+	lookups []string
 }
 
 type schemaField struct {
@@ -139,6 +145,8 @@ func (s *schema) option(name, opt string) error {
 		s.unique = append(s.unique, name)
 	case "version":
 		s.version = name
+	case "lookup":
+		s.lookups = append(s.lookups, name)
 	default:
 		return fmt.Errorf("ndb: field %s has unknown option %q", name, opt)
 	}
@@ -154,7 +162,7 @@ func (s *schema) encode(v any) (json.RawMessage, error) {
 	for _, f := range s.fields {
 		fv := rv.Field(f.index)
 
-		if f.name == idField && fv.IsZero() || f.name == s.version || f.name == collField {
+		if f.name == idField && fv.IsZero() || f.name == s.version || f.name == collField || slices.Contains(s.lookups, f.name) {
 			continue
 		}
 

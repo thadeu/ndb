@@ -211,6 +211,14 @@ module Ndb
     def after(token) = with(after: token)
     def fields(*names) = with(fields: names.flatten.map(&:to_s))
 
+    # Adds relations of other collections to each row ("lookup"):
+    #
+    #   orders.query(status: "paid").lookup(
+    #     customer: { belongs_to: "customers", fk: "customer_id" },
+    #     items: { has_many: "order_items", fk: "order_id", sort: { pos: 1 }, limit: 50 }
+    #   )
+    def lookup(relations) = with(lookup: (@options[:lookup] || {}).merge(Ndb.deep_stringify(relations)))
+
     # The rows of one request: one page with limit, every row without it.
     def all = page.rows
 
@@ -271,6 +279,17 @@ module Ndb
 
   # A client for addr: unix:///path/to/ndb.sock or tcp://host:port. Without
   # addr it reads NDB_URL. See Ndb::Client for the options.
+  # deep_stringify gives value with every Hash key as a String (Symbols
+  # come from Ruby code, the daemon reads JSON).
+  def self.deep_stringify(value)
+    case value
+    when Hash then value.to_h { |k, v| [k.to_s, deep_stringify(v)] }
+    when Array then value.map { |v| deep_stringify(v) }
+    when Symbol then value.to_s
+    else value
+    end
+  end
+
   def self.connect(addr = nil, **opts)
     Client.new(url: addr, **opts)
   end

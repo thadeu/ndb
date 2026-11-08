@@ -249,3 +249,22 @@ export interface PitrInfo {
   bytes: number
   dropped?: boolean
 }
+
+// A lookup of a search: the documents of another collection that a row
+// points to. belongs_to: the fk is in this collection (an object or null);
+// has_many: the fk is in the other one (an array); has_one: one of has_many.
+// Build it with belongsTo, hasMany and hasOne.
+export interface Relation {
+  belongs_to?: string
+  has_many?: string
+  has_one?: string
+  fk: string
+  pk?: string
+  query?: Record<string, unknown>
+  sort?: Record<string, 1 | -1>
+  limit?: number
+  fields?: string[]
+  lookup?: Record<string, Relation>
+}
+
+export type RelationOptions = Omit<Relation, 'belongs_to' | 'has_many' | 'has_one' | 'fk'>

@@ -46,6 +46,7 @@ module Ndb
         record = new(row.slice(*attribute_names))
 
         record.send(:loaded!, version, source)
+        record.load_associations(row) if record.respond_to?(:load_associations)
 
         record
       end

@@ -33,6 +33,9 @@ export type ErrorCode =
   | 'collection_exists'
   | 'out_of_window'
   | 'pitr_off'
+  | 'lookup_invalid'
+  | 'lookup_unindexed'
+  | 'lookup_too_large'
   | 'invalid_update'
   | 'http_status'
   | (string & {})
@@ -75,6 +78,10 @@ export class CollectionExistsError extends NdbError {}
 // collection with pitr: off (pitr_off).
 export class PitrError extends NdbError {}
 
+// A lookup that is not valid (lookup_invalid), whose other side has no index
+// (lookup_unindexed), or that attaches too many documents (lookup_too_large).
+export class LookupError extends NdbError {}
+
 const subclasses: Record<string, typeof NdbError> = {
   unauthorized: UnauthorizedError,
   not_found: NotFoundError,
@@ -99,6 +106,9 @@ const subclasses: Record<string, typeof NdbError> = {
   collection_exists: CollectionExistsError,
   out_of_window: PitrError,
   pitr_off: PitrError,
+  lookup_invalid: LookupError,
+  lookup_unindexed: LookupError,
+  lookup_too_large: LookupError,
 }
 
 export function makeError(code: ErrorCode, message: string, status = 0): NdbError {

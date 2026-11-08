@@ -1,5 +1,5 @@
 import type { Collection } from './collection.js'
-import type { Fields, Row, SortSpec, Where } from './types.js'
+import type { Fields, Relation, Row, SortSpec, Where } from './types.js'
 import { toWhere } from './where.js'
 
 interface State {
@@ -9,6 +9,7 @@ interface State {
   limit?: number
   skip?: number
   after?: string
+  lookup?: Record<string, Relation>
 }
 
 export class Query<F extends Fields, R = Row<F>> implements PromiseLike<R[]> {
@@ -37,6 +38,12 @@ export class Query<F extends Fields, R = Row<F>> implements PromiseLike<R[]> {
 
   or(...ws: Where<F>[]): Query<F, R> {
     return this.with({ clauses: [...this.state.clauses, { $or: ws.map(toWhere) }] })
+  }
+
+  // Adds a relation: each row gets the related documents under name (POST
+  // /{coll}/_search with "lookup"). T types what it holds.
+  lookup<K extends string, T = Record<string, unknown>>(name: K, rel: Relation): Query<F, R & { [P in K]: T }> {
+    return new Query<F, R & { [P in K]: T }>(this.coll, { ...this.state, lookup: { ...this.state.lookup, [name]: rel } })
   }
 
   sort(spec: SortSpec<F>): Query<F, R> {
@@ -126,9 +133,9 @@ export class Query<F extends Fields, R = Row<F>> implements PromiseLike<R[]> {
   }
 
   private body(): Record<string, unknown> {
-    const { fields, sort, limit, skip, after } = this.state
+    const { fields, sort, limit, skip, after, lookup } = this.state
 
-    return { query: this.whereDoc(), fields, sort, limit, skip, after, versions: true }
+    return { query: this.whereDoc(), fields, sort, limit, skip, after, lookup, versions: true }
   }
 
   private whereDoc(): Record<string, unknown> {

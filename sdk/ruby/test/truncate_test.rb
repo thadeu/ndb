@@ -54,4 +54,16 @@ class TruncateTest < Minitest::Test
     assert_raises(Ndb::OutOfWindow) { client.restore(@coll, at: at - 3 * 86_400, to: "#{into}x") }
     assert_equal "1d", client.pitr(@coll)["window"]
   end
+
+  def test_lookup_attaches_related_documents
+    customers = NdbTestHelpers.next_name
+    client.bulk(customers, [{ _id: "x", name: "Ana" }])
+    client.bulk(@coll, [{ _id: "o1", customer_id: "x" }])
+
+    row = Ndb::Collection.new(client, @coll).query(_id: "o1")
+                         .lookup(customer: { belongs_to: customers, fk: :customer_id }).first
+
+    assert_equal "Ana", row["customer"]["name"]
+    assert_raises(Ndb::LookupError) { Ndb::Collection.new(client, @coll).query({}).lookup(x: { has_many: customers, fk: :name }).all }
+  end
 end

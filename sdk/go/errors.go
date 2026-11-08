@@ -61,4 +61,7 @@ var (
 	ErrCollectionExists  = &Error{Code: "collection_exists"}
 	ErrOutOfWindow       = &Error{Code: "out_of_window"}
 	ErrPITROff           = &Error{Code: "pitr_off"}
+	ErrLookupInvalid     = &Error{Code: "lookup_invalid"}
+	ErrLookupUnindexed   = &Error{Code: "lookup_unindexed"}
+	ErrLookupTooLarge    = &Error{Code: "lookup_too_large"}
 )

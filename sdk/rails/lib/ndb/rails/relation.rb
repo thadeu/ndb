@@ -55,6 +55,12 @@ module Ndb
       with(limit: count)
     end
 
+    # Loads associations with the rows, in the same call (the daemon
+    # lookup): includes(:customer, items: :product).
+    def includes(*names)
+      with(includes: Array(values[:includes]) + names)
+    end
+
     def offset(count)
       with(offset: count)
     end
@@ -84,6 +90,7 @@ module Ndb
       query["sort"] = values[:order] unless values[:order].empty?
       query.merge!(window)
       query["after"] = values[:after] if values[:after]
+      query["lookup"] = klass.lookup_for(values[:includes]) if values[:includes]&.any?
 
       query
     end
