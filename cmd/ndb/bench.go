@@ -25,6 +25,7 @@ func runBench(args []string) error {
 	fl.BoolVar(&o.Stress, "stress-load", false, "measure the writes: live writes with a consumer, kill -9, bulk load")
 	fl.BoolVar(&o.Query, "query", false, "measure the queries (loads the calls first)")
 	fl.BoolVar(&o.Aggs, "aggs", false, "measure the aggregations (loads the calls first)")
+	fl.StringVar(&o.PITR, "pitr", "", "pitr of the daemon: off, 1d (default: the daemon default, 1d)")
 
 	if err := fl.Parse(args); err != nil {
 		return err

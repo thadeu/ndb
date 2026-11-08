@@ -18,6 +18,7 @@ package bench
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -51,6 +52,9 @@ type Options struct {
 	Stress bool
 	Query  bool
 	Aggs   bool
+
+	// PITR is the pitr of the daemon (off, 1d); empty keeps its default.
+	PITR string
 }
 
 func (o Options) all() bool { return !o.Stress && !o.Query && !o.Aggs }
@@ -96,6 +100,10 @@ func Run(o Options, w io.Writer) (err error) {
 		defer os.RemoveAll(dir)
 	}
 
+	if o.PITR != "" {
+		check(os.WriteFile(filepath.Join(dir, "ndb.yml"), []byte("pitr: "+o.PITR+"\n"), 0o644))
+	}
+
 	d := &daemon{dir: dir}
 	d.start()
 
@@ -130,7 +138,7 @@ func Run(o Options, w io.Writer) (err error) {
 	}
 
 	fmt.Fprintln(out)
-	fmt.Fprintf(out, "ndb bench, ESL outbox, %s/%s, %d CPU\n\n", runtime.GOOS, runtime.GOARCH, runtime.NumCPU())
+	fmt.Fprintf(out, "ndb bench, ESL outbox, %s/%s, %d CPU, pitr %s\n\n", runtime.GOOS, runtime.GOARCH, runtime.NumCPU(), cmp.Or(o.PITR, "default"))
 	fmt.Fprintln(out, "| Phase | Result |")
 	fmt.Fprintln(out, "|---|---|")
 
@@ -158,7 +166,7 @@ func (d *daemon) sock() string { return filepath.Join(d.dir, "ndb.sock") }
 func (d *daemon) start() {
 	os.Remove(d.sock())
 
-	d.cmd = exec.Command(*bin, "-config", filepath.Join(d.dir, "none.yml"), "-data-dir", filepath.Join(d.dir, "data"), "-unix", d.sock())
+	d.cmd = exec.Command(*bin, "-config", filepath.Join(d.dir, "ndb.yml"), "-data-dir", filepath.Join(d.dir, "data"), "-unix", d.sock())
 	d.cmd.Stderr = io.Discard
 	check(d.cmd.Start())
 
