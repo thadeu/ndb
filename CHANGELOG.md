@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.2.4] - 2026-11-08
+
 ### Changed
 
 - **PITR uses `at` and `to`, like the rest of the contract.** `POST /{coll}/_restore {"at","to"}` (was `until`, `into`); CLI `ndb restore <coll> -at T -to NAME`; Go `Restore(ctx, at, to)`, Ruby `restore(coll, at:, to:)`, TS `restore({ at, to })`. The old keys are refused (`invalid_request`).
@@ -312,7 +314,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.2.3...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.2.4...HEAD
+[1.2.4]: https://github.com/thadeu/ndb/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/thadeu/ndb/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/thadeu/ndb/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/thadeu/ndb/compare/v1.2.0...v1.2.1
