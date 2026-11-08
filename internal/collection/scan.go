@@ -40,6 +40,10 @@ type segSnap struct {
 	r      segment.Reader
 	groups []segment.Group
 	live   bitset
+
+	// exact: live holds the matches themselves (the hits of an index for
+	// the only condition), so a count needs no read of the group.
+	exact bool
 }
 
 // part is the result of one unit: its top-k rows, the matches, and the counters.
@@ -255,17 +259,18 @@ type segScan struct {
 // columns of the where and sort paths are read, and _raw only for the rows
 // that match.
 func (c *Collection) scanSegment(ctx context.Context, q *query.Query, s segSnap, cur query.Pos, hasCur bool) (part, error) {
-	sc := newSegScan(q, s.r, cur, hasCur)
-	conds := q.Indexable()
-	countable := !q.HasWhere() && len(q.Sort) == 0 && !hasCur && !q.NeedsDoc()
 	bounds := c.hideBounds(c.clock())
+	conds := q.Indexable()
+	q = visibleQuery(q, s, bounds)
+	sc := newSegScan(q, s.r, cur, hasCur)
+	countable := (!q.HasWhere() || s.exact) && len(q.Sort) == 0 && !hasCur && !q.NeedsDoc()
 
 	for gi, g := range s.groups {
 		if err := ctx.Err(); err != nil {
 			return part{}, err
 		}
 
-		if liveIn(s.live, g) == 0 || pruned(s.r, gi, conds) {
+		if liveIn(s.live, g) == 0 || pruned(s.r, gi, conds) || timePruned(q, s.r, gi, conds) {
 			sc.p.ex.RowGroupsSkipped++
 
 			continue
@@ -310,6 +315,23 @@ func (c *Collection) scanSegment(ctx context.Context, q *query.Query, s segSnap,
 	sc.p.rows = sc.top.sorted()
 
 	return sc.p, nil
+}
+
+// visibleQuery is q without its hidden conditions when every row group of
+// the segment with live rows is wholly visible (inside the retention, the
+// TTL and the expiry): most segments of a collection with a retention.
+func visibleQuery(q *query.Query, s segSnap, bounds []hideBound) *query.Query {
+	if len(bounds) == 0 {
+		return q
+	}
+
+	for gi, g := range s.groups {
+		if liveIn(s.live, g) > 0 && !allVisible(s.r, gi, bounds) {
+			return q
+		}
+	}
+
+	return q.Visible()
 }
 
 // newSegScan lists the paths to read: the where paths, then the sort paths

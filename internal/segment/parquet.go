@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"sync"
 
 	"github.com/parquet-go/parquet-go"
 	"github.com/parquet-go/parquet-go/compress/zstd"
@@ -299,14 +300,23 @@ type parquetReader struct {
 	n       int
 	closer  io.Closer
 	columns map[string]Column
+
+	// zones and blooms keep the column index and the bloom filter of each
+	// chunk read so far (chunkKey -> zoneCached, parquet.BloomFilter).
+	zones  sync.Map
+	blooms sync.Map
 }
 
 type readCols struct {
 	id, v, seq, tx, del, raw, rest int
 }
 
+// decode opens a segment file. The page index (zone maps) and the bloom
+// filters are read on first use of each column chunk, not at open: a query
+// reads those of the columns it filters on, and opening a segment (at
+// start, or when a sleeping collection wakes) reads only the footer.
 func decode(ra io.ReaderAt, size int64) (*parquetReader, error) {
-	f, err := parquet.OpenFile(ra, size)
+	f, err := parquet.OpenFile(ra, size, parquet.SkipPageIndex(true), parquet.SkipBloomFilters(true))
 	if err != nil {
 		return nil, fmt.Errorf("segment: %w", err)
 	}
@@ -417,6 +427,50 @@ func (r *parquetReader) metaOf(rg parquet.RowGroup) (metaValues, error) {
 	return out, nil
 }
 
+// eachValue calls fn with every value of a column chunk, in order, with its
+// index. A value is only valid during the call (byte arrays point into the
+// page): fn copies what it keeps. A read of a group copies each value once,
+// into what the caller keeps, instead of cloning all of them first.
+func eachValue(chunk parquet.ColumnChunk, fn func(k int, v parquet.Value)) error {
+	pages := chunk.Pages()
+
+	defer pages.Close()
+
+	k := 0
+
+	for {
+		page, err := pages.ReadPage()
+
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+
+		if err != nil {
+			return err
+		}
+
+		buf := make([]parquet.Value, min(page.NumValues(), 1024))
+		vr := page.Values()
+
+		for {
+			n, err := vr.ReadValues(buf)
+
+			for _, v := range buf[:n] {
+				fn(k, v)
+				k++
+			}
+
+			if errors.Is(err, io.EOF) {
+				break
+			}
+
+			if err != nil {
+				return err
+			}
+		}
+	}
+}
+
 // columnValues reads every value of a column chunk. The metadata columns are
 // required, so each row gives one value.
 func columnValues(chunk parquet.ColumnChunk) ([]parquet.Value, error) {
@@ -486,18 +540,13 @@ func (r *parquetReader) Raw(row int) ([]byte, error) {
 // readGroup decodes the _raw column of one row group. Only that column is
 // read, so a row costs its group's raw bytes, not the other columns.
 func (r *parquetReader) readGroup(g int) ([][]byte, error) {
-	vals, err := columnValues(r.file.RowGroups()[g].ColumnChunks()[r.cols.raw])
-	if err != nil {
-		return nil, err
-	}
+	out := make([][]byte, 0, r.rowsIn(g))
 
-	out := make([][]byte, len(vals))
+	err := eachValue(r.file.RowGroups()[g].ColumnChunks()[r.cols.raw], func(_ int, v parquet.Value) {
+		out = append(out, bytes.Clone(v.ByteArray()))
+	})
 
-	for k, v := range vals {
-		out[k] = bytes.Clone(v.ByteArray())
-	}
-
-	return out, nil
+	return out, err
 }
 
 func (r *parquetReader) rowsIn(g int) int {

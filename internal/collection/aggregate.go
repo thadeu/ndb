@@ -180,6 +180,8 @@ func (c *Collection) aggCands(ctx context.Context, p *agg.Pipeline, src source, 
 // scanSegment does, and reads the where, sort and group columns of the rest.
 func (c *Collection) aggSegment(ctx context.Context, p *agg.Pipeline, s segSnap, budget *agg.Budget) (aggPart, error) {
 	q := p.Query
+	conds := q.Indexable()
+	q = visibleQuery(q, s, c.hideBounds(c.clock()))
 	sc := newSegScan(q, s.r, query.Pos{}, false)
 
 	groupPaths := p.Paths()
@@ -192,7 +194,6 @@ func (c *Collection) aggSegment(ctx context.Context, p *agg.Pipeline, s segSnap,
 	sc.paths = pathsByIndex(sc.at)
 
 	part := aggPart{tbl: p.NewTable(budget)}
-	conds := q.Indexable()
 	vals := make([]query.Value, len(groupPaths))
 
 	for gi, g := range s.groups {
@@ -200,7 +201,7 @@ func (c *Collection) aggSegment(ctx context.Context, p *agg.Pipeline, s segSnap,
 			return aggPart{}, err
 		}
 
-		if liveIn(s.live, g) == 0 || pruned(s.r, gi, conds) {
+		if liveIn(s.live, g) == 0 || pruned(s.r, gi, conds) || timePruned(q, s.r, gi, conds) {
 			part.ex.RowGroupsSkipped++
 
 			continue

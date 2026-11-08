@@ -54,6 +54,12 @@ type Query struct {
 	// needsDoc: a node needs the decoded document ($elemMatch), so the
 	// column values alone cannot answer.
 	needsDoc bool
+
+	// user is the where of the request, before Hide added the rows a read
+	// cannot see (nil when none was added), and userPaths the number of
+	// its paths (the paths of Hide come after).
+	user      Node
+	userPaths int
 }
 
 // Cond is one index-friendly condition of the where clause (top level,
@@ -596,6 +602,35 @@ func (q *Query) HasWhere() bool {
 	m, ok := q.raw.(map[string]any)
 
 	return ok && len(m) > 0
+}
+
+// Exact tells whether the only condition of the request is an eq or an in
+// on path, with string or number values: the rows that an index on path
+// gives for it are the matches, with nothing left to check but the hidden
+// rows (a scan checks those by group, allVisible).
+func (q *Query) Exact(path string) bool {
+	n := q.where
+
+	if q.user != nil {
+		n = q.user
+	}
+
+	if a, ok := n.(andNode); ok && len(a) == 1 {
+		n = a[0]
+	}
+
+	f, ok := n.(*fieldNode)
+	if !ok || q.needsDoc || f.path != path || f.isTime || len(f.ops) != 1 {
+		return false
+	}
+
+	o := f.ops[0]
+
+	if o.name != "eq" && o.name != "in" {
+		return false
+	}
+
+	return !slices.ContainsFunc(o.vals, func(v Value) bool { return v.Kind != Number && v.Kind != String })
 }
 
 func (q *Query) Paths() []string {

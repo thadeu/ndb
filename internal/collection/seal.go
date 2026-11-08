@@ -54,6 +54,9 @@ var (
 	keyLive          = []byte("live")
 )
 
+// openWorkers is how many segment files one open decodes at once.
+const openWorkers = 4
+
 // formatSidecars is the checkpoint format whose segments have key files and
 // saved live bits (M16). An older checkpoint is migrated once at open.
 const formatSidecars = 2
@@ -176,13 +179,17 @@ func (c *Collection) openSegments(cfg Config) (recovery.Position, error) {
 		return recovery.Position{}, err
 	}
 
-	for _, name := range cp.Segments {
-		raw, err := segment.Open(cfg.FS, s.path(name))
-		if err != nil {
-			return recovery.Position{}, err
-		}
+	// The footers are decoded in parallel: on a start or a wake, opening
+	// the segments is most of the time an open takes.
+	raws, err := runPool(context.Background(), openWorkers, len(cp.Segments), func(i int) (segment.Reader, error) {
+		return segment.Open(cfg.FS, s.path(cp.Segments[i]))
+	})
+	if err != nil {
+		return recovery.Position{}, err
+	}
 
-		s.readers = append(s.readers, newSegRef(raw, cfg.FS, s.path(name)))
+	for i, name := range cp.Segments {
+		s.readers = append(s.readers, newSegRef(raws[i], cfg.FS, s.path(name)))
 		s.names = append(s.names, name)
 	}
 

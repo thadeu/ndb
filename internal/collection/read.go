@@ -715,6 +715,12 @@ func (c *Collection) source(q *query.Query) source {
 		src = c.scanSource()
 	}
 
+	if path, ok := strings.CutPrefix(src.plan, "index:"); ok && q.Exact(path) {
+		for i := range src.segs {
+			src.segs[i].exact = true
+		}
+	}
+
 	src.held = c.holdSegments()
 
 	return src

@@ -36,6 +36,10 @@ type segRef struct {
 	gen   uint64
 	saved uint64
 
+	// times are the time zones of a time field (timezone.go).
+	timeMu sync.Mutex
+	times  map[string][]timeZone
+
 	mu      sync.Mutex
 	refs    int
 	retired bool

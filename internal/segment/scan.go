@@ -94,6 +94,24 @@ func (r *parquetReader) Zone(group int, path string) (Zone, bool) {
 		return Zone{}, false
 	}
 
+	k := chunkKey{group, path}
+
+	if z, ok := r.zones.Load(k); ok {
+		zc := z.(zoneCached)
+
+		return zc.z, zc.ok
+	}
+
+	z, ok := r.readZone(group, path)
+	r.zones.Store(k, zoneCached{z, ok})
+
+	return z, ok
+}
+
+// readZone reads the column index of one chunk. It is read on first use
+// (the file opens without its page index) and kept by Zone: the chunks that
+// parquet-go gives are copies, so its own cache does not last.
+func (r *parquetReader) readZone(group int, path string) (Zone, bool) {
 	chunk, err := r.chunkOf(group, path)
 	if err != nil {
 		return Zone{}, false
@@ -105,6 +123,17 @@ func (r *parquetReader) Zone(group int, path string) (Zone, bool) {
 	}
 
 	return zoneOf(idx, chunk.Type().Kind()), true
+}
+
+// chunkKey is one column chunk: a row group and a path.
+type chunkKey struct {
+	group int
+	path  string
+}
+
+type zoneCached struct {
+	z  Zone
+	ok bool
 }
 
 func zoneType(t string) bool {
@@ -179,12 +208,7 @@ func (r *parquetReader) Bloom(group int, path string, v Scalar) (may, known bool
 		return true, false
 	}
 
-	chunk, err := r.chunkOf(group, path)
-	if err != nil {
-		return true, false
-	}
-
-	bf := chunk.BloomFilter()
+	bf := r.bloomOf(group, path)
 
 	if bf == nil {
 		return true, false
@@ -227,51 +251,35 @@ func (r *parquetReader) ReadGroup(group int, paths []string) (GroupRows, error) 
 	rg := r.file.RowGroups()[group]
 	chunks := rg.ColumnChunks()
 
-	ids, err := columnValues(chunks[r.cols.id])
-	if err != nil {
-		return GroupRows{}, err
-	}
-
-	seqs, err := columnValues(chunks[r.cols.seq])
-	if err != nil {
-		return GroupRows{}, err
-	}
-
-	vs, err := columnValues(chunks[r.cols.v])
-	if err != nil {
-		return GroupRows{}, err
-	}
+	n := int(rg.NumRows())
 
 	out := GroupRows{
-		IDs:   make([]string, len(ids)),
-		Seqs:  make([]uint64, len(seqs)),
-		Vs:    make([]uint64, len(vs)),
+		IDs:   make([]string, n),
+		Seqs:  make([]uint64, n),
+		Vs:    make([]uint64, n),
 		Cells: make([][]Cell, len(paths)),
 	}
 
-	for i, v := range ids {
-		out.IDs[i] = string(v.ByteArray())
-	}
-
-	for i, v := range seqs {
-		out.Seqs[i] = uint64(v.Int64())
-	}
-
-	for i, v := range vs {
-		out.Vs[i] = uint64(v.Int64())
+	err := errors.Join(
+		eachValue(chunks[r.cols.id], func(k int, v parquet.Value) { out.IDs[k] = string(v.ByteArray()) }),
+		eachValue(chunks[r.cols.seq], func(k int, v parquet.Value) { out.Seqs[k] = uint64(v.Int64()) }),
+		eachValue(chunks[r.cols.v], func(k int, v parquet.Value) { out.Vs[k] = uint64(v.Int64()) }),
+	)
+	if err != nil {
+		return GroupRows{}, err
 	}
 
 	if len(paths) == 0 {
 		return out, nil
 	}
 
-	rest, err := restRows(chunks[r.cols.rest], len(ids))
+	rest, err := restRows(chunks[r.cols.rest], n)
 	if err != nil {
 		return GroupRows{}, err
 	}
 
 	for i, p := range paths {
-		cells, err := r.cellsOf(rg, p, rest, len(ids))
+		cells, err := r.cellsOf(rg, p, rest, n)
 		if err != nil {
 			return GroupRows{}, err
 		}
@@ -295,12 +303,9 @@ func (r *parquetReader) cellsOf(rg parquet.RowGroup, path string, rest [][]byte,
 			return cells, nil
 		}
 
-		vals, err := columnValues(rg.ColumnChunks()[leaf.ColumnIndex])
-		if err != nil {
+		if err := fillCells(cells, rg.ColumnChunks()[leaf.ColumnIndex], strings.HasPrefix(col.Type, "list<")); err != nil {
 			return nil, err
 		}
-
-		fillCells(cells, vals, strings.HasPrefix(col.Type, "list<"))
 	}
 
 	for k := range cells {
@@ -315,40 +320,52 @@ func (r *parquetReader) cellsOf(rg parquet.RowGroup, path string, rest [][]byte,
 // fillCells groups the values of a column chunk by row: a value with
 // repetition level 0 starts a row. A null (definition level 0) adds nothing,
 // so the row stays unknown.
-func fillCells(cells []Cell, vals []parquet.Value, list bool) {
+//
+// A plain column has one value a row: the cells share one block of
+// scalars, so a group costs one allocation, not one a row.
+func fillCells(cells []Cell, chunk parquet.ColumnChunk, list bool) error {
 	row := -1
 
-	for _, v := range vals {
+	var one []Scalar
+
+	if !list {
+		one = make([]Scalar, len(cells))
+	}
+
+	return eachValue(chunk, func(_ int, v parquet.Value) {
 		if v.RepetitionLevel() == 0 {
 			row++
 		}
 
 		if v.DefinitionLevel() == 0 || row < 0 || row >= len(cells) {
-			continue
+			return
 		}
 
 		cells[row].Known = true
 		cells[row].List = list
-		cells[row].Vals = append(cells[row].Vals, scalarOf(v, v.Kind()))
-	}
+
+		if list || len(cells[row].Vals) > 0 {
+			cells[row].Vals = append(cells[row].Vals, scalarOf(v, v.Kind()))
+
+			return
+		}
+
+		one[row] = scalarOf(v, v.Kind())
+		cells[row].Vals = one[row : row+1 : row+1]
+	})
 }
 
 // restRows returns the _rest JSON of each row, nil when the row has none.
 func restRows(chunk parquet.ColumnChunk, n int) ([][]byte, error) {
-	vals, err := columnValues(chunk)
-	if err != nil {
-		return nil, err
-	}
-
 	out := make([][]byte, n)
 
-	for k, v := range vals {
+	err := eachValue(chunk, func(k int, v parquet.Value) {
 		if k < n && v.DefinitionLevel() > 0 {
 			out[k] = bytes.Clone(v.ByteArray())
 		}
-	}
+	})
 
-	return out, nil
+	return out, err
 }
 
 // restCell reads the value of path from one row's _rest object. Only scalars
@@ -435,6 +452,28 @@ func scalarOf(v parquet.Value, k parquet.Kind) Scalar {
 	}
 
 	return Scalar{Kind: ScalarString, Str: string(v.ByteArray())}
+}
+
+// bloomOf is the bloom filter of one chunk, read on first use and kept
+// (nil when the chunk has none).
+func (r *parquetReader) bloomOf(group int, path string) parquet.BloomFilter {
+	k := chunkKey{group, path}
+
+	if bf, ok := r.blooms.Load(k); ok {
+		f, _ := bf.(parquet.BloomFilter)
+
+		return f
+	}
+
+	var bf parquet.BloomFilter
+
+	if chunk, err := r.chunkOf(group, path); err == nil {
+		bf = chunk.BloomFilter()
+	}
+
+	r.blooms.Store(k, bf)
+
+	return bf
 }
 
 // chunkOf is the column chunk of a document path in one row group.

@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- **Counts, aggregations and the wake are faster** (`make bench`, 210k events):
+  - A count whose only condition is an equality on an index counts the hits of the index, without reading the rows: `count of the finishcalls` 111 ms → 4 ms, `count of a customer` 33 ms → 1.3 ms.
+  - A range on the time field skips the row groups outside it (the zone maps of the time field are its instants, read once per segment): `count of one hour` 113 ms → 12 ms, `a customer in one hour` 29 ms → 3.5 ms.
+  - A segment wholly inside the `retention` (or TTL) is read without checking the time of each row, and its time column is not read unless the query uses it: `events per type` 137 ms → 47 ms, `talk time per customer` 150 ms → 60 ms, `long calls, not indexed` 116 ms → 46 ms.
+  - A segment read copies each column value once, and a group of a plain column is one allocation.
+  - A segment opens with its footer only (the page index and the bloom filters are read on first use of a column, then kept), and the segments of a collection open in parallel: the first call on the loaded partition after it slept went from 30 ms to 17 ms.
+  - `make bench` budgets: slowest query 150 ms, aggregation 200 ms, lookup 600 ms, wake of the loaded partition 50 ms.
+
 ## [1.10.0] - 2026-11-08
 
 ### Changed

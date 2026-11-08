@@ -15,6 +15,10 @@ func ExpiredWhere(path string, cutoff time.Time) map[string]any {
 // Hide removes from the result every row that where matches. The condition is
 // not part of the query text, so the cursor hash stays the same.
 func (q *Query) Hide(where map[string]any) error {
+	if q.user == nil {
+		q.user, q.userPaths = q.where, len(q.paths)
+	}
+
 	n, err := q.compileWhere(where)
 	if err != nil {
 		return err
@@ -23,4 +27,18 @@ func (q *Query) Hide(where map[string]any) error {
 	q.where = andNode{q.where, notNode{n}}
 
 	return nil
+}
+
+// Visible is q without the conditions that Hide added, for rows that are all
+// visible (a row group wholly inside the retention): they need no check of
+// their time, and the time column is not read unless the request uses it.
+func (q *Query) Visible() *Query {
+	if q.user == nil {
+		return q
+	}
+
+	v := *q
+	v.where, v.paths, v.user = q.user, q.paths[:q.userPaths], nil
+
+	return &v
 }

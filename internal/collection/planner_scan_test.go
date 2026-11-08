@@ -697,3 +697,138 @@ func TestSortedTopKReadsOnlyTheDocumentsItReturns(t *testing.T) {
 		t.Fatalf("top 3 = %v", got)
 	}
 }
+
+// A count whose only condition is an equality on an index counts the hits
+// of the index: no row group is read.
+func TestExactIndexCountReadsNoRowGroup(t *testing.T) {
+	c := openSealed(t, t.TempDir(), collection.Config{})
+
+	sealBatch(t, c, rangeDocs(0, 3000, func(i int) string {
+		return fmt.Sprintf(`{"_id":"d%04d","status":"s%d","n":%d}`, i, i%3, i)
+	}))
+
+	e := explainOf(t, c, `{"query":{"status":"s1"},"count":true,"limit":1}`)
+
+	if e.RowGroupsRead > 1 || e.RowsMatched != 1000 {
+		t.Fatalf("an exact index count read %d row groups, matched %d: %+v", e.RowGroupsRead, e.RowsMatched, e)
+	}
+
+	if e := explainOf(t, c, `{"query":{"status":"s1","n":{"$gte":0}},"count":true,"limit":1}`); e.RowGroupsRead < 3 || e.RowsMatched != 1000 {
+		t.Fatalf("a second condition must still be checked on the rows: %+v", e)
+	}
+}
+
+// The same count on a collection with a retention, parsed as the daemon
+// does (the retention adds a hidden condition): a group wholly inside the
+// window is counted from the hits too.
+func TestExactIndexCountWithARetention(t *testing.T) {
+	dir := t.TempDir()
+	def := catalog.Def{Name: "logs", Time: "ts", Retention: "7d", Indexes: []string{"status"}}
+
+	c, err := collection.Open(collection.Config{Dir: filepath.Join(dir, "wal"), Data: dir, FS: fs.OS{}, Def: def, SealAge: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { c.Close() })
+
+	at := time.Now().UTC().Add(-time.Hour)
+
+	sealBatch(t, c, rangeDocs(0, 3000, func(i int) string {
+		return fmt.Sprintf(`{"_id":"d%04d","status":"s%d","ts":%q}`, i, i%3, at.Add(time.Duration(i)*time.Second).Format(time.RFC3339))
+	}))
+
+	q, err := c.ParseQuery([]byte(`{"query":{"status":"s1"},"count":true,"limit":1,"explain":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := c.Query(ctx, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if e := page.Explain; e.RowGroupsRead > 1 || *page.Total != 1000 {
+		t.Fatalf("an exact index count with a retention read %d row groups: %+v", e.RowGroupsRead, e)
+	}
+}
+
+func openTimed(t *testing.T, def catalog.Def) *collection.Collection {
+	t.Helper()
+
+	dir := t.TempDir()
+
+	c, err := collection.Open(collection.Config{Dir: filepath.Join(dir, "wal"), Data: dir, FS: fs.OS{}, Def: def, SealAge: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { c.Close() })
+
+	return c
+}
+
+func parsedExplain(t *testing.T, c *collection.Collection, body string) collection.Page {
+	t.Helper()
+
+	q, err := c.ParseQuery([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := c.Query(ctx, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return page
+}
+
+// A range on the time field skips the row groups whose instants are all
+// outside it, though the column holds strings.
+func TestTimeRangeSkipsRowGroups(t *testing.T) {
+	c := openTimed(t, catalog.Def{Name: "logs", Time: "ts"})
+	at := time.Date(2026, 11, 7, 0, 0, 0, 0, time.UTC)
+
+	sealBatch(t, c, rangeDocs(0, 3000, func(i int) string {
+		return fmt.Sprintf(`{"_id":"d%04d","ts":%q}`, i, at.Add(time.Duration(i)*time.Second).Format(time.RFC3339))
+	}))
+
+	body := fmt.Sprintf(`{"query":{"ts":{"$gte":%q,"$lt":%q}},"count":true,"limit":1,"explain":true}`,
+		at.Add(100*time.Second).Format(time.RFC3339), at.Add(600*time.Second).Format(time.RFC3339))
+
+	page := parsedExplain(t, c, body)
+
+	if *page.Total != 500 || page.Explain.RowGroupsRead != 1 {
+		t.Fatalf("total %d, row groups read %d: want 500 from the first group only", *page.Total, page.Explain.RowGroupsRead)
+	}
+}
+
+// A segment wholly inside the retention runs without the hidden condition;
+// one with expired rows still hides them.
+func TestRetentionHidesOnlyWhereItMust(t *testing.T) {
+	c := openTimed(t, catalog.Def{Name: "logs", Time: "ts", Retention: "7d", Indexes: []string{"status"}})
+	now := time.Now().UTC()
+
+	doc := func(at time.Time) func(int) string {
+		return func(i int) string {
+			return fmt.Sprintf(`{"_id":"%s%04d","status":"s%d","ts":%q}`, at.Format("0102"), i, i%2, at.Add(time.Duration(i)*time.Second).Format(time.RFC3339))
+		}
+	}
+
+	sealBatch(t, c, rangeDocs(0, 2000, doc(now.Add(-time.Hour))))
+
+	if got := *parsedExplain(t, c, `{"query":{"status":"s1"},"count":true,"limit":1}`).Total; got != 1000 {
+		t.Fatalf("fresh segment: %d, want 1000", got)
+	}
+
+	sealBatch(t, c, rangeDocs(0, 2000, doc(now.Add(-30*24*time.Hour))))
+
+	for _, body := range []string{`{"query":{"status":"s1"},"count":true,"limit":1}`, `{"count":true,"limit":1}`} {
+		want := map[bool]int{true: 1000, false: 2000}[strings.Contains(body, "status")]
+
+		if got := *parsedExplain(t, c, body).Total; got != want {
+			t.Fatalf("%s with an expired segment: %d, want %d (the expired rows hidden)", body, got, want)
+		}
+	}
+}
