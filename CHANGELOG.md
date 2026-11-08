@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.4.4] - 2026-11-08
+
 ### Changed
 
 - Rails: the Minitest integration is `require "ndb/rails/minitest"` (it was `ndb/rails/test_help` in 1.4.3), next to `ndb/rails/rspec`.
@@ -387,7 +389,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.4.3...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.4.4...HEAD
+[1.4.4]: https://github.com/thadeu/ndb/compare/v1.4.3...v1.4.4
 [1.4.3]: https://github.com/thadeu/ndb/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/thadeu/ndb/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/thadeu/ndb/compare/v1.4.0...v1.4.1
