@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-11-08
+
 ### Changed
 
 - **Idle collections use no CPU.** The seals, compactions, WAL truncation and TTL sweeps of every collection run from one scheduler with a deadline per job, instead of two 1 s timers per collection (and a 200 ms flush timer per `relaxed` WAL). A collection that is not written has no deadline: 300 idle collections went from 280 ms of CPU every 10 s (2.8% of a core) to 0 ms, and 1 000 use 0 ms too. A memtable is still sealed at its size, at `write_buffer` (one daemon-wide check, while some memtable holds writes) and at 10 minutes; `make bench` is the same for writes, load and reads. The `ndb bench` budget for idle CPU is now 0.5% of a core.
@@ -420,7 +422,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/thadeu/ndb/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/thadeu/ndb/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/thadeu/ndb/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/thadeu/ndb/compare/v1.3.0...v1.4.0
