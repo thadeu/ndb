@@ -3,3 +3,4 @@ export { complete, erase, format, normalize, parse, parseTime, pattern, step, te
 export { attachMask, createDatePicker, datePickerHTML, DEFAULT_LABELS, mountDatePicker, mountDatePickers, type DatePickerBounds, type DatePickerCallbacks, type DatePickerChange, type DatePickerController, type DatePickerLabels, type DatePickerMode, type DatePickerOptions } from './date-picker';
 export { closePopover, mountPopovers, openPopover, popoverOpen, repositionPopover } from './popover';
 export { place, type Placed, type Placement, type Rect, type Size } from './popover-position';
+export { enhance, observeDatePickers, optionsOf, type EnhancedDatePicker, type EnhanceOptions } from './enhance';

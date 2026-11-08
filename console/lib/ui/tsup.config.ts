@@ -1,8 +1,8 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/index.ts', 'src/react.ts'],
-  external: ['react'],
+  entry: ['src/index.ts', 'src/react.ts', 'src/stimulus.ts'],
+  external: ['react', '@hotwired/stimulus'],
   format: ['esm', 'cjs'],
   dts: true,
   clean: true,

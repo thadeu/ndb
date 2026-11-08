@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **`@tdu/ui/stimulus`** for Rails and Hotwire: `DatePickerController` (`data-controller="tdu-datepicker"`) grows the picker around the input of the form builder (`text_field`, `date_field`, `datetime_field`; two inputs make a range), with values for mode, min, max, presets, locale and labels, the actions `open`, `close`, `clear`, and the event `tdu-datepicker:change`. Disconnect restores the markup, so the Turbo cache stays clean, and a cached copy is never doubled. Without Stimulus, `data-tdu-datepicker` and `observeDatePickers()` follow Turbo Drive, Frames and Streams. `enhance(root)` is the vanilla API under both.
+
 ## [1.2.8] - 2026-11-08
 
 ### Changed

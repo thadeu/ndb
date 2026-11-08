@@ -43,6 +43,7 @@
   ],
   "exclude": [
     "lib/ui/src/react.ts",
+    "lib/ui/src/stimulus.ts",
     "lib/ui/node_modules",
     "lib/ui/dist"
   ]

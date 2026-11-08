@@ -1,6 +1,6 @@
 # @tdu/ui
 
-A date picker you do not write again. A positional mask, a calendar in a smart popover, a time row, presets and ranges. Vanilla DOM and React, no dependency, ESM + CommonJS + types.
+A date picker you do not write again. A positional mask, a calendar in a smart popover, a time row, presets and ranges. Vanilla DOM, React and Stimulus (Rails, Hotwire), no dependency, ESM + CommonJS + types.
 
 ```bash
 npm install @tdu/ui
@@ -10,11 +10,13 @@ npm install @tdu/ui
 import '@tdu/ui/date-picker.css';
 import { createDatePicker } from '@tdu/ui';          // vanilla
 import { DatePicker, useDatePicker } from '@tdu/ui/react';   // React 18+
+import { registerDatePicker } from '@tdu/ui/stimulus';        // Stimulus 3 (Rails, Hotwire)
 ```
 
 - [What it does](#what-it-does)
 - [Vanilla](#vanilla)
 - [React](#react)
+- [Rails and Hotwire](#rails-and-hotwire)
 - [Server rendering](#server-rendering)
 - [Options](#options)
 - [The controller](#the-controller)
@@ -106,6 +108,100 @@ function Filter() {
 - `id` is optional (it comes from `useId`). Changing `name`, `label`, `mode`, `locale`, `required` or `inputClass` makes the picker again; `min`, `max`, `presets` and `value` update it in place.
 - StrictMode is fine: the double mount makes one picker.
 - In the Next.js App Router, use it in a client component (`'use client'`).
+
+## Rails and Hotwire
+
+The Stimulus controller grows the picker around the input that the form builder writes, so the input keeps its `name`, `value`, `id`, `<label>` and validations. Put `data-controller="tdu-datepicker"` on an element that holds the input (two inputs make a range).
+
+```erb
+<%= form_with model: @restore do |form| %>
+  <div data-controller="tdu-datepicker"
+       data-tdu-datepicker-max-value="now"
+       data-tdu-datepicker-presets-value="<%= [{ label: "1 hour ago", ago: "1h" }].to_json %>">
+    <%= form.label :at, "Restore at (UTC)" %>
+    <%= form.text_field :at %>
+  </div>
+
+  <div data-controller="tdu-datepicker">            <%# date_field: mode date %>
+    <%= form.date_field :day %>
+  </div>
+
+  <div data-controller="tdu-datepicker" data-tdu-datepicker-locale-value="pt-BR">
+    <%= form.text_field :from %> <%= form.text_field :to %>   <%# two inputs: a range %>
+  </div>
+<% end %>
+```
+
+### Install
+
+```bash
+bin/importmap pin @tdu/ui/stimulus        # importmap-rails
+# or: yarn add @tdu/ui / npm install @tdu/ui (jsbundling-rails)
+```
+
+```js
+// app/javascript/controllers/index.js
+import { application } from "controllers/application"
+import { DatePickerController } from "@tdu/ui/stimulus"
+
+application.register("tdu-datepicker", DatePickerController)
+```
+
+The CSS: `@import "@tdu/ui/date-picker.css";` with cssbundling-rails, or copy `dist/date-picker.css` to `app/assets/stylesheets/`. Theme it with the [variables](#theme-css-variables), next to your Tailwind or CSS.
+
+### Values, actions, events
+
+| `data-tdu-datepicker-*-value` | |
+|---|---|
+| `mode` | `date`, `datetime`, `range`. Default: `range` with two inputs, `date` for `date_field`, else `datetime` |
+| `min`, `max` | RFC 3339, `max: now`. A change updates the open picker |
+| `presets` | JSON array (`.to_json`) |
+| `locale`, `label` | month names; the accessible name (default: the `<label>` text) |
+| `labels` | JSON object, to translate the buttons and hints |
+
+- **Actions:** `click->tdu-datepicker#open`, `#close`, `#clear`.
+- **Event:** `tdu-datepicker:change` with the [change detail](#events): `data-action="tdu-datepicker:change->filters#submit"`.
+- **Outlets:** another controller reads `value` and `date` of the `tdu-datepicker` outlet.
+- `date_field` and `datetime_field` become text fields with the mask (`2026-11-05T09:30` is read as `2026-11-05 09:30:00`); disconnect gives them back as they were.
+
+### Turbo
+
+- **Drive and the cache:** disconnect restores the markup before Turbo caches the page; a snapshot that still has an old picker is cleaned when it comes back, never doubled.
+- **Frames and Streams:** Stimulus connects the new elements.
+- **Without Stimulus:** mark the element and observe once:
+
+  ```erb
+  <div data-tdu-datepicker="date" data-tdu-datepicker-max="now"><%= form.text_field :day %></div>
+  ```
+
+  ```js
+  import { observeDatePickers } from "@tdu/ui"
+
+  observeDatePickers()     // now, and every element that Turbo adds or removes later
+  ```
+
+  The attributes are `data-tdu-datepicker` (the mode, or empty), `-min`, `-max`, `-locale`, `-label`, `-presets` and `-labels` (JSON).
+
+### Time zone
+
+The values are UTC (`2026-11-08 14:04:05`). With `config.time_zone = "UTC"` (the Rails default) `params[:at]` parses as it is. With another zone, read it as UTC: `Time.find_zone("UTC").parse(params[:at])`.
+
+### A helper
+
+```ruby
+# app/helpers/date_picker_helper.rb
+module DatePickerHelper
+  def date_picker(form, attribute, max: "now", presets: [], **options)
+    data = { controller: "tdu-datepicker", tdu_datepicker_max_value: max, tdu_datepicker_presets_value: presets.to_json }
+
+    tag.div(data:) { form.text_field(attribute, **options) }
+  end
+end
+```
+
+```erb
+<%= date_picker form, :at, presets: [{ label: "15 minutes ago", ago: "15m" }] %>
+```
 
 ## Server rendering
 
@@ -270,6 +366,9 @@ Each part is exported, pure where it can be, and tested:
 | `popover-position` | `place(triggerRect, size, viewport, { prefer, gap, margin, sheetBelow })` |
 | `popover` | `openPopover`, `closePopover`, `repositionPopover`, `mountPopovers` (`[data-popover-open="id"]`) |
 | `date-picker` | `datePickerHTML`, `mountDatePicker`, `mountDatePickers`, `createDatePicker`, `attachMask`, `DEFAULT_LABELS` |
+| `enhance` | `enhance(root, options)` (existing inputs, returns a controller with `restore()`), `observeDatePickers()`, `optionsOf(el)` |
+| `stimulus` (`@tdu/ui/stimulus`) | `DatePickerController`, `registerDatePicker(application, identifier?)` |
+| `react` (`@tdu/ui/react`) | `useDatePicker`, `DatePicker` |
 
 ```ts
 import { attachMask } from '@tdu/ui';
@@ -283,7 +382,7 @@ attachMask(document.querySelector('input')!, 'time');   // just the mask
 pnpm install
 pnpm test          # bun test
 pnpm typecheck
-pnpm build         # dist: index and react, ESM + CJS + .d.ts, date-picker.css
+pnpm build         # dist: index, react and stimulus, ESM + CJS + .d.ts, date-picker.css
 ```
 
 It lives in the ndb console (`console/lib/ui`), which imports it as `@/lib/ui/...`. License MIT.
