@@ -35,7 +35,7 @@ var gates = []gate{
 	{metric: "queries.worst", what: "slowest query (median)", max: 700, unit: "ms"},
 	{metric: "aggregations.worst", what: "slowest aggregation (median)", max: 600, unit: "ms"},
 	{metric: "idle.disk_kb", what: "disk per idle collection", max: 256, unit: "KB"},
-	{metric: "idle.cpu_pct", what: "CPU of the idle collections", max: 6, unit: "% core"},
+	{metric: "idle.cpu_pct", what: "CPU of the idle collections", max: 0.5, unit: "% core"},
 	{metric: "idle.rss_mb", what: "RSS of the idle collections", max: 60, unit: "MB"},
 	{metric: "idle.fds", what: "open files per idle collection", max: 3},
 }

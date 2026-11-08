@@ -195,6 +195,8 @@ func (c *Collection) applyDurable(op wal.Op, tx uint64) {
 		c.tombs[op.ID] = tx
 	}
 
+	c.dirtied()
+
 	if len(c.rd.idx) == 0 {
 		return
 	}

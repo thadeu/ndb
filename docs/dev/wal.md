@@ -37,7 +37,7 @@ When the client gets its answer depends on `durability`:
 | `strict` (default) | after `fdatasync` | every answered write is on disk |
 | `relaxed` | after `write()` | you can lose the last 200 ms; the WAL is never corrupt |
 
-In `relaxed` mode a background loop calls `fdatasync` every 200 ms. `watch` events wait for that fsync, so a consumer never sees a write that a crash can take back.
+In `relaxed` mode the writer calls `fdatasync` at most 200 ms after the first write that is not on disk yet (a timer armed by that write: an idle writer has none). `watch` events wait for that fsync, so a consumer never sees a write that a crash can take back.
 
 If a write or an fsync fails, ndb exits. It does not retry: after a failed fsync, Linux can drop the dirty pages, so the only safe step is to stop and recover from the WAL.
 

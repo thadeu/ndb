@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- **Idle collections use no CPU.** The seals, compactions, WAL truncation and TTL sweeps of every collection run from one scheduler with a deadline per job, instead of two 1 s timers per collection (and a 200 ms flush timer per `relaxed` WAL). A collection that is not written has no deadline: 300 idle collections went from 280 ms of CPU every 10 s (2.8% of a core) to 0 ms, and 1 000 use 0 ms too. A memtable is still sealed at its size, at `write_buffer` (one daemon-wide check, while some memtable holds writes) and at 10 minutes; `make bench` is the same for writes, load and reads. The `ndb bench` budget for idle CPU is now 0.5% of a core.
+- A `relaxed` collection fsyncs at most 200 ms after the first write that is not on disk, instead of on a 200 ms timer that ran even when idle.
+
+### Fixed
+
+- In `strict` mode a write is in the change feed before it is answered: `_watch` from the current position and the PITR snapshot check saw an acked write a moment late.
+
 ## [1.6.0] - 2026-11-08
 
 ## [1.5.0] - 2026-11-08

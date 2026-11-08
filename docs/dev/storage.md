@@ -43,6 +43,8 @@ A direct collection is disk first, like an engine one: its rows are sealed to se
 
 The recent rows live in memory (the memtable). They are sealed to an immutable Parquet segment when the memtable of a collection reaches its share of `write_buffer` (32 MiB for the whole daemon, the largest memtable goes first) or 10 minutes since the last seal. Segments hold per-row-group min/max (zone maps), so queries skip what cannot match. DuckDB, Spark and pandas can read them. When 4 or more small segments are adjacent, compaction merges them (at most 512k rows at a time), and drops old versions, tombstones, expired rows and rows past `retention`. A segment whose rows are mostly replaced is rewritten alone. A seal can run while a compaction builds its segment.
 
+The seals, compactions, WAL truncation and TTL sweeps of every collection run from one scheduler, not from a timer per collection. Each job has a deadline: a write gives the seal one (when the memtable turns 10 minutes old, or now when it passed its size), a seal gives the compaction one, and a job with nothing left to do gives none. A collection that is not written costs no CPU: 1 000 idle collections use 0 ms of CPU in 10 s (`ndb bench -idle`). Work that comes with time and not with writes (segments past `retention`, WAL files a reader still holds) is checked once a minute, only for the collections that have it.
+
 ## Memory
 
 ndb keeps data on disk; memory has a fixed size, whatever the number of documents, collections or partitions:

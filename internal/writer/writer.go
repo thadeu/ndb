@@ -24,8 +24,9 @@ const (
 	// Strict: reply after fdatasync.
 	Strict Durability = iota
 
-	// Relaxed: reply after write; fsync runs every FlushEvery. A crash can
-	// lose the last FlushEvery of commits, never corrupt the WAL.
+	// Relaxed: reply after write; fsync runs at most FlushEvery after the
+	// first commit it covers. A crash can lose the last FlushEvery of
+	// commits, never corrupt the WAL.
 	Relaxed
 )
 
@@ -290,14 +291,9 @@ func (w *Writer) loop() {
 
 	defer close(w.exited)
 
-	var tick <-chan time.Time
-
-	if w.cfg.Durability == Relaxed {
-		t := time.NewTicker(w.cfg.FlushEvery)
-		defer t.Stop()
-
-		tick = t.C
-	}
+	// flush is armed by the first commit that leaves data without an fsync
+	// (relaxed), and fires FlushEvery later: a writer at rest has no timer.
+	var flush <-chan time.Time
 
 	for {
 		select {
@@ -307,13 +303,19 @@ func (w *Writer) loop() {
 
 				return
 			}
+
+			if w.dirty && flush == nil {
+				flush = time.After(w.cfg.FlushEvery)
+			}
 		case j := <-w.jobs:
 			if !w.runJob(j) {
 				w.failRest()
 
 				return
 			}
-		case <-tick:
+		case <-flush:
+			flush = nil
+
 			if !w.flushDirty() {
 				w.failRest()
 
@@ -417,16 +419,20 @@ func (w *Writer) commitBatch(batch []*request) bool {
 		w.dirty = true
 	}
 
-	for _, p := range ok {
-		if w.cfg.Applied != nil {
+	if w.cfg.Applied != nil {
+		for _, p := range ok {
 			w.cfg.Applied(p.rec)
 		}
-
-		p.req.done <- result{tx: p.rec.Tx, ops: p.rec.Ops}
 	}
 
+	// A strict commit is durable already: the feed has it before the
+	// writer answers, so an acked write is in LastTx and in a new watch.
 	if w.cfg.Durability == Strict {
 		w.synced()
+	}
+
+	for _, p := range ok {
+		p.req.done <- result{tx: p.rec.Tx, ops: p.rec.Ops}
 	}
 
 	if w.cfg.Observer != nil {

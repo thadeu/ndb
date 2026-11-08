@@ -137,7 +137,7 @@ type Collection struct {
 
 	seal    *sealer
 	shared  *Shared
-	sweep   *sweeper
+	sweep   *job
 	onFatal func(error)
 	now     func() time.Time
 

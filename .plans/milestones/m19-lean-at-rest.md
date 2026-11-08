@@ -1,6 +1,6 @@
 # M19: Lean at rest
 
-Status: not started
+Status: in progress (E19.1 done in 1.7.0)
 
 ## Goal
 
@@ -15,13 +15,20 @@ same engine, with nothing running for data nobody touches.
 | Cost per collection at rest | Now | Why |
 |---|---|---|
 | disk | 80 KB | WAL reserve proportional to the data (1.4.6; it was 4 MiB) |
-| CPU | 2.6% of a core for 300, linear | a sealer and a compactor goroutine, each with a 1 s ticker; a 200 ms flush ticker in the WAL writer of a `relaxed` collection; a TTL sweeper when ttl is set |
+| CPU | 0 ms in 10 s (1.7.0; it was 2.6% of a core for 300) | done in E19.1 |
 | open files | 2 | the WAL segment and meta.bolt stay open |
 | RSS | ~70 KB | writer buffers, caches, goroutine stacks |
 
 ## Epics
 
-### E19.1 One scheduler
+### E19.1 One scheduler (done)
+
+Built in `internal/collection/schedule.go`: a heap of deadlines whose goroutine
+exits when no job has one. 300 and 1 000 idle collections: 0 ms of CPU in
+10 s (it was 280 ms for 300). The PITR snapshot and partition retention
+stay on their engine timers (one per daemon, once a minute: they do not grow
+with collections). The global write budget is one job that runs only while
+some memtable holds writes.
 
 One goroutine in the engine runs the periodic work of every collection
 (seal due, compaction due, WAL truncation, TTL sweep, PITR snapshots,

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
-	"sync"
 	"time"
 
 	"github.com/thadeu/ndb/internal/catalog"
@@ -248,48 +247,23 @@ func (c *Collection) prepareExpire(v *view, r expireReq) ([]wal.Op, error) {
 	return ops, nil
 }
 
-type sweeper struct {
-	every time.Duration
-	stop  chan struct{}
-	once  sync.Once
-	wg    sync.WaitGroup
-}
-
+// startSweeper runs the TTL sweep every every, on the scheduler.
 func (c *Collection) startSweeper(every time.Duration) {
 	if every <= 0 {
 		every = defaultSweepEvery
 	}
 
-	c.sweep = &sweeper{every: every, stop: make(chan struct{})}
-	c.sweep.wg.Add(1)
-
-	go c.runSweeper()
-}
-
-func (c *Collection) runSweeper() {
-	defer c.sweep.wg.Done()
-
-	t := time.NewTicker(c.sweep.every)
-
-	defer t.Stop()
-
-	for {
-		select {
-		case <-c.sweep.stop:
-			return
-		case <-t.C:
-			if _, err := c.Sweep(); err != nil && !errors.Is(err, writer.ErrClosed) {
-				log.Printf("ndb: ttl sweep failed, retrying on the next tick: %v", err)
-			}
+	c.sweep = newJob(func() time.Time {
+		if _, err := c.Sweep(); err != nil && !errors.Is(err, writer.ErrClosed) {
+			log.Printf("ndb: ttl sweep failed, retrying on the next tick: %v", err)
 		}
-	}
+
+		return time.Now().Add(every)
+	})
+
+	c.sweep.poke(time.Now().Add(every))
 }
 
 func (c *Collection) stopSweeper() {
-	if c.sweep == nil {
-		return
-	}
-
-	c.sweep.once.Do(func() { close(c.sweep.stop) })
-	c.sweep.wg.Wait()
+	c.sweep.stop()
 }

@@ -164,3 +164,14 @@ func MakeLegacy(root string) error {
 		return putCheckpoint(tx, cp)
 	})
 }
+
+// Scheduled tells whether the seal and the compaction jobs of c have a
+// deadline (or run now).
+func Scheduled(c *Collection) (seal, compact bool) {
+	sched.mu.Lock()
+	defer sched.mu.Unlock()
+
+	queued := func(j *job) bool { return j.idx >= 0 || j.busy }
+
+	return queued(c.seal.sealJob), queued(c.seal.compactJob)
+}

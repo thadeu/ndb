@@ -238,7 +238,7 @@ An app can also declare its collection from code (`ensure_collection`: the SDKs 
 | Mode | Behavior |
 |---|---|
 | `strict` (default) | A write is answered after the WAL is fsynced. Concurrent writes share one fsync (group commit). A crash loses nothing that was answered. |
-| `relaxed` | A write is answered after `write()`. A background fsync runs every 200 ms. A crash can lose the last 200 ms, but never corrupts data. |
+| `relaxed` | A write is answered after `write()`. The fsync runs at most 200 ms after the first write it covers. A crash can lose the last 200 ms, but never corrupts data. |
 
 If an fsync fails, the daemon exits. It does not retry: after a failed fsync, Linux can drop the dirty pages. The start-up recovery then makes the state right.
 

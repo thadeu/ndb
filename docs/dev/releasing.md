@@ -20,6 +20,14 @@ One tag `vX.Y.Z` releases everything. Version 0.1.0 is used in all packages.
 4. ghcr: after the first image push, open the package `ndb` under the profile Packages and set visibility to Public. Link it to the repository.
 5. Settings, Actions, General: allow workflows to have read and write permission (the Go tag step pushes a tag).
 
+## Versions
+
+- **minor** (1.6.0 → 1.7.0): a feature, an API addition, or a performance or resource change (memory, disk, CPU) of the daemon or an SDK.
+- **patch** (1.6.0 → 1.6.1): a bug fix only, with no new behavior.
+- **major**: routes or keys change; the CHANGELOG has a migration table.
+
+`make tag minor` or `make tag patch` bumps the SDK versions and the CHANGELOG.
+
 ## Per release
 
 1. Update the version: `sdk/ts/package.json`, `sdk/ruby/lib/ndb/version.rb`, `sdk/rails/lib/ndb/rails/version.rb`. The publish workflows fail when a version differs from the tag. When the `ndb` minor version changes, update the `ndb` requirement in `sdk/rails/ndb-rails.gemspec`.

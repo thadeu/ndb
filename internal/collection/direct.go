@@ -304,10 +304,7 @@ func (d *Direct) full() bool {
 		return false
 	}
 
-	select {
-	case s.wake <- struct{}{}:
-	default:
-	}
+	s.sealJob.poke(time.Now())
 
 	return true
 }

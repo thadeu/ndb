@@ -764,3 +764,38 @@ func TestSnapshotMergesSegmentsAndMemtableInOrder(t *testing.T) {
 		t.Fatalf("snapshot ids: %d %v", len(ids), ids)
 	}
 }
+
+// A collection at rest has no deadline on the scheduler: no CPU until the
+// next write, which gives the seal job one again.
+func TestACollectionAtRestHasNoDeadline(t *testing.T) {
+	c := openSealed(t, t.TempDir(), collection.Config{SealAge: 10 * time.Millisecond, SealTick: 5 * time.Millisecond})
+
+	insertN(t, c, 0, 5)
+
+	atRest := func() bool {
+		seal, compact := collection.Scheduled(c)
+
+		return !seal && !compact
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+
+	for !atRest() {
+		if time.Now().After(deadline) {
+			seal, compact := collection.Scheduled(c)
+			t.Fatalf("still scheduled after the seal: seal %v, compaction %v", seal, compact)
+		}
+
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if c.Segments() == 0 {
+		t.Fatal("at rest before the memtable was sealed")
+	}
+
+	insertN(t, c, 5, 6)
+
+	if seal, _ := collection.Scheduled(c); !seal {
+		t.Fatal("a write did not give the seal job a deadline")
+	}
+}

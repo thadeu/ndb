@@ -90,9 +90,11 @@ type sealer struct {
 	commitMu   sync.Mutex
 	nameMu     sync.Mutex
 	stop       chan struct{}
-	wake       chan struct{}
 	stopOnce   sync.Once
-	wg         sync.WaitGroup
+
+	// sealJob and compactJob run on the scheduler (schedule.go).
+	sealJob    *job
+	compactJob *job
 }
 
 // checkpoint is the value of meta.bolt: the WAL end covered by the
@@ -144,7 +146,6 @@ func (c *Collection) openSegments(cfg Config) (recovery.Position, error) {
 		tick:  cfg.SealTick,
 		last:  time.Now(),
 		stop:  make(chan struct{}),
-		wake:  make(chan struct{}, 1),
 
 		compactMin: cfg.CompactMin,
 		onCompact:  cfg.OnCompact,
@@ -499,6 +500,8 @@ func (c *Collection) Seal() error {
 		return nil
 	}
 
+	defer s.compactJob.poke(time.Now().Add(s.tick))
+
 	name := s.newName()
 	path := s.path(name)
 
@@ -847,10 +850,7 @@ func (c *Collection) waitRoom(ctx context.Context) error {
 			return nil
 		}
 
-		select {
-		case s.wake <- struct{}{}:
-		default:
-		}
+		s.sealJob.poke(time.Now())
 
 		select {
 		case <-ctx.Done():
@@ -860,60 +860,135 @@ func (c *Collection) waitRoom(ctx context.Context) error {
 	}
 }
 
+// idleChecks is how many seal ticks apart a collection at rest checks the
+// work that comes with time, not with writes: WAL files a reader or PITR
+// held, segments past the retention (1 min with the default tick).
+const idleChecks = 60
+
 func (c *Collection) startSealer() {
-	c.seal.wg.Add(2)
+	s := c.seal
+	soon := time.Now().Add(s.tick)
 
-	go c.runSealer()
-	go c.runCompactor()
+	s.sealJob = newJob(c.sealTick)
+	s.compactJob = newJob(c.compactTick)
+	c.shared.join(c, s.tick)
+	s.sealJob.poke(soon)
+	s.compactJob.poke(soon)
+	c.shared.written()
 }
 
-// runCompactor merges segments on the sealer tick, apart from the seals.
-func (c *Collection) runCompactor() {
-	defer c.seal.wg.Done()
+// dirtied gives the seal job a deadline after a write: now when the
+// memtable passed its seal size, else when it turns seal_age old (a tick
+// away at least). Callers hold c.mu.
+func (c *Collection) dirtied() {
+	s := c.seal
 
-	t := time.NewTicker(c.seal.tick)
-
-	defer t.Stop()
-
-	for {
-		select {
-		case <-c.seal.stop:
-			return
-		case <-t.C:
-			if err := c.compactDue(); err != nil && !errors.Is(err, errStopped) {
-				log.Printf("ndb: compaction failed, retrying on the next tick: %v", err)
-			}
-		}
+	if s == nil {
+		return
 	}
+
+	now := time.Now()
+
+	if c.memBytes >= s.bytes {
+		s.sealJob.poke(now)
+	} else {
+		s.sealJob.poke(s.sealAt(now))
+	}
+
+	c.shared.written()
 }
 
-func (c *Collection) runSealer() {
-	defer c.seal.wg.Done()
+// sealAt is when a dirty memtable is due by age, a tick from now at least.
+// Callers hold c.mu.
+func (s *sealer) sealAt(now time.Time) time.Time {
+	return later(s.last.Add(s.age), now.Add(s.tick))
+}
 
-	t := time.NewTicker(c.seal.tick)
+func later(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
 
-	defer t.Stop()
+	return b
+}
 
-	for {
-		select {
-		case <-c.seal.stop:
-			return
-		case <-c.seal.wake:
-			if err := c.Seal(); err != nil && !errors.Is(err, errStopped) {
-				log.Printf("ndb: seal failed, retrying on the next tick: %v", err)
-			}
-		case <-t.C:
-			if c.sealDue(time.Now()) {
-				if err := c.Seal(); err != nil && !errors.Is(err, errStopped) {
-					log.Printf("ndb: seal failed, retrying on the next tick: %v", err)
-				}
-			}
+// sealTick seals a memtable that is due and deletes the WAL files that the
+// seals cover. The next check is when the memtable turns seal_age old (a
+// write past the seal size or the write buffer pokes it sooner),
+// idleChecks ticks away while old WAL files wait for a reader, and none
+// when the collection is at rest.
+func (c *Collection) sealTick() time.Time {
+	s := c.seal
+	now := time.Now()
 
-			if _, err := c.TruncateWAL(); err != nil {
-				log.Printf("ndb: wal truncation failed, retrying on the next tick: %v", err)
-			}
+	if c.sealDue(now) {
+		if err := c.Seal(); err != nil && !errors.Is(err, errStopped) {
+			log.Printf("ndb: seal failed, retrying on the next tick: %v", err)
 		}
 	}
+
+	if _, err := c.TruncateWAL(); err != nil {
+		log.Printf("ndb: wal truncation failed, retrying on the next tick: %v", err)
+	}
+
+	var next time.Time
+
+	if c.walHeld() {
+		next = now.Add(idleChecks * s.tick)
+	}
+
+	c.mu.RLock()
+
+	if c.memBytes > 0 || len(c.tombs) > 0 {
+		next = earliest(next, s.sealAt(now))
+	}
+
+	c.mu.RUnlock()
+
+	return next
+}
+
+// earliest is the earlier of two deadlines; a zero one is none.
+func earliest(a, b time.Time) time.Time {
+	if a.IsZero() || b.Before(a) {
+		return b
+	}
+
+	return a
+}
+
+// compactTick runs one compaction that is due, and checks again a tick
+// later while there was one; a collection with a retention checks every
+// idleChecks ticks for segments that time made old.
+func (c *Collection) compactTick() time.Time {
+	s := c.seal
+	now := time.Now()
+
+	if lo, hi, ok := c.pickRun(); ok {
+		if err := c.compactRange(lo, hi); err != nil && !errors.Is(err, errStopped) {
+			log.Printf("ndb: compaction failed, retrying on the next tick: %v", err)
+		}
+
+		return now.Add(s.tick)
+	}
+
+	if c.def.Retention != "" && c.def.Time != "" && c.Segments() > 0 {
+		return now.Add(idleChecks * s.tick)
+	}
+
+	return time.Time{}
+}
+
+// walHeld tells whether WAL files wait to be truncated (only with
+// wal_retention: without it the WAL is not truncated).
+func (c *Collection) walHeld() bool {
+	if c.walKeep <= 0 || c.feed == nil {
+		return false
+	}
+
+	files, err := c.feed.files()
+
+	return err == nil && len(files) > 1
 }
 
 func (c *Collection) stopSealer() {
@@ -922,7 +997,8 @@ func (c *Collection) stopSealer() {
 	}
 
 	c.seal.stopOnce.Do(func() { close(c.seal.stop) })
-	c.seal.wg.Wait()
+	c.seal.sealJob.stop()
+	c.seal.compactJob.stop()
 }
 
 // closeSegments closes the segment readers and meta.bolt. It runs after the
