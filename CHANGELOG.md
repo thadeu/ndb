@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.2.9] - 2026-11-08
+
 ### Added
 
 - **`@tdu/ui/stimulus`** for Rails and Hotwire: `DatePickerController` (`data-controller="tdu-datepicker"`) grows the picker around the input of the form builder (`text_field`, `date_field`, `datetime_field`; two inputs make a range), with values for mode, min, max, presets, locale and labels, the actions `open`, `close`, `clear`, and the event `tdu-datepicker:change`. Disconnect restores the markup, so the Turbo cache stays clean, and a cached copy is never doubled. Without Stimulus, `data-tdu-datepicker` and `observeDatePickers()` follow Turbo Drive, Frames and Streams. `enhance(root)` is the vanilla API under both.
@@ -349,7 +351,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.2.8...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.2.9...HEAD
+[1.2.9]: https://github.com/thadeu/ndb/compare/v1.2.8...v1.2.9
 [1.2.8]: https://github.com/thadeu/ndb/compare/v1.2.7...v1.2.8
 [1.2.7]: https://github.com/thadeu/ndb/compare/v1.2.6...v1.2.7
 [1.2.6]: https://github.com/thadeu/ndb/compare/v1.2.5...v1.2.6
