@@ -68,6 +68,7 @@ A push to `main` that changes `docs/`, `docs-site/` or `brand/` deploys it to Cl
 - `gofmt` and `GOOS=linux go vet ./...` must be clean.
 - Code style: a blank line before `if`, `for`, `switch`, `return`, `defer`, `go`, after a closing `}`, and between groups that do different things.
 - Docs in `docs/dev/` change with the behavior.
+- A change to storage, the WAL, memory, or the read and write paths runs `make bench` before it is merged, and every check must PASS. A FAIL is fixed, or its budget in `internal/bench/checks.go` is changed in the same commit, with the reason.
 - `examples/` is not run in CI. Check it locally with `cd examples && make check` when an API changes.
 
 ## Release

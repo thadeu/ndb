@@ -10,7 +10,9 @@ Deferred ideas: [`../backlog/`](../backlog/).
 - Test first (TDD). Each epic starts with its failing tests.
 - A milestone is done only when all its **exit criteria** pass.
 - Performance numbers are measured with `ndb bench` (or `make bench`), on the
-  benchmark machine. A miss is recorded, not hidden.
+  benchmark machine. A miss is recorded, not hidden. Every check of
+  `make bench` must PASS when a milestone closes; a milestone that lowers a
+  cost lowers its budget in `internal/bench/checks.go`.
 - Status values: `not started`, `in progress`, `done`.
 
 ## List
@@ -37,6 +39,7 @@ docs in `docs/dev/` describe what they built.
 | M14 | Ndb Console | self-hosted web UI: connections, browser, dev tools | done |
 | M15 | API 1.0 | ES-style routes, `query` body key, one SDK vocabulary (1.0.0) | done |
 | M16 | Disk first | bounded memory at any data size (1.1.0; direct mode 1.2.0) | done |
+| [M19](m19-lean-at-rest.md) | Lean at rest | one scheduler for the periodic work, idle collections closed: no CPU, files or reserve at rest | not started |
 | M18 | Lookup | `lookup` in `_search` (belongs_to, has_many, has_one), `$lookup` at the end of `_aggregate`, SDKs, Rails `includes` | done |
 | M17 | PITR and rename | restore a collection to an instant of the last day; rename to put it in place (1.2.3; at/to 1.2.4) | done |
 

@@ -32,12 +32,13 @@ const (
 const (
 	defaultSegmentSize = 64 << 20
 
-	// preallocStep is how far ahead of the data a segment reserves disk
-	// blocks (fallocate, Linux), so appends do not wait for allocation. The
-	// reserve grows with the file, up to SegmentSize, and the rest is given
-	// back when the segment is closed: an idle collection holds what it
-	// wrote, not 64 MiB.
+	// preallocStep is the most a segment reserves ahead of its data (disk
+	// blocks, fallocate, Linux), so appends do not wait for allocation. The
+	// step is the size of the data, between preallocMin and preallocStep:
+	// a collection that writes little holds little, one under load gets
+	// the full step. The rest is given back when the segment is closed.
 	preallocStep      = 4 << 20
+	preallocMin       = 64 << 10
 	defaultMaxLine    = 1 << 20
 	defaultFlushEvery = 200 * time.Millisecond
 	maxBatch          = 1024
@@ -565,16 +566,24 @@ func (w *Writer) flushBuf() error {
 	return nil
 }
 
-// grow reserves the next preallocStep of disk blocks when the data passes
-// the middle of the last one. A failure only loses the optimization.
+// grow reserves the next step of disk blocks when the data passes the
+// middle of the last one. A failure only loses the optimization.
 func (w *Writer) grow() {
-	if w.reserved >= w.cfg.SegmentSize || w.size+preallocStep/2 < w.reserved {
+	step := reserveStep(w.size)
+
+	if w.reserved >= w.cfg.SegmentSize || w.size+step/2 < w.reserved {
 		return
 	}
 
-	w.reserved = min(w.size+preallocStep, w.cfg.SegmentSize)
+	w.reserved = min(w.size+step, w.cfg.SegmentSize)
 
 	_ = w.file.Fallocate(w.reserved)
+}
+
+// reserveStep is how far ahead of size a segment reserves: the size itself,
+// between preallocMin and preallocStep.
+func reserveStep(size int64) int64 {
+	return min(max(size, preallocMin), preallocStep)
 }
 
 // release gives back the blocks reserved past the end of the data (a

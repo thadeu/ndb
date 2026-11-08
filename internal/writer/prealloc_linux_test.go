@@ -32,8 +32,9 @@ func lastSegment(t *testing.T, dir string) string {
 	return files[len(files)-1]
 }
 
-// A segment reserves disk a step ahead of its data, never the whole
-// segment size: 10 idle collections hold kilobytes, not 640 MiB.
+// A segment reserves disk a step ahead of its data, as big as the data
+// (64 KiB to 4 MiB), never the whole segment size: 300 idle collections
+// hold kilobytes each, not 4 MiB.
 func TestSegmentReservesAStepAheadAndGivesTheRestBack(t *testing.T) {
 	dir := t.TempDir()
 	w, _ := open(t, writer.Config{Dir: dir})
@@ -50,8 +51,8 @@ func TestSegmentReservesAStepAheadAndGivesTheRestBack(t *testing.T) {
 
 	commit("small", 10)
 
-	if kb := diskKB(t, lastSegment(t, dir)); kb > 5<<10 {
-		t.Fatalf("a new segment holds %d KB, want one step (4 MiB) at most", kb)
+	if kb := diskKB(t, lastSegment(t, dir)); kb > 128 {
+		t.Fatalf("a new small segment holds %d KB, want the minimum step (64 KiB)", kb)
 	}
 
 	for i := range 12 {

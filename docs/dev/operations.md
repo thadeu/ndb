@@ -151,13 +151,14 @@ Find the writer that produced the line with `file` and `offset`, fix it, and wat
 
 ## Measure
 
-`ndb bench` runs the ESL outbox scenario (6 events and a `finishcall` per call) on a daemon of its own, from the same binary, in a temp dir. It has three parts; with no flag it runs all of them, in about two minutes:
+`ndb bench` runs the ESL outbox scenario (6 events and a `finishcall` per call) on a daemon of its own, from the same binary, in a temp dir. It has four parts; with no flag it runs all of them, in about two and a half minutes:
 
 | Flag | Measures |
 |---|---|
 | `-stress-load` | the writes: 30 s of live writes at 400 docs/s (`strict`) with a `_watch` consumer, a `kill -9` with every acked write read back, a bulk load of 30k calls into a daily partition |
 | `-query` | lookups by `_id`, indexed searches, sorted pages, a scan of a field with no index, counts |
 | `-aggs` | the dashboards: calls per customer, events per type, duration per hour, talk time, hangup causes |
+| `-idle` | what idle collections cost: 300 collections of 10 documents (`-collections`) on a daemon of their own, then disk, CPU, RSS and open files over 10 s at rest |
 
 `-query` and `-aggs` load the calls first without measuring it. Each read runs 5 times: the table shows the median, the min and the max, and the RSS peak of each part. Copy the binary to a machine and run it there to compare machines (arm64, x86) or versions.
 
@@ -167,7 +168,19 @@ ndb bench -query -aggs         # only the reads
 ndb bench -stress-load -calls 100000
 ```
 
-From a checkout, `make bench` runs it on `bin/ndb`.
+After the parts, each measurement is checked against a budget and the bench prints a table of checks with PASS or FAIL. A FAIL makes it exit 1:
+
+```
+| Check | Measured | Budget | Result |
+|---|---|---|---|
+| acked writes lost by a kill -9 | 0 | ≤ 0 | PASS |
+| live write p99 | 3.1 ms | ≤ 15 ms | PASS |
+| disk per idle collection | 4112.4 KB | ≤ 256 KB | **FAIL** |
+```
+
+The budgets (in `internal/bench/checks.go`) are about 3 times what the benchmark machine measures, so a slower machine passes and a regression does not: lost writes, a slower write p99, load, query or aggregation, more memory, or more disk, CPU or files per idle collection.
+
+From a checkout, `make bench` runs it on `bin/ndb`. Run it for any change to storage, the WAL, memory, or the read and write paths.
 
 ## Change
 

@@ -9,8 +9,9 @@ import (
 
 // runBench is ndb bench: the ESL outbox scenario on a daemon of its own (this
 // binary, in a temp dir). -stress-load measures the writes, -query the
-// queries, -aggs the aggregations; with none of them it runs all, in about
-// two minutes. Copy the binary to a machine and run it there to compare
+// queries, -aggs the aggregations, -idle the cost of idle collections; with
+// none of them it runs all, in about two and a half minutes. Each
+// measurement is checked against its budget: a FAIL makes it exit 1. Copy the binary to a machine and run it there to compare
 // machines or versions.
 func runBench(args []string) error {
 	o := bench.Defaults()
@@ -25,6 +26,8 @@ func runBench(args []string) error {
 	fl.BoolVar(&o.Stress, "stress-load", false, "measure the writes: live writes with a consumer, kill -9, bulk load")
 	fl.BoolVar(&o.Query, "query", false, "measure the queries (loads the calls first)")
 	fl.BoolVar(&o.Aggs, "aggs", false, "measure the aggregations (loads the calls first)")
+	fl.BoolVar(&o.Idle, "idle", false, "measure idle collections: disk, CPU, RSS and files per collection at rest")
+	fl.IntVar(&o.Collections, "collections", o.Collections, "collections of the idle part")
 	fl.StringVar(&o.PITR, "pitr", "", "pitr of the daemon: off, 1d (default: the daemon default, 1d)")
 
 	if err := fl.Parse(args); err != nil {

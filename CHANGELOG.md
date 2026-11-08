@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **`ndb bench` checks its numbers.** After the parts, every measurement is compared with a budget (lost writes, write p99, load, query and aggregation time, RSS, and the cost of idle collections), and the bench prints a PASS/FAIL table and exits 1 on a FAIL. `make bench` fails with it. A new part, `-idle`, measures what idle collections cost: 300 collections of 10 documents (`-collections`), then disk, CPU, RSS and open files at rest.
+
+### Fixed
+
+- **The WAL reserve is proportional to the data.** 1.4.5 reserved 4 MiB ahead of the data of every open WAL file, so 300 small collections held 1.2 GB. The reserve is now as big as the data, between 64 KiB and 4 MiB: 300 collections of 10 documents went from 4 112 KB to 80 KB each. A collection under load still gets 4 MiB ahead, and write p99 and load in `make bench` are the same.
+
 ## [1.4.5] - 2026-11-08
 
 ### Fixed

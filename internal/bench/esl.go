@@ -1,14 +1,19 @@
 // Package bench is the ESL outbox benchmark (ndb bench): an app that talks
 // to FreeSWITCH
 // writes 7 docs per call (6 events and a finishcall) and workers consume them.
-// It starts its own daemon in a temp dir and runs four phases in about two
+// It starts its own daemon in a temp dir and runs four parts in about two and a half
 // minutes:
 //
 //  1. stress load: concurrent calls write one doc at a time (strict) while
 //     a _watch consumer acks them; a kill -9 while writing, then every acked
 //     write read back; a bulk load of calls into a daily partition;
 //  2. queries: by id, by indexed fields, sorted pages, counts;
-//  3. aggregations: the dashboards of the ESL.
+//  3. aggregations: the dashboards of the ESL;
+//  4. idle collections: hundreds of small collections at rest, on a daemon
+//     of their own (disk, CPU, RSS and files per collection).
+//
+// Then each measurement is checked against its budget (checks.go): the run
+// prints PASS or FAIL per check and fails when one misses.
 //
 // Options pick the parts (none is all of them). The queries and the
 // aggregations load the calls first without measuring it. The daemon RSS is
@@ -52,16 +57,20 @@ type Options struct {
 	Stress bool
 	Query  bool
 	Aggs   bool
+	Idle   bool
+
+	// Collections is how many collections the idle part creates.
+	Collections int
 
 	// PITR is the pitr of the daemon (off, 1d); empty keeps its default.
 	PITR string
 }
 
-func (o Options) all() bool { return !o.Stress && !o.Query && !o.Aggs }
+func (o Options) all() bool { return !o.Stress && !o.Query && !o.Aggs && !o.Idle }
 
 // Defaults run in about two minutes.
 func Defaults() Options {
-	return Options{Live: 30 * time.Second, Rate: 400, Calls: 30_000}
+	return Options{Live: 30 * time.Second, Rate: 400, Calls: 30_000, Collections: 300}
 }
 
 var (
@@ -75,7 +84,10 @@ var (
 // failure is a fatal error of a run (check panics with it).
 type failure struct{ err error }
 
-// Run starts a daemon from o.Bin in a temp dir (under o.Dir), runs the four
+// ErrFailed is the error of a run whose measurements miss a budget.
+var ErrFailed = errors.New("bench: checks failed")
+
+// Run starts a daemon from o.Bin in a temp dir (under o.Dir), runs the
 // phases and writes their table to w.
 func Run(o Options, w io.Writer) (err error) {
 	bin, liveFor, rate, calls, out = &o.Bin, &o.Live, &o.Rate, &o.Calls, w
@@ -111,6 +123,8 @@ func Run(o Options, w io.Writer) (err error) {
 
 	go d.sample()
 
+	measured = map[string]float64{}
+
 	var report []string
 
 	if o.Stress || o.all() {
@@ -119,12 +133,16 @@ func Run(o Options, w io.Writer) (err error) {
 		report = append(report, crash(d)...)
 	}
 
-	loaded := load(d)
+	if o.Stress || o.Query || o.Aggs || o.all() {
+		loaded := load(d)
 
-	if o.Stress || o.all() {
-		report = append(report, loaded...)
-	} else {
-		report = append(report, loaded[0])
+		if o.Stress || o.all() {
+			report = append(report, loaded...)
+		} else {
+			report = append(report, loaded[0])
+			delete(measured, "load.docs_s")
+			delete(measured, "load.rss")
+		}
 	}
 
 	if o.Query || o.all() {
@@ -137,6 +155,11 @@ func Run(o Options, w io.Writer) (err error) {
 		report = append(report, timed(d, "aggregations", aggregations())...)
 	}
 
+	if o.Idle || o.all() {
+		report = append(report, "| **idle collections** | |")
+		report = append(report, idle(dir, o.Collections)...)
+	}
+
 	fmt.Fprintln(out)
 	fmt.Fprintf(out, "ndb bench, ESL outbox, %s/%s, %d CPU, pitr %s\n\n", runtime.GOOS, runtime.GOARCH, runtime.NumCPU(), cmp.Or(o.PITR, "default"))
 	fmt.Fprintln(out, "| Phase | Result |")
@@ -147,6 +170,10 @@ func Run(o Options, w io.Writer) (err error) {
 	}
 
 	fmt.Fprintf(out, "| disk | %s |\n", du(dir))
+
+	if verify(out) > 0 {
+		return ErrFailed
+	}
 
 	return nil
 }
@@ -268,12 +295,18 @@ func live(d *daemon) []string {
 	peak := d.phase()
 	w := write(d, *liveFor, nil)
 	stats := w.wait()
+	rss := peak()
+
+	record("live.failed", float64(stats.failed))
+	record("live.lag", float64(stats.written-stats.consumed))
+	record("live.p99", stats.p(.99))
+	record("live.rss", float64(rss))
 
 	return []string{
 		fmt.Sprintf("| live writes | %d docs, %.0f/s, %d failed |", stats.written, stats.perSec, stats.failed),
 		fmt.Sprintf("| live latency | p50 %.1f ms, p99 %.1f ms, p99.9 %.1f ms, max %.1f ms |", stats.p(.5), stats.p(.99), stats.p(.999), stats.p(1)),
 		fmt.Sprintf("| live consumer | lag %d |", stats.written-stats.consumed),
-		fmt.Sprintf("| live RSS | peak %d MB |", peak()),
+		fmt.Sprintf("| live RSS | peak %d MB |", rss),
 	}
 }
 
@@ -301,6 +334,9 @@ func crash(d *daemon) []string {
 			missing++
 		}
 	}
+
+	record("crash.missing", float64(missing))
+	record("crash.restart", float64(restart.Milliseconds()))
 
 	return []string{
 		fmt.Sprintf("| crash | %d acked writes, %d missing, restart %d ms |", len(acked), missing, restart.Milliseconds()),
@@ -354,11 +390,15 @@ func load(d *daemon) []string {
 
 	el := time.Since(start).Seconds()
 	settle := d.settle("/events-" + day.Format("2006-01-02"))
+	rss := peak()
+
+	record("load.docs_s", float64(*calls*7)/el)
+	record("load.rss", float64(rss))
 
 	return []string{
 		fmt.Sprintf("| load | %d calls, %d docs in %.0f s, %.0f docs/s |", *calls, *calls*7, el, float64(*calls*7)/el),
 		fmt.Sprintf("| load settle | seals and compactions done %.0f s after the load |", settle.Seconds()),
-		fmt.Sprintf("| load RSS | peak %d MB, after %d MB |", peak(), d.rss()),
+		fmt.Sprintf("| load RSS | peak %d MB, after %d MB |", rss, d.rss()),
 	}
 }
 
@@ -451,7 +491,10 @@ func timed(d *daemon, part string, probes []probe) []string {
 
 	peak := d.phase()
 
-	var lines []string
+	var (
+		lines []string
+		worst time.Duration
+	)
 
 	for _, p := range probes {
 		var times []time.Duration
@@ -466,8 +509,11 @@ func timed(d *daemon, part string, probes []probe) []string {
 		}
 
 		slices.Sort(times)
+		worst = max(worst, times[2])
 		lines = append(lines, fmt.Sprintf("| %s | %.1f ms (%.1f–%.1f) |", p.name, ms(times[2]), ms(times[0]), ms(times[4])))
 	}
+
+	record(part+".worst", ms(worst))
 
 	return append(lines, fmt.Sprintf("| %s RSS | peak %d MB |", part, peak()))
 }
