@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-11-08
+
 ### Changed
 
 - **Rails associations behave like ActiveRecord.** `user.cdrs` (a `has_many`) is an `Ndb::Relation`: lazy and chainable (`user.cdrs.where(status: "answered").count`); after an `includes` it holds the loaded records, and a builder on it queries again. An association is kept for the key it was read with: changing the foreign key reads it again.
@@ -375,7 +377,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.4.1...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.4.2...HEAD
+[1.4.2]: https://github.com/thadeu/ndb/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/thadeu/ndb/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/thadeu/ndb/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/thadeu/ndb/compare/v1.2.1...v1.3.0
