@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"slices"
 	"strings"
@@ -86,6 +87,7 @@ func TestElemMatchRoute(t *testing.T) {
 
 	expectStatus(t, call(h, "PUT", "/orders", `{"indexes":["items.sku"]}`), http.StatusOK)
 	expectStatus(t, call(h, "POST", "/orders/_bulk", `{"docs":`+docs+`}`), http.StatusOK)
+	indexesReady(t, h, "orders")
 
 	for _, sealed := range []bool{false, true} {
 		if sealed {
@@ -131,4 +133,29 @@ func TestElemMatchRoute(t *testing.T) {
 	if got := strings.TrimSpace(rec.Body.String()); !strings.Contains(got, `"matched":1`) {
 		t.Fatalf("update = %s", got)
 	}
+}
+
+// indexesReady waits for the background build of the indexes of coll.
+func indexesReady(t *testing.T, h http.Handler, coll string) {
+	t.Helper()
+
+	type index struct {
+		State string `json:"state"`
+	}
+
+	for range 500 {
+		var body struct {
+			Indexes []index `json:"indexes"`
+		}
+
+		_ = json.Unmarshal(call(h, "GET", "/"+coll, ``).Body.Bytes(), &body)
+
+		if !slices.ContainsFunc(body.Indexes, func(ix index) bool { return ix.State != "ready" }) {
+			return
+		}
+
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	t.Fatalf("the indexes of %s are not ready", coll)
 }

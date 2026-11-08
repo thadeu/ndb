@@ -31,9 +31,16 @@ const (
 
 const (
 	defaultSegmentSize = 64 << 20
-	defaultMaxLine     = 1 << 20
-	defaultFlushEvery  = 200 * time.Millisecond
-	maxBatch           = 1024
+
+	// preallocStep is how far ahead of the data a segment reserves disk
+	// blocks (fallocate, Linux), so appends do not wait for allocation. The
+	// reserve grows with the file, up to SegmentSize, and the rest is given
+	// back when the segment is closed: an idle collection holds what it
+	// wrote, not 64 MiB.
+	preallocStep      = 4 << 20
+	defaultMaxLine    = 1 << 20
+	defaultFlushEvery = 200 * time.Millisecond
+	maxBatch          = 1024
 )
 
 type Config struct {
@@ -129,8 +136,11 @@ type Writer struct {
 	file fs.File
 	seq  int
 	size int64
-	tx   uint64
-	buf  []byte
+
+	// reserved is how far disk blocks are reserved in the current segment.
+	reserved int64
+	tx       uint64
+	buf      []byte
 
 	dirty bool
 }
@@ -231,6 +241,7 @@ func (w *Writer) Close() error {
 
 	if err == nil {
 		w.synced()
+		w.release()
 	}
 
 	if cerr := w.file.Close(); err == nil {
@@ -521,6 +532,7 @@ func (w *Writer) rotateBefore(cut int) error {
 	}
 
 	w.synced()
+	w.release()
 
 	if err := w.file.Close(); err != nil {
 		return err
@@ -548,8 +560,31 @@ func (w *Writer) flushBuf() error {
 	}
 
 	w.buf = w.buf[:0]
+	w.grow()
 
 	return nil
+}
+
+// grow reserves the next preallocStep of disk blocks when the data passes
+// the middle of the last one. A failure only loses the optimization.
+func (w *Writer) grow() {
+	if w.reserved >= w.cfg.SegmentSize || w.size+preallocStep/2 < w.reserved {
+		return
+	}
+
+	w.reserved = min(w.size+preallocStep, w.cfg.SegmentSize)
+
+	_ = w.file.Fallocate(w.reserved)
+}
+
+// release gives back the blocks reserved past the end of the data (a
+// truncate to the size frees them, on ext4 and XFS).
+func (w *Writer) release() {
+	if w.reserved > w.size {
+		_ = w.file.Truncate(w.size)
+	}
+
+	w.reserved = w.size
 }
 
 func (w *Writer) flushDirty() bool {
@@ -640,6 +675,7 @@ func (w *Writer) openLastSegment() error {
 
 	w.file = f
 	w.size = info.Size()
+	w.reserved = w.size
 
 	return nil
 }
@@ -652,8 +688,6 @@ func (w *Writer) createSegment(seq int) error {
 		return err
 	}
 
-	_ = f.Fallocate(w.cfg.SegmentSize)
-
 	if err := w.cfg.FS.SyncDir(w.cfg.Dir); err != nil {
 		f.Close()
 
@@ -663,6 +697,9 @@ func (w *Writer) createSegment(seq int) error {
 	w.file = f
 	w.seq = seq
 	w.size = 0
+	w.reserved = 0
+
+	w.grow()
 
 	return nil
 }

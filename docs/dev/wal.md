@@ -52,6 +52,8 @@ If a write or an fsync fails, ndb exits. It does not retry: after a failed fsync
 
 The files are numbered. ndb appends to the last one. When a line would pass 64 MiB, the writer closes the file and starts the next number. Files that are closed never change again, so they are safe to copy for a backup. See [operations.md](operations.md#backup-and-restore).
 
+On Linux the writer reserves disk blocks 4 MiB ahead of the data (`fallocate`), so an append does not wait for the file system to allocate. The reserve grows with the file and goes back when the file is closed (rotation or shutdown): a collection holds about what it wrote, plus 4 MiB while it is open.
+
 ## Recovery
 
 At start, ndb reads the WAL after the last checkpoint and rebuilds memory and indexes from it.
