@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.4.5] - 2026-11-08
+
 ### Fixed
 
 - **The WAL reserved 64 MiB of disk per collection.** Each open WAL file reserved its whole size with `fallocate` at creation, so 10 small collections held 640 MB, and every partition of a partitioned collection kept 64 MiB. The writer now reserves 4 MiB ahead of the data, growing with the file, and gives the rest back when the file is closed: 10 collections of 1 000 documents went from 641 MB to 41 MB while running and 1.2 MB after a stop. Load throughput is the same in `ndb bench`; write p99 moved within noise (2.65 ms → 2.98 ms on average of 4 runs, p99.9 lower in 3 of 4).
@@ -393,7 +395,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.4.4...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.4.5...HEAD
+[1.4.5]: https://github.com/thadeu/ndb/compare/v1.4.4...v1.4.5
 [1.4.4]: https://github.com/thadeu/ndb/compare/v1.4.3...v1.4.4
 [1.4.3]: https://github.com/thadeu/ndb/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/thadeu/ndb/compare/v1.4.1...v1.4.2
