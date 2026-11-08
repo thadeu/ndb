@@ -105,6 +105,8 @@ The answer is the rows: a JSON array, or NDJSON with `Accept: application/x-ndjs
 
 ## Lookup
 
+This is the primitive: the SDKs build this JSON ([Go](clients/go.md#lookup), [Ruby](clients/ruby.md#lookup), [Rails](clients/rails.md#lookup), [TypeScript](clients/typescript.md#lookup)).
+
 `lookup` reads, in the same call, the documents of other collections that the rows point to: the `includes` of Rails, the `$lookup` of MongoDB. The daemon runs it, so every SDK gets the same answer.
 
 ::: code-group

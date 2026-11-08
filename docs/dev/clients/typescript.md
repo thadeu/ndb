@@ -142,43 +142,6 @@ await sessions.persist('s1') // PERSIST
 
 ## Query
 
-### Lookup
-
-```ts
-import { belongsTo, hasMany } from '@thadeu/ndb'
-
-const rows = await orders
-  .query({ status: 'paid' })
-  .lookup<'customer', Customer | null>('customer', belongsTo('customers', 'customer_id'))
-  .lookup<'items', Item[]>('items', hasMany('order_items', 'order_id', { sort: { pos: 1 }, limit: 50 }))
-  .all()
-```
-
-`belongsTo` (the fk is here), `hasMany` and `hasOne` (the fk is there), with `pk`, `query`, `sort`, `limit`, `fields` and a nested `lookup`. The second type parameter types the field. See [Lookup](../query.md#lookup); errors are `LookupError`.
-
-
-A query is lazy and immutable. It is also thenable: `await` runs it.
-
-```ts
-const rows = await calls
-  .query({ status: 'answered', duration: { $gte: 30 } })
-  .query({ caller: { $in: ['a', 'b'] } })
-  .not({ caller: 'zzz' })
-  .or({ duration: { $lt: 5 } }, { 'meta.agent.id': 7 })
-  .sort({ at: -1, _id: 1 })
-  .fields('_id', 'status')
-  .limit(50)
-  .skip(100)
-```
-
-- Operators: `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$exists`, `$elemMatch`, and date math on the time field (`{ at: { $gte: 'now-7d/d' } }`). Several `query` calls are ANDed. Dot paths work on `json` fields.
-- `$regex` (with `$options` `i`, `m`, `s`, `x`) uses Go RE2: no backreferences, no look-around. Pass a string, or a `RegExp` (`{ name: /^al/i }` or `{ name: { $regex: /^al/i } }`). Only the `i`, `m` and `s` flags are accepted; any other flag (`g`, `y`, `u`, ...) throws `InvalidQueryError` before the request. An anchored prefix such as `^abc` can use an index.
-- The order of the `sort` keys is the order of the sort. The id is always the last key.
-- `fields(...)` returns only these fields. The rows are `Partial`.
-- `page(n, size)` sets `skip` and `limit` for page `n` (from 1).
-- `first()` returns the first row, or `null`.
-- The collection has the same shortcuts: `calls.query(...)`, `calls.sort(...)`, `calls.all()`, `calls.count(...)`, `calls.each()`.
-
 ### Queries built elsewhere
 
 For a search form or a saved search, take the JSON as is. `rawQuery` takes an untyped query and chains like `query`; `search` takes a whole search body and returns one page.
@@ -247,6 +210,70 @@ console.log(res.header('x-ndb-explain')) // JSON string with the counters
 
 await res.body.dump()
 ```
+
+## Lookup
+
+`lookup` is a key of the HTTP search (`POST /{coll}/_search`): in the same call, the daemon reads the documents of other collections that each row points to, and puts them in the row. The HTTP API is the primitive and has every rule ([Lookup](../query.md#lookup)); this SDK only builds that JSON.
+
+| Relation | The foreign key lives | Match | The row gets |
+|---|---|---|---|
+| belongs to | in **this** collection | `row.fk == other.pk` | an object, or null |
+| has many | in the **other** collection | `other.fk == row.pk` | an array (100 unless a limit, at most 1000) |
+| has one | in the **other** collection | `other.fk == row.pk` | an object, or null |
+
+`pk` is `_id` unless you say otherwise. The field that is searched on the other side (its `pk` for a belongs to, its `fk` for a has many) must be `_id` or indexed, else the daemon answers `lookup_unindexed`.
+
+### Basic use
+
+```ts
+import { belongsTo, hasMany, hasOne } from '@thadeu/ndb'
+
+// belongs to: orders.customer_id -> customers._id
+const rows = await orders
+  .query({ status: 'paid' })
+  .lookup<'customer', { name: string } | null>('customer', belongsTo('customers', 'customer_id'))
+  .all()
+
+rows[0].customer?.name // 'Ana' (null when there is no customer)
+
+// has many: order_items.order_id -> orders._id
+const withItems = await orders
+  .query({})
+  .lookup<'items', Item[]>('items', hasMany('order_items', 'order_id'))
+  .all()
+
+// has one: invoices.order_id -> orders._id
+const withInvoice = await orders
+  .query({})
+  .lookup<'invoice', Invoice | null>('invoice', hasOne('invoices', 'order_id'))
+  .all()
+```
+
+The type parameters are optional: the first is the name, the second the type of the field (`Record<string, unknown>` by default).
+
+### Options
+
+```ts
+hasMany('order_items', 'order_id', {
+  query: { qty: { $gt: 0 } },     // filter the related documents
+  sort: { pos: 1 },               // their order
+  limit: 50,                      // per row, 1 to 1000
+  fields: ['sku', 'qty'],         // keep these fields
+  lookup: {                       // nested, two levels at most
+    product: belongsTo('products', 'sku', { pk: 'code' }),   // products.code instead of _id
+  },
+})
+```
+
+`belongsTo` takes `pk`, `fields` and `lookup`; `hasOne` takes everything but `limit`. Each one is the plain JSON object of the HTTP API (`{ has_many: 'order_items', fk: 'order_id', ... }`), so you can also write it by hand.
+
+### Index
+
+A `hasMany('order_items', 'order_id')` needs an index on `order_items.order_id`: `index: true` on that field in the schema of the collection, or `items.ensureIndex('order_id')`.
+
+### Errors
+
+`LookupError` (codes `lookup_invalid`, `lookup_unindexed`, `lookup_too_large`) and `NotFoundError` for an unknown collection.
 
 ## Aggregate
 

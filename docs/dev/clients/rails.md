@@ -212,38 +212,6 @@ Call.where(status: "failed").exists?
 - `pluck` asks the daemon for only those fields.
 - There is no `explain` on a relation. Use the client: `Ndb::Rails.client.search(coll, "query" => {...}, "explain" => true)` returns a `Page` with `plan` (the `X-Ndb-Plan` header: `id`, `index:<field>`, `scan`, `snapshot`) and `examined`.
 
-### Associations and includes
-
-```ruby
-class Order < Ndb::Record
-  attribute :customer_id, :string
-
-  belongs_to :customer                  # customer_id -> Customer._id
-  has_many :items, sort: { pos: 1 }     # Item.order_id -> _id
-  has_one :invoice                      # Invoice.order_id -> _id
-end
-
-class Item < Ndb::Record
-  attribute :order_id, :string
-  attribute :sku, :string
-
-  belongs_to :product, fk: :sku, pk: :code   # or foreign_key:, primary_key:
-end
-
-Order.where(status: "paid").includes(:customer, :invoice, items: :product).each do |order|
-  order.customer.name          # loaded with the rows, in the same call
-  order.items.map(&:sku)
-end
-
-Order.find("o1").customer      # without includes: one more call on first use
-```
-
-- The defaults are the Rails ones: `belongs_to :customer` reads `customer_id` and the model `Customer`; `has_many :items` reads `Item.order_id`. Override with `class_name:`, `foreign_key:` (or `fk:`) and `primary_key:` (or `pk:`); a value you pass always wins, and passing both names of one option is an `ArgumentError`.
-- `has_many` takes `sort:`, `limit:` and `where:`; `has_one` takes `sort:` and `where:`.
-- `has_many` and `has_one` create the index on the foreign key of the other model (the [lookup](../query.md#lookup) needs it).
-- Nested `includes` go two levels deep: `includes(items: :product)`.
-- Associations read; they do not write (no `order.items << item`, no `dependent:`).
-
 ### Regular expressions
 
 A Ruby `Regexp` works in `where`, `where.not` and `or`. The gem `ndb` turns it into `$regex` and `$options` (the daemon uses RE2). Ruby `^` and `$` match at each line, so `m` is always sent. `/i` is `i`, `/m` is `s`, `/x` is `x`. Look-around, backreferences, atomic groups, possessive quantifiers, `\h`, `\G`, `\R` and `\X` raise `Ndb::InvalidQuery` before the request.
@@ -314,6 +282,113 @@ Call.where(status: "answered").find_each(batch_size: 500) { |call| puts call._id
 
 Call.in_batches(of: 500) { |batch| batch.each { |call| ... } }
 ```
+
+## Lookup
+
+`lookup` is a key of the HTTP search (`POST /{coll}/_search`): in the same call, the daemon reads the documents of other collections that each row points to, and puts them in the row. The HTTP API is the primitive and has every rule ([Lookup](../query.md#lookup)); this SDK only builds that JSON.
+
+| Relation | The foreign key lives | Match | The row gets |
+|---|---|---|---|
+| belongs to | in **this** collection | `row.fk == other.pk` | an object, or null |
+| has many | in the **other** collection | `other.fk == row.pk` | an array (100 unless a limit, at most 1000) |
+| has one | in the **other** collection | `other.fk == row.pk` | an object, or null |
+
+`pk` is `_id` unless you say otherwise. The field that is searched on the other side (its `pk` for a belongs to, its `fk` for a has many) must be `_id` or indexed, else the daemon answers `lookup_unindexed`.
+
+In Rails the relations are associations on the model, with the Rails names and conventions, and `includes` sends them.
+
+### Basic use
+
+```ruby
+class User < Ndb::Record
+  attribute :name, :string
+
+  has_many :cdrs                # cdrs.user_id -> users._id
+  has_one :profile              # profiles.user_id -> users._id
+end
+
+class Cdr < Ndb::Record
+  attribute :user_id, :string
+  attribute :duration, :integer
+
+  belongs_to :user              # cdrs.user_id -> users._id
+end
+
+User.where(plan: "pro").includes(:cdrs, :profile).each do |user|
+  user.cdrs.sum(&:duration)     # loaded with the users, in the same call
+end
+
+Cdr.order(at: :desc).limit(50).includes(:user).map { |cdr| cdr.user.name }
+```
+
+Without `includes`, an association loads on first use, with one more call for each record (the N+1 of ActiveRecord):
+
+```ruby
+User.find("u1").cdrs            # one search on cdrs, now
+```
+
+### What is inferred
+
+Nothing needs to be said when the names follow Rails:
+
+| Declaration | Class | Foreign key | Primary key | Match |
+|---|---|---|---|---|
+| `User has_many :cdrs` | `Cdr` (`"cdrs".singularize.camelize`) | `user_id`, on each CDR | `_id`, on the user | `cdrs.user_id == users._id` |
+| `User has_one :profile` | `Profile` | `user_id`, on the profile | `_id` | `profiles.user_id == users._id` |
+| `Cdr belongs_to :user` | `User` | `user_id`, on the CDR | `_id`, on the user | `cdrs.user_id == users._id` |
+
+The foreign key of a `has_many` or `has_one` is named after the model that declares it (`User` → `user_id`), and lives on the other side; the one of a `belongs_to` is named after the association (`:user` → `user_id`) and lives on this side. The collection is the `collection_name` of the class.
+
+### When the names differ
+
+A value you pass always wins over the inference:
+
+```ruby
+class User < Ndb::Record
+  has_many :cdrs, fk: :account_id                     # cdrs.account_id -> users._id
+  has_many :calls, class_name: "CDR", fk: :account_id # an acronym class
+end
+
+class Cdr < Ndb::Record
+  belongs_to :caller, class_name: "User", fk: :account_id
+  belongs_to :plan, fk: :plan_code, pk: :code         # plans.code instead of _id
+end
+```
+
+`fk:` and `foreign_key:` are the same option, as are `pk:` and `primary_key:`; passing both names of one option is an `ArgumentError`.
+
+### Options
+
+| Option | On | |
+|---|---|---|
+| `class_name:` | all | the model of the other side |
+| `fk:` / `foreign_key:` | all | the foreign key field |
+| `pk:` / `primary_key:` | all | the field it points to (default `_id`) |
+| `sort:` | `has_many`, `has_one` | `sort: { at: -1 }` |
+| `limit:` | `has_many` | per record, 1 to 1000 (default 100) |
+| `where:` | `has_many`, `has_one` | filter the other side: `where: { status: "answered" }` |
+
+```ruby
+has_many :recent_cdrs, class_name: "Cdr", sort: { at: -1 }, limit: 20, where: { status: "answered" }
+```
+
+### Nested
+
+Two levels, as in ActiveRecord:
+
+```ruby
+Order.includes(:customer, items: :product).to_a
+```
+
+### Index
+
+`has_many` and `has_one` create the index on the foreign key of the other model (`cdrs.user_id`) the first time `includes` uses them; the lookup needs it. Declaring it on the other model also works: `attribute :user_id, :string, index: true`. A `belongs_to` with `pk:` other than `_id` needs that field indexed on the other model (`attribute :code, :string, index: true`).
+
+### Limits
+
+- Associations read; they do not write: no `user.cdrs << cdr`, `build`, `dependent:` or `counter_cache`.
+- No `joins(...).where` (filtering users by their CDRs); query the CDRs and read `user_id`.
+- `Ndb::LookupError` for a bad relation, a missing index or more than 10 000 documents in one answer.
 
 ## Aggregate
 

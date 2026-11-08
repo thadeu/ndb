@@ -164,17 +164,6 @@ page.rows; page.next; page.total; page.plan; page.examined
 
 Several `query` calls are ANDed. `sort(at: -1, _id: 1)`: `1` ascending, `-1` descending, the key order is the sort order, and `_id` is always the last key.
 
-### Lookup
-
-```ruby
-orders.query(status: "paid").lookup(
-  customer: { belongs_to: "customers", fk: "customer_id" },
-  items: { has_many: "order_items", fk: "order_id", sort: { pos: 1 }, limit: 50 }
-).all
-```
-
-The relations are the JSON of [Lookup](../query.md#lookup), with Symbol or String keys. Errors are `Ndb::LookupError`. In Rails, use the [associations](rails.md#associations-and-includes).
-
 ### Regular expressions
 
 A Ruby `Regexp` is accepted anywhere a value is: a field value, `"$regex" => /x/`, inside `$not`, `$or`, `$and`, in a search, an `aggregate` (`$match`) and the `query:` of `watch`.
@@ -239,6 +228,66 @@ end
 ```
 
 A cursor works only with the same query and sort. Another query shape raises `Ndb::InvalidCursor`.
+
+## Lookup
+
+`lookup` is a key of the HTTP search (`POST /{coll}/_search`): in the same call, the daemon reads the documents of other collections that each row points to, and puts them in the row. The HTTP API is the primitive and has every rule ([Lookup](../query.md#lookup)); this SDK only builds that JSON.
+
+| Relation | The foreign key lives | Match | The row gets |
+|---|---|---|---|
+| belongs to | in **this** collection | `row.fk == other.pk` | an object, or null |
+| has many | in the **other** collection | `other.fk == row.pk` | an array (100 unless a limit, at most 1000) |
+| has one | in the **other** collection | `other.fk == row.pk` | an object, or null |
+
+`pk` is `_id` unless you say otherwise. The field that is searched on the other side (its `pk` for a belongs to, its `fk` for a has many) must be `_id` or indexed, else the daemon answers `lookup_unindexed`.
+
+### Basic use
+
+The relations are the JSON of the HTTP API as a Hash, with Symbol or String keys:
+
+```ruby
+orders = Ndb::Collection.new(client, "orders")
+
+# belongs to: orders.customer_id -> customers._id
+rows = orders.query(status: "paid")
+             .lookup(customer: { belongs_to: "customers", fk: :customer_id })
+             .all
+
+rows.first["customer"]["name"] # "Ana" (nil when there is no customer)
+
+# has many: order_items.order_id -> orders._id
+orders.query({}).lookup(items: { has_many: "order_items", fk: :order_id }).all
+
+# has one: invoices.order_id -> orders._id
+orders.query({}).lookup(invoice: { has_one: "invoices", fk: :order_id }).all
+```
+
+### Options
+
+```ruby
+orders.query({}).lookup(
+  items: {
+    has_many: "order_items", fk: :order_id,   # or foreign_key:
+    query: { qty: { "$gt" => 0 } },          # filter the related documents
+    sort: { pos: 1 },                         # their order
+    limit: 50,                                # per row, 1 to 1000
+    fields: %w[sku qty],                      # keep these fields
+    lookup: {                                 # nested, two levels at most
+      product: { belongs_to: "products", fk: :sku, pk: :code }   # or primary_key:
+    }
+  }
+).all
+```
+
+`lookup` can be called more than once; the relations add up. `query`, `sort` and `limit` are for `has_many` and `has_one`.
+
+### Index
+
+`has_many: "order_items", fk: :order_id` needs an index on `order_items.order_id`: `client.ensure_index("order_items", "order_id")`, or `indexes: ["order_id"]` in its definition.
+
+### Errors
+
+`Ndb::LookupError` (codes `lookup_invalid`, `lookup_unindexed`, `lookup_too_large`) and `Ndb::UnknownCollection`. In Rails, use the [associations](rails.md#lookup).
 
 ## Aggregate
 

@@ -190,24 +190,6 @@ rows, err := calls.
 - `First(ctx)` returns the first row, or `ErrNotFound`.
 - The SDK has no explain call. To see the plan counters, send `"explain": true` in a raw `find` request and read the `X-Ndb-Explain` header. See the query language doc.
 
-### Lookup
-
-```go
-type Order struct {
-	ID         string    `ndb:"_id"`
-	CustomerID string    `ndb:"customer_id"`
-	Customer   *Customer `ndb:"customer,lookup"` // filled by Lookup, never written
-	Items      []Item    `ndb:"items,lookup"`
-}
-
-rows, err := orders.Query(ndb.Eq("status", "paid")).
-	Lookup("customer", ndb.BelongsTo("customers", "customer_id")).
-	Lookup("items", ndb.HasMany("order_items", "order_id").Sort(ndb.Asc("pos")).Limit(50)).
-	All(ctx)
-```
-
-`BelongsTo` (the fk is here), `HasMany` and `HasOne` (the fk is there); `PK`, `Query`, `Sort`, `Limit`, `Fields` and a nested `Lookup` on each. The related types decode with `encoding/json` (json tags). See [Lookup](../query.md#lookup) for the rules; errors `ErrLookupInvalid`, `ErrLookupUnindexed`, `ErrLookupTooLarge`.
-
 ### Queries built elsewhere
 
 For a search form or a saved search, take the JSON as is. `ndb.RawQueryJSON` (or `ndb.RawQuery` with a map) is a `Filter` that mixes with the others; `Search` takes a whole search body and returns one page.
@@ -275,6 +257,91 @@ for call, err := range calls.Query(ndb.Eq("status", "answered")).Sort(ndb.Asc("_
 	fmt.Println(call.ID)
 }
 ```
+
+## Lookup
+
+`lookup` is a key of the HTTP search (`POST /{coll}/_search`): in the same call, the daemon reads the documents of other collections that each row points to, and puts them in the row. The HTTP API is the primitive and has every rule ([Lookup](../query.md#lookup)); this SDK only builds that JSON.
+
+| Relation | The foreign key lives | Match | The row gets |
+|---|---|---|---|
+| belongs to | in **this** collection | `row.fk == other.pk` | an object, or null |
+| has many | in the **other** collection | `other.fk == row.pk` | an array (100 unless a limit, at most 1000) |
+| has one | in the **other** collection | `other.fk == row.pk` | an object, or null |
+
+`pk` is `_id` unless you say otherwise. The field that is searched on the other side (its `pk` for a belongs to, its `fk` for a has many) must be `_id` or indexed, else the daemon answers `lookup_unindexed`.
+
+### Basic use
+
+Give the struct a field for each relation, with the `lookup` tag option: a read fills it, a write leaves it out. Its type decodes with `encoding/json` (json tags).
+
+```go
+type Customer struct {
+	ID   string `json:"_id"`
+	Name string `json:"name"`
+}
+
+type Item struct {
+	ID      string `json:"_id"`
+	OrderID string `json:"order_id"`
+	SKU     string `json:"sku"`
+}
+
+type Order struct {
+	ID         string    `ndb:"_id"`
+	CustomerID string    `ndb:"customer_id"`
+	Customer   *Customer `ndb:"customer,lookup"`
+	Items      []Item    `ndb:"items,lookup"`
+}
+
+orders, _ := ndb.Collection[Order](db, "orders")
+
+// belongs to: orders.customer_id -> customers._id
+rows, err := orders.Query(ndb.Eq("status", "paid")).
+	Lookup("customer", ndb.BelongsTo("customers", "customer_id")).
+	All(ctx)
+
+rows[0].Customer.Name // "Ana" (nil when there is no customer)
+
+// has many: order_items.order_id -> orders._id
+rows, err = orders.Query().
+	Lookup("items", ndb.HasMany("order_items", "order_id")).
+	All(ctx)
+
+// has one: invoices.order_id -> orders._id
+rows, err = orders.Query().
+	Lookup("invoice", ndb.HasOne("invoices", "order_id")).
+	All(ctx)
+```
+
+### Options
+
+Each method returns a new `Relation`:
+
+```go
+ndb.HasMany("order_items", "order_id").
+	Query(ndb.Gt("qty", 0)).       // filter the related documents
+	Sort(ndb.Asc("pos")).          // their order
+	Limit(50).                     // per row, 1 to 1000
+	Fields("sku", "qty").          // keep these fields
+	Lookup("product",              // nested, two levels at most
+		ndb.BelongsTo("products", "sku").PK("code")) // products.code instead of _id
+```
+
+`Query`, `Sort` and `Limit` are for `HasMany` and `HasOne`. The JSON it sends:
+
+```json
+{ "lookup": { "items": { "has_many": "order_items", "fk": "order_id", "query": { "qty": { "$gt": 0 } },
+  "sort": { "pos": 1 }, "limit": 50, "fields": ["sku", "qty"],
+  "lookup": { "product": { "belongs_to": "products", "fk": "sku", "pk": "code" } } } } }
+```
+
+### Index
+
+A `HasMany("order_items", "order_id")` needs an index on `order_items.order_id`: tag it in the struct of that collection (`ndb:"order_id,index"`) or call `items.EnsureIndex(ctx, "order_id")`.
+
+### Errors
+
+`ErrLookupInvalid` (a bad relation), `ErrLookupUnindexed` (the other side has no index; the message gives the route), `ErrLookupTooLarge` (more than 10 000 documents in one answer), `ErrUnknownCollection`.
 
 ## Aggregate
 
