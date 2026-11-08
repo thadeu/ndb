@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.2.7] - 2026-11-08
+
 ### Added
 
 - **`@thadeu/ui` as a library.** React bindings in `@thadeu/ui/react`: `useDatePicker` (a `ref`, `value`, `date`, `from`, `to`, `setValue`, `open`, `close`) and `<DatePicker>` (controlled with `value` + `onChange`), React as an optional peer. The vanilla controller has `value()`, `date()`, `setValue()`, `update({ min, max, presets })` and `destroy()`; every change calls `onChange` and dispatches a bubbling `datepicker:change`. Every color, radius, size, space, font and shadow is a `--dp-*` variable (the README has the table, a blue theme and a dark one), and the fields have a default style of their own.
@@ -337,7 +339,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.2.6...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.2.7...HEAD
+[1.2.7]: https://github.com/thadeu/ndb/compare/v1.2.6...v1.2.7
 [1.2.6]: https://github.com/thadeu/ndb/compare/v1.2.5...v1.2.6
 [1.2.5]: https://github.com/thadeu/ndb/compare/v1.2.4...v1.2.5
 [1.2.4]: https://github.com/thadeu/ndb/compare/v1.2.3...v1.2.4
