@@ -43,5 +43,7 @@ func runBench(args []string) error {
 		o.Bin = self
 	}
 
+	o.Log = os.Stderr
+
 	return bench.Run(o, os.Stdout)
 }

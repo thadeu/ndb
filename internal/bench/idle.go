@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -18,7 +19,9 @@ const idleWindow = 10 * time.Second
 // What an idle collection costs is what the daemon holds for it at rest:
 // disk (blocks, not sizes), CPU, RSS and open files.
 func idle(dir string, n int) []string {
-	fmt.Fprintf(out, "idle: %d collections of 10 docs, then %s at rest\n", n, idleWindow)
+	var made atomic.Int32
+
+	prog.step("idle: create", func() string { return fmt.Sprintf("%d of %d collections", made.Load(), n) })
 
 	d := &daemon{dir: filepath.Join(dir, "idle")}
 	check(os.MkdirAll(d.dir, 0o755))
@@ -35,7 +38,11 @@ func idle(dir string, n int) []string {
 
 		d.must("PUT", coll, `{"indexes":["status"]}`)
 		d.must("POST", coll+"/_bulk", idleDocs(i))
+		made.Add(1)
 	}
+
+	prog.end(fmt.Sprintf("%d collections of 10 docs", n))
+	prog.step("idle: at rest", nil)
 
 	time.Sleep(3 * time.Second)
 
@@ -46,6 +53,8 @@ func idle(dir string, n int) []string {
 	disk := blocksKB(filepath.Join(d.dir, "data"))
 	rss, fds := d.rss()-rss0, d.fds()-fds0
 	pct := 100 * cpu.Seconds() / idleWindow.Seconds()
+
+	prog.end(fmt.Sprintf("%d ms of CPU in %s, %s open files", cpu.Milliseconds(), idleWindow, count(fds, fds0)))
 
 	record("idle.disk_kb", float64(disk)/float64(n))
 	record("idle.cpu_pct", pct)

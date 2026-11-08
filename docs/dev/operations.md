@@ -168,6 +168,14 @@ ndb bench -query -aggs         # only the reads
 ndb bench -stress-load -calls 100000
 ```
 
+While it runs, the bench logs each step to stderr: a line when it starts, one every 5 s with where it is, and one when it ends with what it found, each with the time since the start and the ETA of the run. The report goes to stdout, so `ndb bench > report.md` keeps the log on the terminal:
+
+```
+[00:30] ✓ live writes in 31s: 12001 docs, 0 failed, p99 2.7 ms · ETA 1m22s
+[00:35] … crash 5s, writing, 1998 docs · ETA 1m17s
+[00:52] … bulk load 5s, 78400 of 210000 docs · ETA 1m0s
+```
+
 After the parts, each measurement is checked against a budget and the bench prints a table of checks with PASS or FAIL. A FAIL makes it exit 1:
 
 ```

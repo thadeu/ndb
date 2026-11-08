@@ -64,11 +64,43 @@ type Options struct {
 
 	// PITR is the pitr of the daemon (off, 1d); empty keeps its default.
 	PITR string
+
+	// Log gets a line per step as the run goes, with the ETA (stderr in
+	// ndb bench); nil logs nothing.
+	Log io.Writer
 }
 
 func (o Options) all() bool { return !o.Stress && !o.Query && !o.Aggs && !o.Idle }
 
-// Defaults run in about two minutes.
+// plan is the steps of the run with a first estimate of each, for the ETA.
+func (o Options) plan() []planned {
+	sec := func(s float64) time.Duration { return time.Duration(s * float64(time.Second)) }
+	steps := []planned{{"daemon start", sec(0.5)}}
+
+	if o.Stress || o.all() {
+		steps = append(steps, planned{"live writes", o.Live}, planned{"crash", sec(17)})
+	}
+
+	if o.Stress || o.Query || o.Aggs || o.all() {
+		steps = append(steps, planned{"bulk load", sec(float64(o.Calls) / 1300)}, planned{"settle", sec(12)})
+	}
+
+	if o.Query || o.all() {
+		steps = append(steps, planned{"queries", sec(4)})
+	}
+
+	if o.Aggs || o.all() {
+		steps = append(steps, planned{"aggregations", sec(4)})
+	}
+
+	if o.Idle || o.all() {
+		steps = append(steps, planned{"idle: create", sec(float64(o.Collections) / 40)}, planned{"idle: at rest", sec(14)})
+	}
+
+	return steps
+}
+
+// Defaults run in about two and a half minutes.
 func Defaults() Options {
 	return Options{Live: 30 * time.Second, Rate: 400, Calls: 30_000, Collections: 300}
 }
@@ -116,8 +148,16 @@ func Run(o Options, w io.Writer) (err error) {
 		check(os.WriteFile(filepath.Join(dir, "ndb.yml"), []byte("pitr: "+o.PITR+"\n"), 0o644))
 	}
 
+	prog = newProgress(cmp.Or[io.Writer](o.Log, io.Discard), o.plan())
+
+	defer prog.end("")
+
+	prog.step("daemon start", nil)
+
 	d := &daemon{dir: dir}
 	d.start()
+
+	prog.end("")
 
 	defer d.stop()
 
@@ -289,13 +329,19 @@ func (d *daemon) must(method, path, body string) []byte {
 
 // live: concurrent calls write one doc at a time, a watcher acks.
 func live(d *daemon) []string {
-	fmt.Fprintf(out, "live: %s at %d docs/s, strict, with a _watch consumer\n", *liveFor, *rate)
 	d.must("PUT", "/outbox", `{"time":"ts","indexes":["status","call_id"],"durability":"strict"}`)
 
 	peak := d.phase()
 	w := write(d, *liveFor, nil)
+
+	prog.step("live writes", func() string {
+		return fmt.Sprintf("%d docs, %d failed, lag %d", w.written.Load(), w.failed.Load(), w.written.Load()-w.consumed.Load())
+	})
+
 	stats := w.wait()
 	rss := peak()
+
+	prog.end(fmt.Sprintf("%d docs, %d failed, p99 %.1f ms", stats.written, stats.failed, stats.p(.99)))
 
 	record("live.failed", float64(stats.failed))
 	record("live.lag", float64(stats.written-stats.consumed))
@@ -312,14 +358,26 @@ func live(d *daemon) []string {
 
 // crash: kill -9 while writing, restart, every acked write must be there.
 func crash(d *daemon) []string {
-	fmt.Fprintln(out, "crash: kill -9 while writing, restart, read back")
-
-	var acked []string
+	var (
+		acked  []string
+		killed atomic.Bool
+	)
 
 	w := write(d, 15*time.Second, &acked)
 
+	prog.step("crash", func() string {
+		state := "writing"
+
+		if killed.Load() {
+			state = "killed and restarted, writing"
+		}
+
+		return fmt.Sprintf("%s, %d docs", state, w.written.Load())
+	})
+
 	time.Sleep(7 * time.Second)
 	d.kill()
+	killed.Store(true)
 
 	start := time.Now()
 	d.start()
@@ -335,6 +393,7 @@ func crash(d *daemon) []string {
 		}
 	}
 
+	prog.end(fmt.Sprintf("%d acked, %d missing, restart %d ms", len(acked), missing, restart.Milliseconds()))
 	record("crash.missing", float64(missing))
 	record("crash.restart", float64(restart.Milliseconds()))
 
@@ -345,7 +404,9 @@ func crash(d *daemon) []string {
 
 // load: bulk load of calls into a daily partition.
 func load(d *daemon) []string {
-	fmt.Fprintf(out, "load: %d calls (%d docs) into a daily partition\n", *calls, *calls*7)
+	var loaded atomic.Int64
+
+	prog.step("bulk load", func() string { return fmt.Sprintf("%d of %d docs", loaded.Load(), *calls*7) })
 	d.must("PUT", "/events", `{"time":"ts","indexes":["call_id","customer","type"],"partition_by":"day","retention":"7d","max_line_size":16777216}`)
 
 	peak := d.phase()
@@ -368,6 +429,7 @@ func load(d *daemon) []string {
 			flush := func() {
 				body, _ := json.Marshal(map[string]any{"docs": batch})
 				d.must("POST", "/events/_bulk", string(body))
+				loaded.Add(int64(len(batch)))
 				batch = batch[:0]
 			}
 
@@ -389,8 +451,14 @@ func load(d *daemon) []string {
 	wg.Wait()
 
 	el := time.Since(start).Seconds()
+
+	prog.end(fmt.Sprintf("%.0f docs/s", float64(*calls*7)/el))
+	prog.step("settle", nil)
+
 	settle := d.settle("/events-" + day.Format("2006-01-02"))
 	rss := peak()
+
+	prog.end("seals and compactions done")
 
 	record("load.docs_s", float64(*calls*7)/el)
 	record("load.rss", float64(rss))
@@ -487,7 +555,9 @@ func aggregations() []probe {
 // timed runs each probe 5 times and gives one line per probe: the median,
 // the min and the max; then the RSS peak of the part.
 func timed(d *daemon, part string, probes []probe) []string {
-	fmt.Fprintln(out, part)
+	var done atomic.Int32
+
+	prog.step(part, func() string { return fmt.Sprintf("%d of %d", done.Load(), len(probes)) })
 
 	peak := d.phase()
 
@@ -509,10 +579,12 @@ func timed(d *daemon, part string, probes []probe) []string {
 		}
 
 		slices.Sort(times)
+		done.Add(1)
 		worst = max(worst, times[2])
 		lines = append(lines, fmt.Sprintf("| %s | %.1f ms (%.1f–%.1f) |", p.name, ms(times[2]), ms(times[0]), ms(times[4])))
 	}
 
+	prog.end(fmt.Sprintf("slowest %.1f ms", ms(worst)))
 	record(part+".worst", ms(worst))
 
 	return append(lines, fmt.Sprintf("| %s RSS | peak %d MB |", part, peak()))

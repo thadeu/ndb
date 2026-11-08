@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **`ndb bench` logs as it runs.** Each step logs to stderr when it starts, every 5 s while it runs (docs written, docs loaded, collections made) and when it ends with what it found, with the elapsed time and the ETA of the run. The report stays on stdout.
+
 ## [1.7.0] - 2026-11-08
 
 ### Changed
