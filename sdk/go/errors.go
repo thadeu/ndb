@@ -58,4 +58,5 @@ var (
 	ErrUnindexedMany     = &Error{Code: "unindexed_many"}
 	ErrEmptyFilter       = &Error{Code: "empty_filter"}
 	ErrConfirmRequired   = &Error{Code: "confirm_required"}
+	ErrCollectionExists  = &Error{Code: "collection_exists"}
 )

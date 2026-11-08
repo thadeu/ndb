@@ -30,6 +30,7 @@ func (s *Server) partitionRoutes() map[string]partitionHandler {
 		"GET ":                  s.partGet,
 		"DELETE ":               s.partDrop,
 		"POST _truncate":        s.partTruncate,
+		"POST _rename":          func(w http.ResponseWriter, r *http.Request, db *engine.DB, _ catalog.Def) { s.rename(w, r, db) },
 		"POST _search":          s.partSearch,
 		"POST _count":           s.partCount,
 		"POST _aggregate":       s.partAggregate,

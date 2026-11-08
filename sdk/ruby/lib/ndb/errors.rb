@@ -55,6 +55,9 @@ module Ndb
   # truncate or drop without the collection name as confirm.
   class ConfirmRequired < Error; end
 
+  # rename onto a name that exists, without replace.
+  class CollectionExists < Error; end
+
   # The daemon error code -> the Ruby class.
   CODE_TO_ERROR = {
     "unauthorized" => Unauthorized,
@@ -81,7 +84,8 @@ module Ndb
     "invalid_field" => InvalidField,
     "unindexed_many" => UnindexedMany,
     "empty_filter" => EmptyFilter,
-    "confirm_required" => ConfirmRequired
+    "confirm_required" => ConfirmRequired,
+    "collection_exists" => CollectionExists
   }.freeze
 
   def self.error_for(code, message, status)

@@ -273,6 +273,25 @@ func (c *Coll[T]) Drop(ctx context.Context) error {
 	return err
 }
 
+// Rename gives the collection the name to: its documents, indexes and watch
+// positions move with it. With replace, an existing to goes aside first
+// (with PITR on, it stays restorable for the window); without it, an
+// existing to is ErrCollectionExists. c keeps the old name: open the
+// collection again under to.
+func (c *Coll[T]) Rename(ctx context.Context, to string, replace bool) error {
+	body, err := json.Marshal(map[string]any{"to": to, "replace": replace})
+	if err != nil {
+		return err
+	}
+
+	err = c.send(ctx, http.MethodPost, "_rename", body, nil)
+
+	c.db.forget(c.name)
+	c.db.forget(to)
+
+	return err
+}
+
 // Stats is the state of the collection (GET /{coll}/_stats): rows, indexes,
 // files and bytes.
 func (c *Coll[T]) Stats(ctx context.Context) (map[string]any, error) {

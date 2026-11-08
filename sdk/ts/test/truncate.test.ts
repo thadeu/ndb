@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest'
-import { NotFoundError } from '../src/errors.js'
+import { CollectionExistsError, NotFoundError } from '../src/errors.js'
 import { callsModel } from './fixtures.js'
 import { unixDb } from './helpers.js'
 
@@ -40,5 +40,20 @@ describe('truncate and drop', () => {
     await expect(db.transport.request('DELETE', calls.path() + `?confirm=${calls.name}`)).rejects.toBeInstanceOf(NotFoundError)
 
     expect(await calls.get('a')).toBeNull()
+  })
+
+  it('rename moves the documents, and replace puts them in place of another', async () => {
+    const calls = callsModel(db)
+    const other = callsModel(db)
+
+    await calls.insert({ _id: 'a', status: 's', ts: new Date() })
+    await other.insert({ _id: 'old', status: 's', ts: new Date() })
+
+    await expect(calls.rename(other.name)).rejects.toBeInstanceOf(CollectionExistsError)
+
+    await calls.rename(other.name, { replace: true })
+
+    expect(await other.get('a')).not.toBeNull()
+    expect(await other.get('old')).toBeNull()
   })
 })

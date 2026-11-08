@@ -28,4 +28,15 @@ class TruncateTest < Minitest::Test
     refute_includes client.collections.map { |c| c["name"] }, @coll
     assert_raises(Ndb::UnknownCollection) { client.drop(@coll) }
   end
+
+  def test_rename_moves_the_documents
+    other = NdbTestHelpers.next_name
+
+    client.ensure_collection(other)
+    assert_raises(Ndb::CollectionExists) { client.rename(@coll, other) }
+
+    assert_equal({ "collection" => other, "renamed_from" => @coll, "replaced" => true }, client.rename(@coll, other, replace: true))
+    assert_equal 1, client.get(other, "c1")["n"]
+    refute_includes client.collections.map { |c| c["name"] }, @coll
+  end
 end

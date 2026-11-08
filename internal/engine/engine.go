@@ -134,6 +134,12 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		return nil, err
 	}
 
+	if err := db.finishRename(); err != nil {
+		db.Close()
+
+		return nil, err
+	}
+
 	db.emptyTrash()
 
 	if err := cfg.Apply(cat); err != nil {

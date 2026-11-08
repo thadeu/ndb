@@ -552,3 +552,28 @@ func TestTruncateAndDropCommands(t *testing.T) {
 		t.Fatalf("drop again: err = %v", err)
 	}
 }
+
+func TestRenameCommand(t *testing.T) {
+	dir := seedMixed(t, t.TempDir())
+	sock, _ := startDaemon(t, dir)
+
+	base := []string{"-config", "none.yml", "-url", "unix://" + sock}
+
+	got := runCmd(t, func(a []string, o *strings.Builder) error { return rename(a, nil, o) }, append([]string{"posts", "articles"}, base...)...)
+
+	if got != "posts: renamed to articles\n" {
+		t.Fatalf("rename output = %q", got)
+	}
+
+	var out strings.Builder
+
+	err := rename(append([]string{"articles", "calls", "-replace"}, base...), strings.NewReader("calls\n"), &out)
+	if err == nil || !strings.Contains(err.Error(), "-yes") {
+		t.Fatalf("no terminal, no -yes: err = %v", err)
+	}
+
+	err = rename(append([]string{"articles", "calls"}, base...), nil, &out)
+	if err == nil || !strings.Contains(err.Error(), "collection_exists") {
+		t.Fatalf("rename onto calls: err = %v", err)
+	}
+}

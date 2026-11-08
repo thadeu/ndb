@@ -123,6 +123,7 @@ func (s *Server) routes() http.Handler {
 			"_indexes/{}":      {{"PUT", s.ready(s.ensureIndex)}, {"DELETE", s.ready(s.dropIndex)}},
 			"_stats":           {{"GET", s.ready(s.stats)}},
 			"_compact":         {{"POST", s.ready(s.compact)}},
+			"_rename":          {{"POST", s.ready(s.rename)}},
 			"_quarantine":      {{"GET", s.ready(s.quarantine)}},
 			"_doc":             {{"POST", s.ready(s.insertOne)}},
 			"_bulk":            {{"POST", s.ready(s.bulk)}},

@@ -193,6 +193,14 @@ module Ndb
       json(request("DELETE", "#{path(coll)}?confirm=#{confirm(coll)}", nil))
     end
 
+    # Gives the collection the name +to+: documents, indexes and watch
+    # positions move with it. With +replace+, an existing +to+ goes aside
+    # first; without it, an existing +to+ raises CollectionExists.
+    # {"collection", "renamed_from", "replaced"}
+    def rename(coll, to, replace: false)
+      json(post(coll, "_rename", { to: to, replace: replace }))
+    end
+
     # PUT /{coll}: creates the collection or merges the definition into it.
     def ensure_collection(coll, definition = {})
       json(request("PUT", path(coll), definition))

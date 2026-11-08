@@ -17,6 +17,7 @@ func TestScopedTokens(t *testing.T) {
 			{Name: "esl", Secret: "esl-secret", Write: []string{"outbox", "calls*"}},
 			{Name: "dash", Secret: "dash-secret", Read: []string{"calls*"}},
 			{Name: "ops", Secret: "ops-secret", Admin: []string{"*"}},
+			{Name: "calls-admin", Secret: "calls-admin-secret", Admin: []string{"calls*"}},
 		})
 	})
 
@@ -39,6 +40,8 @@ func TestScopedTokens(t *testing.T) {
 		{"dash", "POST", "/_blobs", `x`, false},
 		{"ops", "PUT", "/fresh", `{}`, true},
 		{"ops", "POST", "/fresh/_compact", ``, true},
+		{"esl", "POST", "/outbox/_rename", `{"to":"outbox2"}`, false},
+		{"calls-admin", "POST", "/calls_restored/_rename", `{"to":"other"}`, false},
 	}
 
 	for _, c := range cases {

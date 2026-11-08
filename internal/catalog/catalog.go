@@ -243,6 +243,58 @@ func (c *Catalog) Delete(name string) error {
 	return nil
 }
 
+// Rename moves the definition of from to the name to, in one transaction.
+// A partition gets partitionOf as its logical collection when it is set.
+// When from is gone and to exists, the rename was done before: nothing
+// changes, so a rename that a crash stopped can run again.
+func (c *Catalog) Rename(from, to, partitionOf string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	d, ok := c.defs[from]
+	if !ok {
+		if _, done := c.defs[to]; done {
+			return nil
+		}
+
+		return fmt.Errorf("%w: %s", ErrUnknown, from)
+	}
+
+	d.Name = to
+
+	if partitionOf != "" {
+		d.PartitionOf = partitionOf
+	}
+
+	data, err := json.Marshal(d)
+	if err != nil {
+		return err
+	}
+
+	err = c.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+
+		if err := b.Put([]byte(to), data); err != nil {
+			return err
+		}
+
+		return b.Delete([]byte(from))
+	})
+	if err != nil {
+		return err
+	}
+
+	c.defs[to] = d
+	delete(c.defs, from)
+
+	return nil
+}
+
+// ValidName tells if name can be a collection name.
+func ValidName(name string) bool {
+	return nameRe.MatchString(name)
+}
+
 // Put stores a definition exactly as given, with no merge and no default.
 // A restore uses it to rebuild the catalog from a backup.
 func (c *Catalog) Put(d Def) error {

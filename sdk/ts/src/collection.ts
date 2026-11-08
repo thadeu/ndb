@@ -155,6 +155,16 @@ export class Collection<F extends Fields> {
     await this.db.transport.request('DELETE', this.path() + this.confirm())
   }
 
+  // Gives the collection the name `to`: documents, indexes and watch positions
+  // move with it. With replace, an existing `to` goes aside first; without it,
+  // an existing `to` throws CollectionExistsError. This object keeps the old
+  // name: open the collection again under `to`.
+  async rename(to: string, opts: { replace?: boolean } = {}): Promise<void> {
+    this.ensured = undefined
+
+    await this.db.transport.request('POST', this.path('_rename'), { to, replace: opts.replace ?? false })
+  }
+
   private confirm(): string {
     return `?confirm=${encodeURIComponent(this.name)}`
   }

@@ -59,3 +59,32 @@ func TestDropRoute(t *testing.T) {
 	expectStatus(t, call(h, "GET", "/posts", ``), http.StatusNotFound)
 	expectStatus(t, call(h, "DELETE", "/posts?confirm=posts", ``), http.StatusNotFound)
 }
+
+func TestRenameRoute(t *testing.T) {
+	h := seedTwo(t)
+
+	expectStatus(t, call(h, "PUT", "/other", `{}`), http.StatusOK)
+	expectStatus(t, call(h, "POST", "/posts/_rename", `{}`), http.StatusBadRequest)
+	expectStatus(t, call(h, "POST", "/nope/_rename", `{"to":"x"}`), http.StatusNotFound)
+
+	rec := call(h, "POST", "/posts/_rename", `{"to":"other"}`)
+
+	expectStatus(t, rec, http.StatusConflict)
+
+	if got := errorCode(t, rec); got != "collection_exists" {
+		t.Fatalf("code = %q", got)
+	}
+
+	rec = call(h, "POST", "/posts/_rename", `{"to":"Bad Name"}`)
+
+	if got := errorCode(t, rec); got != "catalog_invalid" {
+		t.Fatalf("code = %q", got)
+	}
+
+	expectStatus(t, call(h, "POST", "/posts/_rename", `{"to":"other","replace":true}`), http.StatusOK)
+	expectStatus(t, call(h, "GET", "/posts", ``), http.StatusNotFound)
+
+	rec = call(h, "GET", "/other/_doc/p1", ``)
+
+	expectStatus(t, rec, http.StatusOK)
+}

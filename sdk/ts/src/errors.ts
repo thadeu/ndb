@@ -30,6 +30,7 @@ export type ErrorCode =
   | 'unindexed_many'
   | 'empty_filter'
   | 'confirm_required'
+  | 'collection_exists'
   | 'invalid_update'
   | 'http_status'
   | (string & {})
@@ -65,6 +66,9 @@ export class InvalidUpdateError extends NdbError {}
 // from ttl + time (ttl_derived).
 export class TtlError extends NdbError {}
 
+// rename onto a name that exists, without replace.
+export class CollectionExistsError extends NdbError {}
+
 const subclasses: Record<string, typeof NdbError> = {
   unauthorized: UnauthorizedError,
   not_found: NotFoundError,
@@ -86,6 +90,7 @@ const subclasses: Record<string, typeof NdbError> = {
   invalid_field: InvalidUpdateError,
   unindexed_many: InvalidUpdateError,
   empty_filter: InvalidUpdateError,
+  collection_exists: CollectionExistsError,
 }
 
 export function makeError(code: ErrorCode, message: string, status = 0): NdbError {

@@ -112,7 +112,7 @@ func required(method string, segs []string) (string, access) {
 		}
 
 		return coll, accessAdmin
-	case "_truncate", "_indexes", "_compact":
+	case "_truncate", "_indexes", "_compact", "_rename":
 		return coll, accessAdmin
 	case "_doc":
 		if method == "GET" {

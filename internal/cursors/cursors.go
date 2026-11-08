@@ -128,6 +128,34 @@ func (s *Store) DeleteCollection(coll string) error {
 	})
 }
 
+// Rename moves the positions of the consumers of from to the collection to,
+// in one transaction. With no position under from it changes nothing, so a
+// rename that a crash stopped can run again.
+func (s *Store) Rename(from, to string) error {
+	prefix := []byte(from + "\x00")
+
+	return s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+		c := b.Cursor()
+
+		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Seek(prefix) {
+			consumer := bytes.TrimPrefix(k, prefix)
+
+			if err := b.Put(key(to, string(consumer)), bytes.Clone(v)); err != nil {
+				return err
+			}
+
+			if err := b.Delete(k); err != nil {
+				return err
+			}
+
+			c = b.Cursor()
+		}
+
+		return nil
+	})
+}
+
 // Entry is one stored position.
 type Entry struct {
 	Collection string

@@ -305,3 +305,39 @@ func (s *Server) drop(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 
 	writeJSON(w, http.StatusOK, map[string]any{"collection": name, "dropped": true})
 }
+
+// rename is POST /{coll}/_rename {"to", "replace"}: the collection takes the
+// new name; with replace, an existing target goes aside first.
+func (s *Server) rename(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+	var req struct {
+		To      string `json:"to"`
+		Replace bool   `json:"replace"`
+	}
+
+	body, err := readBody(w, r, engine.DefaultMaxLine)
+	if err == nil {
+		err = decode(body, &req)
+	}
+
+	if err == nil && req.To == "" {
+		err = badRequest("to is required")
+	}
+
+	if err == nil {
+		err = s.mayAlso(r, req.To, accessAdmin)
+	}
+
+	name := r.PathValue("coll")
+
+	if err == nil {
+		err = db.Rename(name, req.To, req.Replace)
+	}
+
+	if err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"collection": req.To, "renamed_from": name, "replaced": req.Replace})
+}

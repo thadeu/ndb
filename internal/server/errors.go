@@ -72,6 +72,8 @@ func codeOf(err error) string {
 		return "direct_collection"
 	case errors.Is(err, engine.ErrNotSupported):
 		return "not_supported"
+	case errors.Is(err, engine.ErrExists):
+		return "collection_exists"
 	case errors.Is(err, engine.ErrConfirm):
 		return "confirm_required"
 	case errors.Is(err, wal.ErrLineTooLarge):
@@ -89,7 +91,7 @@ func statusOf(code string) int {
 	switch code {
 	case "not_found", "unknown_collection", "unknown_route":
 		return http.StatusNotFound
-	case "duplicate_id", "unique_violation", "catalog_conflict", "direct_collection":
+	case "duplicate_id", "unique_violation", "catalog_conflict", "direct_collection", "collection_exists":
 		return http.StatusConflict
 	case "request_too_large", "line_too_large":
 		return http.StatusRequestEntityTooLarge

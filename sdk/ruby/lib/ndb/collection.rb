@@ -146,6 +146,9 @@ module Ndb
       client.drop(name)
     end
 
+    # Renames the collection on the daemon; this object keeps the old name.
+    def rename(to, replace: false) = client.rename(name, to, replace: replace)
+
     def stats
       ready!
       client.collection_stats(name)

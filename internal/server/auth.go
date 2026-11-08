@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"fmt"
@@ -38,8 +39,21 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), tokenKey{}, t)))
 	})
+}
+
+type tokenKey struct{}
+
+// mayAlso tells if the request may also do need on coll: a route that
+// names a second collection in its body (a rename target) checks it here.
+func (s *Server) mayAlso(r *http.Request, coll string, need access) error {
+	t, ok := r.Context().Value(tokenKey{}).(Token)
+	if !ok || t.allows(coll, need) {
+		return nil
+	}
+
+	return &apiError{status: http.StatusForbidden, code: "forbidden", msg: forbidden(t, coll, need)}
 }
 
 func forbidden(t Token, coll string, need access) string {
