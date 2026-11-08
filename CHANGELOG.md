@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-11-08
+
+The releases of 1.1.0 and 1.1.1 did not publish the `ndb-ui` binaries, and the SDKs of 1.1.1 still had version 1.1.0. 1.1.2 publishes everything with one version. The daemon and the SDKs do not change.
+
+### Added
+
+- **Console:** edit a saved connection. The Edit drawer is the New connection form, filled in, with Discover. An empty Token field keeps the saved token.
+
+### Fixed
+
+- **Console:** Dev Tools adds the leading slash to a path, as in Kibana: `POST orders/_search` sends `POST /orders/_search`.
+- **CI:** the release builds the console client bundles before it compiles `ndb-ui`.
+
 ## [1.1.0] - 2026-11-07
 
 ndb 1.1 keeps its data on disk: the memory of the daemon has a fixed size (about 512 MB) whatever the number of documents. The API and the SDKs do not change. The first start writes the key files of the existing segments, once.
@@ -261,7 +274,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.1.2...HEAD
+[1.1.2]: https://github.com/thadeu/ndb/compare/v1.1.0...v1.1.2
 [1.1.0]: https://github.com/thadeu/ndb/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/thadeu/ndb/compare/v0.4.0...v1.0.0
 [0.4.0]: https://github.com/thadeu/ndb/compare/v0.3.3...v0.4.0
