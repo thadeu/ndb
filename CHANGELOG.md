@@ -12,11 +12,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- **`has_many` and `has_one` lookups read a whole page in one search** (`$in` on the foreign field, with `per`), not one search per row: 20 customers with their last 5 events went from 190 ms to 79 ms in `make bench`, a 2-level lookup from 97 ms to 75 ms. Budget: slowest lookup 250 ms.
+- **`has_many` and `has_one` lookups read a whole page in one search** (`$in` on the foreign field, with `per`), not one search per row: 20 customers with their last 5 events went from 190 ms to 67 ms in `make bench`, a 2-level lookup from 97 ms to 66 ms. Budget: slowest lookup 250 ms.
 
 ### Fixed
 
 - The writer metrics (`/metrics`) count a commit before the client gets its answer, so they are never behind an acked write.
+
+## [1.11.1] - 2026-11-08
 
 ## [1.11.0] - 2026-11-08
 
@@ -487,7 +489,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.11.0...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.11.1...HEAD
+[1.11.1]: https://github.com/thadeu/ndb/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/thadeu/ndb/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/thadeu/ndb/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/thadeu/ndb/compare/v1.8.0...v1.9.0
