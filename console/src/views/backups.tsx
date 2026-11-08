@@ -8,11 +8,13 @@ import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
 import { Card, CardHeader } from '@/ui/card';
 import { CodeBlock } from '@/ui/code-block';
+import { DatePicker } from '@/ui/date-picker';
 import { Dialog } from '@/ui/dialog';
 import { Empty } from '@/ui/empty';
 import { Field } from '@/ui/field';
 import { Input } from '@/ui/input';
 import { Table } from '@/ui/table';
+import { Tabs, type TabItem } from '@/ui/tabs';
 
 // BackupsQuery is the state of the page in the URL: the PITR page, and the
 // dialog that is open (restore of one collection, or rename).
@@ -34,11 +36,44 @@ export interface BackupsPageProps {
   error?: string;
 }
 
-const BACKUP_COMMANDS = ['ndb backup /backups/daily -gzip', 'ndb backup - | aws s3 cp - s3://bucket/daily.ndb'].join('\n');
+const lines = (...rows: string[]) => rows.join('\n');
 
-const RESTORE_COMMANDS = ['systemctl stop ndb', 'sudo -u ndb ndb restore /backups/daily.ndb.gz -data-dir /var/lib/ndb', 'systemctl start ndb'].join('\n');
+const code = (id: string, label: string, text: string): TabItem => ({ id, label, content: <CodeBlock code={text} /> });
 
-const PITR_COMMANDS = ['ndb pitr', 'ndb restore calls -at 15m -to calls_restored', 'ndb rename calls_restored calls -replace -yes'].join('\n');
+// The backup file: taken while ndb runs, from the host.
+const BACKUP_TABS: TabItem[] = [
+  code('systemd', 'systemd', lines('sudo -u ndb ndb backup /backups/daily.ndb.gz -gzip', '# every night: a systemd timer or cron runs the same line')),
+  code('cli', 'CLI', lines('ndb backup /backups/daily -gzip', 'ndb backup - | aws s3 cp - s3://bucket/daily.ndb')),
+  code('docker', 'Docker', lines('docker exec ndb /usr/local/bin/ndb backup - > daily.ndb', '# or a second container with the volumes:', 'docker run --rm -v ndb-run:/run/ndb -v /backups:/backups ghcr.io/thadeu/ndb backup /backups/daily -gzip')),
+  code('voodu', 'Voodu', lines('vd exec ndb -- ndb backup - > daily.ndb', '# add -r <remote> as in your other vd commands')),
+];
+
+// Restoring a backup file swaps the data dir: the daemon must be stopped.
+const RESTORE_TABS: TabItem[] = [
+  code('systemd', 'systemd', lines('systemctl stop ndb', 'sudo -u ndb ndb restore /backups/daily.ndb.gz -data-dir /var/lib/ndb', 'systemctl start ndb')),
+  code('cli', 'CLI', lines('# the daemon must be stopped', 'ndb restore /backups/daily.ndb.gz -data-dir /var/lib/ndb', 'aws s3 cp s3://bucket/daily.ndb - | ndb restore - -data-dir /var/lib/ndb')),
+  code('docker', 'Docker', lines('docker stop ndb', 'docker run --rm -v ndb-data:/var/lib/ndb -v /backups:/backups:ro \\', '  ghcr.io/thadeu/ndb restore /backups/daily.ndb.gz -data-dir /var/lib/ndb', 'docker start ndb')),
+  code('voodu', 'Voodu', lines('# 1. replicas = 0 in ndb.voodu', 'vd apply -f ndb.voodu -y', '# 2. on the node, on the path of the data volume', 'ndb restore /backups/daily.ndb.gz -data-dir <data volume path>', '# 3. replicas = 1 again', 'vd apply -f ndb.voodu -y')),
+];
+
+// PITR runs on the live daemon, so the SDKs can do it too.
+const PITR_TABS: TabItem[] = [
+  code('cli', 'CLI', lines('ndb pitr', 'ndb restore calls -at 15m -to calls_restored', 'ndb rename calls_restored calls -replace -yes')),
+  code('docker', 'Docker', lines('docker exec ndb /usr/local/bin/ndb restore calls -at 15m -to calls_restored', 'docker exec ndb /usr/local/bin/ndb rename calls_restored calls -replace -yes')),
+  code('voodu', 'Voodu', lines('vd exec ndb -- ndb restore calls -at 15m -to calls_restored', 'vd exec ndb -- ndb rename calls_restored calls -replace -yes')),
+  code('curl', 'curl', lines("curl --unix-socket /run/ndb/ndb.sock http://ndb/calls/_restore -d '{\"at\":\"2026-11-12T14:04:00Z\",\"to\":\"calls_restored\"}'", "curl --unix-socket /run/ndb/ndb.sock http://ndb/calls_restored/_rename -d '{\"to\":\"calls\",\"replace\":true}'")),
+  code('go', 'Go', lines('err := calls.Restore(ctx, at, "calls_restored")', 'err = restored.Rename(ctx, "calls", true)')),
+  code('ruby', 'Ruby', lines('client.restore("calls", at: at, to: "calls_restored")', 'client.rename("calls_restored", "calls", replace: true)')),
+  code('ts', 'TypeScript', lines("await calls.restore({ at, to: 'calls_restored' })", "await restored.rename('calls', { replace: true })")),
+];
+
+const PITR_PRESETS = [
+  { label: '5 minutes ago', ago: '5m' },
+  { label: '15 minutes ago', ago: '15m' },
+  { label: '1 hour ago', ago: '1h' },
+  { label: '6 hours ago', ago: '6h' },
+  { label: 'Start of the window', at: 'min' as const },
+];
 
 export function backupsHref(name: string, query: BackupsQuery = {}): string {
   const params = new URLSearchParams();
@@ -99,13 +134,13 @@ export const BackupsPage: FC<BackupsPageProps> = ({ current, online, pitr, query
       <Card>
         <CardHeader title="Backup from the host" description="The CLI writes the file by itself, with the daemon running or stopped." />
 
-        <CodeBlock code={BACKUP_COMMANDS} />
+        <Tabs id="backup-how" label="Backup from the host" items={BACKUP_TABS} />
       </Card>
 
       <Card>
-        <CardHeader title="Restore a backup file" description="Not in the console: a restore swaps the data directory, so ndb must be stopped." />
+        <CardHeader title="Restore a backup file" description="Not in the console: a restore swaps the data directory, so ndb must be stopped. There is no SDK call for it, since no daemon runs." />
 
-        <CodeBlock code={RESTORE_COMMANDS} />
+        <Tabs id="restore-how" label="Restore a backup file" items={RESTORE_TABS} />
 
         <p class="hint">Restore refuses a data dir that is not empty unless you add <span class="mono">-force</span>. Documents keep their <span class="mono">_v</span>, and watch consumers resume after their last ack.</p>
       </Card>
@@ -188,9 +223,9 @@ const PitrCard: FC<{ current: Current; pitr: BackupsPageProps['pitr']; query: Ba
       )}
 
       <details class="stack">
-        <summary class="hint">The same from the host</summary>
+        <summary class="hint">The same from the host or the SDKs</summary>
 
-        <CodeBlock code={PITR_COMMANDS} />
+        <Tabs id="pitr-how" label="PITR from the host" items={PITR_TABS} />
       </details>
     </Card>
   );
@@ -208,7 +243,7 @@ const RestoreDialog: FC<{ current: Current; pitr: BackupsPageProps['pitr']; quer
         <input type="hidden" name="collection" value={item.collection} />
 
         <Field id="pitr-at" label="At (UTC)">
-          <Input id="pitr-at" mono type="datetime-local" step="1" name="at" value={query.at ?? defaultAt(item.oldest)} required />
+          <DatePicker id="pitr-at" name="at" label="At (UTC)" value={query.at ?? defaultAt(item.oldest)} min={item.oldest} max="now" presets={PITR_PRESETS} required />
         </Field>
 
         <Field id="pitr-to" label="To (a new collection)">

@@ -6,14 +6,17 @@ import { Badge, Dot } from '@/ui/badge';
 import { Button } from '@/ui/button';
 import { Card, CardHeader } from '@/ui/card';
 import { CodeBlock } from '@/ui/code-block';
+import { DatePicker } from '@/ui/date-picker';
 import { Dialog, openDialog } from '@/ui/dialog';
 import { Empty } from '@/ui/empty';
 import { Field } from '@/ui/field';
 import { Input } from '@/ui/input';
+import { Popover, popoverTrigger } from '@/ui/popover';
 import { SegmentBar } from '@/ui/progress';
 import { Segmented } from '@/ui/segmented';
 import { Stat } from '@/ui/stat';
 import { Table } from '@/ui/table';
+import { Tabs } from '@/ui/tabs';
 import { Textarea } from '@/ui/textarea';
 
 const Block: FC<{ title: string; children?: unknown }> = ({ title, children }) => (
@@ -104,6 +107,36 @@ export const UiPage: FC = () => (
       </Dialog>
 
       <ConfirmHost />
+    </Block>
+
+    <Block title="DatePicker">
+      <div class="stack" style="width:min(420px,100%)">
+        <Field id="demo-dt" label="Date and time (UTC), with presets">
+          <DatePicker id="demo-dt" name="at" label="Date and time" max="now" presets={[{ label: '5 minutes ago', ago: '5m' }, { label: '1 hour ago', ago: '1h' }, { label: '1 day ago', ago: '1d' }]} />
+        </Field>
+
+        <Field id="demo-d" label="Date">
+          <DatePicker id="demo-d" name="day" label="Date" mode="date" />
+        </Field>
+
+        <Field id="demo-r" label="Range, with presets">
+          <DatePicker id="demo-r" name="period" label="Range" mode="range" max="now" presets={[{ label: 'Last day', last: '1d' }, { label: 'Last 7 days', last: '7d' }, { label: 'Last 30 days', last: '30d' }, { label: 'Last 3 months', last: '3mo' }]} />
+        </Field>
+      </div>
+    </Block>
+
+    <Block title="Popover">
+      <Button {...popoverTrigger('demo-pop')}>Open popover</Button>
+
+      <Popover id="demo-pop" label="Demo">
+        <p class="hint" style="padding:12px;margin:0">Below the trigger when it fits, above when not; inside the viewport.</p>
+      </Popover>
+    </Block>
+
+    <Block title="Tabs">
+      <div style="width:min(520px,100%)">
+        <Tabs id="demo-tabs" label="Install" items={[{ id: 'cli', label: 'CLI', content: <CodeBlock code="ndb stats" /> }, { id: 'docker', label: 'Docker', content: <CodeBlock code="docker exec ndb ndb stats" /> }]} />
+      </div>
     </Block>
 
     <Block title="CodeBlock">

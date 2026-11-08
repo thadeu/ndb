@@ -8,10 +8,12 @@ import { mount as insertForm } from '@/components/insert-form';
 
 import { mount as alertDialog } from './alert-dialog';
 import { mount as codeBlock } from './code-block';
+import { mount as datePicker } from './date-picker';
 import { mount as dialog } from './dialog';
+import { mount as popover } from './popover';
 
 export function mountAll(): void {
-  for (const mount of [connectionTest, discover, dialog, alertDialog, codeBlock, insertForm, backupDownload]) mount();
+  for (const mount of [connectionTest, discover, dialog, alertDialog, popover, datePicker, codeBlock, insertForm, backupDownload]) mount();
 }
 
 if (typeof document !== 'undefined') mountAll();

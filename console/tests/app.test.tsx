@@ -475,8 +475,9 @@ describe('pitr helpers', () => {
     const { defaultAt, pageOf, utc } = await import('@/pitr');
     const now = Date.parse('2026-11-12T14:10:00Z');
 
-    expect(defaultAt(undefined, now)).toBe('2026-11-12T14:05:00');
-    expect(defaultAt('2026-11-12T14:08:00Z', now)).toBe('2026-11-12T14:08:01');
+    expect(defaultAt(undefined, now)).toBe('2026-11-12 14:05:00');
+    expect(defaultAt('2026-11-12T14:08:00Z', now)).toBe('2026-11-12 14:08:01');
+    expect(utc('2026-11-12 14:04:05')).toBe('2026-11-12T14:04:05Z');
     expect(utc('2026-11-12T14:04')).toBe('2026-11-12T14:04:00Z');
     expect(utc('2026-11-12T14:04:05Z')).toBe('2026-11-12T14:04:05Z');
 

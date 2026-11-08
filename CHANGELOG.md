@@ -11,6 +11,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Changed
 
 - **PITR uses `at` and `to`, like the rest of the contract.** `POST /{coll}/_restore {"at","to"}` (was `until`, `into`); CLI `ndb restore <coll> -at T -to NAME`; Go `Restore(ctx, at, to)`, Ruby `restore(coll, at:, to:)`, TS `restore({ at, to })`. The old keys are refused (`invalid_request`).
+- **Console date picker of its own** (`DatePicker` in the design system, in the `/ui` gallery): a positional mask for `YYYY-MM-DD` and `YYYY-MM-DD HH:MM:SS` (digits fill their places and skip the separators, a 4 as the first digit of a month becomes 04, parts stay in range, ArrowUp/Down step the part at the caret, a paste is read), a calendar in a `Popover` that goes below or above its trigger by the room there (`getBoundingClientRect`) in the native top layer, min/max days, keyboard moves, presets on the left (`5 minutes ago`; `Last 7 days` in range mode) and a range mode. Its colors are `--dp-*` variables, for a library later. The PITR restore dialog uses it (presets up to the start of the window).
+- **Console tabs** (`Tabs`, radios, no script needed) in the Backups tab: backup and restore of a file for systemd, CLI, Docker and Voodu; PITR for CLI, Docker, Voodu, curl, Go, Ruby and TypeScript.
 - **Console:** PITR is a block of the **Backups** tab, as in DynamoDB, instead of a tab of its own: the windows paged by 10, a Restore dialog on each row, and a Rename dialog that opens filled in after a restore.
 
 ## [1.2.3] - 2026-11-08
