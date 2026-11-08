@@ -8,3 +8,10 @@ func SetWALSegmentSize(n int64) func() {
 
 	return func() { walSegmentSize = old }
 }
+
+func SetLookupBudget(n int) func() {
+	old := lookupBudget
+	lookupBudget = n
+
+	return func() { lookupBudget = old }
+}

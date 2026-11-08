@@ -68,14 +68,14 @@ func (s *Server) find(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
-	s.read(w, r, db, &s.metrics.find, col.Find)
+	s.read(w, r, db, &s.metrics.find, s.withLookup(r, db, col.Find))
 }
 
 // findPattern is _search over every collection of a pattern (logs-2026-*).
 func (s *Server) findPattern(w http.ResponseWriter, r *http.Request, db *engine.DB) {
-	s.read(w, r, db, &s.metrics.find, func(ctx context.Context, body []byte) (collection.Page, error) {
+	s.read(w, r, db, &s.metrics.find, s.withLookup(r, db, func(ctx context.Context, body []byte) (collection.Page, error) {
 		return db.FindPattern(ctx, r.PathValue("coll"), body)
-	})
+	}))
 }
 
 // aggregate is POST /{coll}/_aggregate: the output rows of a pipeline, with

@@ -144,9 +144,9 @@ func (s *Server) partSwap(w http.ResponseWriter, r *http.Request, db *engine.DB,
 }
 
 func (s *Server) partSearch(w http.ResponseWriter, r *http.Request, db *engine.DB, def catalog.Def) {
-	s.read(w, r, db, &s.metrics.find, func(ctx context.Context, body []byte) (collection.Page, error) {
+	s.read(w, r, db, &s.metrics.find, s.withLookup(r, db, func(ctx context.Context, body []byte) (collection.Page, error) {
 		return db.FindPartitioned(ctx, def, body)
-	})
+	}))
 }
 
 func (s *Server) partCount(w http.ResponseWriter, r *http.Request, db *engine.DB, def catalog.Def) {
