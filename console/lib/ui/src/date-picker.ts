@@ -42,7 +42,29 @@ export const DEFAULT_LABELS: DatePickerLabels = {
   hintRange: 'Pick the first and the last day (UTC).',
 };
 
-export interface DatePickerOptions {
+// DatePickerChange is what onChange and the datepicker:change event get.
+// value and values are the fields as typed; date, from and to are parsed
+// (null while a field is not complete).
+export interface DatePickerChange {
+  value: string;
+  values: string[];
+  date: Date | null;
+  from: Date | null;
+  to: Date | null;
+}
+
+export interface DatePickerCallbacks {
+  onChange?: (change: DatePickerChange) => void;
+}
+
+// DatePickerBounds can change after mount (update).
+export interface DatePickerBounds {
+  min?: string | null;
+  max?: string | null;
+  presets?: Preset[];
+}
+
+export interface DatePickerOptions extends DatePickerCallbacks {
   id: string;
   name: string;
   label: string;
@@ -64,10 +86,21 @@ export interface DatePickerOptions {
 }
 
 export interface DatePickerController {
-  root: HTMLElement;
+  readonly root: HTMLElement;
+  // value is the first field; values are all of them (two for a range).
+  value(): string;
   values(): string[];
+  // date is the first field parsed; null while it is not complete.
+  date(): Date | null;
+  // setValue writes a field (0, or 1 for the end of a range) from a Date or
+  // a text in the shape of the mask; null clears it. It fires a change.
+  setValue(value: Date | string | null, index?: number): void;
+  // update changes min, max or the presets.
+  update(bounds: DatePickerBounds): void;
   open(): void;
   close(): void;
+  // destroy removes every listener; the markup stays.
+  destroy(): void;
 }
 
 function esc(text: string): string {
@@ -135,7 +168,7 @@ export function datePickerHTML(options: DatePickerOptions): string {
 
 // attachMask makes an input follow the mask, on the keyboard and on mobile
 // (beforeinput carries what a soft keyboard types).
-export function attachMask(input: HTMLInputElement, kind: MaskKind, onChange: () => void = () => {}): void {
+export function attachMask(input: HTMLInputElement, kind: MaskKind, onChange: () => void = () => {}, signal?: AbortSignal): void {
   const apply = (next: MaskState) => {
     input.value = next.value;
     input.setSelectionRange(next.caret, next.caret);
@@ -178,14 +211,14 @@ export function attachMask(input: HTMLInputElement, kind: MaskKind, onChange: ()
       event.preventDefault();
       apply({ value: '', caret: 0 });
     }
-  });
+  }, { signal });
 
   input.addEventListener('keydown', event => {
     if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
 
     event.preventDefault();
     apply(step(state(), event.key === 'ArrowUp' ? 1 : -1, kind));
-  });
+  }, { signal });
 }
 
 type Attrs = Record<string, string | boolean | undefined>;
@@ -218,14 +251,15 @@ class Picker implements DatePickerController {
   private readonly inputs: HTMLInputElement[];
   private readonly pop: HTMLElement;
   private readonly toggle: HTMLElement;
-  private readonly presets: Preset[];
   private readonly labels: DatePickerLabels;
   private readonly locale: string | undefined;
+  private readonly abort = new AbortController();
+  private presets: Preset[];
   private view = { year: 0, month: 0 };
   private focusDay = '';
   private time = '';
 
-  constructor(readonly root: HTMLElement) {
+  constructor(readonly root: HTMLElement, private readonly callbacks: DatePickerCallbacks = {}) {
     const data = root.dataset;
 
     this.id = data.id ?? '';
@@ -238,18 +272,70 @@ class Picker implements DatePickerController {
     this.labels = { ...DEFAULT_LABELS, ...(JSON.parse(data.labels || '{}') as Partial<DatePickerLabels>) };
     this.locale = data.locale;
 
+    const signal = this.abort.signal;
+
     this.toggle.addEventListener('click', event => {
       event.preventDefault();
 
-      if (this.pop.classList.contains('open')) this.close();
+      if (this.isOpen()) this.close();
       else this.open();
-    });
+    }, { signal });
 
-    for (const input of this.inputs) attachMask(input, this.kind, () => this.fieldChanged());
+    for (const input of this.inputs) attachMask(input, this.kind, () => this.fieldChanged(), signal);
+  }
+
+  value(): string {
+    return this.inputs[0]?.value ?? '';
   }
 
   values(): string[] {
     return this.inputs.map(input => input.value);
+  }
+
+  date(): Date | null {
+    return this.dates()[0] ?? null;
+  }
+
+  setValue(value: Date | string | null, index = 0): void {
+    const text = value instanceof Date ? format(value, this.kind) : normalize(value ?? '', this.kind);
+    const input = this.inputs[index];
+
+    if (!input || input.value === text) return;
+
+    input.value = text;
+    this.changed();
+
+    if (this.isOpen()) this.render();
+  }
+
+  update(bounds: DatePickerBounds): void {
+    const data = this.root.dataset;
+
+    if (bounds.min !== undefined) bounds.min === null ? delete data.min : (data.min = bounds.min);
+    if (bounds.max !== undefined) bounds.max === null ? delete data.max : (data.max = bounds.max);
+
+    if (bounds.presets) {
+      this.presets = bounds.presets;
+      data.presets = JSON.stringify(bounds.presets);
+    }
+
+    if (this.isOpen()) this.render();
+  }
+
+  destroy(): void {
+    if (this.isOpen()) this.close();
+
+    this.abort.abort();
+    mounted.delete(this.root);
+  }
+
+  // changed tells the page: the callback and a bubbling datepicker:change.
+  private changed(): void {
+    const dates = this.dates();
+    const detail: DatePickerChange = { value: this.value(), values: this.values(), date: dates[0] ?? null, from: this.mode === 'range' ? (dates[0] ?? null) : null, to: dates[1] ?? null };
+
+    this.callbacks.onChange?.(detail);
+    this.root.dispatchEvent(new CustomEvent<DatePickerChange>('datepicker:change', { detail, bubbles: true }));
   }
 
   open(): void {
@@ -300,6 +386,7 @@ class Picker implements DatePickerController {
 
     input.value = date ? format(date, this.kind) : '';
     input.dispatchEvent(new Event('change', { bubbles: true }));
+    this.changed();
   }
 
   // setAt writes day + time (clamped) in the field, and keeps the time row
@@ -313,6 +400,8 @@ class Picker implements DatePickerController {
   }
 
   private fieldChanged(): void {
+    this.changed();
+
     const date = this.dates()[0];
 
     if (date && this.kind === 'datetime') this.time = format(date, 'time');
@@ -380,7 +469,7 @@ class Picker implements DatePickerController {
       this.set(0, picked.from);
       this.set(1, picked.to);
     } else {
-      this.set(0, picked.at);
+      this.set(0, picked.at ?? picked.from);
     }
 
     this.done();
@@ -490,13 +579,14 @@ class Picker implements DatePickerController {
 
 const mounted = new WeakMap<HTMLElement, Picker>();
 
-// mountDatePicker brings one datePickerHTML root to life (once).
-export function mountDatePicker(root: HTMLElement): DatePickerController {
+// mountDatePicker brings one datePickerHTML root to life (once; a second
+// call returns the same picker).
+export function mountDatePicker(root: HTMLElement, callbacks: DatePickerCallbacks = {}): DatePickerController {
   const existing = mounted.get(root);
 
   if (existing) return existing;
 
-  const picker = new Picker(root);
+  const picker = new Picker(root, callbacks);
 
   mounted.set(root, picker);
 
@@ -504,13 +594,13 @@ export function mountDatePicker(root: HTMLElement): DatePickerController {
 }
 
 // mountDatePickers mounts every date picker under root.
-export function mountDatePickers(root: ParentNode = document): DatePickerController[] {
-  return [...root.querySelectorAll<HTMLElement>('[data-datepicker]')].map(mountDatePicker);
+export function mountDatePickers(root: ParentNode = document, callbacks: DatePickerCallbacks = {}): DatePickerController[] {
+  return [...root.querySelectorAll<HTMLElement>('[data-datepicker]')].map(el => mountDatePicker(el, callbacks));
 }
 
 // createDatePicker writes a date picker into container and mounts it.
 export function createDatePicker(container: HTMLElement, options: DatePickerOptions): DatePickerController {
   container.innerHTML = datePickerHTML(options);
 
-  return mountDatePicker(container.firstElementChild as HTMLElement);
+  return mountDatePicker(container.firstElementChild as HTMLElement, { onChange: options.onChange });
 }

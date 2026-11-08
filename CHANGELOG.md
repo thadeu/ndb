@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **`@thadeu/ui` as a library.** React bindings in `@thadeu/ui/react`: `useDatePicker` (a `ref`, `value`, `date`, `from`, `to`, `setValue`, `open`, `close`) and `<DatePicker>` (controlled with `value` + `onChange`), React as an optional peer. The vanilla controller has `value()`, `date()`, `setValue()`, `update({ min, max, presets })` and `destroy()`; every change calls `onChange` and dispatches a bubbling `datepicker:change`. Every color, radius, size, space, font and shadow is a `--dp-*` variable (the README has the table, a blue theme and a dark one), and the fields have a default style of their own.
+
+### Fixed
+
+- A `last` preset (`Last 7 days`) in a single date picker cleared the field; it takes the start of the range now.
+
 ## [1.2.6] - 2026-11-08
 
 ### Added

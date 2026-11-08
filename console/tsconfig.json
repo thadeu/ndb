@@ -40,5 +40,10 @@
     "tests",
     "lib/ui/src",
     "lib/ui/test"
+  ],
+  "exclude": [
+    "lib/ui/src/react.ts",
+    "lib/ui/node_modules",
+    "lib/ui/dist"
   ]
 }
