@@ -66,7 +66,7 @@ An unknown key is an error at start (the file is read in strict mode). Sizes are
 | `data_dir` | where all data lives. Never put it on NFS, EFS or another network volume. A relative path starts at the folder of `ndb.yml`. |
 | `listen.unix` | unix socket path. A relative path starts at the folder of `ndb.yml`. |
 | `listen.tcp` | TCP address. Bind to a private address only, and set `-token-file`. |
-| `memory_limit` | Go heap soft limit (`GOMEMLIMIT`). Default 384 MiB: with it the daemon stays under about 512 MB of RSS. Raise it for very large aggregations. |
+| `memory_limit` | Go heap soft limit (`GOMEMLIMIT`). Default 384 MiB: with it the daemon stays under about 512 MB of RSS. The heap grows toward the limit before the GC works hard, so a higher limit is also a higher RSS: in `ndb bench`, 512 MiB loaded 6% faster and read at the same speed, with 125 to 180 MB more RSS in every phase. Raise it for very large aggregations or bulk loads. |
 | `write_buffer` | memory for the documents not sealed yet, shared by every collection and partition. Over it, the largest memtable is written to a segment. Default 32 MiB. |
 | `group_limit` | memory limit of one aggregate group table. Over it: `group_limit_exceeded`. |
 | `blob_max_size` | largest blob. Default 1 GiB. |
