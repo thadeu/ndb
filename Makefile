@@ -71,6 +71,10 @@ docs-build:
 # push. With make's --dry-run (-n) or DRY=1, it only shows the next version.
 # YES=1 pushes without asking.
 # The + runs the script even under --dry-run. See scripts/release.sh.
+# The short flags of make are the first word of MAKEFLAGS ("n" for -n), read
+# before --silent is added: its own n must not look like a dry run.
+RELEASE_DRY := $(if $(or $(DRY),$(findstring n,$(filter-out -%,$(firstword $(MAKEFLAGS))))),--dry-run)
+
 ifneq ($(filter tag tg,$(firstword $(MAKECMDGOALS))),)
 MAKEFLAGS += --silent
 BUMP := $(word 2,$(MAKECMDGOALS))
@@ -79,8 +83,6 @@ ifneq ($(BUMP),)
 $(eval $(BUMP): tag ;)
 endif
 endif
-
-RELEASE_DRY := $(if $(or $(DRY),$(findstring n,$(firstword -$(MAKEFLAGS)))),--dry-run)
 
 tag:
 	+@scripts/release.sh $(or $(BUMP),patch) $(RELEASE_DRY) $(if $(YES),--yes)
