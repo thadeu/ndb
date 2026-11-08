@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-11-08
+
 ### Added
 
 - **Rails test support.** ndb has no transactions, so the gem truncates the collections a test used, after it (a few ms each; definitions and indexes stay): `require "ndb/rails/test_help"` (Minitest, every `ActiveSupport::TestCase`, `self.ndb_clean = false` to opt out), `require "ndb/rails/rspec"` (`ndb_clean: false`), and `require "ndb/rails/database_cleaner"` (`DatabaseCleaner[:ndb]` with `:touched` and `:truncation`). Parallel workers get collections of their own (`test<n>_`, from `parallelize` or `TEST_ENV_NUMBER`; `config.collection_prefix`). A clean refuses to run outside the test environment.
@@ -381,7 +383,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.4.2...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.4.3...HEAD
+[1.4.3]: https://github.com/thadeu/ndb/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/thadeu/ndb/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/thadeu/ndb/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/thadeu/ndb/compare/v1.3.0...v1.4.0
