@@ -168,6 +168,7 @@ export const tabs: Tab[] = [
           { text: 'Overview', link: '/operations' },
           { text: 'Health and metrics', link: '/operations#check' },
           { text: 'Backup and restore', link: '/operations#backup-and-restore' },
+          { text: 'Point in time recovery', link: '/pitr' },
           { text: 'Recovery', link: '/operations#recovery-after-a-crash' },
           { text: 'Compaction and TTL', link: '/operations#compaction-retention-and-ttl' },
           { text: 'Upgrade', link: '/operations#upgrade' },

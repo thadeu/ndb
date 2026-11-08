@@ -25,6 +25,8 @@ The SDKs turn each code into a typed error: Go `ndb.ErrUnknownCollection` (`erro
 | `invalid_pattern` | 400 | A collection pattern that is not a prefix and one `*` at the end. |
 | `pattern_read_only` | 400 | A write or admin route on a collection pattern. |
 | `pattern_too_wide` | 400 | The pattern matches more than 256 collections. |
+| `out_of_window` | 400 | A restore to an instant out of the PITR window; the message gives the start of the window. |
+| `pitr_off` | 400 | A restore of a collection with `pitr: off`. |
 | `confirm_required` | 400 | `_truncate` or drop without `confirm` equal to the collection name. |
 | `catalog_invalid` | 400 | The collection definition or name is not valid (for example, it has `id`). |
 | `ttl_not_enabled` | 400 | `expire_in`, `_expire` or `_persist` on a collection without `expires_field`. |
@@ -38,6 +40,7 @@ The SDKs turn each code into a typed error: Go `ndb.ErrUnknownCollection` (`erro
 | `forbidden` | 403 | For example, `/_backup` over TCP. |
 | `not_found` | 404 | No document (or blob) with this id. |
 | `unknown_collection` | 404 | The collection does not exist. |
+| `collection_exists` | 409 | A rename to a name that exists (without `replace`), or a restore `into` a name that exists. |
 | `unknown_route` | 404 | No route has this path. |
 | `method_not_allowed` | 405 | The path exists with other methods (see `Allow`). |
 | `duplicate_id` | 409 | A document with this `_id` exists. |

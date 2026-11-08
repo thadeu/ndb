@@ -1,6 +1,6 @@
 # M17 — PITR and rename
 
-Status: not started (plan 2026-11-08) · Depends on: M16 · Diagram: the
+Status: built (2026-11-08) · Depends on: M16 · Diagram: the
 "PITR do ndb" artifact of 2026-11-08
 
 ## Goal
@@ -50,52 +50,66 @@ be undone.
 
 ### E17.1 Rename
 
-- [ ] `POST /{coll}/_rename {"to", "replace"}`: under the engine swap lock,
+- [x] `POST /{coll}/_rename {"to", "replace"}`: under the engine swap lock,
       close, rename the dir, update the catalog, move the watch cursors,
       reopen. A partitioned collection renames its partitions with it.
-- [ ] `replace: true` with an existing target: the target goes aside (kept
+- [x] `replace: true` with an existing target: the target goes aside (kept
       by the PITR window, else deleted in the background like a drop).
       Without `replace`: `409 collection_exists`.
-- [ ] Errors: `404 unknown_collection`, `400 invalid_collection` (bad name,
+- [x] Errors: `404 unknown_collection`, `400 catalog_invalid` (bad name,
       a pattern, a partition name), `409 collection_exists`.
-- [ ] Scope: admin on both names. CLI `ndb rename <coll> <to> [-replace]`.
+- [x] Scope: admin on both names. CLI `ndb rename <coll> <to> [-replace]`.
       SDKs: `rename(to, replace:)`. Docs, console (a Rename action).
 
 ### E17.2 Snapshots
 
-- [ ] Config: `pitr` (daemon default `1d`, per collection override, `off`).
-- [ ] A daily snapshot per engine collection with writes since the last
+- [x] Config: `pitr` (daemon default `1d`, per collection override, `off`).
+- [x] A daily snapshot per engine collection with writes since the last
       one: under the commit lock (no seal or compaction commit in between),
       hard link the live segments and their key files into
       `pitr/<unix-ms>/`, copy meta.bolt (bolt `Tx.CopyFile`).
-- [ ] Keep the snapshots that cover the window (today and yesterday for
+- [x] Keep the snapshots that cover the window (today and yesterday for
       1d); delete older ones.
-- [ ] TruncateWAL never deletes a WAL file the oldest kept snapshot needs.
-- [ ] Blob GC keeps the blobs younger than the window (a restored doc may
+- [x] TruncateWAL never deletes a WAL file the oldest kept snapshot needs.
+- [x] Blob GC keeps the blobs younger than the window (a restored doc may
       point to them).
 
 ### E17.3 Restore
 
-- [ ] `POST /{coll}/_restore {"until", "into"}` and, for a collection that
+- [x] `POST /{coll}/_restore {"until", "into"}` and, for a collection that
       was dropped or replaced within the window,
       `POST /_restore {"collection", "until", "into"}`.
-- [ ] Build `into` from the newest snapshot at or before `until`: link its
+- [x] Build `into` from the newest snapshot at or before `until`: link its
       segments, copy its meta.bolt, copy the WAL records from its position
       up to `until` (by the record time), then open it: the normal recovery
       replays them. A partitioned collection restores the partitions with
       writes in the window; the others are linked as they are.
-- [ ] Errors: `400 pitr_off`, `400 out_of_window` (with the oldest instant
+- [x] Errors: `400 pitr_off`, `400 out_of_window` (with the oldest instant
       that can be restored), `409 collection_exists` for `into`.
-- [ ] Scope: admin on the source and on `into`. CLI `ndb restore <coll>
+- [x] Scope: admin on the source and on `into`. CLI `ndb restore <coll>
       --until T --into NAME` (the backup restore keeps its file argument).
-- [ ] `GET /{coll}/_pitr`: the window (oldest and newest instant) and the
+- [x] `GET /{coll}/_pitr`: the window (oldest and newest instant) and the
       disk it uses. Console: a Restore action with a date picker.
 
 ### E17.4 Truncate and drop with PITR
 
-- [ ] With PITR on, truncate and drop move the collection dir to
+- [x] With PITR on, truncate and drop move the collection dir to
       `pitr-trash/<name>.<unix-ms>/` for the window instead of deleting it;
       `POST /_restore` can bring it back.
+
+## As built
+
+- Rename is crash safe through `rename.json` (stages aside, move); the
+  next start finishes it.
+- Snapshots live in `<coll>/pitr/<unix ms>/` (segments linked, meta.bolt,
+  point.json), so they follow a rename. A trash entry keeps `trash.json`
+  (definition, time, window); a restore of a truncated, dropped or replaced
+  name reads the trash entry that left after `until`.
+- Blob GC holds an orphan for the longest window (in memory: a restart only
+  delays a delete).
+- Ruby names the instant `at:` (`until` is a keyword).
+- Extra: `GET /_pitr`, `ndb pitr`, `-until 15m`, the `pitr` column of
+  `ndb size`.
 
 ## Tests first
 

@@ -160,6 +160,14 @@ Use `ndb backup` instead of calling it by hand; `ndb restore` reads the file. Se
 curl --unix-socket /run/ndb/ndb.sock http://ndb/_backup -d '{}' > ndb.ndb
 ```
 
+## `POST /_restore`
+
+`POST /{coll}/_restore` with the collection name in the body: `{"collection":"calls","until":"2026-11-12T14:04:00Z","into":"calls_restored"}`. Same answer and errors. See [PITR](../pitr.md).
+
+## `GET /_pitr`
+
+The default window and every collection with one, dropped ones included: `{"default":"1d","collections":[{"collection":"calls","window":"1d","oldest":"…",…}]}`. Partitions are left out: their logical collection stands for them.
+
 ## `POST /_blobs`
 
 Stores bytes in the blob store (content addressed, deduplicated) and returns the reference to keep in a document field.

@@ -134,6 +134,66 @@ await calls.truncate()
 
 :::
 
+## `POST /{coll}/_rename`
+
+Gives the collection a new name: its documents, indexes and watch positions move with it. A partitioned collection renames its partitions. With `replace`, an existing `to` goes to the trash first, where it stays restorable for its [PITR window](../pitr.md).
+
+**Body:** `{"to":"calls","replace":true}`. **Answer:** `{"collection":"calls","renamed_from":"calls_restored","replaced":true}`.
+
+**Errors:** `400 catalog_invalid` (bad name, a partition, the same name), `404 unknown_collection`, `409 collection_exists` (without `replace`). A scoped token needs `admin` on both names.
+
+::: code-group
+
+```bash [curl]
+curl --unix-socket /run/ndb/ndb.sock -X POST http://ndb/calls_restored/_rename -d '{"to":"calls","replace":true}'
+```
+
+```go [Go]
+err := restored.Rename(ctx, "calls", true)
+```
+
+```ruby [Ruby]
+client.rename("calls_restored", "calls", replace: true)
+```
+
+```ts [TypeScript]
+await restored.rename('calls', { replace: true })
+```
+
+:::
+
+## `POST /{coll}/_restore`
+
+Makes the collection `into` hold `coll` as it was at `until`, from its [PITR window](../pitr.md) (1 day by default). The source is not touched. A dropped, truncated or replaced collection can be restored by its name while it is in the window.
+
+**Body:** `{"until":"2026-11-12T14:04:00Z","into":"calls_restored"}`. **Answer:** `{"collection":"calls_restored","restored":"calls","until":"…","duration_ms":840}`.
+
+**Errors:** `400 out_of_window` (the message gives the start of the window), `400 pitr_off`, `400 catalog_invalid` (bad `into`), `404 unknown_collection`, `409 collection_exists` (`into` exists). A scoped token needs `admin` on `coll` and `into`.
+
+::: code-group
+
+```bash [curl]
+curl --unix-socket /run/ndb/ndb.sock -X POST http://ndb/calls/_restore -d '{"until":"2026-11-12T14:04:00Z","into":"calls_restored"}'
+```
+
+```go [Go]
+err := calls.Restore(ctx, "calls_restored", until)
+```
+
+```ruby [Ruby]
+client.restore("calls", at: until_time, into: "calls_restored")
+```
+
+```ts [TypeScript]
+await calls.restore({ until, into: 'calls_restored' })
+```
+
+:::
+
+## `GET /{coll}/_pitr`
+
+The PITR window of the collection: `{"collection":"calls","window":"1d","oldest":"…","newest":"…","snapshots":2,"bytes":18874368}`. `oldest` is the first instant a restore reaches; `bytes` is the disk the window holds beyond the live files. `dropped: true` for a collection that is only in the trash. A collection with `pitr: off` has `"window":"off"`.
+
 ## `PUT /{coll}/_indexes/{field}`
 
 Adds a secondary index on `field` (a dot path) and builds it in the background. Writes keep it up to date during the build; reads use it when it is `ready`.

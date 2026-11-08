@@ -71,6 +71,7 @@ An unknown key is an error at start (the file is read in strict mode). Sizes are
 | `group_limit` | memory limit of one aggregate group table. Over it: `group_limit_exceeded`. |
 | `blob_max_size` | largest blob. Default 1 GiB. |
 | `allow_implicit` | `false` forbids creating a collection by the first `insert`. Default `true`. |
+| `pitr` | the [point in time recovery](pitr.md) window of every engine collection: `off`, or a duration up to `7d`. Default `1d`. |
 
 ### Document id
 
@@ -98,6 +99,7 @@ Every collection has `_id`, the primary key. It is not configurable.
 | `expires_field` | each document expires at the time in this field (RFC 3339 or unix seconds). No field: never expires. |
 | `max_line_size` | largest line or request body. Default 1 MiB, maximum 16 MiB. |
 | `blob_threshold` | engine mode: string values over this size go to the blob store. Default off. |
+| `pitr` | engine mode: the [PITR](pitr.md) window of this collection (`off`, `6h`, at most `7d`). Default: the daemon `pitr`. A partition uses the window of its logical collection. |
 | `partition_by` | `day`, `week`, `month` or `year`: split the collection into one partition per period of `time` (`calls-2026-11`); with `retention`, old partitions are dropped whole. See [Partitioned collections](http/collections.md#partitioned-collections). |
 
 Durations use Go syntax (`90m`, `1h30m`) plus `d` and `w` (`24h`, `30d`, `2w`).

@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **Point in time recovery.** `pitr: 1d` (the default) keeps one snapshot a day of every engine collection (hard links of its segments and a copy of `meta.bolt`, no data copied) plus the WAL from it. `POST /{coll}/_restore {"until","into"}` makes a copy of the collection as it was at any instant of the window, in a new collection; the source is not touched. Truncate, drop and `rename -replace` keep the old dir in the trash for the window, so they can be restored too. `pitr: off` or up to `7d`, per daemon or per collection. CLI `ndb restore <coll> -until T -into NAME` and `ndb pitr`; `GET /{coll}/_pitr` and `GET /_pitr`; a PITR tab in the console; `Restore`/`PITR` in the SDKs. See [PITR](docs/dev/pitr.md).
+- **Rename.** `POST /{coll}/_rename {"to","replace"}` moves a collection, its indexes and its watch positions to a new name (partitions too); `replace` puts it in place of an existing one. CLI `ndb rename`, SDKs `Rename`/`rename`. Crash safe.
+- `ndb size` has a `pitr` column.
+
+### Changed
+
+- A truncated or dropped collection no longer frees its disk at once when PITR is on: its dir stays in `<data_dir>/trash/` for the window. Set `pitr: off` for the old behavior.
+
 ## [1.2.2] - 2026-11-08
 
 ### Added

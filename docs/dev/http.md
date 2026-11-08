@@ -6,8 +6,8 @@ The routes have pages by group:
 
 | Page | Routes |
 |---|---|
-| [System](http/system.md) | `/_health`, `/_metrics`, `/_collections`, `/_stats`, `/_size`, `/_backup`, `/_blobs` |
-| [Collections](http/collections.md) | `PUT`, `GET`, `DELETE /{coll}`, `_truncate`, `_indexes`, `_stats`, `_compact`, `_quarantine` |
+| [System](http/system.md) | `/_health`, `/_metrics`, `/_collections`, `/_stats`, `/_size`, `/_backup`, `/_restore`, `/_pitr`, `/_blobs` |
+| [Collections](http/collections.md) | `PUT`, `GET`, `DELETE /{coll}`, `_truncate`, `_rename`, `_restore`, `_pitr`, `_indexes`, `_stats`, `_compact`, `_quarantine` |
 | [Documents](http/documents.md) | `_doc`, `_bulk`, `_update/{id}`, `_expire`, `_persist`, `_ttl` |
 | [Queries](http/queries.md) | `_search`, `_count`, `_aggregate`, `_update_by_query`, `_delete_by_query`, patterns |
 | [Watch](http/watch.md) | `_watch`, `_ack` |
@@ -35,12 +35,17 @@ The query language (operators, date math, `$elemMatch`) is on [Query](query.md),
 | GET | `/_stats` | [System](http/system.md#get-stats) |
 | GET | `/_size` | [System](http/system.md#get-size) |
 | POST | `/_backup` | [System](http/system.md#post-backup) |
+| POST | `/_restore` | [System](http/system.md#post-restore) |
+| GET | `/_pitr` | [System](http/system.md#get-pitr) |
 | POST | `/_blobs` | [System](http/system.md#post-blobs) |
 | GET | `/_blobs/{ref}` | [System](http/system.md#get-blobs-ref) |
 | PUT | `/{coll}` | [Collections](http/collections.md#put-coll) |
 | GET | `/{coll}` | [Collections](http/collections.md#get-coll) |
 | DELETE | `/{coll}?confirm={coll}` | [Collections](http/collections.md#delete-coll) |
 | POST | `/{coll}/_truncate?confirm={coll}` | [Collections](http/collections.md#post-coll-truncate) |
+| POST | `/{coll}/_rename` | [Collections](http/collections.md#post-coll-rename) |
+| POST | `/{coll}/_restore` | [Collections](http/collections.md#post-coll-restore) |
+| GET | `/{coll}/_pitr` | [Collections](http/collections.md#get-coll-pitr) |
 | PUT | `/{coll}/_indexes/{field}` | [Collections](http/collections.md#put-coll-indexes-field) |
 | DELETE | `/{coll}/_indexes/{field}` | [Collections](http/collections.md#delete-coll-indexes-field) |
 | GET | `/{coll}/_stats` | [Collections](http/collections.md#get-coll-stats) |
