@@ -1,0 +1,79 @@
+/* @thadeu/ui date picker and popover.
+ *
+ * Theme it with the --dp-* variables on .datepicker (or :root). The popover
+ * sits in the top layer but still inherits them from its .datepicker. */
+
+.datepicker {
+  --dp-bg: #ffffff;
+  --dp-ink: #0b0b0f;
+  --dp-muted: #6b6b76;
+  --dp-border: #e5e5e5;
+  --dp-field-border: #d9d9de;
+  --dp-accent: #f0047f;
+  --dp-accent-ink: #ffffff;
+  --dp-range: #fde7f2;
+  --dp-hover: #f2f2f4;
+  --dp-disabled: #b8b8c0;
+  --dp-today: #0b0b0f;
+  --dp-radius: 8px;
+  --dp-radius-panel: 14px;
+  --dp-shadow: 0 12px 40px rgba(0, 0, 0, .14);
+  --dp-cell: 36px;
+  --dp-font: inherit;
+  --dp-mono: 'JetBrains Mono', ui-monospace, monospace;
+  position: relative;
+}
+
+/* part: popover (top and left come from the script) */
+.popover-layer { position: fixed; inset: auto; width: max-content; max-width: calc(100vw - 16px); margin: 0; padding: 0; overflow: auto; box-sizing: border-box; border: 1px solid var(--dp-border, #e5e5e5); border-radius: var(--dp-radius-panel, 14px); background: var(--dp-bg, #fff); color: var(--dp-ink, #0b0b0f); box-shadow: var(--dp-shadow, 0 12px 40px rgba(0, 0, 0, .14)); }
+.popover-layer:not(.open) { display: none; }
+.popover-layer[data-placement="sheet"] { width: 100vw; max-width: 100vw; border-width: 1px 0 0; border-radius: var(--dp-radius-panel, 14px) var(--dp-radius-panel, 14px) 0 0; }
+
+/* part: field */
+.datepicker-field { display: flex; align-items: center; gap: 8px; }
+.datepicker-input { flex: 1 1 0; min-width: 0; font-family: var(--dp-mono); }
+.datepicker-sep { color: var(--dp-muted); }
+.datepicker-toggle { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border: 1px solid var(--dp-field-border); border-radius: var(--dp-radius); background: var(--dp-bg); color: var(--dp-muted); cursor: pointer; }
+.datepicker-toggle:hover, .datepicker-toggle[aria-expanded="true"] { border-color: var(--dp-accent); color: var(--dp-accent); }
+
+/* part: panel */
+.dp-panel { display: flex; font-family: var(--dp-font); }
+.dp-presets { display: flex; flex-direction: column; gap: 2px; min-width: 150px; padding: 10px; border-right: 1px solid var(--dp-border); }
+.dp-preset { padding: 8px 10px; border: 0; border-radius: var(--dp-radius); background: none; color: var(--dp-ink); font: 500 13px var(--dp-font); text-align: left; cursor: pointer; white-space: nowrap; }
+.dp-preset:hover, .dp-preset:focus-visible { background: var(--dp-hover); outline: none; }
+.dp-main { padding: 12px; }
+.dp-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.dp-title { font-weight: 700; font-size: 14px; }
+.dp-nav { width: 32px; height: 32px; border: 0; border-radius: var(--dp-radius); background: none; font-size: 20px; line-height: 1; color: var(--dp-muted); cursor: pointer; }
+.dp-nav:hover { background: var(--dp-hover); }
+
+/* part: days */
+.dp-grid { display: grid; grid-template-columns: repeat(7, var(--dp-cell)); gap: 2px; }
+.dp-weekday { height: 28px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: var(--dp-muted); text-transform: uppercase; }
+.dp-day { width: var(--dp-cell); height: var(--dp-cell); border: 0; border-radius: var(--dp-radius); background: none; color: var(--dp-ink); font: 500 13px var(--dp-mono); cursor: pointer; }
+.dp-day:hover:not(:disabled) { background: var(--dp-hover); }
+.dp-day:focus-visible { outline: 2px solid var(--dp-accent); outline-offset: -2px; }
+.dp-day.out { color: var(--dp-muted); }
+.dp-day.today { box-shadow: inset 0 0 0 1px var(--dp-today); }
+.dp-day.in-range { background: var(--dp-range); border-radius: 0; }
+.dp-day.on { background: var(--dp-accent); color: var(--dp-accent-ink); border-radius: var(--dp-radius); }
+.dp-day:disabled { color: var(--dp-disabled); cursor: not-allowed; text-decoration: line-through; }
+
+/* part: time row (datetime mode) */
+.dp-time { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--dp-border); }
+.dp-time-label { flex: 1 0 100%; font-size: 12px; font-weight: 600; color: var(--dp-muted); }
+.dp-time-input { width: 9.5ch; height: 34px; box-sizing: content-box; padding: 0 10px; border: 1px solid var(--dp-field-border); border-radius: var(--dp-radius); background: var(--dp-bg); color: var(--dp-ink); font: 500 14px var(--dp-mono); }
+.dp-time-input:focus { outline: 2px solid var(--dp-range); border-color: var(--dp-accent); }
+.dp-btn { height: 34px; padding: 0 12px; border: 1px solid var(--dp-field-border); border-radius: var(--dp-radius); background: var(--dp-bg); color: var(--dp-ink); font: 600 13px var(--dp-font); cursor: pointer; }
+.dp-btn:hover { background: var(--dp-hover); }
+.dp-btn.primary { margin-left: auto; border-color: var(--dp-accent); background: var(--dp-accent); color: var(--dp-accent-ink); }
+.dp-hint { margin: 8px 0 0; font-size: 12px; color: var(--dp-muted); }
+
+/* part: narrow screens */
+@media (max-width: 520px) {
+  .dp-panel.with-presets { flex-direction: column; }
+  .dp-presets { flex-direction: row; flex-wrap: wrap; min-width: 0; border-right: 0; border-bottom: 1px solid var(--dp-border); }
+  .datepicker { --dp-cell: 40px; }
+  .dp-main { display: flex; flex-direction: column; align-items: center; }
+  .dp-head, .dp-time { align-self: stretch; }
+}

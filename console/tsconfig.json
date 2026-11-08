@@ -12,6 +12,9 @@
       "bun"
     ],
     "paths": {
+      "@/lib/ui/*": [
+        "./lib/ui/src/*"
+      ],
       "@/ui/*": [
         "./src/components/ui/*"
       ],
@@ -34,6 +37,8 @@
   },
   "include": [
     "src",
-    "tests"
+    "tests",
+    "lib/ui/src",
+    "lib/ui/test"
   ]
 }

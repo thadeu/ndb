@@ -15,7 +15,7 @@ const url = `unix://${sock}`;
 let daemon: ReturnType<typeof Bun.spawn> | undefined;
 
 const store = new Connections(join(dir, 'cfg', 'console.json'));
-const app = createApp(store, { css: () => new Response('body{}'), ui: () => new Response('//'), favicon: () => new Response('<svg/>') });
+const app = createApp(store, { css: () => new Response('body{}'), libCss: () => new Response('.datepicker{}'), ui: () => new Response('//'), favicon: () => new Response('<svg/>') });
 
 function page(path: string, init?: RequestInit): Promise<Response> {
   return Promise.resolve(app.fetch(new Request(`http://ui${path}`, init)));
@@ -397,7 +397,7 @@ describe('discover route', () => {
   const post = (body: unknown, headers: Record<string, string> = {}) =>
     page('/connections/discover', { method: 'POST', body: JSON.stringify(body), headers: { 'content-type': 'application/json', origin: 'http://ui', ...headers } });
 
-  const open = createApp(store, { css: () => new Response('body{}'), ui: () => new Response('//'), favicon: () => new Response('<svg/>') }, { discover: { configPaths: [], socketDirs: [dir], tmpDir: join(dir, 'none') } });
+  const open = createApp(store, { css: () => new Response('body{}'), libCss: () => new Response('.datepicker{}'), ui: () => new Response('//'), favicon: () => new Response('<svg/>') }, { discover: { configPaths: [], socketDirs: [dir], tmpDir: join(dir, 'none') } });
 
   it('finds the test socket and classifies fake TCP servers', async () => {
     const auth = Bun.serve({ port: 0, fetch: () => Response.json({ error: { code: 'unauthorized', message: 'x' } }, { status: 401 }) });

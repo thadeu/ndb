@@ -24,6 +24,7 @@ import { UiPage } from '@/views/ui';
 
 export interface Assets {
   css: () => Response;
+  libCss: () => Response;
   ui: () => Response;
   favicon: () => Response;
   islands?: Record<string, () => Response>;
@@ -91,6 +92,7 @@ export function createApp(connections: Connections, assets: Assets, options: App
 
   app.get('/healthz', c => c.json({ status: 'ok' }));
   app.get('/assets/app.css', () => assets.css());
+  app.get('/assets/date-picker.css', () => assets.libCss());
   app.get('/assets/ui.js', () => assets.ui());
   app.get('/assets/favicon.svg', () => assets.favicon());
   app.get('/assets/:file{[a-z-]+\\.js}', c => {

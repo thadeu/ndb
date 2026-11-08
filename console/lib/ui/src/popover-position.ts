@@ -1,7 +1,8 @@
 // Where a popover goes next to its trigger: below it when it fits or when
 // there is more room below than above, else above; its start edge on the
-// trigger's start edge (or end on end), moved back inside the viewport. The
-// numbers come from getBoundingClientRect, so the result is for
+// trigger's start edge (or end on end), moved back inside the viewport. On a
+// narrow screen (sheetBelow) it is a sheet on the bottom edge, full width.
+// The numbers come from getBoundingClientRect, so the result is for
 // position: fixed.
 
 export interface Rect {
@@ -18,14 +19,30 @@ export interface Size {
 
 export type Placement = 'bottom-start' | 'bottom-end' | 'top-start' | 'top-end';
 
+
 export interface Placed {
   top: number;
   left: number;
   maxHeight: number;
-  placement: Placement;
+  placement: Placement | 'sheet';
 }
 
-export function place(trigger: Rect, size: Size, viewport: Size, prefer: Placement = 'bottom-start', gap = 6, margin = 8): Placed {
+export interface PlaceOptions {
+  prefer?: Placement;
+  gap?: number;
+  margin?: number;
+  sheetBelow?: number;
+}
+
+export function place(trigger: Rect, size: Size, viewport: Size, options: PlaceOptions = {}): Placed {
+  const { prefer = 'bottom-start', gap = 6, margin = 8, sheetBelow = 520 } = options;
+
+  if (viewport.width < sheetBelow) {
+    const room = viewport.height - margin;
+
+    return { top: viewport.height - Math.min(size.height, room), left: 0, maxHeight: room, placement: 'sheet' };
+  }
+
   const below = viewport.height - trigger.bottom - gap - margin;
   const above = trigger.top - gap - margin;
   const wantsTop = prefer.startsWith('top');

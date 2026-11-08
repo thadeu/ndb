@@ -1,4 +1,5 @@
 import css from '@/assets/app.css' with { type: 'file' };
+import datePickerCss from '../lib/ui/styles/date-picker.css' with { type: 'file' };
 import favicon from '@/assets/favicon.svg' with { type: 'file' };
 import devtools from '../dist/devtools.js' with { type: 'file' };
 import documentEditor from '../dist/document-editor.js' with { type: 'file' };
@@ -17,6 +18,7 @@ const script = (path: string) => () => new Response(Bun.file(path), { headers: {
 
 const app = createApp(connections, {
   css: () => new Response(Bun.file(css), { headers: { 'content-type': 'text/css; charset=utf-8' } }),
+  libCss: () => new Response(Bun.file(datePickerCss), { headers: { 'content-type': 'text/css; charset=utf-8' } }),
   ui: script(ui),
   favicon: () => new Response(Bun.file(favicon), { headers: { 'content-type': 'image/svg+xml', 'cache-control': 'public, max-age=86400' } }),
   islands: { devtools: script(devtools), 'document-editor': script(documentEditor), watch: script(watch) },

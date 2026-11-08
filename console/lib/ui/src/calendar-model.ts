@@ -19,10 +19,6 @@ export interface Preset {
   at?: 'min' | 'max';
 }
 
-export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-
-export const WEEKDAYS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'];
-
 export function isoDay(date: Date): string {
   return date.toISOString().slice(0, 10);
 }

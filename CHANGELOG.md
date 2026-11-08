@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **`@thadeu/ui`** (`console/lib/ui`): the date picker and the popover of the console as a package of their own, for npm: plain TypeScript and DOM, ESM + CommonJS + types (tsup), its own CSS themed by `--dp-*` variables, months and weekdays from `Intl` (`locale`), labels for i18n, `datePickerHTML` for a server and `createDatePicker`/`mountDatePickers` for the browser. The console imports it as `@/lib/ui/...`.
+- **Time in the date picker popover:** a `HH:MM:SS` row with the mask, Now and Done. A day click keeps the popover open for the time; Enter or Done closes it; a time out of `min`/`max` is moved inside.
+- **On a phone** the popover is a sheet on the bottom edge, full width, so the time row and Done fit.
+
 ## [1.2.5] - 2026-11-08
 
 ### Added

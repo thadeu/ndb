@@ -9,6 +9,8 @@ RUN bun install --frozen-lockfile
 
 COPY tsconfig.json ./
 COPY src ./src
+COPY lib/ui/src ./lib/ui/src
+COPY lib/ui/styles ./lib/ui/styles
 
 RUN bun run client && \
     target=$([ "$TARGETARCH" = "arm64" ] && echo bun-linux-arm64 || echo bun-linux-x64) && \

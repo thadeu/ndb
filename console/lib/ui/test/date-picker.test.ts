@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 
-import { addDays, addMonths, duration, inRange, monthGrid, outside, pickRange, resolvePreset } from '@/components/ui/calendar-model';
-import { erase, format, normalize, parse, step, typeDigit, type MaskKind, type MaskState } from '@/components/ui/date-mask';
-import { place } from '@/components/ui/popover-position';
+import { addDays, addMonths, duration, inRange, monthGrid, outside, pickRange, resolvePreset } from '../src/calendar-model';
+import { erase, format, normalize, parse, step, typeDigit, type MaskKind, type MaskState } from '../src/date-mask';
+import { place } from '../src/popover-position';
 
 function typed(text: string, kind: MaskKind = 'datetime', start: MaskState = { value: '', caret: 0 }): MaskState {
   let state = start;
@@ -135,7 +135,56 @@ describe('popover position', () => {
 
   it('moves back inside the viewport, and aligns end on end', () => {
     expect(place({ top: 100, left: 900, right: 980, bottom: 140 }, { width: 300, height: 200 }, viewport).left).toBe(692);
-    expect(place({ top: 100, left: 600, right: 900, bottom: 140 }, { width: 300, height: 200 }, viewport, 'bottom-end')).toMatchObject({ left: 600, placement: 'bottom-end' });
-    expect(place({ top: 100, left: 0, right: 40, bottom: 140 }, { width: 600, height: 200 }, { width: 360, height: 800 }).left).toBe(8);
+    expect(place({ top: 100, left: 600, right: 900, bottom: 140 }, { width: 300, height: 200 }, viewport, { prefer: 'bottom-end' })).toMatchObject({ left: 600, placement: 'bottom-end' });
+    expect(place({ top: 100, left: 0, right: 40, bottom: 140 }, { width: 600, height: 200 }, { width: 560, height: 800 }).left).toBe(8);
+  });
+
+  it('is a sheet on the bottom edge of a narrow screen', () => {
+    expect(place({ top: 400, left: 20, right: 300, bottom: 440 }, { width: 380, height: 500 }, { width: 390, height: 844 })).toEqual({ top: 344, left: 0, maxHeight: 836, placement: 'sheet' });
+    expect(place({ top: 400, left: 20, right: 300, bottom: 440 }, { width: 380, height: 900 }, { width: 390, height: 844 }).top).toBe(8);
+  });
+});
+
+describe('time mask (the row in the popover)', () => {
+  it('types, clamps and steps HH:MM:SS', () => {
+    expect(typed('140405', 'time')).toEqual({ value: '14:04:05', caret: 8 });
+    expect(typed('9', 'time').value).toBe('09:');
+    expect(typed('25', 'time').value).toBe('23:');
+    expect(step({ value: '23:59:00', caret: 1 }, 1, 'time').value).toBe('00:59:00');
+    expect(normalize('9:4', 'time')).toBe('09:04');
+  });
+
+  it('reads seconds of the day and formats a time', async () => {
+    const { parseTime } = await import('../src/date-mask');
+
+    expect(parseTime('01:02:03')).toBe(3723);
+    expect(parseTime('01:02')).toBeNull();
+    expect(format(new Date('2026-11-12T14:04:05Z'), 'time')).toBe('14:04:05');
+    expect(parse('14:04:05', 'time')).toBeNull();
+  });
+});
+
+describe('datePickerHTML', () => {
+  it('writes a field that works without the script, and escapes', async () => {
+    const { datePickerHTML } = await import('../src/date-picker');
+    const html = datePickerHTML({ id: 'at', name: 'at', label: 'At "x"', value: '2026-11-12 14:04:05', min: '2026-11-12T00:00:00Z', max: 'now', presets: [{ label: '5m', ago: '5m' }], inputClass: 'input', inputAttrs: { 'data-1p-ignore': true } });
+
+    expect(html).toContain('name="at"');
+    expect(html).toContain('value="2026-11-12 14:04:05"');
+    expect(html).toContain('pattern="\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}:\\d{2}"');
+    expect(html).toContain('class="input datepicker-input"');
+    expect(html).toContain('data-1p-ignore');
+    expect(html).toContain('aria-label="At &#34;x&#34;"');
+    expect(html).toContain('popover="manual"');
+    expect(html).toContain('data-max="now"');
+  });
+
+  it('writes two fields for a range', async () => {
+    const { datePickerHTML } = await import('../src/date-picker');
+    const html = datePickerHTML({ id: 'p', name: 'period', label: 'Period', mode: 'range' });
+
+    expect(html).toContain('name="period_from"');
+    expect(html).toContain('name="period_to"');
+    expect(html).toContain('placeholder="YYYY-MM-DD"');
   });
 });

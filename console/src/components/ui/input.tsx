@@ -8,7 +8,7 @@ export interface InputProps {
 
 // No field of the console is a login, so password managers must not offer to
 // fill or save them: 1Password, LastPass, Bitwarden, and Dashlane.
-const NO_PASSWORD_MANAGER = {
+export const NO_PASSWORD_MANAGER = {
   'data-1p-ignore': true,
   'data-lpignore': 'true',
   'data-bwignore': true,

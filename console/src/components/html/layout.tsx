@@ -46,6 +46,7 @@ export const Layout: FC<LayoutProps> = ({ title, current, tab, scripts = [], ble
         <base href={`${prefix()}/`} />
         <title>{`${title} · Ndb Console`}</title>
         <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+        <link rel="stylesheet" href="assets/date-picker.css" />
         <link rel="stylesheet" href="assets/app.css" />
         <script type="module" src="assets/ui.js"></script>
         {scripts.map(name => (

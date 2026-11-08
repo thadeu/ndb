@@ -1,5 +1,5 @@
-// A positional mask for dates and times, written as YYYY-MM-DD and
-// YYYY-MM-DD HH:MM:SS. Each digit has its place: typing writes the place at
+// A positional mask for dates and times, written as YYYY-MM-DD,
+// YYYY-MM-DD HH:MM:SS and HH:MM:SS. Each digit has its place: typing writes the place at
 // the caret and jumps over the separators, typing in the middle overwrites,
 // and a digit that cannot start a two-digit part (a 4 as the first digit of a
 // month) gets a 0 in front. Complete parts are kept in range: month 01-12,
@@ -8,7 +8,7 @@
 // Pure functions of { value, caret }: the date picker calls them from its
 // input events, the tests call them alone.
 
-export type MaskKind = 'date' | 'datetime';
+export type MaskKind = 'date' | 'datetime' | 'time';
 
 export interface MaskState {
   value: string;
@@ -16,6 +16,7 @@ export interface MaskState {
 }
 
 interface Part {
+  name: 'year' | 'month' | 'day' | 'hour' | 'minute' | 'second';
   start: number;
   len: number;
   min: number;
@@ -23,23 +24,32 @@ interface Part {
   first: number;
 }
 
-const TEMPLATE: Record<MaskKind, string> = { date: 'YYYY-MM-DD', datetime: 'YYYY-MM-DD HH:MM:SS' };
+const TEMPLATE: Record<MaskKind, string> = { date: 'YYYY-MM-DD', datetime: 'YYYY-MM-DD HH:MM:SS', time: 'HH:MM:SS' };
 
-const PARTS: Part[] = [
-  { start: 0, len: 4, min: 0, max: 9999, first: 9 },
-  { start: 5, len: 2, min: 1, max: 12, first: 1 },
-  { start: 8, len: 2, min: 1, max: 31, first: 3 },
-  { start: 11, len: 2, min: 0, max: 23, first: 2 },
-  { start: 14, len: 2, min: 0, max: 59, first: 5 },
-  { start: 17, len: 2, min: 0, max: 59, first: 5 },
+const DATE: Part[] = [
+  { name: 'year', start: 0, len: 4, min: 0, max: 9999, first: 9 },
+  { name: 'month', start: 5, len: 2, min: 1, max: 12, first: 1 },
+  { name: 'day', start: 8, len: 2, min: 1, max: 31, first: 3 },
 ];
+
+const TIME: Part[] = [
+  { name: 'hour', start: 0, len: 2, min: 0, max: 23, first: 2 },
+  { name: 'minute', start: 3, len: 2, min: 0, max: 59, first: 5 },
+  { name: 'second', start: 6, len: 2, min: 0, max: 59, first: 5 },
+];
+
+const PARTS: Record<MaskKind, Part[]> = {
+  date: DATE,
+  datetime: [...DATE, ...TIME.map(part => ({ ...part, start: part.start + 11 }))],
+  time: TIME,
+};
 
 export function template(kind: MaskKind): string {
   return TEMPLATE[kind];
 }
 
 function parts(kind: MaskKind): Part[] {
-  return kind === 'date' ? PARTS.slice(0, 3) : PARTS;
+  return PARTS[kind];
 }
 
 function isSeparator(tpl: string, pos: number): boolean {
@@ -55,7 +65,7 @@ function daysIn(year: number, month: number): number {
 }
 
 function maxOf(part: Part, value: string): number {
-  if (part.start !== 8 || value.length < 7) return part.max;
+  if (part.name !== 'day' || value.length < 7) return part.max;
 
   return daysIn(Number(value.slice(0, 4)), Number(value.slice(5, 7)));
 }
@@ -195,9 +205,10 @@ export function complete(value: string, kind: MaskKind): boolean {
   return value.length === TEMPLATE[kind].length;
 }
 
-// parse reads a complete value as a UTC time; anything else is null.
+// parse reads a complete date or date-time value as a UTC time; anything
+// else is null. A time value has no date: see parseTime.
 export function parse(value: string, kind: MaskKind): Date | null {
-  if (!complete(value, kind)) return null;
+  if (kind === 'time' || !complete(value, kind)) return null;
 
   const n = (start: number, len: number) => Number(value.slice(start, start + len));
   const time = kind === 'datetime' ? [n(11, 2), n(14, 2), n(17, 2)] : [0, 0, 0];
@@ -205,9 +216,21 @@ export function parse(value: string, kind: MaskKind): Date | null {
   return new Date(Date.UTC(n(0, 4), n(5, 2) - 1, n(8, 2), time[0], time[1], time[2]));
 }
 
+// parseTime reads a complete HH:MM:SS as seconds of the day; null when it
+// is not complete.
+export function parseTime(value: string): number | null {
+  if (!complete(value, 'time')) return null;
+
+  const [h, m, s] = value.split(':').map(Number);
+
+  return (h ?? 0) * 3600 + (m ?? 0) * 60 + (s ?? 0);
+}
+
 // format writes a time in UTC in the shape of kind.
 export function format(date: Date, kind: MaskKind): string {
   const iso = date.toISOString();
+
+  if (kind === 'time') return iso.slice(11, 19);
 
   return kind === 'date' ? iso.slice(0, 10) : `${iso.slice(0, 10)} ${iso.slice(11, 19)}`;
 }
@@ -215,5 +238,9 @@ export function format(date: Date, kind: MaskKind): string {
 // pattern is the regexp of a complete value, for the input pattern attribute
 // (the form check without the script).
 export function pattern(kind: MaskKind): string {
-  return kind === 'date' ? '\\d{4}-\\d{2}-\\d{2}' : '\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}:\\d{2}';
+  const time = '\\d{2}:\\d{2}:\\d{2}';
+
+  if (kind === 'time') return time;
+
+  return kind === 'date' ? '\\d{4}-\\d{2}-\\d{2}' : `\\d{4}-\\d{2}-\\d{2}[ T]${time}`;
 }
