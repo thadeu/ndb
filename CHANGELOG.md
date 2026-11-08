@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.2.8] - 2026-11-08
+
 ### Changed
 
 - The UI library is `@tdu/ui` (it was named `@thadeu/ui`; it was never published under that name).
@@ -343,7 +345,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.2.7...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.2.8...HEAD
+[1.2.8]: https://github.com/thadeu/ndb/compare/v1.2.7...v1.2.8
 [1.2.7]: https://github.com/thadeu/ndb/compare/v1.2.6...v1.2.7
 [1.2.6]: https://github.com/thadeu/ndb/compare/v1.2.5...v1.2.6
 [1.2.5]: https://github.com/thadeu/ndb/compare/v1.2.4...v1.2.5
