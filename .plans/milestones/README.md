@@ -37,7 +37,7 @@ docs in `docs/dev/` describe what they built.
 | M14 | Ndb Console | self-hosted web UI: connections, browser, dev tools | done |
 | M15 | API 1.0 | ES-style routes, `query` body key, one SDK vocabulary (1.0.0) | done |
 | M16 | Disk first | bounded memory at any data size (1.1.0; direct mode 1.2.0) | done |
-| [M17](m17-pitr.md) | PITR and rename | restore a collection to an instant of the last day; rename to put it in place | built |
+| M17 | PITR and rename | restore a collection to an instant of the last day; rename to put it in place (1.2.3; at/to 1.2.4) | done |
 
 ## Next (after 0.1.2)
 
