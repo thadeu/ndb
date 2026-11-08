@@ -108,11 +108,44 @@ func FindMany(ctx context.Context, pattern string, cols []Named, body []byte) (P
 
 	slices.SortFunc(rows, func(a, b patternRow) int { return cmpAcross(q, a, b) })
 
+	if q.Per != nil {
+		rows = firstPer(rows, q.Per.Limit)
+	}
+
 	if err := materializeAcross(q, rows, &ex); err != nil {
 		return Page{}, err
 	}
 
 	return pageAcross(q, pattern, rows, total, ex), nil
+}
+
+// firstPer keeps, from rows in their order, the first n of each key: each
+// collection gave its own first n of every key.
+func firstPer(rows []patternRow, n int) []patternRow {
+	count := map[string]int{}
+	out := rows[:0]
+
+	for _, r := range rows {
+		keep := false
+
+		for _, k := range r.keys {
+			if count[k] < n {
+				keep = true
+			}
+		}
+
+		if !keep {
+			continue
+		}
+
+		for _, k := range r.keys {
+			count[k]++
+		}
+
+		out = append(out, r)
+	}
+
+	return out
 }
 
 // materializeAcross reads the documents of the rows of the page only: after

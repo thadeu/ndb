@@ -33,7 +33,7 @@ var gates = []gate{
 	{metric: "load.docs_s", what: "bulk load", min: 3_000, max: -1, unit: "docs/s"},
 	{metric: "load.rss", what: "load RSS peak", max: 600, unit: "MB"},
 	{metric: "queries.worst", what: "slowest query (median)", max: 150, unit: "ms"},
-	{metric: "lookups.worst", what: "slowest lookup (median)", max: 600, unit: "ms"},
+	{metric: "lookups.worst", what: "slowest lookup (median)", max: 250, unit: "ms"},
 	{metric: "aggregations.worst", what: "slowest aggregation (median)", max: 200, unit: "ms"},
 	{metric: "wake.loaded_asleep", what: "the loaded partition stayed open after idle_close", max: 0},
 	{metric: "wake.loaded_ms", what: "first call on the loaded partition after it slept", max: 50, unit: "ms"},

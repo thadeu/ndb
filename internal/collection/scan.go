@@ -201,7 +201,13 @@ func (c *Collection) evalCands(ctx context.Context, q *query.Query, src source, 
 			continue
 		}
 
-		top.add(row{Pos: pos, doc: doc, v: cd.e.v})
+		var keys []string
+
+		if q.Per != nil {
+			keys = perKeys(query.Elements(m, q.Per.Field, q.IsTime(q.Per.Field)))
+		}
+
+		top.add(row{Pos: pos, doc: doc, v: cd.e.v, keys: keys})
 	}
 
 	p.rows = top.sorted()
@@ -252,6 +258,9 @@ type segScan struct {
 	hasCur bool
 	top    *topK
 	p      part
+
+	// perAt is the path index of q.Per.Field (per mode).
+	perAt int
 }
 
 // scanSegment reads one segment. A row group that its live bits, zone maps
@@ -347,6 +356,10 @@ func newSegScan(q *query.Query, r segment.Reader, cur query.Pos, hasCur bool) *s
 		sc.sorted = append(sc.sorted, sc.index(s.Path))
 	}
 
+	if q.Per != nil {
+		sc.perAt = sc.index(q.Per.Field)
+	}
+
 	sc.paths = make([]string, len(sc.at))
 
 	for p, i := range sc.at {
@@ -403,11 +416,19 @@ func (sc *segScan) row(rows segment.GroupRows, i, abs int) error {
 		return nil
 	}
 
-	if !sc.top.wants(pos) {
+	var per []string
+
+	if sc.q.Per != nil {
+		if per, err = st.perKeys(); err != nil {
+			return err
+		}
+	}
+
+	if !sc.top.wantsKeys(pos, per) {
 		return nil
 	}
 
-	sc.top.add(row{Pos: pos, doc: st.doc, v: rows.Vs[i], lazy: st.doc == nil, seg: sc.r, at: abs})
+	sc.top.add(row{Pos: pos, doc: st.doc, v: rows.Vs[i], lazy: st.doc == nil, seg: sc.r, at: abs, keys: per})
 
 	return nil
 }
@@ -443,6 +464,25 @@ func (st *rowState) match() (bool, error) {
 	}
 
 	return st.m != nil && st.sc.q.Match(st.m), nil
+}
+
+// perKeys are the per keys of the row: from its cell, or from the document
+// when the cell cannot answer.
+func (st *rowState) perKeys() ([]string, error) {
+	q := st.sc.q
+	isTime := q.IsTime(q.Per.Field)
+
+	if cell := st.rows.Cells[st.sc.perAt][st.i]; cell.Known {
+		elems, _ := cellValues(cell, isTime)
+
+		return perKeys(elems), nil
+	}
+
+	if err := st.decode(); err != nil {
+		return nil, err
+	}
+
+	return perKeys(query.Elements(st.m, q.Per.Field, isTime)), nil
 }
 
 // keys are the sort keys of the row: from its cells, or from the document

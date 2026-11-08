@@ -832,3 +832,68 @@ func TestRetentionHidesOnlyWhereItMust(t *testing.T) {
 		}
 	}
 }
+
+// per keeps the first rows of each value, in sort order: the same answer
+// from the memtable and from segments, and only those rows read a document.
+func TestPerKeepsTheFirstRowsOfEachValue(t *testing.T) {
+	c := openSealed(t, t.TempDir(), collection.Config{})
+	docs := rangeDocs(0, 1500, func(i int) string {
+		return fmt.Sprintf(`{"_id":"d%04d","status":"c%d","n":%d}`, i, i%5, i)
+	})
+
+	sealBatch(t, c, docs[:1000])
+	bulk(t, c, docs[1000:])
+
+	body := `{"query":{"status":{"$in":["c1","c3"]}},"sort":{"n":-1},"per":{"field":"status","limit":3},"explain":true}`
+	page := rq(t, c, body)
+
+	want := []string{"d1498", "d1496", "d1493", "d1491", "d1488", "d1486"}
+
+	if got := ids(t, page); !slices.Equal(got, want) {
+		t.Fatalf("per: %v, want %v", got, want)
+	}
+
+	sealed := rq(t, c, `{"query":{"status":{"$in":["c2","c4"]},"n":{"$lt":1000}},"sort":{"n":1},"per":{"field":"status","limit":2},"explain":true}`)
+
+	if got := ids(t, sealed); !slices.Equal(got, []string{"d0002", "d0004", "d0007", "d0009"}) {
+		t.Fatalf("per on segments: %v", got)
+	}
+
+	mustSeal(t, c)
+
+	if again := rq(t, c, body); !slices.Equal(ids(t, again), want) || again.Explain.RawFetched != 6 {
+		t.Fatalf("sealed: %v, %d documents read, want the 6 it returns", ids(t, again), again.Explain.RawFetched)
+	}
+}
+
+// A row whose field is an array counts for each of its values.
+func TestPerWithAnArrayField(t *testing.T) {
+	c := openSealed(t, t.TempDir(), collection.Config{})
+
+	sealBatch(t, c, []string{
+		`{"_id":"a","tags":["x","y"],"n":1}`,
+		`{"_id":"b","tags":["x"],"n":2}`,
+		`{"_id":"c","tags":["y"],"n":3}`,
+		`{"_id":"d","tags":["x"],"n":4}`,
+	})
+
+	page := rq(t, c, `{"sort":{"n":1},"per":{"field":"tags","limit":1}}`)
+
+	if got := ids(t, page); !slices.Equal(got, []string{"a"}) {
+		t.Fatalf("a is the first of both x and y: %v", got)
+	}
+}
+
+func TestPerIsRefusedWithAPageKey(t *testing.T) {
+	c := openSealed(t, t.TempDir(), collection.Config{})
+
+	for _, body := range []string{
+		`{"limit":5,"per":{"field":"status","limit":3}}`,
+		`{"per":{"field":"status","limit":0}}`,
+		`{"per":{"limit":2}}`,
+	} {
+		if err := rqErr(t, c, body); err == nil {
+			t.Fatalf("%s: want invalid_query", body)
+		}
+	}
+}

@@ -431,12 +431,14 @@ func (w *Writer) commitBatch(batch []*request) bool {
 		w.synced()
 	}
 
-	for _, p := range ok {
-		p.req.done <- result{tx: p.rec.Tx, ops: p.rec.Ops}
-	}
-
+	// The metrics count a commit before it is answered, so they are never
+	// behind an acked write.
 	if w.cfg.Observer != nil {
 		w.cfg.Observer.Committed(len(ok), time.Since(began))
+	}
+
+	for _, p := range ok {
+		p.req.done <- result{tx: p.rec.Tx, ops: p.rec.Ops}
 	}
 
 	return true

@@ -498,6 +498,9 @@ type row struct {
 	// v is the version of doc, from the same snapshot as doc.
 	v uint64
 
+	// keys are the values of q.Per.Field of the row (per mode).
+	keys []string
+
 	// lazy is a segment row whose doc is not read yet: at is its row in
 	// seg. Only the rows of the page read it (materialize).
 	lazy bool
@@ -916,11 +919,19 @@ type topK struct {
 	q    *query.Query
 	k    int
 	rows []row
+
+	// per holds one top-k for each value of q.Per.Field (per mode): a row
+	// goes to the top of each of its keys.
+	per map[string]*topK
 }
 
 // newTopK keeps the rows a page of q needs: skip + limit + 1 of them. With no
 // limit, or with a snapshot, it keeps all rows.
 func newTopK(q *query.Query) *topK {
+	if q.Per != nil {
+		return &topK{q: q, per: map[string]*topK{}}
+	}
+
 	k := 0
 
 	if q.Limit > 0 && !q.Snapshot {
@@ -944,7 +955,7 @@ func (t *topK) Pop() any {
 
 // full tells if the top-k holds k rows (never with no limit).
 func (t *topK) full() bool {
-	return t.k > 0 && len(t.rows) == t.k
+	return t.per == nil && t.k > 0 && len(t.rows) == t.k
 }
 
 // wants tells if a row at p would be kept: the caller fetches the document
@@ -953,7 +964,39 @@ func (t *topK) wants(p query.Pos) bool {
 	return t.k == 0 || len(t.rows) < t.k || t.q.Cmp(p, t.rows[0].Pos) < 0
 }
 
+// wantsKeys is wants in per mode: the top of one of keys keeps the row.
+func (t *topK) wantsKeys(p query.Pos, keys []string) bool {
+	if t.per == nil {
+		return t.wants(p)
+	}
+
+	for _, k := range keys {
+		top, ok := t.per[k]
+
+		if !ok || top.wants(p) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (t *topK) add(r row) {
+	if t.per != nil {
+		for _, k := range r.keys {
+			top, ok := t.per[k]
+
+			if !ok {
+				top = &topK{q: t.q, k: t.q.Per.Limit}
+				t.per[k] = top
+			}
+
+			top.add(r)
+		}
+
+		return
+	}
+
 	switch {
 	case t.k == 0:
 		t.rows = append(t.rows, r)
@@ -966,9 +1009,59 @@ func (t *topK) add(r row) {
 }
 
 func (t *topK) sorted() []row {
+	if t.per != nil {
+		return t.union()
+	}
+
 	slices.SortFunc(t.rows, func(a, b row) int { return t.q.Cmp(a.Pos, b.Pos) })
 
 	return t.rows
+}
+
+// union is the rows of every key in sort order, each once (a row of two
+// keys is in two tops).
+func (t *topK) union() []row {
+	seen := map[string]bool{}
+
+	var out []row
+
+	for _, top := range t.per {
+		for _, r := range top.rows {
+			if !seen[r.ID] {
+				seen[r.ID] = true
+				out = append(out, r)
+			}
+		}
+	}
+
+	slices.SortFunc(out, func(a, b row) int { return t.q.Cmp(a.Pos, b.Pos) })
+
+	return out
+}
+
+// perKeys are the keys of a row in per mode: one for each value of the
+// field (each element of an array). A row without the field has none.
+func perKeys(elems []query.Value) []string {
+	keys := make([]string, 0, len(elems))
+
+	for _, v := range elems {
+		keys = append(keys, perKey(v))
+	}
+
+	return keys
+}
+
+func perKey(v query.Value) string {
+	switch v.Kind {
+	case query.Number:
+		return "n" + strconv.FormatFloat(v.Num, 'g', -1, 64)
+	case query.Time:
+		return "t" + strconv.FormatInt(v.Int, 10)
+	case query.Bool:
+		return "b" + strconv.FormatBool(v.Bool)
+	}
+
+	return strconv.Itoa(int(v.Kind)) + v.Str
 }
 
 // project keeps the listed dot paths of doc (objects only, not arrays).

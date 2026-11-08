@@ -228,20 +228,20 @@ func TestSleepsRacingWithWritesLoseNothing(t *testing.T) {
 	}
 }
 
-// idle_close is read from the config: off keeps collections open.
+// idle_close off keeps every collection open: SleepIdle with the DB's own
+// setting closes nothing, and the loop does not run.
 func TestIdleCloseOffKeepsCollectionsOpen(t *testing.T) {
 	c := cfg(t.TempDir(), nil)
 	c.IdleClose = "off"
-
-	engine.IdleTick = 10 * time.Millisecond
-
-	t.Cleanup(func() { engine.IdleTick = time.Minute })
 
 	db := open(t, c)
 	col := ensure(t, db, catalog.Def{Name: "a"})
 
 	insertRange(t, col, 0, 3)
-	time.Sleep(50 * time.Millisecond)
+
+	if db.IdleClose() != 0 {
+		t.Fatalf("idle_close off is %s, want 0", db.IdleClose())
+	}
 
 	if asleep(t, col) {
 		t.Fatal("a collection slept with idle_close off")

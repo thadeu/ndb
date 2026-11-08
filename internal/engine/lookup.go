@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"sync"
 
 	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/lookup"
@@ -13,13 +12,10 @@ import (
 
 // Lookup (M18) attaches to rows the documents of other collections that they
 // point to. A belongs_to reads every key of the rows in one query ($in on
-// the primary key); a has_many or has_one reads one query per row, with its
-// own query, sort and limit, 4 at a time. The nested lookups run once on all
-// the documents found. Each collection reads its own snapshot: there is no
+// the primary key); a has_many or has_one too, with its own query and sort,
+// keeping the first limit documents of each key (per). The nested lookups
+// run once on all the documents found. Each collection reads its own snapshot: there is no
 // snapshot across collections.
-
-// lookupWorkers is how many per-row queries of one relation run at once.
-const lookupWorkers = 4
 
 // lookupBudget is how many documents one answer may attach (tests lower it).
 var lookupBudget = lookup.MaxAttached
@@ -139,76 +135,97 @@ func (db *DB) relateBatched(ctx context.Context, rows []json.RawMessage, s looku
 	return out, nil
 }
 
-// relatePerRow reads, for each row, the documents whose foreign field is the
-// row's local field, with the query, sort and limit of the relation.
+// relatePerRow reads the documents of a has_many or has_one for every row in
+// one search: the foreign field in the keys of all rows, with the query and
+// sort of the relation, and the first limit documents of each key (per).
+// Each row then takes, in sort order, the first limit documents of its own
+// keys.
 func (db *DB) relatePerRow(ctx context.Context, rows []json.RawMessage, s lookup.Spec, budget *int) ([]json.RawMessage, error) {
-	found := make([][]json.RawMessage, len(rows))
-	errs := make([]error, len(rows))
-	added := addedFields(s)
+	rowKeys := make([][]lookup.KeyVal, len(rows))
+	seen := map[string]bool{}
 
-	var (
-		mu   sync.Mutex
-		wg   sync.WaitGroup
-		slot = make(chan struct{}, lookupWorkers)
-	)
+	var all []lookup.KeyVal
 
 	for i, row := range rows {
-		keys := lookup.Keys(row, s.Local)
-		if len(keys) == 0 {
-			continue
+		rowKeys[i] = lookup.Keys(row, s.Local)
+
+		for _, kv := range rowKeys[i] {
+			if !seen[kv.Key] {
+				seen[kv.Key] = true
+				all = append(all, kv)
+			}
 		}
-
-		wg.Add(1)
-		slot <- struct{}{}
-
-		go func() {
-			defer wg.Done()
-			defer func() { <-slot }()
-
-			filter := keyFilter(s, keys)
-
-			docs, _, err := db.lookupFind(ctx, s, filter, s.Limit, "")
-			if err == nil {
-				mu.Lock()
-				err = spend(budget, len(docs))
-				mu.Unlock()
-			}
-
-			if err != nil {
-				errs[i] = err
-
-				return
-			}
-
-			found[i] = docs
-		}()
 	}
 
-	wg.Wait()
+	found := make([][]json.RawMessage, len(rows))
 
-	for _, err := range errs {
+	if len(all) > 0 {
+		docs, added, err := db.lookupFind(ctx, s, keyFilter(s, all), 0, s.Foreign)
 		if err != nil {
 			return nil, err
 		}
-	}
 
-	if len(s.Nested) > 0 {
-		if err := db.attachNested(ctx, found, s.Nested, budget); err != nil {
+		if err := spend(budget, len(docs)); err != nil {
 			return nil, err
+		}
+
+		found = splitByKey(docs, s.Foreign, rowKeys, s.Limit)
+
+		if len(s.Nested) > 0 {
+			if err := db.attachNested(ctx, found, s.Nested, budget); err != nil {
+				return nil, err
+			}
+		}
+
+		for i := range found {
+			for j := range found[i] {
+				found[i][j] = lookup.Without(found[i][j], added)
+			}
 		}
 	}
 
 	out := make([]json.RawMessage, len(rows))
 
 	for i := range rows {
-		for j := range found[i] {
-			found[i][j] = lookup.Without(found[i][j], added)
-		}
-
 		out[i] = value(found[i], s.Many)
 	}
 
 	return out, nil
+}
+
+// splitByKey gives each row, in the order of docs, the first limit docs
+// whose foreign field is one of the row's keys.
+func splitByKey(docs []json.RawMessage, foreign string, rowKeys [][]lookup.KeyVal, limit int) [][]json.RawMessage {
+	byKey := map[string][]int{}
+
+	for d, doc := range docs {
+		for _, kv := range lookup.Keys(doc, foreign) {
+			byKey[kv.Key] = append(byKey[kv.Key], d)
+		}
+	}
+
+	out := make([][]json.RawMessage, len(rowKeys))
+
+	for i, keys := range rowKeys {
+		var at []int
+
+		for _, kv := range keys {
+			at = append(at, byKey[kv.Key]...)
+		}
+
+		slices.Sort(at)
+		at = slices.Compact(at)
+
+		if limit > 0 && len(at) > limit {
+			at = at[:limit]
+		}
+
+		for _, d := range at {
+			out[i] = append(out[i], docs[d])
+		}
+	}
+
+	return out
 }
 
 // keyFilter is the filter of one row: the foreign field equals the key (or
@@ -268,7 +285,13 @@ func (db *DB) attachNested(ctx context.Context, found [][]json.RawMessage, specs
 func (db *DB) lookupFind(ctx context.Context, s lookup.Spec, filter map[string]any, limit int, keep string) ([]json.RawMessage, []string, error) {
 	fields, added := lookup.Need(s.Fields, needed(s, keep)...)
 
-	body := map[string]any{"query": filter, "limit": limit}
+	body := map[string]any{"query": filter}
+
+	if s.Batched {
+		body["limit"] = limit
+	} else {
+		body["per"] = map[string]any{"field": s.Foreign, "limit": s.Limit}
+	}
 
 	if len(fields) > 0 {
 		body["fields"] = fields
@@ -297,14 +320,6 @@ func needed(s lookup.Spec, keep string) []string {
 	}
 
 	return need
-}
-
-// addedFields are the fields that a per-row relation reads but that its
-// fields leave out.
-func addedFields(s lookup.Spec) []string {
-	_, added := lookup.Need(s.Fields, needed(s, "")...)
-
-	return added
 }
 
 // findAny searches a collection by name, plain or partitioned.

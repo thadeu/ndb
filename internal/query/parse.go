@@ -39,6 +39,11 @@ type Query struct {
 	// client can send it back in the filter of an update.
 	Versions bool
 
+	// Per keeps the first Per.Limit rows (in sort order) of each value of
+	// Per.Field, instead of a limit over all rows: the has_many of a lookup
+	// reads every row of a page in one search.
+	Per *Per
+
 	opts  Options
 	where Node
 	raw   any
@@ -62,6 +67,12 @@ type Query struct {
 	userPaths int
 }
 
+// Per is the "per" key of a search: {"field": "customer", "limit": 5}.
+type Per struct {
+	Field string `json:"field"`
+	Limit int    `json:"limit"`
+}
+
 // Cond is one index-friendly condition of the where clause (top level,
 // AND-ed). Op is eq, in, gt, gte or lt, lte. Every value is a scalar.
 type Cond struct {
@@ -70,7 +81,7 @@ type Cond struct {
 	Vals []Value
 }
 
-var topKeys = []string{"query", "fields", "sort", "limit", "skip", "after", "count", "snapshot", "explain", "versions"}
+var topKeys = []string{"query", "fields", "sort", "limit", "skip", "after", "count", "snapshot", "explain", "versions", "per"}
 
 // Parse validates a find body. An empty body is an empty query.
 func Parse(body []byte, opts Options) (*Query, error) {
@@ -142,6 +153,12 @@ func (q *Query) parseScalars(top map[string]json.RawMessage) error {
 		return invalid("after must be a string")
 	}
 
+	if raw, ok := top["per"]; ok {
+		if err := q.parsePer(raw); err != nil {
+			return err
+		}
+	}
+
 	if raw, ok := top["fields"]; ok {
 		if json.Unmarshal(raw, &q.Fields) != nil {
 			return invalid("fields must be an array of strings")
@@ -153,6 +170,28 @@ func (q *Query) parseScalars(top map[string]json.RawMessage) error {
 			}
 		}
 	}
+
+	return nil
+}
+
+// parsePer reads per. It gives every row of the page, so it does not go
+// with limit, skip, after or snapshot.
+func (q *Query) parsePer(raw json.RawMessage) error {
+	var p Per
+
+	if json.Unmarshal(raw, &p) != nil || p.Field == "" || p.Limit < 1 {
+		return invalid(`per must be {"field": "<path>", "limit": <n ≥ 1>}`)
+	}
+
+	if err := checkPath(p.Field); err != nil {
+		return err
+	}
+
+	if q.Limit > 0 || q.Skip > 0 || q.After != "" || q.Snapshot {
+		return invalid("per does not go with limit, skip, after or snapshot: it gives the first per.limit rows of each value")
+	}
+
+	q.Per = &p
 
 	return nil
 }

@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **`per` in `_search`**: `{"per": {"field": "customer_id", "limit": 5}}` gives the first `limit` rows (in `sort` order) of each value of the field, in one search: the last 5 orders of each customer. Each value keeps its own top rows while the rows are read, and only the rows returned read their document, across segments and partitions.
+
+### Changed
+
+- **`has_many` and `has_one` lookups read a whole page in one search** (`$in` on the foreign field, with `per`), not one search per row: 20 customers with their last 5 events went from 190 ms to 79 ms in `make bench`, a 2-level lookup from 97 ms to 75 ms. Budget: slowest lookup 250 ms.
+
+### Fixed
+
+- The writer metrics (`/metrics`) count a commit before the client gets its answer, so they are never behind an acked write.
+
 ## [1.11.0] - 2026-11-08
 
 ### Changed

@@ -73,6 +73,7 @@ The full body:
   "versions": true,
   "snapshot": true,
   "explain": true,
+  "per": { "field": "customer_id", "limit": 5 },
   "lookup": { "customer": { "belongs_to": "customers", "fk": "customer_id" } }
 }
 ```
@@ -91,6 +92,7 @@ All keys are optional. An unknown key is `invalid_query`.
 | `snapshot` | keep the first snapshot for 60 s, so all pages see the same data. |
 | `explain` | add header `X-Ndb-Explain` with the plan counters. |
 | `lookup` | add the documents of other collections that each row points to. See [Lookup](#lookup). |
+| `per` | `{"field": "customer_id", "limit": 5}`: the first `limit` rows (in `sort` order) of each value of `field`, instead of a limit over all rows: the last 5 orders of each customer in one search. A row whose field is an array counts for each element. It does not go with `limit`, `skip`, `after` or `snapshot`. A `has_many` lookup uses it to read the rows of a whole page in one search. |
 
 The answer is the rows: a JSON array, or NDJSON with `Accept: application/x-ndjson`. The page data is in headers:
 

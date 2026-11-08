@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/config"
@@ -279,6 +280,21 @@ tokens:
 	} {
 		if _, err := config.Load(write(t, bad)); !errors.Is(err, config.ErrInvalid) {
 			t.Fatalf("%q: err = %v, want ErrInvalid", bad, err)
+		}
+	}
+}
+
+func TestParseIdleClose(t *testing.T) {
+	for in, want := range map[string]time.Duration{"": 10 * time.Minute, "off": 0, "2s": 2 * time.Second, "1d": 24 * time.Hour} {
+		got, err := config.ParseIdleClose(in)
+		if err != nil || got != want {
+			t.Fatalf("ParseIdleClose(%q) = %s, %v; want %s", in, got, err, want)
+		}
+	}
+
+	for _, in := range []string{"500ms", "soon"} {
+		if _, err := config.ParseIdleClose(in); err == nil {
+			t.Fatalf("ParseIdleClose(%q): want an error", in)
 		}
 	}
 }

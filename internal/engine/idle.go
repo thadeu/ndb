@@ -63,6 +63,11 @@ func (db *DB) idleLoop() {
 	}
 }
 
+// IdleClose is the idle_close of the DB (0: collections never sleep).
+func (db *DB) IdleClose() time.Duration {
+	return db.idleClose
+}
+
 // SleepIdle closes the collections that no call used for idle, and returns
 // how many it closed. When some closed, the memory they freed goes back to
 // the OS now (a GC and a scavenge), not over the next minutes.
