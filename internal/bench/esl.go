@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"math/rand/v2"
 	"net"
@@ -57,6 +58,7 @@ type Options struct {
 	Stress bool
 	Query  bool
 	Aggs   bool
+	Lookup bool
 	Idle   bool
 
 	// Collections is how many collections the idle part creates.
@@ -70,7 +72,7 @@ type Options struct {
 	Log io.Writer
 }
 
-func (o Options) all() bool { return !o.Stress && !o.Query && !o.Aggs && !o.Idle }
+func (o Options) all() bool { return !o.Stress && !o.Query && !o.Aggs && !o.Lookup && !o.Idle }
 
 // plan is the steps of the run with a first estimate of each, for the ETA.
 func (o Options) plan() []planned {
@@ -81,7 +83,7 @@ func (o Options) plan() []planned {
 		steps = append(steps, planned{"live writes", o.Live}, planned{"crash", sec(17)})
 	}
 
-	if o.Stress || o.Query || o.Aggs || o.all() {
+	if o.Stress || o.Query || o.Aggs || o.Lookup || o.all() {
 		steps = append(steps, planned{"bulk load", sec(float64(o.Calls) / 1300)}, planned{"settle", sec(12)})
 	}
 
@@ -91,6 +93,14 @@ func (o Options) plan() []planned {
 
 	if o.Aggs || o.all() {
 		steps = append(steps, planned{"aggregations", sec(4)})
+	}
+
+	if o.Lookup || o.all() {
+		steps = append(steps, planned{"lookups", sec(3)})
+	}
+
+	if o.all() {
+		steps = append(steps, planned{"wake: loaded partition", loadedIdle + 3*time.Second})
 	}
 
 	if o.Idle || o.all() {
@@ -145,9 +155,13 @@ func Run(o Options, w io.Writer) (err error) {
 		defer os.RemoveAll(dir)
 	}
 
+	conf := "idle_close: " + loadedIdle.String() + "\n"
+
 	if o.PITR != "" {
-		check(os.WriteFile(filepath.Join(dir, "ndb.yml"), []byte("pitr: "+o.PITR+"\n"), 0o644))
+		conf += "pitr: " + o.PITR + "\n"
 	}
+
+	check(os.WriteFile(filepath.Join(dir, "ndb.yml"), []byte(conf), 0o644))
 
 	prog = newProgress(cmp.Or[io.Writer](o.Log, io.Discard), o.plan())
 
@@ -174,7 +188,7 @@ func Run(o Options, w io.Writer) (err error) {
 		report = append(report, crash(d)...)
 	}
 
-	if o.Stress || o.Query || o.Aggs || o.all() {
+	if o.Stress || o.Query || o.Aggs || o.Lookup || o.all() {
 		loaded := load(d)
 
 		if o.Stress || o.all() {
@@ -194,6 +208,15 @@ func Run(o Options, w io.Writer) (err error) {
 	if o.Aggs || o.all() {
 		report = append(report, "| **aggregations** (median of 5, min–max) | |")
 		report = append(report, timed(d, "aggregations", aggregations())...)
+	}
+
+	if o.Lookup || o.all() {
+		report = append(report, "| **lookups** (median of 5, min–max) | |")
+		report = append(report, timed(d, "lookups", lookups(d))...)
+	}
+
+	if o.all() {
+		report = append(report, wakeLoaded(d)...)
 	}
 
 	if o.Idle || o.all() {
@@ -229,7 +252,17 @@ type daemon struct {
 	peak int64
 }
 
-func (d *daemon) sock() string { return filepath.Join(d.dir, "ndb.sock") }
+// sock is the socket of the daemon: in its dir, or in the system temp dir
+// when that path is past the unix socket limit (~104 bytes on macOS).
+func (d *daemon) sock() string {
+	path := filepath.Join(d.dir, "ndb.sock")
+
+	if len(path) < 100 {
+		return path
+	}
+
+	return filepath.Join(os.TempDir(), fmt.Sprintf("ndb-bench-%x.sock", crc32.ChecksumIEEE([]byte(path))))
+}
 
 func (d *daemon) start() {
 	os.Remove(d.sock())
@@ -534,6 +567,93 @@ func queries(d *daemon) []probe {
 		{"count of the finishcalls", "POST", "/events/_count", `{"query":{"type":"finishcall"}}`},
 		{"count of one hour", "POST", "/events/_count", fmt.Sprintf(`{"query":{"ts":%s}}`, hour)},
 		{"count of all", "POST", "/events/_count", `{}`},
+	}
+}
+
+// loadedIdle is the idle_close of the main daemon: short, so the loaded
+// partition sleeps after the reads and its wake can be timed.
+const loadedIdle = 20 * time.Second
+
+// wakeLoaded waits for the partition of the load to sleep (no call for
+// loadedIdle), then times the first call on it: the cost of opening a big
+// collection again.
+func wakeLoaded(d *daemon) []string {
+	part := "/events-" + day().Format("2006-01-02")
+
+	var row struct {
+		ID string `json:"_id"`
+	}
+
+	check(json.Unmarshal(bytes.TrimSpace(d.must("POST", part+"/_search", `{"limit":1}`)), &row))
+
+	prog.step("wake: loaded partition", nil)
+
+	var stats struct {
+		Asleep bool  `json:"asleep"`
+		Rows   int   `json:"rows"`
+		Total  int64 `json:"total"`
+	}
+
+	for deadline := time.Now().Add(loadedIdle + 30*time.Second); time.Now().Before(deadline); time.Sleep(500 * time.Millisecond) {
+		check(json.Unmarshal(d.must("GET", part+"/_stats", ""), &stats))
+
+		if stats.Asleep {
+			break
+		}
+	}
+
+	if !stats.Asleep {
+		prog.end("it did not sleep")
+		record("wake.loaded_asleep", 1)
+
+		return []string{"| wake | the loaded partition did not sleep |"}
+	}
+
+	code, body, took := d.call("GET", part+"/_doc/"+row.ID, nil)
+	if code != 200 {
+		check(fmt.Errorf("wake: %d %s", code, body))
+	}
+
+	prog.end(fmt.Sprintf("%.1f ms for %d rows, %.0f MB", ms(took), stats.Rows, float64(stats.Total)/(1<<20)))
+	record("wake.loaded_asleep", 0)
+	record("wake.loaded_ms", ms(took))
+
+	return []string{
+		fmt.Sprintf("| wake | first call on the loaded partition after it slept (%d rows, %.0f MB): %.1f ms |", stats.Rows, float64(stats.Total)/(1<<20), ms(took)),
+	}
+}
+
+// lookups are the reads that bring the customer of a call, or the last
+// calls of a customer, in the same answer (M18). They load 400 customers
+// first, not measured.
+func lookups(d *daemon) []probe {
+	d.must("PUT", "/customers", `{"indexes":["plan"]}`)
+
+	var b strings.Builder
+
+	b.WriteString(`{"docs":[`)
+
+	for i := range 400 {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+
+		fmt.Fprintf(&b, `{"_id":"cust-%03d","name":"Customer %d","plan":%q}`, i, i, []string{"free", "pro", "team"}[i%3])
+	}
+
+	b.WriteString(`]}`)
+	d.must("POST", "/customers/_bulk", b.String())
+
+	finishcalls := `"query":{"customer":"cust-042","type":"finishcall"},"sort":{"ts":-1},"limit":20`
+	belongs := `"customer":{"belongs_to":"customers","fk":"customer"}`
+
+	return []probe{
+		{"20 finishcalls with their customer (belongs_to)", "POST", "/events/_search", `{` + finishcalls + `,"lookup":{` + belongs + `}}`},
+		{"100 finishcalls of any customer, belongs_to", "POST", "/events/_search", `{"query":{"type":"finishcall"},"limit":100,"lookup":{` + belongs + `}}`},
+		{"20 customers with their last 5 events (has_many)", "POST", "/customers/_search", `{"query":{"plan":"pro"},"limit":20,"lookup":{"events":{"has_many":"events","fk":"customer","sort":{"ts":-1},"limit":5}}}`},
+		{"a customer, its last finishcall (has_one)", "POST", "/customers/_search", `{"query":{"_id":"cust-042"},"lookup":{"last":{"has_one":"events","fk":"customer","query":{"type":"finishcall"},"sort":{"ts":-1}}}}`},
+		{"customers, last 3 events, each with its customer (2 levels)", "POST", "/customers/_search", `{"query":{"plan":"team"},"limit":10,"lookup":{"events":{"has_many":"events","fk":"customer","sort":{"ts":-1},"limit":3,"lookup":{` + belongs + `}}}}`},
+		{"top 5 customers by calls, with the customer ($lookup)", "POST", "/events/_aggregate", `{"pipeline":[{"$match":{"type":"finishcall"}},{"$group":{"_id":"$customer","n":{"$count":{}}}},{"$sort":{"n":-1}},{"$limit":5},{"$lookup":{"from":"customers","localField":"_id","foreignField":"_id","as":"customer"}}]}`},
 	}
 }
 

@@ -75,7 +75,8 @@ func idle(dir string, n int) []string {
 	time.Sleep(idleWindow)
 	cpu := d.cpu() - cpu0
 
-	disk := blocksKB(filepath.Join(d.dir, "data"))
+	blocks, reserve := diskOf(filepath.Join(d.dir, "data"))
+	disk := blocks / 1024
 	rss, fds := d.rss()-rss0, d.fds()-fds0
 	pct := 100 * cpu.Seconds() / idleWindow.Seconds()
 
@@ -83,6 +84,7 @@ func idle(dir string, n int) []string {
 
 	record("idle.asleep", float64(total-slept))
 	record("idle.disk_kb", float64(disk)/float64(total))
+	record("idle.reserve_kb", float64(reserve)/1024/float64(total))
 	record("idle.cpu_pct", pct)
 	record("idle.rss_kb", float64(rss)*1024/float64(total))
 
@@ -106,7 +108,7 @@ func idle(dir string, n int) []string {
 
 	return []string{
 		fmt.Sprintf("| idle collections | %d of 10 docs and %d daily partitions, %d asleep |", n, idleDays, slept),
-		fmt.Sprintf("| idle disk | %.1f MB, %d KB per collection |", float64(disk)/1024, disk/int64(total)),
+		fmt.Sprintf("| idle disk | %.1f MB, %d KB per collection, %.1f KB of it past the data |", float64(disk)/1024, disk/int64(total), float64(reserve)/1024/float64(total)),
 		fmt.Sprintf("| idle CPU | %.1f%% of a core (%d ms in %s) |", pct, cpu.Milliseconds(), idleWindow),
 		fmt.Sprintf("| idle RSS | +%d MB, %d KB per collection |", rss, rss*1024/int64(total)),
 		fmt.Sprintf("| idle files | +%s open |", count(fds, fds0)),
@@ -299,19 +301,30 @@ func (d *daemon) fds() int {
 // blocksKB is the disk the files under dir hold: their blocks, which count
 // what fallocate reserved past the size.
 func blocksKB(dir string) int64 {
-	var total int64
+	total, _ := diskOf(dir)
 
+	return total / 1024
+}
+
+// diskOf gives the blocks of the files under dir, and the part of them past
+// each file's size, rounded to a block (the reserve, not data).
+func diskOf(dir string) (blocks, reserve int64) {
 	filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
 		}
 
-		if st, ok := info.Sys().(*syscall.Stat_t); ok {
-			total += st.Blocks * 512
+		st, ok := info.Sys().(*syscall.Stat_t)
+		if !ok {
+			return nil
 		}
+
+		held := st.Blocks * 512
+		blocks += held
+		reserve += max(held-(info.Size()+4095)/4096*4096, 0)
 
 		return nil
 	})
 
-	return total / 1024
+	return blocks, reserve
 }

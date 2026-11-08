@@ -33,13 +33,19 @@ var gates = []gate{
 	{metric: "load.docs_s", what: "bulk load", min: 3_000, max: -1, unit: "docs/s"},
 	{metric: "load.rss", what: "load RSS peak", max: 600, unit: "MB"},
 	{metric: "queries.worst", what: "slowest query (median)", max: 700, unit: "ms"},
+	// The has_many of 20 rows runs 20 sorted searches of ~180 ms (a sort
+	// by ts decodes every matching doc; backlog: top-N from the column).
+	{metric: "lookups.worst", what: "slowest lookup (median)", max: 4000, unit: "ms"},
 	{metric: "aggregations.worst", what: "slowest aggregation (median)", max: 600, unit: "ms"},
+	{metric: "wake.loaded_asleep", what: "the loaded partition stayed open after idle_close", max: 0},
+	{metric: "wake.loaded_ms", what: "first call on the loaded partition after it slept", max: 100, unit: "ms"},
 	{metric: "idle.asleep", what: "idle collections still open after idle_close", max: 0},
 	{metric: "idle.wake_ms", what: "first call on a sleeping collection (median)", max: 50, unit: "ms"},
 	{metric: "idle.missing", what: "acked writes lost by a kill -9 while collections wake", max: 0},
 	{metric: "idle.disk_kb", what: "disk per idle collection", max: 128, unit: "KB"},
+	{metric: "idle.reserve_kb", what: "disk reserved past the data, per idle collection", max: 16, unit: "KB"},
 	{metric: "idle.cpu_pct", what: "CPU of the idle collections", max: 0.5, unit: "% core"},
-	{metric: "idle.rss_kb", what: "RSS per idle collection", max: 256, unit: "KB"},
+	{metric: "idle.rss_kb", what: "RSS per idle collection", max: 128, unit: "KB"},
 	{metric: "idle.fds", what: "open files per idle collection", max: 0.1},
 }
 

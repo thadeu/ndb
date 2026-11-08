@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- **Concurrent reads of the same segments are 5 to 12 times faster.** Each segment kept one decoded row group, so queries that read rows of different groups at once decoded them again and again: 4 sorted searches at once took 3.1 s (0.6 s one after another), and a `has_many` lookup of 20 rows took 12.3 s. The decoded groups now share one cache of the daemon, at most 32 MiB: 4 at once take 0.26 s, the lookup 1.1 s. Memory stays bounded.
+- A collection that sleeps gives the memory it freed back to the OS at once: 48 KB of RSS per sleeping collection in `ndb bench` (it was 101 KB).
+
+### Fixed
+
+- After a crash, the open WAL file kept its disk reserve (up to 4 MiB) until it rotated. The next start gives it back.
+
+### Added
+
+- `ndb bench -lookup` measures the lookups (`belongs_to`, `has_many`, `has_one`, 2 levels, `$lookup`). `ndb bench` also times the first call on the loaded partition after it sleeps (30 ms for 210k rows, 481 MB) and measures the disk reserved past the data of an idle collection (0 KB). It works with a long `-dir` (the socket goes to the temp dir).
+
 ## [1.8.0] - 2026-11-08
 
 ### Added

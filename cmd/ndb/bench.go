@@ -26,6 +26,7 @@ func runBench(args []string) error {
 	fl.BoolVar(&o.Stress, "stress-load", false, "measure the writes: live writes with a consumer, kill -9, bulk load")
 	fl.BoolVar(&o.Query, "query", false, "measure the queries (loads the calls first)")
 	fl.BoolVar(&o.Aggs, "aggs", false, "measure the aggregations (loads the calls first)")
+	fl.BoolVar(&o.Lookup, "lookup", false, "measure the lookups: belongs_to, has_many, has_one, 2 levels, $lookup (loads the calls first)")
 	fl.BoolVar(&o.Idle, "idle", false, "measure idle collections: disk, CPU, RSS and files per collection at rest")
 	fl.IntVar(&o.Collections, "collections", o.Collections, "collections of the idle part")
 	fl.StringVar(&o.PITR, "pitr", "", "pitr of the daemon: off, 1d (default: the daemon default, 1d)")

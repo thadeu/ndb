@@ -95,3 +95,30 @@ func TestRotatedSegmentGivesItsReserveBack(t *testing.T) {
 		t.Fatalf("the rotated segment holds %d KB, want at most its size (8 MiB)", kb)
 	}
 }
+
+// A crash leaves the reserve of the open segment on disk; the next open
+// gives it back.
+func TestReopenGivesBackTheReserveACrashLeft(t *testing.T) {
+	dir := t.TempDir()
+	w, _ := open(t, writer.Config{Dir: dir})
+
+	for i := range 3 {
+		doc := []byte(`{"pad":"` + strings.Repeat("z", 100<<10) + `"}`)
+
+		if _, _, err := w.Commit(context.Background(), []wal.Op{{Kind: wal.Put, ID: string(rune('a' + i)), Doc: doc}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	seg := lastSegment(t, dir)
+	crashed := diskKB(t, seg)
+
+	again, _ := open(t, writer.Config{Dir: dir})
+
+	if kb := diskKB(t, seg); kb >= crashed || kb > 320 {
+		t.Fatalf("after the reopen the segment holds %d KB (was %d), want only its ~300 KB of data", kb, crashed)
+	}
+
+	again.Close()
+	w.Close()
+}

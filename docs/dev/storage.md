@@ -55,7 +55,8 @@ ndb keeps data on disk; memory has a fixed size, whatever the number of document
 |---|---|
 | memtables (rows not sealed yet) | `write_buffer`, 32 MiB; writes wait while a memtable is over twice its seal size |
 | per sealed row: a live bit, a share of the bloom filter and of the sparse index of its ids | about 20–40 bytes |
-| a decoded row group per segment being read, the plan of one compaction | a few MB |
+| decoded row groups (1 024 rows each) of the segments being read, shared by every query | at most 32 MiB |
+| the plan of one compaction | a few MB |
 
 A sealed document is not in a map: a lookup by `_id` asks the memtable, then the key files of the segments from the newest. One bitmap per segment marks the rows that are still the current version of their document; a scan reads only those, and a `_count` with no conditions adds whole row groups from the bits. The bits are saved with each checkpoint, and the WAL tail clears them again after a crash.
 

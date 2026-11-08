@@ -151,13 +151,14 @@ Find the writer that produced the line with `file` and `offset`, fix it, and wat
 
 ## Measure
 
-`ndb bench` runs the ESL outbox scenario (6 events and a `finishcall` per call) on a daemon of its own, from the same binary, in a temp dir. It has four parts; with no flag it runs all of them, in about two and a half minutes:
+`ndb bench` runs the ESL outbox scenario (6 events and a `finishcall` per call) on a daemon of its own, from the same binary, in a temp dir. It has five parts; with no flag it runs all of them, in about three minutes, and then times the first call on the loaded partition after it sleeps (the daemon runs with `idle_close: 20s`):
 
 | Flag | Measures |
 |---|---|
 | `-stress-load` | the writes: 30 s of live writes at 400 docs/s (`strict`) with a `_watch` consumer, a `kill -9` with every acked write read back, a bulk load of 30k calls into a daily partition |
 | `-query` | lookups by `_id`, indexed searches, sorted pages, a scan of a field with no index, counts |
 | `-aggs` | the dashboards: calls per customer, events per type, duration per hour, talk time, hangup causes |
+| `-lookup` | the lookups: finishcalls with their customer (`belongs_to`), customers with their last events (`has_many`, `has_one`), 2 levels, and `$lookup` at the end of an aggregate |
 | `-idle` | what idle collections cost: 300 collections of 10 documents (`-collections`) and a partitioned collection with 365 daily partitions, on a daemon of their own with `idle_close: 2s`; once they sleep, disk, CPU, RSS and open files over 10 s, the first call on a sleeping collection, and a `kill -9` while writes wake collections |
 
 `-query` and `-aggs` load the calls first without measuring it. Each read runs 5 times: the table shows the median, the min and the max, and the RSS peak of each part. Copy the binary to a machine and run it there to compare machines (arm64, x86) or versions.

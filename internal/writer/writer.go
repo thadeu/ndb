@@ -690,6 +690,10 @@ func (w *Writer) openLastSegment() error {
 
 	w.file = f
 	w.size = info.Size()
+
+	// A crash leaves the reserve of the last segment past its size: a
+	// truncate to the size gives it back (the data does not change).
+	_ = f.Truncate(w.size)
 	w.reserved = w.size
 
 	return nil

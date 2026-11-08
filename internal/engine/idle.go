@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"runtime/debug"
 	"time"
 
 	"github.com/thadeu/ndb/internal/catalog"
@@ -63,7 +64,8 @@ func (db *DB) idleLoop() {
 }
 
 // SleepIdle closes the collections that no call used for idle, and returns
-// how many it closed.
+// how many it closed. When some closed, the memory they freed goes back to
+// the OS now (a GC and a scavenge), not over the next minutes.
 func (db *DB) SleepIdle(idle time.Duration) int {
 	db.mu.RLock()
 
@@ -86,6 +88,10 @@ func (db *DB) SleepIdle(idle time.Duration) int {
 		if ok {
 			slept++
 		}
+	}
+
+	if slept > 0 {
+		debug.FreeOSMemory()
 	}
 
 	return slept

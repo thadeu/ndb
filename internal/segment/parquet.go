@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"sync"
 
 	"github.com/parquet-go/parquet-go"
 	"github.com/parquet-go/parquet-go/compress/zstd"
@@ -301,10 +300,6 @@ type parquetReader struct {
 	closer  io.Closer
 	columns map[string]Column
 
-	// mu guards the raw values of one row group, read by Raw in order.
-	mu    sync.Mutex
-	group int
-	raws  [][]byte
 }
 
 type readCols struct {
@@ -322,7 +317,7 @@ func decode(ra io.ReaderAt, size int64) (*parquetReader, error) {
 		return nil, err
 	}
 
-	r := &parquetReader{file: f, cols: cols, group: -1, columns: readColumns(f)}
+	r := &parquetReader{file: f, cols: cols, columns: readColumns(f)}
 
 	for _, rg := range f.RowGroups() {
 		r.starts = append(r.starts, r.n)
@@ -465,28 +460,28 @@ func columnValues(chunk parquet.ColumnChunk) ([]parquet.Value, error) {
 }
 
 // Raw returns the _raw value of one row. The row group that holds it is kept
-// decoded, so reads in row order cost one decode per group.
+// decoded in the cache of the daemon (groupcache.go), so reads of rows near
+// each other cost one decode per group, even from many queries at once.
 func (r *parquetReader) Raw(row int) ([]byte, error) {
 	if row < 0 || row >= r.n {
 		return nil, fmt.Errorf("segment: row %d out of range", row)
 	}
 
 	g := sort.Search(len(r.starts), func(j int) bool { return r.starts[j] > row }) - 1
+	k := groupKey{r, g}
 
-	r.mu.Lock()
+	raws, ok := groups.get(k)
+	if !ok {
+		var err error
 
-	defer r.mu.Unlock()
-
-	if r.group != g {
-		raws, err := r.readGroup(g)
-		if err != nil {
+		if raws, err = r.readGroup(g); err != nil {
 			return nil, err
 		}
 
-		r.group, r.raws = g, raws
+		groups.put(k, raws)
 	}
 
-	return r.raws[row-r.starts[g]], nil
+	return raws[row-r.starts[g]], nil
 }
 
 // readGroup decodes the _raw column of one row group. Only that column is
@@ -515,6 +510,8 @@ func (r *parquetReader) rowsIn(g int) int {
 }
 
 func (r *parquetReader) Close() error {
+	groups.drop(r)
+
 	if r.closer == nil {
 		return nil
 	}
