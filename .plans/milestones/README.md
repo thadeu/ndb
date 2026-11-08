@@ -33,7 +33,7 @@ docs in `docs/dev/` describe what they built.
 | M10 | Ruby client | gem `ndb-rails`, `Ndb::Record` | done |
 | M11 | TS client | package `ndb`, `ndb.model` | done |
 | M12 | Compaction, retention, TTL, blobs, metrics | long-running operation; document expiry | done |
-| [M13](m13-packaging-adoption.md) | Packaging + adoption | release, Docker, docs, use in 3 apps | in progress |
+| [M13](m13-packaging-adoption.md) | Packaging + adoption | release, Docker, docs, use in fsw-esl and 1billion | in progress |
 | M14 | Ndb Console | self-hosted web UI: connections, browser, dev tools | done |
 | M15 | API 1.0 | ES-style routes, `query` body key, one SDK vocabulary (1.0.0) | done |
 | M16 | Disk first | bounded memory at any data size (1.1.0; direct mode 1.2.0) | done |
@@ -49,7 +49,6 @@ docs in `docs/dev/` describe what they built.
 | Collection patterns | read many collections by name prefix (`logs-2026-*`): `find`, `count`, `aggregate`, `_coll` per row | done (0.4.0) | docs/dev/query.md#collection-patterns |
 | Date math and `$elemMatch` | `now-7d/d` in ranges on the time field; one array element matches many conditions | done (0.4.0) | docs/dev/query.md#date-math |
 | Relationships | `include` in find | not now | [backlog/relationships.md](../backlog/relationships.md) |
-| Anway job history | the jobs that ended, searchable, through direct mode | proposal | [backlog/anway-job-history.md](../backlog/anway-job-history.md) |
 
 ## Milestone file template
 

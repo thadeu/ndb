@@ -5,7 +5,10 @@ Status: in progress (E13.1, E13.2, E13.3, E13.5, E13.6 done; E13.4 open) · Depe
 ## Goal
 
 ndb is installable in one step and runs real queries in production for
-fsw-esl, anway and voodu-webui.
+fsw-esl (the main use case) and 1billion.
+
+Decision (2026-11-08): not in anway (it would be a third database next to
+Postgres and bbolt) and not in voodu-webui for now (it is settled).
 
 ## Epics
 
@@ -78,16 +81,16 @@ fsw-esl, anway and voodu-webui.
 
 ### E13.4 Adoption
 
-- [ ] fsw-esl: outbox-sweeper (from M09) + one report or chart query
-- [ ] anway: job history (direct mode), see [backlog/anway-job-history.md](../backlog/anway-job-history.md)
-- [ ] voodu-webui: replace one in-memory filter class with ndb
+- [ ] fsw-esl: outbox (engine, `_watch` + `ack`), call events in daily
+      partitions, one report or chart query; replaces Redis and RediSearch
+- [ ] 1billion: to evaluate
 - [ ] Record what was hard in each app → new backlog items
 
 ## Exit criteria
 
 - [ ] A fresh server goes from zero to a working query in < 5 minutes with the README
-- [ ] Each of the three apps runs at least one real query against ndb in production
-- [ ] The in-memory filter code removed from at least one app
+- [ ] fsw-esl and 1billion run real queries against ndb in production
+- [ ] Redis removed from fsw-esl
 
 ## Out of scope
 
