@@ -370,10 +370,14 @@ func (w *Writer) commitBatch(batch []*request) bool {
 
 		var rerr *rotateError
 
+		// Close first, then answer, as fatal does: the caller must not see
+		// the error before the writer is closed and OnFatal ran.
 		if errors.As(err, &rerr) {
+			alive := w.fatal(rerr.err, ok)
+
 			req.done <- result{err: err}
 
-			return w.fatal(rerr.err, ok)
+			return alive
 		}
 
 		if err != nil {
