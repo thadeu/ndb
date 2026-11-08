@@ -4,9 +4,10 @@
 # vX.Y.Z, then asks before it pushes. A tag push starts the full release
 # (binaries, console, gem, npm, images), so everything has one version.
 #
-#   scripts/release.sh patch|minor|major [--dry-run]
+#   scripts/release.sh patch|minor|major [--dry-run] [--yes]
 #
 # The Makefile calls it: make tag patch, make tag minor, make tag major.
+# --yes (make tag patch YES=1) pushes without asking, for scripts and agents.
 
 set -eu
 
@@ -14,8 +15,16 @@ cd "$(dirname "$0")/.."
 
 bump="${1:-patch}"
 dry=""
+yes=""
 
-[ "${2:-}" = "--dry-run" ] && dry=1
+[ $# -gt 0 ] && shift
+
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) dry=1 ;;
+    --yes | -y) yes=1 ;;
+  esac
+done
 
 case "$bump" in
   patch | minor | major) ;;
@@ -131,8 +140,12 @@ git tag "v$next"
 
 echo "release: made the commit and the tag v$next."
 
-printf "Push main and v%s to origin? [y/N] " "$next"
-read -r answer
+if [ -n "$yes" ]; then
+  answer=y
+else
+  printf "Push main and v%s to origin? [y/N] " "$next"
+  read -r answer
+fi
 
 if [ "$answer" = "y" ] || [ "$answer" = "Y" ]; then
   git push origin main
