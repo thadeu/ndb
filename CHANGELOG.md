@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-11-08
+
 ### Added
 
 - **Point in time recovery.** `pitr: 1d` (the default) keeps one snapshot a day of every engine collection (hard links of its segments and a copy of `meta.bolt`, no data copied) plus the WAL from it. `POST /{coll}/_restore {"until","into"}` makes a copy of the collection as it was at any instant of the window, in a new collection; the source is not touched. Truncate, drop and `rename -replace` keep the old dir in the trash for the window, so they can be restored too. `pitr: off` or up to `7d`, per daemon or per collection. CLI `ndb restore <coll> -until T -into NAME` and `ndb pitr`; `GET /{coll}/_pitr` and `GET /_pitr`; a PITR tab in the console; `Restore`/`PITR` in the SDKs. See [PITR](docs/dev/pitr.md).
@@ -305,7 +307,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.2.2...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.2.3...HEAD
+[1.2.3]: https://github.com/thadeu/ndb/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/thadeu/ndb/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/thadeu/ndb/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/thadeu/ndb/compare/v1.1.4...v1.2.0
