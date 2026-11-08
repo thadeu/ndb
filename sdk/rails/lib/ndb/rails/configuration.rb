@@ -11,6 +11,10 @@ module Ndb
     class Configuration
       attr_accessor :url, :socket, :token, :timeout, :pool_size, :ready_timeout
 
+      # collection_prefix goes before every collection name of the models
+      # ("test2_" for a parallel test worker). nil by default.
+      attr_accessor :collection_prefix
+
       def initialize
         @timeout = 30
         @pool_size = 16

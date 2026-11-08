@@ -87,10 +87,12 @@ module Ndb
 
         @lookup_indexes ||= Set.new
 
-        return if @lookup_indexes.include?(reflection.foreign_key.to_s)
+        key = "#{collection_name}\0#{reflection.foreign_key}"
+
+        return if @lookup_indexes.include?(key)
 
         Rails.client.ensure_index(collection_name, reflection.foreign_key.to_s)
-        @lookup_indexes << reflection.foreign_key.to_s
+        @lookup_indexes << key
       end
 
       private

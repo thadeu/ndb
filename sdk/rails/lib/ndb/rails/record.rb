@@ -129,7 +129,7 @@ module Ndb
       end
 
       def collection_name
-        @collection_name || model_name.plural
+        "#{Rails.configuration.collection_prefix}#{@collection_name || model_name.plural}"
       end
 
       def collection_name=(name)
@@ -207,6 +207,8 @@ module Ndb
       # pattern declares nothing.
       def ensure_collection!
         return if collection_pattern?
+
+        Testing.touch(collection_name) if defined?(Testing) && !source
 
         client = Rails.client
 

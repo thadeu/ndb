@@ -27,6 +27,12 @@ module Ndb
         @client = nil
       end
 
+      # A new client on next use (after a configuration change); models
+      # declare their collections again.
+      def reset_client!
+        @client = nil
+      end
+
       def client
         @client ||= Client.new(
           url: configuration.url,

@@ -10,4 +10,6 @@ group :development, :test do
   gem "minitest", "~> 5.25"
   gem "rake", "~> 13.0"
   gem "railties", ">= 7.1"
+  gem "database_cleaner-core", "~> 2.0"
+  gem "rspec-core", "~> 3.13"
 end

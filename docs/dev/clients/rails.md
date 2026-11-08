@@ -597,6 +597,12 @@ Every public method of the gem, grouped. The names and return values follow Acti
 
 :::
 
+::: details Tests
+
+`Ndb::Testing.clean!`, `clean_all!`, `worker!`, `touched`; `ndb/rails/test_help` (Minitest), `ndb/rails/rspec`, `ndb/rails/database_cleaner`. See [Testing](#testing).
+
+:::
+
 ::: details The low layer
 
 `Ndb::Rails.client` is the `Ndb::Client` of the gem: `watch`, `ack`, `aggregate`, `restore`, `rename`, `pitr`, `ensure_index` and every route of the HTTP API. See the [Ruby SDK](ruby.md).
@@ -638,14 +644,91 @@ rescue Ndb::RecordNotUnique => e
 
 ## Testing
 
-The tests of this gem build the daemon from the repository (`go build ./cmd/ndb`), start it on a short temp unix socket (macOS allows 104 bytes), wait for `GET /_health` to return 200, and stop it at exit. To do the same by hand:
+ndb has no transactions, so a test cannot roll back like `use_transactional_tests`. Instead, the gem **truncates the collections a test used**, after it: a few ms per collection whatever its size, and the definition and indexes stay. It knows what a test used from the models (every query and write of a model marks its collection).
 
-```sh
-ndb -config /nonexistent.yml -data-dir "$(mktemp -d)" -unix /tmp/ndb-test.sock
-```
+### Minitest
 
 ```ruby
-Ndb::Rails.configure { |c| c.socket = "/tmp/ndb-test.sock" }
+# test/test_helper.rb
+ENV["RAILS_ENV"] ||= "test"
+require_relative "../config/environment"
+require "rails/test_help"
+require "ndb/rails/test_help"
 ```
 
-Use a new collection name per test (`self.collection_name = ...`). Run the suite with `bundle exec rake test` in `sdk/rails`. Its Gemfile uses the gem `ndb` from `../ruby`.
+Every `ActiveSupport::TestCase` (models, controllers, integration, system tests) cleans after each test. To keep the data of a test case:
+
+```ruby
+class ImportTest < ActiveSupport::TestCase
+  self.ndb_clean = false
+end
+```
+
+### RSpec
+
+```ruby
+# spec/rails_helper.rb
+require "ndb/rails/rspec"
+```
+
+Each example cleans after itself. `ndb_clean: false` on an example or a group keeps its data:
+
+```ruby
+it "imports the file", ndb_clean: false do
+  # ...
+end
+```
+
+### DatabaseCleaner
+
+For a suite that already uses [DatabaseCleaner](https://github.com/DatabaseCleaner/database_cleaner) (2.x, the `database_cleaner-core` gem):
+
+```ruby
+require "ndb/rails/database_cleaner"
+
+DatabaseCleaner[:ndb].strategy = :touched                     # the default: what the test used
+DatabaseCleaner[:ndb].clean_with(:truncation)                 # every collection, before the suite
+DatabaseCleaner[:ndb].strategy = :truncation, { except: %w[plans] }
+
+# RSpec
+config.before(:suite) { DatabaseCleaner[:ndb].clean_with(:truncation) }
+config.around { |example| DatabaseCleaner[:ndb].cleaning { example.run } }
+```
+
+| Strategy | Cleans |
+|---|---|
+| `:touched` | the collections the tests used since the last clean (fast; the default) |
+| `:truncation` | every engine collection of this worker, or `only:`; less `except:` |
+
+Both truncate: ndb has no `:transaction` or `:deletion` strategy.
+
+### Parallel tests
+
+The daemon is shared by every worker, so each one gets collections of its own: the models read and write `test<n>_calls` instead of `calls`.
+
+- **Rails `parallelize`:** `ndb/rails/test_help` sets it in `parallelize_setup`.
+- **parallel_tests (`TEST_ENV_NUMBER`):** `ndb/rails/test_help` and `ndb/rails/rspec` read it.
+- By hand: `Ndb::Testing.worker!(2)`, or `config.collection_prefix = "ci_"` in `Ndb::Rails.configure`.
+
+The prefix covers the models (and their associations). A collection written with the raw client (`Ndb::Rails.client`) is not prefixed and not cleaned unless you pass it: `Ndb::Testing.clean!(only: %w[raw_events])`.
+
+### The API
+
+| Method | |
+|---|---|
+| `Ndb::Testing.clean!(only: nil, except: [])` | truncate what the tests used since the last clean (or only these) |
+| `Ndb::Testing.clean_all!(except: [])` | truncate every engine collection of this worker (its prefix) |
+| `Ndb::Testing.worker!(n)` | collections of their own for worker n (`test<n>_`) |
+| `Ndb::Testing.touched` | the collections used since the last clean |
+
+- **Safeguard:** a clean refuses to run outside the test environment (`Ndb::Testing::UnsafeClean`), so a test helper loaded by mistake against the development daemon deletes nothing. `NDB_ALLOW_CLEAN=1` forces it.
+- Direct collections (`source`) and patterns are never cleaned: their data is the app files.
+- **The test daemon:** run it with `pitr: off`. A truncate with PITR on keeps the old data in the trash for the window, so a long suite would fill the disk. A data dir in a temp dir (`-data-dir "$(mktemp -d)"`) starts each run empty.
+
+```sh
+ndb -config test/ndb.yml -data-dir "$(mktemp -d)" -unix /tmp/ndb-test.sock   # test/ndb.yml: pitr: off
+```
+
+### The tests of this gem
+
+The tests of this gem build the daemon from the repository (`go build ./cmd/ndb`), start it on a short temp unix socket (macOS allows 104 bytes), wait for `GET /_health` to return 200, and stop it at exit. Run them with `bundle exec rake test` in `sdk/rails`; its Gemfile uses the gem `ndb` from `../ruby`.

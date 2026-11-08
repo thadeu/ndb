@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **Rails test support.** ndb has no transactions, so the gem truncates the collections a test used, after it (a few ms each; definitions and indexes stay): `require "ndb/rails/test_help"` (Minitest, every `ActiveSupport::TestCase`, `self.ndb_clean = false` to opt out), `require "ndb/rails/rspec"` (`ndb_clean: false`), and `require "ndb/rails/database_cleaner"` (`DatabaseCleaner[:ndb]` with `:touched` and `:truncation`). Parallel workers get collections of their own (`test<n>_`, from `parallelize` or `TEST_ENV_NUMBER`; `config.collection_prefix`). A clean refuses to run outside the test environment.
+
 ## [1.4.2] - 2026-11-08
 
 ### Changed
