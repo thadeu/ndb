@@ -164,28 +164,28 @@ await restored.rename('calls', { replace: true })
 
 ## `POST /{coll}/_restore`
 
-Makes the collection `into` hold `coll` as it was at `until`, from its [PITR window](../pitr.md) (1 day by default). The source is not touched. A dropped, truncated or replaced collection can be restored by its name while it is in the window.
+Makes the collection `to` hold `coll` as it was at `at`, from its [PITR window](../pitr.md) (1 day by default). The source is not touched. A dropped, truncated or replaced collection can be restored by its name while it is in the window.
 
-**Body:** `{"until":"2026-11-12T14:04:00Z","into":"calls_restored"}`. **Answer:** `{"collection":"calls_restored","restored":"calls","until":"…","duration_ms":840}`.
+**Body:** `{"at":"2026-11-12T14:04:00Z","to":"calls_restored"}`. **Answer:** `{"collection":"calls_restored","restored":"calls","at":"…","duration_ms":840}`.
 
-**Errors:** `400 out_of_window` (the message gives the start of the window), `400 pitr_off`, `400 catalog_invalid` (bad `into`), `404 unknown_collection`, `409 collection_exists` (`into` exists). A scoped token needs `admin` on `coll` and `into`.
+**Errors:** `400 out_of_window` (the message gives the start of the window), `400 pitr_off`, `400 catalog_invalid` (bad `to`), `404 unknown_collection`, `409 collection_exists` (`to` exists). A scoped token needs `admin` on `coll` and `to`.
 
 ::: code-group
 
 ```bash [curl]
-curl --unix-socket /run/ndb/ndb.sock -X POST http://ndb/calls/_restore -d '{"until":"2026-11-12T14:04:00Z","into":"calls_restored"}'
+curl --unix-socket /run/ndb/ndb.sock -X POST http://ndb/calls/_restore -d '{"at":"2026-11-12T14:04:00Z","to":"calls_restored"}'
 ```
 
 ```go [Go]
-err := calls.Restore(ctx, "calls_restored", until)
+err := calls.Restore(ctx, at, "calls_restored")
 ```
 
 ```ruby [Ruby]
-client.restore("calls", at: until_time, into: "calls_restored")
+client.restore("calls", at: at, to: "calls_restored")
 ```
 
 ```ts [TypeScript]
-await calls.restore({ until, into: 'calls_restored' })
+await calls.restore({ at, to: 'calls_restored' })
 ```
 
 :::

@@ -162,7 +162,7 @@ curl --unix-socket /run/ndb/ndb.sock http://ndb/_backup -d '{}' > ndb.ndb
 
 ## `POST /_restore`
 
-`POST /{coll}/_restore` with the collection name in the body: `{"collection":"calls","until":"2026-11-12T14:04:00Z","into":"calls_restored"}`. Same answer and errors. See [PITR](../pitr.md).
+`POST /{coll}/_restore` with the collection name in the body: `{"collection":"calls","at":"2026-11-12T14:04:00Z","to":"calls_restored"}`. Same answer and errors. See [PITR](../pitr.md).
 
 ## `GET /_pitr`
 

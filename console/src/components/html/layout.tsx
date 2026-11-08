@@ -7,7 +7,7 @@ import { Dot } from '@/ui/badge';
 import { Logo } from '@/ui/logo';
 import { formatVersion } from '@/format';
 
-export type Tab = 'overview' | 'browser' | 'devtools' | 'watch' | 'pitr' | 'backups';
+export type Tab = 'overview' | 'browser' | 'devtools' | 'watch' | 'backups';
 
 export interface Current {
   name: string;
@@ -22,7 +22,6 @@ const TABS: { id: Tab; label: string; path: string }[] = [
   { id: 'browser', label: 'Browser', path: '/browser' },
   { id: 'devtools', label: 'Dev Tools', path: '/devtools' },
   { id: 'watch', label: 'Watch', path: '/watch' },
-  { id: 'pitr', label: 'PITR', path: '/pitr' },
   { id: 'backups', label: 'Backups', path: '/backups' },
 ];
 

@@ -586,9 +586,9 @@ func TestPITRRestoreAndListCommands(t *testing.T) {
 	base := []string{"-config", "none.yml", "-url", "unix://" + sock}
 	until := time.Now().UTC().Format(time.RFC3339Nano)
 
-	got := runCmd(t, func(a []string, o *strings.Builder) error { return pitrRestore(a, o) }, append([]string{"posts", "-until", until, "-into", "posts_back"}, base...)...)
+	got := runCmd(t, func(a []string, o *strings.Builder) error { return pitrRestore(a, o) }, append([]string{"posts", "-at", until, "-to", "posts_back"}, base...)...)
 
-	if !strings.HasPrefix(got, "posts: restored into posts_back as of ") {
+	if !strings.HasPrefix(got, "posts: restored to posts_back as of ") {
 		t.Fatalf("restore output = %q", got)
 	}
 
@@ -598,13 +598,13 @@ func TestPITRRestoreAndListCommands(t *testing.T) {
 		t.Fatalf("pitr output = %q", got)
 	}
 
-	if !isPITRRestore([]string{"posts", "--until=15m"}) || isPITRRestore([]string{"backup.ndb"}) {
+	if !isPITRRestore([]string{"posts", "--at=15m"}) || isPITRRestore([]string{"backup.ndb"}) {
 		t.Fatal("isPITRRestore")
 	}
 
 	now := time.Now()
 
-	if at, err := parseUntil("15m", now); err != nil || !at.Equal(now.Add(-15*time.Minute)) {
-		t.Fatalf("parseUntil 15m = %v, %v", at, err)
+	if at, err := parseAt("15m", now); err != nil || !at.Equal(now.Add(-15*time.Minute)) {
+		t.Fatalf("parseAt 15m = %v, %v", at, err)
 	}
 }

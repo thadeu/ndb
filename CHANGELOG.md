@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- **PITR uses `at` and `to`, like the rest of the contract.** `POST /{coll}/_restore {"at","to"}` (was `until`, `into`); CLI `ndb restore <coll> -at T -to NAME`; Go `Restore(ctx, at, to)`, Ruby `restore(coll, at:, to:)`, TS `restore({ at, to })`. The old keys are refused (`invalid_request`).
+- **Console:** PITR is a block of the **Backups** tab, as in DynamoDB, instead of a tab of its own: the windows paged by 10, a Restore dialog on each row, and a Rename dialog that opens filled in after a restore.
+
 ## [1.2.3] - 2026-11-08
 
 ### Added

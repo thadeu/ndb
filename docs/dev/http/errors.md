@@ -40,7 +40,7 @@ The SDKs turn each code into a typed error: Go `ndb.ErrUnknownCollection` (`erro
 | `forbidden` | 403 | For example, `/_backup` over TCP. |
 | `not_found` | 404 | No document (or blob) with this id. |
 | `unknown_collection` | 404 | The collection does not exist. |
-| `collection_exists` | 409 | A rename to a name that exists (without `replace`), or a restore `into` a name that exists. |
+| `collection_exists` | 409 | A rename to a name that exists (without `replace`), or a restore `to` a name that exists. |
 | `unknown_route` | 404 | No route has this path. |
 | `method_not_allowed` | 405 | The path exists with other methods (see `Allow`). |
 | `duplicate_id` | 409 | A document with this `_id` exists. |

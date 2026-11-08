@@ -3,7 +3,7 @@
 Someone deleted data by mistake today. Pick an instant before the mistake, and ndb makes a copy of the collection as it was then. Writes after that instant are not in the copy. A rename puts the copy in place, so the apps change nothing.
 
 ```bash
-ndb restore calls -until 2026-11-12T14:04:00Z -into calls_restored   # or -until 15m (15 minutes ago)
+ndb restore calls -at 2026-11-12T14:04:00Z -to calls_restored   # or -at 15m (15 minutes ago)
 ndb rename calls_restored calls -replace
 ```
 
@@ -57,15 +57,15 @@ calls_old (dropped) 1d     2026-11-11 14:30:12    1          240 MiB
 
 | | HTTP | CLI | Go | Ruby | TypeScript |
 |---|---|---|---|---|---|
-| Restore | `POST /{coll}/_restore {"until","into"}` | `ndb restore <coll> -until T -into NAME` | `calls.Restore(ctx, into, until)` | `client.restore(coll, at:, into:)` | `calls.restore({ until, into })` |
+| Restore | `POST /{coll}/_restore {"at","to"}` | `ndb restore <coll> -at T -to NAME` | `calls.Restore(ctx, at, to)` | `client.restore(coll, at:, to:)` | `calls.restore({ at, to })` |
 | Window | `GET /{coll}/_pitr`, `GET /_pitr` | `ndb pitr [coll]` | `calls.PITR(ctx)` | `client.pitr(coll)` | `calls.pitr()` |
 | Rename | `POST /{coll}/_rename {"to","replace"}` | `ndb rename <coll> <to> [-replace]` | `calls.Rename(ctx, to, replace)` | `client.rename(coll, to, replace:)` | `calls.rename(to, { replace })` |
 
-The console has a **PITR** tab with the windows, a restore form and a rename form.
+In the console, the **Backups** tab has a PITR block: the windows (paged), a Restore dialog on each row and a Rename dialog that comes filled in after a restore.
 
-- `until` is RFC 3339. A dropped collection is restored by its name, while it is in the window (`POST /_restore {"collection","until","into"}` does the same with the name in the body).
-- **Errors:** `400 out_of_window` (the message gives the start of the window), `400 pitr_off`, `409 collection_exists` (`into` exists), `404 unknown_collection`.
-- **Scope:** a scoped token needs `admin` on the collection and on `into` (and on `to` for a rename).
+- `at` is RFC 3339; `to` is the new collection, as in a rename. A dropped collection is restored by its name, while it is in the window (`POST /_restore {"collection","at","to"}` does the same with the name in the body).
+- **Errors:** `400 out_of_window` (the message gives the start of the window), `400 pitr_off`, `409 collection_exists` (`to` exists), `404 unknown_collection`.
+- **Scope:** a scoped token needs `admin` on the collection and on `to`.
 
 ## Rename
 

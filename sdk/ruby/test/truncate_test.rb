@@ -48,10 +48,10 @@ class TruncateTest < Minitest::Test
     client.delete(@coll, "c1")
 
     into = NdbTestHelpers.next_name
-    client.restore(@coll, at: at, into: into)
+    client.restore(@coll, at: at, to: into)
 
     assert_equal 1, client.get(into, "c1")["n"]
-    assert_raises(Ndb::OutOfWindow) { client.restore(@coll, at: at - 3 * 86_400, into: "#{into}x") }
+    assert_raises(Ndb::OutOfWindow) { client.restore(@coll, at: at - 3 * 86_400, to: "#{into}x") }
     assert_equal "1d", client.pitr(@coll)["window"]
   end
 end

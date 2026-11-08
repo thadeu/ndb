@@ -120,7 +120,7 @@ func TestRestoreAndPITR(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := calls.Restore(ctx, into, until); err != nil {
+	if err := calls.Restore(ctx, until, into); err != nil {
 		t.Fatal(err)
 	}
 
@@ -133,7 +133,7 @@ func TestRestoreAndPITR(t *testing.T) {
 		t.Fatalf("get on the copy: %v", err)
 	}
 
-	if err := calls.Restore(ctx, into+"x", until.Add(-48*time.Hour)); !errors.Is(err, ErrOutOfWindow) {
+	if err := calls.Restore(ctx, until.Add(-48*time.Hour), into+"x"); !errors.Is(err, ErrOutOfWindow) {
 		t.Fatalf("restore out of the window: %v", err)
 	}
 

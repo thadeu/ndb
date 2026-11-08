@@ -115,7 +115,7 @@ Usage:
   ndb serve [daemon flags]      run the daemon
   ndb backup <dest|->           one .ndb file (daemon stopped or running); - is stdout
   ndb restore <file|->          put a backup in an empty data dir, after a check; - is stdin
-  ndb restore <coll> -until T -into NAME
+  ndb restore <coll> -at T -to NAME
                                 PITR: a copy of coll as it was at T (RFC 3339, or 15m = 15 minutes ago)
   ndb pitr [collection]         the PITR window of every collection: from when it can restore, its disk
   ndb stats                     rows, size, segments, WAL files, indexes, quarantine
@@ -150,7 +150,7 @@ Common flags:
   -config FILE      ndb.yml (default NDB_CONFIG, ./ndb.yml, then /etc/ndb/ndb.yml)
   -data-dir DIR     data dir (overrides ndb.yml)
 
-Talking to the daemon (backup, stats, size, collections, compact, truncate, drop, rename, pitr, restore -until, health, get, update, delete, expire, persist, ttl, quarantine, query):
+Talking to the daemon (backup, stats, size, collections, compact, truncate, drop, rename, pitr, restore -at, health, get, update, delete, expire, persist, ttl, quarantine, query):
   -url unix:///sock|tcp://host:port   which daemon (default NDB_URL, then the
                                       unix socket of ndb.yml); NDB_TOKEN is the bearer token
   -json                               machine output (query: NDJSON rows)

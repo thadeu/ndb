@@ -423,22 +423,27 @@ describe('discover route', () => {
   });
 });
 
-describe('pitr tab', () => {
-  it('lists the windows and offers the restore form', async () => {
-    const html = await (await page('/c/local/pitr')).text();
+describe('pitr block of the backups tab', () => {
+  it('lists the windows and opens the restore dialog from the url', async () => {
+    const html = await (await page('/c/local/backups')).text();
 
-    expect(html).toContain('Point in time recovery');
+    expect(html).toContain('Point in time recovery (PITR)');
     expect(html).toContain('orders');
-    expect(html).toContain('Restore copy');
+    expect(html).not.toContain('id="pitr-restore"');
+
+    const open = await (await page('/c/local/backups?restore=orders')).text();
+
+    expect(open).toContain('id="pitr-restore"');
+    expect(open).toContain('value="orders_restored"');
   });
 
-  it('restores a copy, then renames it in place', async () => {
-    const until = new Date(Date.now() + 1000).toISOString().slice(0, 19);
+  it('restores a copy, then renames it in place from the open rename dialog', async () => {
+    const at = new Date(Date.now() + 1000).toISOString().slice(0, 19);
 
     await Bun.sleep(2100);
     await new Ndb({ url }).remove('orders', 'a');
 
-    const restored = await page('/c/local/pitr/restore', form({ collection: 'orders', until, into: 'orders_restored' }));
+    const restored = await page('/c/local/backups/restore', form({ collection: 'orders', at, to: 'orders_restored' }));
     const location = restored.headers.get('location') ?? '';
 
     expect(restored.status).toBe(303);
@@ -446,34 +451,46 @@ describe('pitr tab', () => {
     expect(location).toContain('from=orders_restored');
     expect((await new Ndb({ url }).document('orders_restored', 'a'))._id).toBe('a');
 
-    const renamed = await page('/c/local/pitr/rename', form({ from: 'orders_restored', to: 'orders', replace: '1' }));
+    const next = await (await page(location.replace(/^.*\/c\//, '/c/'))).text();
+
+    expect(next).toContain('id="pitr-rename"');
+
+    const renamed = await page('/c/local/backups/rename', form({ from: 'orders_restored', to: 'orders', replace: '1' }));
 
     expect(renamed.headers.get('location')).toContain('notice=');
     expect((await new Ndb({ url }).document('orders', 'a'))._id).toBe('a');
   });
 
-  it('comes back with the ndb error', async () => {
-    const response = await page('/c/local/pitr/restore', form({ collection: 'orders', until: '2020-01-01T00:00:00', into: 'x' }));
+  it('comes back with the ndb error and the dialog open', async () => {
+    const response = await page('/c/local/backups/restore', form({ collection: 'orders', at: '2020-01-01T00:00:00', to: 'x' }));
+    const location = decodeURIComponent(response.headers.get('location') ?? '');
 
-    expect(decodeURIComponent(response.headers.get('location') ?? '')).toContain('error=');
+    expect(location).toContain('error=');
+    expect(location).toContain('restore=orders');
   });
+});
 
-  it('reads a datetime-local value as UTC', async () => {
-    const { defaultUntil, utc } = await import('@/routes/pitr');
+describe('pitr helpers', () => {
+  it('read a datetime-local value as UTC, keep the default in the window, and page in memory', async () => {
+    const { defaultAt, pageOf, utc } = await import('@/pitr');
     const now = Date.parse('2026-11-12T14:10:00Z');
 
-    expect(defaultUntil(undefined, now)).toBe('2026-11-12T14:05:00');
-    expect(defaultUntil('2026-11-12T14:08:00Z', now)).toBe('2026-11-12T14:08:01');
-
+    expect(defaultAt(undefined, now)).toBe('2026-11-12T14:05:00');
+    expect(defaultAt('2026-11-12T14:08:00Z', now)).toBe('2026-11-12T14:08:01');
     expect(utc('2026-11-12T14:04')).toBe('2026-11-12T14:04:00Z');
-    expect(utc('2026-11-12T14:04:05')).toBe('2026-11-12T14:04:05Z');
     expect(utc('2026-11-12T14:04:05Z')).toBe('2026-11-12T14:04:05Z');
+
+    const items = Array.from({ length: 23 }, (_, i) => i);
+
+    expect(pageOf(items, 3)).toEqual({ rows: [20, 21, 22], page: 3, pages: 3 });
+    expect(pageOf(items, 9).page).toBe(3);
+    expect(pageOf([], 1)).toEqual({ rows: [], page: 1, pages: 1 });
   });
 });
 
 describe('native forms', () => {
   it('send their Origin: the referrer policy is same-origin, not no-referrer', async () => {
-    const response = await page('/c/local/pitr');
+    const response = await page('/c/local/backups');
 
     expect(response.headers.get('referrer-policy')).toBe('same-origin');
   });

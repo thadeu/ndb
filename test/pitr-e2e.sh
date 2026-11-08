@@ -51,7 +51,7 @@ c /calls/_delete_by_query -d '{"query":{"status":"s1"},"many":true}' >/dev/null
 check "calls after the mistake" "$(count calls)" 1501
 c /calls/_bulk -d '{"docs":[{"_id":"new1","status":"s9"}]}' >/dev/null
 
-$NDB restore calls -until "$T1" -into calls_restored
+$NDB restore calls -at "$T1" -to calls_restored
 check "copy at T1 (snapshot + compaction + WAL)" "$(count calls_restored)" 2001
 check "copy has no later write" "$(c /calls_restored/_doc/new1 | grep -c not_found)" 1
 $NDB pitr
@@ -60,15 +60,15 @@ $NDB rename calls_restored calls -replace -yes
 check "calls after the swap" "$(count calls)" 2001
 
 sleep 0.05; T2=$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)
-$NDB restore calls -until "$T2" -into calls_check
+$NDB restore calls -at "$T2" -to calls_check
 check "restore of the swapped calls" "$(count calls_check)" 2001
 
 T3=$(date -u +%Y-%m-%dT%H:%M:%S.%NZ); sleep 0.05
 c "/logs?confirm=logs" -X DELETE >/dev/null
-$NDB restore logs -until "$T3" -into logs_back
+$NDB restore logs -at "$T3" -to logs_back
 check "logs back (partitioned)" "$(count 'logs_back')" 3
 
-c /calls/_restore -d '{"until":"2020-01-01T00:00:00Z","into":"x"}' | grep -q out_of_window && echo "ok   out_of_window"
+c /calls/_restore -d '{"at":"2020-01-01T00:00:00Z","to":"x"}' | grep -q out_of_window && echo "ok   out_of_window"
 
 kill -9 $PID; wait $PID 2>/dev/null || true
 start

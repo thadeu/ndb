@@ -16,25 +16,25 @@ import (
 	"github.com/thadeu/ndb/internal/tui"
 )
 
-// pitrRestore is "ndb restore <collection> -until T -into NAME": a copy of
-// the collection as it was at T, made by the daemon from its PITR window.
+// pitrRestore is "ndb restore <collection> -at T -to NAME": a copy of the
+// collection as it was at T, made by the daemon from its PITR window.
 func pitrRestore(args []string, out io.Writer) error {
 	fl := flag.NewFlagSet("ndb restore", flag.ContinueOnError)
 
 	cf := addConnFlags(fl)
-	until := fl.String("until", "", "the instant: RFC 3339 (2026-11-12T14:04:00Z) or a time ago (15m, 2h)")
-	into := fl.String("into", "", "the new collection that gets the copy")
+	at := fl.String("at", "", "the instant: RFC 3339 (2026-11-12T14:04:00Z) or a time ago (15m, 2h)")
+	to := fl.String("to", "", "the new collection that gets the copy")
 
 	pos, err := parseInterspersed(fl, args)
 	if err != nil {
 		return err
 	}
 
-	if len(pos) != 1 || *until == "" || *into == "" {
-		return errors.New("usage: ndb restore <collection> -until T -into NAME [-url u] [-json]")
+	if len(pos) != 1 || *at == "" || *to == "" {
+		return errors.New("usage: ndb restore <collection> -at T -to NAME [-url u] [-json]")
 	}
 
-	at, err := parseUntil(*until, time.Now())
+	instant, err := parseAt(*at, time.Now())
 	if err != nil {
 		return err
 	}
@@ -51,7 +51,7 @@ func pitrRestore(args []string, out io.Writer) error {
 
 	c.timeout = 30 * time.Minute
 
-	body, err := json.Marshal(map[string]string{"until": at.UTC().Format(time.RFC3339Nano), "into": *into})
+	body, err := json.Marshal(map[string]string{"at": instant.UTC().Format(time.RFC3339Nano), "to": *to})
 	if err != nil {
 		return err
 	}
@@ -66,29 +66,29 @@ func pitrRestore(args []string, out io.Writer) error {
 		return writeJSON(out, rep)
 	}
 
-	fmt.Fprintf(out, "%s: restored into %s as of %s\n", pos[0], *into, at.UTC().Format(time.RFC3339))
+	fmt.Fprintf(out, "%s: restored to %s as of %s\n", pos[0], *to, instant.UTC().Format(time.RFC3339))
 
 	return nil
 }
 
-// isPITRRestore tells a PITR restore (-until) from a backup restore.
+// isPITRRestore tells a PITR restore (-at) from a backup restore.
 func isPITRRestore(args []string) bool {
 	return slices.ContainsFunc(args, func(a string) bool {
 		name, _, _ := strings.Cut(strings.TrimLeft(a, "-"), "=")
 
-		return strings.HasPrefix(a, "-") && name == "until"
+		return strings.HasPrefix(a, "-") && name == "at"
 	})
 }
 
-// parseUntil reads an RFC 3339 instant, or a duration ago (15m, 2h, 1d).
-func parseUntil(s string, now time.Time) (time.Time, error) {
+// parseAt reads an RFC 3339 instant, or a duration ago (15m, 2h, 1d).
+func parseAt(s string, now time.Time) (time.Time, error) {
 	if at, err := time.Parse(time.RFC3339Nano, s); err == nil {
 		return at, nil
 	}
 
 	ago, err := catalog.ParseDuration(s)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("-until %q: want an RFC 3339 time or a time ago such as 15m", s)
+		return time.Time{}, fmt.Errorf("-at %q: want an RFC 3339 time or a time ago such as 15m", s)
 	}
 
 	return now.Add(-ago), nil

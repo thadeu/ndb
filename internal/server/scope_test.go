@@ -42,9 +42,9 @@ func TestScopedTokens(t *testing.T) {
 		{"ops", "POST", "/fresh/_compact", ``, true},
 		{"esl", "POST", "/outbox/_rename", `{"to":"outbox2"}`, false},
 		{"calls-admin", "POST", "/calls_restored/_rename", `{"to":"other"}`, false},
-		{"calls-admin", "POST", "/calls/_restore", `{"until":"2026-01-01T00:00:00Z","into":"other"}`, false},
-		{"calls-admin", "POST", "/_restore", `{"collection":"other","until":"2026-01-01T00:00:00Z","into":"calls_x"}`, false},
-		{"esl", "POST", "/_restore", `{"collection":"outbox","until":"2026-01-01T00:00:00Z","into":"outbox_x"}`, false},
+		{"calls-admin", "POST", "/calls/_restore", `{"at":"2026-01-01T00:00:00Z","to":"other"}`, false},
+		{"calls-admin", "POST", "/_restore", `{"collection":"other","at":"2026-01-01T00:00:00Z","to":"calls_x"}`, false},
+		{"esl", "POST", "/_restore", `{"collection":"outbox","at":"2026-01-01T00:00:00Z","to":"outbox_x"}`, false},
 		{"dash", "GET", "/calls/_pitr", ``, true},
 	}
 

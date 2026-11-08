@@ -91,7 +91,7 @@ After a restore, documents keep their `_v`, and `watch` consumers resume after t
 
 ### Point in time recovery
 
-A copy of a collection as it was at an instant of the last day: `ndb restore calls -until 15m -into calls_restored`, then `ndb rename calls_restored calls -replace`. See [PITR](pitr.md).
+A copy of a collection as it was at an instant of the last day: `ndb restore calls -at 15m -to calls_restored`, then `ndb rename calls_restored calls -replace`. See [PITR](pitr.md).
 
 ### Recovery after a crash
 

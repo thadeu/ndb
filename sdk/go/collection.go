@@ -292,13 +292,13 @@ func (c *Coll[T]) Rename(ctx context.Context, to string, replace bool) error {
 	return err
 }
 
-// Restore makes the collection into hold this collection as it was at
-// until, from the PITR window of the daemon (1 day by default). The source
-// is not touched; a dropped collection can be restored while it is in the
-// window. Rename into over the source to put the copy in place. Errors:
+// Restore makes the collection to hold this collection as it was at at,
+// from the PITR window of the daemon (1 day by default). The source is not
+// touched; a dropped collection can be restored while it is in the window.
+// Rename to over the source to put the copy in place. Errors:
 // ErrOutOfWindow, ErrPITROff, ErrCollectionExists.
-func (c *Coll[T]) Restore(ctx context.Context, into string, until time.Time) error {
-	body, err := json.Marshal(map[string]any{"into": into, "until": until.UTC().Format(time.RFC3339Nano)})
+func (c *Coll[T]) Restore(ctx context.Context, at time.Time, to string) error {
+	body, err := json.Marshal(map[string]any{"at": at.UTC().Format(time.RFC3339Nano), "to": to})
 	if err != nil {
 		return err
 	}

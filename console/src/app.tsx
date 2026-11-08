@@ -10,7 +10,6 @@ import { Ndb, NdbError, type Stats, target } from './ndb';
 import { type Env, readPrefix } from './prefix';
 
 import { backupsRoutes } from '@/routes/backups';
-import { pitrRoutes } from '@/routes/pitr';
 import { browserRoutes } from '@/routes/browser';
 import { pageOrigin, sameOrigin } from '@/routes/context';
 import { devtoolsRoutes } from '@/routes/devtools';
@@ -234,7 +233,6 @@ export function createApp(connections: Connections, assets: Assets, options: App
   browserRoutes(app, deps);
   devtoolsRoutes(app, deps);
   watchRoutes(app, deps);
-  pitrRoutes(app, deps);
   backupsRoutes(app, deps);
 
   return app;

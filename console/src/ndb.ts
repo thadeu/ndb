@@ -198,8 +198,8 @@ export class Ndb {
 
   // restore is POST /{coll}/_restore. It copies up to a day of WAL, so it
   // gets a long timeout.
-  restore(collection: string, until: string, into: string): Promise<{ collection: string; duration_ms: number }> {
-    return this.json('POST', `/${encodeURIComponent(collection)}/_restore`, JSON.stringify({ until, into }), 600_000);
+  restore(collection: string, at: string, to: string): Promise<{ collection: string; duration_ms: number }> {
+    return this.json('POST', `/${encodeURIComponent(collection)}/_restore`, JSON.stringify({ at, to }), 600_000);
   }
 
   rename(collection: string, to: string, replace: boolean): Promise<{ collection: string }> {

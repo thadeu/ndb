@@ -68,11 +68,11 @@ describe('truncate and drop', () => {
 
     await new Promise((r) => setTimeout(r, 5))
     await calls.delete('a')
-    await calls.restore({ until, into: into.name })
+    await calls.restore({ at: until, to: into.name })
 
     expect(await into.get('a')).not.toBeNull()
 
-    await expect(calls.restore({ until: new Date(Date.now() - 3 * 86_400_000), into: `${into.name}x` })).rejects.toBeInstanceOf(PitrError)
+    await expect(calls.restore({ at: new Date(Date.now() - 3 * 86_400_000), to: `${into.name}x` })).rejects.toBeInstanceOf(PitrError)
 
     const info = await calls.pitr()
 

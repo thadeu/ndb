@@ -166,12 +166,12 @@ export class Collection<F extends Fields> {
     await this.db.transport.request('POST', this.path('_rename'), { to, replace: opts.replace ?? false })
   }
 
-  // Makes the collection `into` hold this collection as it was at `until`, from
-  // the PITR window of the daemon (1 day by default). The source is not
-  // touched. Throws PitrError out of the window, CollectionExistsError when
-  // `into` exists.
-  async restore(opts: { until: Date; into: string }): Promise<void> {
-    await this.db.transport.request('POST', this.path('_restore'), { until: opts.until.toISOString(), into: opts.into })
+  // Makes the collection `to` hold this collection as it was at `at`, from the
+  // PITR window of the daemon (1 day by default). The source is not touched.
+  // Throws PitrError out of the window, CollectionExistsError when `to`
+  // exists.
+  async restore(opts: { at: Date; to: string }): Promise<void> {
+    await this.db.transport.request('POST', this.path('_restore'), { at: opts.at.toISOString(), to: opts.to })
   }
 
   // The PITR window of the collection: from when a restore reaches, and the

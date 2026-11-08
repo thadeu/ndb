@@ -201,15 +201,15 @@ module Ndb
       json(post(coll, "_rename", { to: to, replace: replace }))
     end
 
-    # Makes the collection +into+ hold +coll+ as it was at +at+ (a Time or
+    # Makes the collection +to+ hold +coll+ as it was at +at+ (a Time or
     # an RFC 3339 string), from the PITR window of the daemon (1 day by
     # default). +coll+ may be dropped while it is in the window. Raises
     # OutOfWindow, PitrOff or CollectionExists.
-    # {"collection", "restored", "until", "duration_ms"}
-    def restore(coll, at:, into:)
+    # {"collection", "restored", "at", "duration_ms"}
+    def restore(coll, at:, to:)
       at = at.utc.iso8601(9) if at.respond_to?(:utc)
 
-      json(post(coll, "_restore", { until: at, into: into }))
+      json(post(coll, "_restore", { at: at, to: to }))
     end
 
     # The PITR window of the collection: {"collection", "window", "oldest",
