@@ -1,5 +1,5 @@
 {
-  "name": "@thadeu/ui",
+  "name": "@tdu/ui",
   "version": "0.1.0",
   "description": "A date picker with a positional mask, a smart popover, a time row and presets. Vanilla DOM and React, no dependency.",
   "keywords": [

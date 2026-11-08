@@ -1,15 +1,15 @@
-# @thadeu/ui
+# @tdu/ui
 
 A date picker you do not write again. A positional mask, a calendar in a smart popover, a time row, presets and ranges. Vanilla DOM and React, no dependency, ESM + CommonJS + types.
 
 ```bash
-npm install @thadeu/ui
+npm install @tdu/ui
 ```
 
 ```ts
-import '@thadeu/ui/date-picker.css';
-import { createDatePicker } from '@thadeu/ui';          // vanilla
-import { DatePicker, useDatePicker } from '@thadeu/ui/react';   // React 18+
+import '@tdu/ui/date-picker.css';
+import { createDatePicker } from '@tdu/ui';          // vanilla
+import { DatePicker, useDatePicker } from '@tdu/ui/react';   // React 18+
 ```
 
 - [What it does](#what-it-does)
@@ -38,8 +38,8 @@ import { DatePicker, useDatePicker } from '@thadeu/ui/react';   // React 18+
 ## Vanilla
 
 ```ts
-import { createDatePicker } from '@thadeu/ui';
-import '@thadeu/ui/date-picker.css';
+import { createDatePicker } from '@tdu/ui';
+import '@tdu/ui/date-picker.css';
 
 const picker = createDatePicker(document.querySelector('#when')!, {
   id: 'at',
@@ -68,7 +68,7 @@ picker.destroy();                                // removes the listeners
 `useDatePicker` gives a `ref` for a container and the state. The picker owns the DOM of that container; React renders an empty element and never touches its children.
 
 ```tsx
-import { useDatePicker } from '@thadeu/ui/react';
+import { useDatePicker } from '@tdu/ui/react';
 
 function RestoreForm() {
   const at = useDatePicker({ name: 'at', label: 'At (UTC)', max: 'now', presets: [{ label: '1 hour ago', ago: '1h' }] });
@@ -85,7 +85,7 @@ function RestoreForm() {
 `<DatePicker>` is the hook in a `div`. With `value` it is controlled: the field follows the prop, and `onChange` reports what the user does.
 
 ```tsx
-import { DatePicker } from '@thadeu/ui/react';
+import { DatePicker } from '@tdu/ui/react';
 
 function Filter() {
   const [from, setFrom] = useState('2026-11-01');
@@ -113,12 +113,12 @@ Write the markup on the server (any template, any framework), mount it in the br
 
 ```ts
 // server
-import { datePickerHTML } from '@thadeu/ui';
+import { datePickerHTML } from '@tdu/ui';
 
 const html = datePickerHTML({ id: 'period', name: 'period', label: 'Period', mode: 'range', presets: [{ label: 'Last 7 days', last: '7d' }] });
 
 // browser
-import { mountDatePickers } from '@thadeu/ui';
+import { mountDatePickers } from '@tdu/ui';
 
 mountDatePickers(document, { onChange: change => console.log(change.from, change.to) });
 ```
@@ -272,7 +272,7 @@ Each part is exported, pure where it can be, and tested:
 | `date-picker` | `datePickerHTML`, `mountDatePicker`, `mountDatePickers`, `createDatePicker`, `attachMask`, `DEFAULT_LABELS` |
 
 ```ts
-import { attachMask } from '@thadeu/ui';
+import { attachMask } from '@tdu/ui';
 
 attachMask(document.querySelector('input')!, 'time');   // just the mask
 ```
