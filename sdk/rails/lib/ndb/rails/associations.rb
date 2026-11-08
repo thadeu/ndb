@@ -131,13 +131,21 @@ module Ndb
       end
     end
 
-    # The associated record (or records), from includes or loaded now.
+    # The associated record, or for a has_many a Ndb::Relation (lazy and
+    # chainable, like ActiveRecord). It is kept on the record for the key it
+    # was read with: a change of the foreign key (or reload) reads it again.
     def association(name)
-      @associations ||= {}
+      reflection = self.class.reflections.fetch(name)
+      key = association_key(reflection)
+      cached = (@associations ||= {})[name]
 
-      return @associations[name] if @associations.key?(name)
+      return cached[:value] if cached && cached[:key] == key
 
-      @associations[name] = load_association(self.class.reflections.fetch(name))
+      value = load_association(reflection, key)
+
+      @associations[name] = { key: key, value: value }
+
+      value
     end
 
     # Sets the associations that a lookup brought in row.
@@ -145,35 +153,51 @@ module Ndb
       self.class.reflections.each do |name, reflection|
         next unless row.key?(name)
 
-        @associations ||= {}
-        @associations[name] = build_association(reflection, row[name])
+        key = association_key(reflection)
+
+        (@associations ||= {})[name] = { key: key, value: build_association(reflection, key, row[name]) }
       end
     end
 
     private
 
-    def build_association(reflection, value)
-      return value.map { |doc| reflection.klass.instantiate(doc) } if value.is_a?(Array) && reflection.many?
-      return nil if value.nil?
-      return value.map { |doc| reflection.klass.instantiate(doc) } if value.is_a?(Array)
+    # The field of this record the association reads: the foreign key of a
+    # belongs_to, the primary key of a has_many or has_one.
+    def association_key(reflection)
+      field = reflection.kind == :belongs_to ? reflection.foreign_key : reflection.primary_key
 
-      reflection.klass.instantiate(value)
+      respond_to?(field) ? public_send(field) : nil
     end
 
-    def load_association(reflection)
+    def build_association(reflection, key, value)
       target = reflection.klass
 
-      if reflection.kind == :belongs_to
-        key = public_send(reflection.foreign_key)
+      return association_scope(reflection, key).preload(Array(value).map { |doc| target.instantiate(doc) }) if reflection.many?
+      return nil if value.nil?
+      return value.map { |doc| target.instantiate(doc) } if value.is_a?(Array)
 
-        return key.nil? ? nil : target.find_by(reflection.primary_key => key)
+      target.instantiate(value)
+    end
+
+    def load_association(reflection, key)
+      if reflection.kind == :belongs_to
+        return key.nil? ? nil : reflection.klass.find_by(reflection.primary_key => key)
       end
 
-      scope = target.where(reflection.foreign_key => public_send(reflection.primary_key))
+      scope = association_scope(reflection, key)
+
+      reflection.many? ? scope : scope.first
+    end
+
+    # The relation of a has_many or has_one: the other side whose foreign
+    # key is key, with the declared where, sort and limit.
+    def association_scope(reflection, key)
+      scope = reflection.klass.where(reflection.foreign_key => key)
       scope = scope.where_raw(reflection.options[:query]) if reflection.options[:query]
       scope = scope.order(reflection.options[:sort]) if reflection.options[:sort]
+      scope = scope.limit(reflection.options[:limit]) if reflection.options[:limit]
 
-      reflection.many? ? scope.limit(reflection.options[:limit] || 100).to_a : scope.first
+      scope
     end
   end
 end

@@ -195,6 +195,22 @@ module Ndb
       add_to!(attribute, -by)
     end
 
+    # Reads the document again, like ActiveRecord reload: the attributes,
+    # the version and the associations (they load again on next use).
+    def reload
+      raise RecordNotSaved, "Cannot reload a record that is not saved" unless persisted?
+
+      fresh = self.class.find(id)
+
+      @attributes = fresh.instance_variable_get(:@attributes)
+      @version = fresh.version
+      @associations = nil
+
+      clear_changes_information
+
+      self
+    end
+
     def ==(other)
       other.instance_of?(self.class) && !id.nil? && id == other.id
     end

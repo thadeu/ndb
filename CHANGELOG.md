@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- **Rails associations behave like ActiveRecord.** `user.cdrs` (a `has_many`) is an `Ndb::Relation`: lazy and chainable (`user.cdrs.where(status: "answered").count`); after an `includes` it holds the loaded records, and a builder on it queries again. An association is kept for the key it was read with: changing the foreign key reads it again.
+
+### Added
+
+- Rails: `reload` (the attributes, the version and the associations) and `last` on a relation and on the model; a relation's `size` uses the loaded records, else counts.
+
 ## [1.4.1] - 2026-11-08
 
 ### Added

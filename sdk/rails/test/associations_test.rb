@@ -18,7 +18,7 @@ end
 class Item < Ndb::Record
   self.collection_name = NdbTestHelpers.next_name
 
-  attribute :order_id, :string
+  attribute :order_id, :string, index: true
   attribute :sku, :string
   attribute :pos, :integer
 
@@ -45,7 +45,7 @@ end
 
 class AssociationsTest < Minitest::Test
   def setup
-    Customer.create!(_id: "c1", name: "Ana")
+    Customer.create!([{ _id: "c1", name: "Ana" }, { _id: "c2", name: "Bruno" }])
     Product.create!([{ _id: "p1", code: "A", name: "Mouse" }, { _id: "p2", code: "B", name: "Teclado" }])
     Order.create!([{ _id: "o1", customer_id: "c1", total: 120 }, { _id: "o2", customer_id: "nobody", total: 1 }])
     Item.create!([{ _id: "i1", order_id: "o1", sku: "A", pos: 2 }, { _id: "i2", order_id: "o1", sku: "B", pos: 1 }])
@@ -91,5 +91,54 @@ class AssociationsTest < Minitest::Test
     assert_equal "Ana", order.customer.name
     assert_equal %w[i2 i1], order.items.map(&:_id)
     assert_equal "Mouse", order.items.last.product.name
+  end
+
+  def test_has_many_is_a_chainable_relation
+    order = Order.find("o1")
+    items = order.items
+
+    assert_kind_of Ndb::Relation, items
+    refute_predicate items, :loaded?
+    assert_equal %w[i2 i1], items.map(&:_id)
+    assert_equal %w[i1], order.items.where(sku: "A").map(&:_id)
+    assert_equal 1, order.items.where(sku: "B").count
+    assert_equal "i2", order.items.first._id
+  end
+
+  def test_includes_preloads_the_relation_and_a_builder_queries_again
+    order = Order.where(_id: "o1").includes(:items).first
+
+    assert_predicate order.items, :loaded?
+    assert_equal 2, order.items.size
+    refute_empty order.items
+    assert_equal %w[i1], order.items.where(sku: "A").map(&:_id)
+  end
+
+  def test_a_new_foreign_key_reads_the_association_again
+    order = Order.find("o1")
+
+    assert_equal "Ana", order.customer.name
+
+    order.customer_id = "c2"
+
+    assert_equal "Bruno", order.customer.name
+
+    order.customer_id = nil
+
+    assert_nil order.customer
+  end
+
+  def test_reload_reads_the_document_and_the_associations_again
+    order = Order.find("o1")
+
+    assert_equal "Ana", order.customer.name
+
+    Order.where(_id: "o1").update({ "$set" => { "customer_id" => "c2" } })
+    order.customer_id = "changed in memory"
+    order.reload
+
+    assert_equal "c2", order.customer_id
+    refute_predicate order, :changed?
+    assert_equal "Bruno", order.customer.name
   end
 end

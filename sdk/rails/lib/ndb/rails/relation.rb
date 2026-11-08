@@ -10,6 +10,7 @@ module Ndb
     DEFAULT_PER_PAGE = 25
     BATCH_SIZE = 1000
     EMPTY = { where: [].freeze, order: {}.freeze, group: [].freeze }.freeze
+    PRELOADED = Data.define(:rows, :next, :total).new(rows: [].freeze, next: nil, total: nil)
 
     attr_reader :klass, :values
 
@@ -152,10 +153,35 @@ module Ndb
       records.length
     end
 
+    # Like ActiveRecord: the number of loaded records when loaded, else a
+    # count in the daemon.
+    def size
+      loaded? ? @records.length : count
+    end
+
+    def empty?
+      size.zero?
+    end
+
+    # Holds records that were read already (an includes): reading the
+    # relation does not query; a builder on it (where, order...) does.
+    def preload(records)
+      @records = records
+      @result = PRELOADED
+
+      self
+    end
+
     def next_cursor
       load
 
       @result.next
+    end
+
+    # The last record (or count of them) of the loaded records, in the
+    # order of the relation.
+    def last(count = nil)
+      count ? records.last(count) : records.last
     end
 
     def first(count = nil)

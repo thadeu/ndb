@@ -321,10 +321,40 @@ end
 Cdr.order(at: :desc).limit(50).includes(:user).map { |cdr| cdr.user.name }
 ```
 
-Without `includes`, an association loads on first use, with one more call for each record (the N+1 of ActiveRecord):
+Each association is a method, made by the declaration. Without `includes`, it loads on first use, with one more call for each record (the N+1 of ActiveRecord):
 
 ```ruby
-User.find("u1").cdrs            # one search on cdrs, now
+cdr = Cdr.find("x1")
+cdr.user                        # finds the user now: User.find_by(_id: cdr.user_id)
+cdr.user                        # the same object, no call
+```
+
+### has_many is a relation
+
+`user.cdrs` is an `Ndb::Relation`, as in ActiveRecord: lazy and chainable. A builder on it is a new query, scoped to the user:
+
+```ruby
+user = User.find("u1")
+
+user.cdrs.where(status: "answered").order(at: :desc).limit(10).to_a
+user.cdrs.count                 # a count in the daemon
+user.cdrs.each { |cdr| ... }    # loads once, then reads from memory
+
+User.includes(:cdrs).each do |u|
+  u.cdrs.size                   # loaded with the users: no call
+  u.cdrs.where(status: "missed").count   # a builder queries again
+end
+```
+
+### Stale associations
+
+An association is kept on the record for the key it was read with:
+
+```ruby
+cdr.user                        # Ana
+cdr.user_id = "u2"
+cdr.user                        # the foreign key changed: reads again, Bruno
+cdr.reload                      # reads the document; every association loads again on next use
 ```
 
 ### What is inferred
