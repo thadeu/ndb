@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest'
-import { CollectionExistsError, NotFoundError } from '../src/errors.js'
+import { CollectionExistsError, NotFoundError, PitrError } from '../src/errors.js'
 import { callsModel } from './fixtures.js'
 import { unixDb } from './helpers.js'
 
@@ -55,5 +55,27 @@ describe('truncate and drop', () => {
 
     expect(await other.get('a')).not.toBeNull()
     expect(await other.get('old')).toBeNull()
+  })
+
+  it('restore makes a copy as of an instant, and pitr reports the window', async () => {
+    const calls = callsModel(db)
+    const into = callsModel(db)
+
+    await calls.insert({ _id: 'a', status: 's', ts: new Date() })
+    await new Promise((r) => setTimeout(r, 5))
+
+    const until = new Date()
+
+    await new Promise((r) => setTimeout(r, 5))
+    await calls.delete('a')
+    await calls.restore({ until, into: into.name })
+
+    expect(await into.get('a')).not.toBeNull()
+
+    await expect(calls.restore({ until: new Date(Date.now() - 3 * 86_400_000), into: `${into.name}x` })).rejects.toBeInstanceOf(PitrError)
+
+    const info = await calls.pitr()
+
+    expect(info.window).toBe('1d')
   })
 })

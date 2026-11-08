@@ -58,6 +58,12 @@ module Ndb
   # rename onto a name that exists, without replace.
   class CollectionExists < Error; end
 
+  # restore to an instant out of the PITR window of the collection.
+  class OutOfWindow < Error; end
+
+  # restore of a collection with pitr: off.
+  class PitrOff < Error; end
+
   # The daemon error code -> the Ruby class.
   CODE_TO_ERROR = {
     "unauthorized" => Unauthorized,
@@ -85,7 +91,9 @@ module Ndb
     "unindexed_many" => UnindexedMany,
     "empty_filter" => EmptyFilter,
     "confirm_required" => ConfirmRequired,
-    "collection_exists" => CollectionExists
+    "collection_exists" => CollectionExists,
+    "out_of_window" => OutOfWindow,
+    "pitr_off" => PitrOff
   }.freeze
 
   def self.error_for(code, message, status)

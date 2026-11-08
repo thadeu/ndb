@@ -237,3 +237,15 @@ export interface WatchEvent<R> {
   _v: number
   doc: R | undefined
 }
+
+// The PITR window of a collection (GET /{coll}/_pitr). oldest and newest
+// are RFC 3339 times; they are absent while nothing can be restored yet.
+export interface PitrInfo {
+  collection: string
+  window: string
+  oldest?: string
+  newest?: string
+  snapshots: number
+  bytes: number
+  dropped?: boolean
+}

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/config"
@@ -575,5 +576,35 @@ func TestRenameCommand(t *testing.T) {
 	err = rename(append([]string{"articles", "calls"}, base...), nil, &out)
 	if err == nil || !strings.Contains(err.Error(), "collection_exists") {
 		t.Fatalf("rename onto calls: err = %v", err)
+	}
+}
+
+func TestPITRRestoreAndListCommands(t *testing.T) {
+	dir := seedMixed(t, t.TempDir())
+	sock, _ := startDaemon(t, dir)
+
+	base := []string{"-config", "none.yml", "-url", "unix://" + sock}
+	until := time.Now().UTC().Format(time.RFC3339Nano)
+
+	got := runCmd(t, func(a []string, o *strings.Builder) error { return pitrRestore(a, o) }, append([]string{"posts", "-until", until, "-into", "posts_back"}, base...)...)
+
+	if !strings.HasPrefix(got, "posts: restored into posts_back as of ") {
+		t.Fatalf("restore output = %q", got)
+	}
+
+	got = runCmd(t, func(a []string, o *strings.Builder) error { return pitrList(a, o) }, base...)
+
+	if !strings.Contains(got, "posts_back") || !strings.Contains(got, "1d") || strings.Contains(got, "calls") {
+		t.Fatalf("pitr output = %q", got)
+	}
+
+	if !isPITRRestore([]string{"posts", "--until=15m"}) || isPITRRestore([]string{"backup.ndb"}) {
+		t.Fatal("isPITRRestore")
+	}
+
+	now := time.Now()
+
+	if at, err := parseUntil("15m", now); err != nil || !at.Equal(now.Add(-15*time.Minute)) {
+		t.Fatalf("parseUntil 15m = %v, %v", at, err)
 	}
 }

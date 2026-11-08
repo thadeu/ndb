@@ -12,6 +12,7 @@ import type {
   Filter,
   Input,
   InsertOptions,
+  PitrInfo,
   Row,
   Schema,
   SearchBody,
@@ -163,6 +164,20 @@ export class Collection<F extends Fields> {
     this.ensured = undefined
 
     await this.db.transport.request('POST', this.path('_rename'), { to, replace: opts.replace ?? false })
+  }
+
+  // Makes the collection `into` hold this collection as it was at `until`, from
+  // the PITR window of the daemon (1 day by default). The source is not
+  // touched. Throws PitrError out of the window, CollectionExistsError when
+  // `into` exists.
+  async restore(opts: { until: Date; into: string }): Promise<void> {
+    await this.db.transport.request('POST', this.path('_restore'), { until: opts.until.toISOString(), into: opts.into })
+  }
+
+  // The PITR window of the collection: from when a restore reaches, and the
+  // disk it holds.
+  async pitr(): Promise<PitrInfo> {
+    return await this.db.transport.request<PitrInfo>('GET', this.path('_pitr'))
   }
 
   private confirm(): string {

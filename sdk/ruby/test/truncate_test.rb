@@ -39,4 +39,19 @@ class TruncateTest < Minitest::Test
     assert_equal 1, client.get(other, "c1")["n"]
     refute_includes client.collections.map { |c| c["name"] }, @coll
   end
+
+  def test_restore_brings_back_a_deleted_document
+    sleep 0.005
+    at = Time.now
+    sleep 0.005
+
+    client.delete(@coll, "c1")
+
+    into = NdbTestHelpers.next_name
+    client.restore(@coll, at: at, into: into)
+
+    assert_equal 1, client.get(into, "c1")["n"]
+    assert_raises(Ndb::OutOfWindow) { client.restore(@coll, at: at - 3 * 86_400, into: "#{into}x") }
+    assert_equal "1d", client.pitr(@coll)["window"]
+  end
 end

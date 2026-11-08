@@ -23,7 +23,13 @@ const stageDir = ".restore-stage"
 // line CRC and its end line checked. The stage is then opened like a daemon
 // would, to prove it recovers. Only then does it replace the data dir
 // contents; any earlier failure leaves the data dir as it was.
+//
+// With -until it is a PITR restore instead, by a running daemon (pitr.go).
 func runRestore(args []string) error {
+	if isPITRRestore(args) {
+		return pitrRestore(args, os.Stdout)
+	}
+
 	return restore(args, os.Stdin, os.Stderr)
 }
 

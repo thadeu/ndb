@@ -59,4 +59,6 @@ var (
 	ErrEmptyFilter       = &Error{Code: "empty_filter"}
 	ErrConfirmRequired   = &Error{Code: "confirm_required"}
 	ErrCollectionExists  = &Error{Code: "collection_exists"}
+	ErrOutOfWindow       = &Error{Code: "out_of_window"}
+	ErrPITROff           = &Error{Code: "pitr_off"}
 )

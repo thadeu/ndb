@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestTruncateAndDrop(t *testing.T) {
@@ -92,5 +93,52 @@ func TestRename(t *testing.T) {
 
 	if _, err := target.Get(ctx, "old"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("the replaced collection is still there: %v", err)
+	}
+}
+
+func TestRestoreAndPITR(t *testing.T) {
+	ctx := context.Background()
+	db := openTest(t, daemon.unix)
+	name, into := newColl(), newColl()
+
+	calls, err := Collection[Call](db, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := calls.Insert(ctx, Call{CallID: "c1", Status: "a"}); err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(5 * time.Millisecond)
+
+	until := time.Now()
+
+	time.Sleep(5 * time.Millisecond)
+
+	if _, err := calls.Delete(ctx, "c1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := calls.Restore(ctx, into, until); err != nil {
+		t.Fatal(err)
+	}
+
+	back, err := Collection[Call](db, into)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := back.Get(ctx, "c1"); err != nil {
+		t.Fatalf("get on the copy: %v", err)
+	}
+
+	if err := calls.Restore(ctx, into+"x", until.Add(-48*time.Hour)); !errors.Is(err, ErrOutOfWindow) {
+		t.Fatalf("restore out of the window: %v", err)
+	}
+
+	info, err := calls.PITR(ctx)
+	if err != nil || info.Window != "1d" || info.Oldest.IsZero() {
+		t.Fatalf("pitr = %+v, %v", info, err)
 	}
 }

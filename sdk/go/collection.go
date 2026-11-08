@@ -292,6 +292,39 @@ func (c *Coll[T]) Rename(ctx context.Context, to string, replace bool) error {
 	return err
 }
 
+// Restore makes the collection into hold this collection as it was at
+// until, from the PITR window of the daemon (1 day by default). The source
+// is not touched; a dropped collection can be restored while it is in the
+// window. Rename into over the source to put the copy in place. Errors:
+// ErrOutOfWindow, ErrPITROff, ErrCollectionExists.
+func (c *Coll[T]) Restore(ctx context.Context, into string, until time.Time) error {
+	body, err := json.Marshal(map[string]any{"into": into, "until": until.UTC().Format(time.RFC3339Nano)})
+	if err != nil {
+		return err
+	}
+
+	return c.send(ctx, http.MethodPost, "_restore", body, nil)
+}
+
+// PITRInfo is the PITR window of a collection: the oldest and newest
+// instant a restore reaches, and the disk the window holds.
+type PITRInfo struct {
+	Collection string    `json:"collection"`
+	Window     string    `json:"window"`
+	Oldest     time.Time `json:"oldest"`
+	Newest     time.Time `json:"newest"`
+	Snapshots  int       `json:"snapshots"`
+	Bytes      int64     `json:"bytes"`
+	Dropped    bool      `json:"dropped"`
+}
+
+// PITR is the PITR window of the collection (GET /{coll}/_pitr).
+func (c *Coll[T]) PITR(ctx context.Context) (PITRInfo, error) {
+	var out PITRInfo
+
+	return out, c.send(ctx, http.MethodGet, "_pitr", nil, &out)
+}
+
 // Stats is the state of the collection (GET /{coll}/_stats): rows, indexes,
 // files and bytes.
 func (c *Coll[T]) Stats(ctx context.Context) (map[string]any, error) {

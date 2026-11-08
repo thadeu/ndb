@@ -149,6 +149,11 @@ module Ndb
     # Renames the collection on the daemon; this object keeps the old name.
     def rename(to, replace: false) = client.rename(name, to, replace: replace)
 
+    # A copy of the collection as it was at +at+, in the collection +into+.
+    def restore(at:, into:) = client.restore(name, at: at, into: into)
+
+    def pitr = client.pitr(name)
+
     def stats
       ready!
       client.collection_stats(name)

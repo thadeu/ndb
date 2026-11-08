@@ -31,6 +31,8 @@ export type ErrorCode =
   | 'empty_filter'
   | 'confirm_required'
   | 'collection_exists'
+  | 'out_of_window'
+  | 'pitr_off'
   | 'invalid_update'
   | 'http_status'
   | (string & {})
@@ -69,6 +71,10 @@ export class TtlError extends NdbError {}
 // rename onto a name that exists, without replace.
 export class CollectionExistsError extends NdbError {}
 
+// restore to an instant out of the PITR window (out_of_window), or of a
+// collection with pitr: off (pitr_off).
+export class PitrError extends NdbError {}
+
 const subclasses: Record<string, typeof NdbError> = {
   unauthorized: UnauthorizedError,
   not_found: NotFoundError,
@@ -91,6 +97,8 @@ const subclasses: Record<string, typeof NdbError> = {
   unindexed_many: InvalidUpdateError,
   empty_filter: InvalidUpdateError,
   collection_exists: CollectionExistsError,
+  out_of_window: PitrError,
+  pitr_off: PitrError,
 }
 
 export function makeError(code: ErrorCode, message: string, status = 0): NdbError {
