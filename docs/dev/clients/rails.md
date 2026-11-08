@@ -507,6 +507,102 @@ loaded.recording.each_chunk { |chunk| out.write(chunk) } # 1 MiB ranges
 
 A blob behaves like a read-only IO (`read`, `each_chunk`, `eof?`, `rewind`). A loaded blob reads the daemon in 1 MiB ranges, so memory stays small. The same content always gives the same reference. You can also use `Ndb::Blob.new(io_or_string, content_type: "audio/wav")`.
 
+## Method reference
+
+Every public method of the gem, grouped. The names and return values follow ActiveRecord; what is not in these lists does not exist (no `joins`, `transaction`, `dependent:`, migrations).
+
+::: details Declare a model (class methods)
+
+| Method | |
+|---|---|
+| `attribute :name, :type, index:, unique:, time:, expires:` | an ActiveModel attribute; `index`/`unique` declare an index or a unique key; `time` is the time field; `expires` holds the expiry of each document |
+| `self.collection_name = "calls"` / `collection_name` | the collection (default: the plural model name). A pattern (`"logs-2026-*"`) reads many collections and writes none |
+| `ttl 24.hours` | documents expire this long after the time field |
+| `source "/var/log/app/*.ndjson"` | a direct collection: the app files are the data, ndb only reads |
+| `belongs_to`, `has_many`, `has_one` | associations, see [Lookup](#lookup) |
+| `self.abstract_class = true` / `abstract_class?` | a base class with no collection |
+| `primary_key` | always `"_id"` |
+| `time_field`, `expires_field`, `indexed_fields`, `unique_fields`, `collection_definition` | what the model declares |
+| `collection_pattern?` | `true` for a pattern |
+| `ensure_collection!` | declares the collection in the daemon (done by itself on first use, and at boot by the Railtie) |
+
+:::
+
+::: details Query (on the model and on a relation)
+
+| Method | Returns |
+|---|---|
+| `all` | a relation of every document |
+| `where(hash)`, `where.not(hash)`, `where_raw(hash)`, `or(relation)` | a relation. A Range is `$gte`/`$lte`, an Array is `$in`, `nil` is a missing field; `where_raw` sends the Hash as is |
+| `order(:a, b: :desc)`, `limit(n)`, `offset(n)`, `page(n)`, `per(n)`, `after(cursor)` | a relation |
+| `includes(:a, b: :c)` | a relation that loads associations in the same call |
+| `group(*fields)` | a relation for `count`/`sum`/... by group |
+| `find(id)`, `find(id1, id2)` | a record, or an Array; `Ndb::NotFound` when missing |
+| `find_by(hash)`, `find_by!(hash)`, `find_by_<attr>[_and_<attr>](values)` | a record or `nil` (`!`: `Ndb::NotFound`) |
+| `first`, `first(n)`, `last`, `last(n)` | a record or `nil`, or an Array |
+| `to_a`, `each`, `map`... (Enumerable), `load`, `loaded?`, `records` | the records (one call, then memory) |
+| `size`, `length`, `empty?` | from the loaded records, else a count |
+| `count`, `exists?`, `pluck(:a, :b)` | a number, a boolean, an Array of values |
+| `sum(:f)`, `average(:f)`, `minimum(:f)`, `maximum(:f)` | a number (or a Hash by group) |
+| `find_each(batch_size:)`, `in_batches(of:)` | every record, page by page with the cursor |
+| `next_cursor` | the cursor of the next page |
+| `search(body)` | a raw search body; `SearchResult` (`records`, `next_cursor`, `total`) |
+| `to_query` | the JSON body the relation sends |
+
+:::
+
+::: details Write
+
+| Method | |
+|---|---|
+| `Model.create(attrs)`, `create!(attrs)`, `create([attrs, ...])` | insert with validations and callbacks (`!` raises) |
+| `Model.upsert(attrs)`, `upsert_all([attrs, ...])` | create or merge by `_id`, no validations or callbacks |
+| `Model.find_or_create_by(hash)`, `find_or_create_by!(hash)` | atomic (an upsert) |
+| `Model.find_or_initialize_by(hash)` | a found record, or a new one not saved |
+| `Model.destroy(id)`, `Model.delete(id)` | by id, with or without callbacks |
+| `relation.update(ops)` | one atomic update on every match (`{ "$inc" => { "n" => 1 } }`); the number modified |
+| `relation.delete_all`, `relation.destroy_all` | delete every match (no callbacks / with callbacks) |
+| `Model.truncate!`, `Model.drop!` | empty the collection / remove it (keeps / removes the definition) |
+
+:::
+
+::: details A record (instance methods)
+
+| Method | |
+|---|---|
+| `save(validate: true, expire_in: nil)`, `save!` | insert or update the changed fields; `Ndb::StaleObjectError` when another write changed it |
+| `update(attrs)`, `update!(attrs)` | assign and save |
+| `destroy`, `destroy!`, `delete` | remove, with or without callbacks |
+| `reload` | read the document again: attributes, version, associations |
+| `increment!(:n, by)`, `decrement!(:n, by)` | an atomic `$inc` |
+| `expire(30.minutes)`, `persist_ttl!`, `ttl` | the expiry of this document |
+| `create_unless_exists(attrs)`, `create_unless_exists!(attrs)` | insert only when the `_id` is free |
+| `id`, `id=`, `_id` | the primary key (`id` is an alias) |
+| `version` | `_v`, the version the record was read with |
+| `persisted?`, `new_record?`, `destroyed?`, `to_key`, `==` | state and identity, like ActiveRecord |
+| `changed?`, `changes`, `<attr>_changed?`, `valid?`, `errors`, `as_json`, `to_json` | from ActiveModel (Dirty, Validations, Serializers) |
+| `source_collection` | the collection a record came from, when the model reads a pattern |
+| `customer`, `items`, ... | one method per association: a record or `nil` (`belongs_to`, `has_one`), a relation (`has_many`) |
+
+:::
+
+::: details Blobs
+
+| Method | |
+|---|---|
+| `attribute :recording, :blob` | a large value stored apart, referenced by the document |
+| `Ndb::Blob.new(io_or_string, content_type:)` | a blob to assign; it uploads on save |
+| `blob.read(n)`, `each_chunk`, `rewind`, `eof?` | stream the content |
+| `blob.uploaded?`, `upload!`, `to_reference` | its state and its `sha256:` reference |
+
+:::
+
+::: details The low layer
+
+`Ndb::Rails.client` is the `Ndb::Client` of the gem: `watch`, `ack`, `aggregate`, `restore`, `rename`, `pitr`, `ensure_index` and every route of the HTTP API. See the [Ruby SDK](ruby.md).
+
+:::
+
 ## Errors
 
 The transport and daemon errors are defined by the gem `ndb`. They all live in the `Ndb` module (`Ndb::Error`, `Ndb::NotFound`, ...). For an ActiveRecord-like `rescue`, this gem adds one alias: `Ndb::RecordNotUnique` is `Ndb::UniqueViolation` (the same class). `Ndb::StaleObjectError`, `Ndb::RecordInvalid` and `Ndb::RecordNotSaved` exist only here, and they inherit from `Ndb::Error`. Every error has `code` (the daemon code) and `status` (the HTTP status).
