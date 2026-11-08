@@ -22,7 +22,7 @@ class Item < Ndb::Record
   attribute :sku, :string
   attribute :pos, :integer
 
-  belongs_to :product, foreign_key: :sku, primary_key: :code
+  belongs_to :product, fk: :sku, pk: :code
 end
 
 class Invoice < Ndb::Record
@@ -54,6 +54,15 @@ class AssociationsTest < Minitest::Test
 
   def teardown
     [Customer, Product, Item, Invoice, Order].each(&:truncate!)
+  end
+
+  def test_short_names_and_one_name_only
+    assert_equal "sku", Item.reflections["product"].foreign_key
+    assert_equal "code", Item.reflections["product"].primary_key
+
+    error = assert_raises(ArgumentError) { Class.new(Ndb::Record) { belongs_to :x, fk: :a, foreign_key: :b } }
+
+    assert_match(/foreign_key: and fk:/, error.message)
   end
 
   def test_rails_defaults

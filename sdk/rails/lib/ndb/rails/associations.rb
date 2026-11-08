@@ -38,20 +38,27 @@ module Ndb
     end
 
     class_methods do
-      def belongs_to(name, class_name: nil, foreign_key: nil, primary_key: "_id")
-        associate(name, :belongs_to, class_name || name.to_s.camelize, foreign_key || "#{name}_id", primary_key, {})
+      # The keys are inferred like Rails (customer -> customer_id, Customer;
+      # has_many in Order -> order_id). foreign_key: (fk:) and primary_key:
+      # (pk:) replace them.
+      def belongs_to(name, class_name: nil, foreign_key: nil, fk: nil, primary_key: nil, pk: nil)
+        foreign_key = either(name, :foreign_key, foreign_key, :fk, fk) || "#{name}_id"
+
+        associate(name, :belongs_to, class_name || name.to_s.camelize, foreign_key, keys_pk(name, primary_key, pk), {})
       end
 
-      def has_many(name, class_name: nil, foreign_key: nil, primary_key: "_id", sort: nil, limit: nil, where: nil)
+      def has_many(name, class_name: nil, foreign_key: nil, fk: nil, primary_key: nil, pk: nil, sort: nil, limit: nil, where: nil)
         options = { sort: sort, limit: limit, query: where }.compact
+        foreign_key = either(name, :foreign_key, foreign_key, :fk, fk) || "#{model_name.singular}_id"
 
-        associate(name, :has_many, class_name || name.to_s.singularize.camelize, foreign_key || "#{model_name.singular}_id", primary_key, options)
+        associate(name, :has_many, class_name || name.to_s.singularize.camelize, foreign_key, keys_pk(name, primary_key, pk), options)
       end
 
-      def has_one(name, class_name: nil, foreign_key: nil, primary_key: "_id", sort: nil, where: nil)
+      def has_one(name, class_name: nil, foreign_key: nil, fk: nil, primary_key: nil, pk: nil, sort: nil, where: nil)
         options = { sort: sort, query: where }.compact
+        foreign_key = either(name, :foreign_key, foreign_key, :fk, fk) || "#{model_name.singular}_id"
 
-        associate(name, :has_one, class_name || name.to_s.camelize, foreign_key || "#{model_name.singular}_id", primary_key, options)
+        associate(name, :has_one, class_name || name.to_s.camelize, foreign_key, keys_pk(name, primary_key, pk), options)
       end
 
       def reflections
@@ -87,6 +94,19 @@ module Ndb
       end
 
       private
+
+      def keys_pk(name, primary_key, pk)
+        either(name, :primary_key, primary_key, :pk, pk) || "_id"
+      end
+
+      # either takes one of two names of the same option.
+      def either(name, long, long_value, short, short_value)
+        if long_value && short_value
+          raise ArgumentError, "#{self.name}.#{name}: #{long}: and #{short}: are the same option; pass one"
+        end
+
+        (long_value || short_value)&.to_s
+      end
 
       def own_reflections
         @own_reflections ||= {}

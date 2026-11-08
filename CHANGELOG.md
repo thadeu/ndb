@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Rails associations take `fk:` and `pk:` as short names of `foreign_key:` and `primary_key:`.
+
 ## [1.4.0] - 2026-11-08
 
 ### Added

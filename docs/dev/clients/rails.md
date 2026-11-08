@@ -227,7 +227,7 @@ class Item < Ndb::Record
   attribute :order_id, :string
   attribute :sku, :string
 
-  belongs_to :product, foreign_key: :sku, primary_key: :code
+  belongs_to :product, fk: :sku, pk: :code   # or foreign_key:, primary_key:
 end
 
 Order.where(status: "paid").includes(:customer, :invoice, items: :product).each do |order|
@@ -238,7 +238,7 @@ end
 Order.find("o1").customer      # without includes: one more call on first use
 ```
 
-- The defaults are the Rails ones: `belongs_to :customer` reads `customer_id` and the model `Customer`; `has_many :items` reads `Item.order_id`. Override with `class_name:`, `foreign_key:`, `primary_key:`.
+- The defaults are the Rails ones: `belongs_to :customer` reads `customer_id` and the model `Customer`; `has_many :items` reads `Item.order_id`. Override with `class_name:`, `foreign_key:` (or `fk:`) and `primary_key:` (or `pk:`); a value you pass always wins, and passing both names of one option is an `ArgumentError`.
 - `has_many` takes `sort:`, `limit:` and `where:`; `has_one` takes `sort:` and `where:`.
 - `has_many` and `has_one` create the index on the foreign key of the other model (the [lookup](../query.md#lookup) needs it).
 - Nested `includes` go two levels deep: `includes(items: :product)`.
