@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.4.6] - 2026-11-08
+
 ### Added
 
 - **`ndb bench` checks its numbers.** After the parts, every measurement is compared with a budget (lost writes, write p99, load, query and aggregation time, RSS, and the cost of idle collections), and the bench prints a PASS/FAIL table and exits 1 on a FAIL. `make bench` fails with it. A new part, `-idle`, measures what idle collections cost: 300 collections of 10 documents (`-collections`), then disk, CPU, RSS and open files at rest.
@@ -403,7 +405,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.4.5...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.4.6...HEAD
+[1.4.6]: https://github.com/thadeu/ndb/compare/v1.4.5...v1.4.6
 [1.4.5]: https://github.com/thadeu/ndb/compare/v1.4.4...v1.4.5
 [1.4.4]: https://github.com/thadeu/ndb/compare/v1.4.3...v1.4.4
 [1.4.3]: https://github.com/thadeu/ndb/compare/v1.4.2...v1.4.3

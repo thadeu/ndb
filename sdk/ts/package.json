@@ -1,6 +1,6 @@
 {
   "name": "@thadeu/ndb",
-  "version": "1.4.5",
+  "version": "1.4.6",
   "description": "TypeScript client for the ndb daemon",
   "keywords": [
     "ndb",
