@@ -142,6 +142,21 @@ await sessions.persist('s1') // PERSIST
 
 ## Query
 
+### Lookup
+
+```ts
+import { belongsTo, hasMany } from '@thadeu/ndb'
+
+const rows = await orders
+  .query({ status: 'paid' })
+  .lookup<'customer', Customer | null>('customer', belongsTo('customers', 'customer_id'))
+  .lookup<'items', Item[]>('items', hasMany('order_items', 'order_id', { sort: { pos: 1 }, limit: 50 }))
+  .all()
+```
+
+`belongsTo` (the fk is here), `hasMany` and `hasOne` (the fk is there), with `pk`, `query`, `sort`, `limit`, `fields` and a nested `lookup`. The second type parameter types the field. See [Lookup](../query.md#lookup); errors are `LookupError`.
+
+
 A query is lazy and immutable. It is also thenable: `await` runs it.
 
 ```ts

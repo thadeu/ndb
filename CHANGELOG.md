@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **Lookup.** `lookup` in `_search` reads, in the same call, the documents of other collections that the rows point to, inside the daemon: `belongs_to` (the foreign key is here; an object or `null`), `has_many` (the foreign key is there; an array, with its own `query`, `sort` and `limit`) and `has_one`, with `foreign_key`/`fk` and `primary_key`/`pk` (default `_id`), `fields`, and a nested `lookup` (two levels). An array foreign key matches each element. The other side must be indexed (`lookup_unindexed`), one answer attaches 10 000 documents at most (`lookup_too_large`, 422), and a scoped token must read every collection of it. Works on plain, partitioned and pattern searches. See [Lookup](docs/dev/query.md#lookup).
+- **`$lookup` in `_aggregate`**, at the end of the pipeline, with the MongoDB names (`from`, `localField`, `foreignField`, `as`) or one relation of the Rails names.
+- **SDKs:** Go `Lookup` with `BelongsTo`/`HasMany`/`HasOne` and the `lookup` tag option; TS `lookup` with `belongsTo`/`hasMany`/`hasOne`; Ruby `lookup`. **Rails:** `belongs_to`, `has_many` and `has_one` on `Ndb::Record` with the Rails defaults, and `includes(:customer, items: :product)` in one call.
+
 ## [1.3.0] - 2026-11-08
 
 ## [1.2.9] - 2026-11-08

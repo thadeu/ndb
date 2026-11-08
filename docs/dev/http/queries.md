@@ -20,12 +20,13 @@ Finds documents. No `query` matches every document.
 | `versions` | bool | `false` | add `_v` to each row |
 | `snapshot` | bool | `false` | keep the first snapshot for 60 s so all pages see the same data |
 | `explain` | bool | `false` | add `X-Ndb-Explain`, the plan counters |
+| `lookup` | object | none | documents of other collections for each row, see [Lookup](../query.md#lookup) |
 
 An unknown key is `invalid_query`.
 
 **Answer:** the rows, a JSON array (or NDJSON with `Accept: application/x-ndjson`), and the page headers `X-Ndb-Next`, `X-Ndb-Total`, `X-Ndb-Plan`, `X-Ndb-Examined`, `X-Ndb-Took-Ms`, `X-Ndb-Explain`. See [Answers](../http.md#answers).
 
-**Errors:** `invalid_query`, `cursor_invalid`, `cursor_mismatch`, `cursor_expired`, `404 unknown_collection`.
+**Errors:** `invalid_query`, `cursor_invalid`, `cursor_mismatch`, `cursor_expired`, `404 unknown_collection`; with a lookup, `lookup_invalid`, `lookup_unindexed`, `422 lookup_too_large`, `403 forbidden` (a scoped token that may not read the other collection).
 
 ::: code-group
 

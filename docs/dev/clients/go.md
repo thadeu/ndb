@@ -190,6 +190,24 @@ rows, err := calls.
 - `First(ctx)` returns the first row, or `ErrNotFound`.
 - The SDK has no explain call. To see the plan counters, send `"explain": true` in a raw `find` request and read the `X-Ndb-Explain` header. See the query language doc.
 
+### Lookup
+
+```go
+type Order struct {
+	ID         string    `ndb:"_id"`
+	CustomerID string    `ndb:"customer_id"`
+	Customer   *Customer `ndb:"customer,lookup"` // filled by Lookup, never written
+	Items      []Item    `ndb:"items,lookup"`
+}
+
+rows, err := orders.Query(ndb.Eq("status", "paid")).
+	Lookup("customer", ndb.BelongsTo("customers", "customer_id")).
+	Lookup("items", ndb.HasMany("order_items", "order_id").Sort(ndb.Asc("pos")).Limit(50)).
+	All(ctx)
+```
+
+`BelongsTo` (the fk is here), `HasMany` and `HasOne` (the fk is there); `PK`, `Query`, `Sort`, `Limit`, `Fields` and a nested `Lookup` on each. The related types decode with `encoding/json` (json tags). See [Lookup](../query.md#lookup) for the rules; errors `ErrLookupInvalid`, `ErrLookupUnindexed`, `ErrLookupTooLarge`.
+
 ### Queries built elsewhere
 
 For a search form or a saved search, take the JSON as is. `ndb.RawQueryJSON` (or `ndb.RawQuery` with a map) is a `Filter` that mixes with the others; `Search` takes a whole search body and returns one page.

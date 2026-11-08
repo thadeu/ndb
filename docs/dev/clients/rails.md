@@ -212,6 +212,38 @@ Call.where(status: "failed").exists?
 - `pluck` asks the daemon for only those fields.
 - There is no `explain` on a relation. Use the client: `Ndb::Rails.client.search(coll, "query" => {...}, "explain" => true)` returns a `Page` with `plan` (the `X-Ndb-Plan` header: `id`, `index:<field>`, `scan`, `snapshot`) and `examined`.
 
+### Associations and includes
+
+```ruby
+class Order < Ndb::Record
+  attribute :customer_id, :string
+
+  belongs_to :customer                  # customer_id -> Customer._id
+  has_many :items, sort: { pos: 1 }     # Item.order_id -> _id
+  has_one :invoice                      # Invoice.order_id -> _id
+end
+
+class Item < Ndb::Record
+  attribute :order_id, :string
+  attribute :sku, :string
+
+  belongs_to :product, foreign_key: :sku, primary_key: :code
+end
+
+Order.where(status: "paid").includes(:customer, :invoice, items: :product).each do |order|
+  order.customer.name          # loaded with the rows, in the same call
+  order.items.map(&:sku)
+end
+
+Order.find("o1").customer      # without includes: one more call on first use
+```
+
+- The defaults are the Rails ones: `belongs_to :customer` reads `customer_id` and the model `Customer`; `has_many :items` reads `Item.order_id`. Override with `class_name:`, `foreign_key:`, `primary_key:`.
+- `has_many` takes `sort:`, `limit:` and `where:`; `has_one` takes `sort:` and `where:`.
+- `has_many` and `has_one` create the index on the foreign key of the other model (the [lookup](../query.md#lookup) needs it).
+- Nested `includes` go two levels deep: `includes(items: :product)`.
+- Associations read; they do not write (no `order.items << item`, no `dependent:`).
+
 ### Regular expressions
 
 A Ruby `Regexp` works in `where`, `where.not` and `or`. The gem `ndb` turns it into `$regex` and `$options` (the daemon uses RE2). Ruby `^` and `$` match at each line, so `m` is always sent. `/i` is `i`, `/m` is `s`, `/x` is `x`. Look-around, backreferences, atomic groups, possessive quantifiers, `\h`, `\G`, `\R` and `\X` raise `Ndb::InvalidQuery` before the request.

@@ -164,6 +164,17 @@ page.rows; page.next; page.total; page.plan; page.examined
 
 Several `query` calls are ANDed. `sort(at: -1, _id: 1)`: `1` ascending, `-1` descending, the key order is the sort order, and `_id` is always the last key.
 
+### Lookup
+
+```ruby
+orders.query(status: "paid").lookup(
+  customer: { belongs_to: "customers", fk: "customer_id" },
+  items: { has_many: "order_items", fk: "order_id", sort: { pos: 1 }, limit: 50 }
+).all
+```
+
+The relations are the JSON of [Lookup](../query.md#lookup), with Symbol or String keys. Errors are `Ndb::LookupError`. In Rails, use the [associations](rails.md#associations-and-includes).
+
 ### Regular expressions
 
 A Ruby `Regexp` is accepted anywhere a value is: a field value, `"$regex" => /x/`, inside `$not`, `$or`, `$and`, in a search, an `aggregate` (`$match`) and the `query:` of `watch`.

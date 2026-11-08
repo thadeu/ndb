@@ -27,6 +27,8 @@ The SDKs turn each code into a typed error: Go `ndb.ErrUnknownCollection` (`erro
 | `pattern_too_wide` | 400 | The pattern matches more than 256 collections. |
 | `out_of_window` | 400 | A restore to an instant out of the PITR window; the message gives the start of the window. |
 | `pitr_off` | 400 | A restore of a collection with `pitr: off`. |
+| `lookup_invalid` | 400 | A [lookup](../query.md#lookup) or `$lookup` that is not valid (a relation without a kind or a foreign key, an unknown key, more than two levels, a `$lookup` before another stage). |
+| `lookup_unindexed` | 400 | The other side of a lookup has no index on the field it searches. The message gives the `_indexes` route. |
 | `confirm_required` | 400 | `_truncate` or drop without `confirm` equal to the collection name. |
 | `catalog_invalid` | 400 | The collection definition or name is not valid (for example, it has `id`). |
 | `ttl_not_enabled` | 400 | `expire_in`, `_expire` or `_persist` on a collection without `expires_field`. |
@@ -49,6 +51,7 @@ The SDKs turn each code into a typed error: Go `ndb.ErrUnknownCollection` (`erro
 | `direct_collection` | 409 | A write on a direct-mode collection. |
 | `history_truncated` | 410 | A `_watch` needs WAL files that `wal_retention` deleted. |
 | `request_too_large`, `line_too_large` | 413 | The body or a line is over `max_line_size` (or the blob limit). |
+| `lookup_too_large` | 422 | A lookup attaches more than 10 000 documents to one answer. |
 | `group_limit_exceeded` | 422 | The group table of an aggregate is over its memory limit. |
 | `canceled` | 499 | The client left before the answer (logs and metrics only). |
 | `internal` | 500 | A bug or a disk error. The message stays in the daemon log. |

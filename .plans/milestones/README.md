@@ -37,6 +37,7 @@ docs in `docs/dev/` describe what they built.
 | M14 | Ndb Console | self-hosted web UI: connections, browser, dev tools | done |
 | M15 | API 1.0 | ES-style routes, `query` body key, one SDK vocabulary (1.0.0) | done |
 | M16 | Disk first | bounded memory at any data size (1.1.0; direct mode 1.2.0) | done |
+| M18 | Lookup | `lookup` in `_search` (belongs_to, has_many, has_one), `$lookup` at the end of `_aggregate`, SDKs, Rails `includes` | done |
 | M17 | PITR and rename | restore a collection to an instant of the last day; rename to put it in place (1.2.3; at/to 1.2.4) | done |
 
 ## Next (after 0.1.2)
@@ -49,7 +50,7 @@ docs in `docs/dev/` describe what they built.
 | Delete by index only | big `delete?many` without decoding each document | done (0.3.2) | — |
 | Collection patterns | read many collections by name prefix (`logs-2026-*`): `find`, `count`, `aggregate`, `_coll` per row | done (0.4.0) | docs/dev/query.md#collection-patterns |
 | Date math and `$elemMatch` | `now-7d/d` in ranges on the time field; one array element matches many conditions | done (0.4.0) | docs/dev/query.md#date-math |
-| Relationships | `include` in find | not now | [backlog/relationships.md](../backlog/relationships.md) |
+| Relationships | `lookup` in find, Rails `includes` | done (M18) | docs/dev/query.md#lookup |
 
 ## Milestone file template
 

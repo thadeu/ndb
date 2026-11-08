@@ -72,7 +72,8 @@ The full body:
   "count": true,
   "versions": true,
   "snapshot": true,
-  "explain": true
+  "explain": true,
+  "lookup": { "customer": { "belongs_to": "customers", "fk": "customer_id" } }
 }
 ```
 
@@ -89,6 +90,7 @@ All keys are optional. An unknown key is `invalid_query`.
 | `versions` | add `_v`, the document version, to each row. Use it as a guard in an [update](#update-by-query). |
 | `snapshot` | keep the first snapshot for 60 s, so all pages see the same data. |
 | `explain` | add header `X-Ndb-Explain` with the plan counters. |
+| `lookup` | add the documents of other collections that each row points to. See [Lookup](#lookup). |
 
 The answer is the rows: a JSON array, or NDJSON with `Accept: application/x-ndjson`. The page data is in headers:
 
@@ -100,6 +102,94 @@ The answer is the rows: a JSON array, or NDJSON with `Accept: application/x-ndjs
 | `X-Ndb-Total` | only with `count: true`. |
 | `X-Ndb-Took-Ms` | time spent by the daemon. |
 | `X-Ndb-Explain` | only with `explain: true`. JSON with `segments_read`, `segments_skipped`, `row_groups_read`, `row_groups_skipped`, `rows_read`, `rows_matched`, `raw_fetched`, `cache_hits`. |
+
+## Lookup
+
+`lookup` reads, in the same call, the documents of other collections that the rows point to: the `includes` of Rails, the `$lookup` of MongoDB. The daemon runs it, so every SDK gets the same answer.
+
+::: code-group
+
+```bash [curl]
+curl --unix-socket /run/ndb/ndb.sock http://ndb/orders/_search -d '{
+  "query": { "status": "paid" },
+  "sort": { "created_at": -1 },
+  "limit": 20,
+  "lookup": {
+    "customer": { "belongs_to": "customers", "fk": "customer_id", "fields": ["name"] },
+    "items":    { "has_many": "order_items", "fk": "order_id", "sort": { "pos": 1 }, "limit": 50,
+                  "lookup": { "product": { "belongs_to": "products", "fk": "sku", "pk": "code" } } },
+    "invoice":  { "has_one": "invoices", "fk": "order_id" }
+  }
+}'
+```
+
+```go [Go]
+rows, err := orders.Query(ndb.Eq("status", "paid")).
+	Sort(ndb.Desc("created_at")).
+	Limit(20).
+	Lookup("customer", ndb.BelongsTo("customers", "customer_id").Fields("name")).
+	Lookup("items", ndb.HasMany("order_items", "order_id").Sort(ndb.Asc("pos")).Limit(50).
+		Lookup("product", ndb.BelongsTo("products", "sku").PK("code"))).
+	Lookup("invoice", ndb.HasOne("invoices", "order_id")).
+	All(ctx)
+```
+
+```ruby [Ruby]
+orders.query(status: "paid").sort(created_at: -1).limit(20).lookup(
+  customer: { belongs_to: "customers", fk: "customer_id", fields: ["name"] },
+  items: { has_many: "order_items", fk: "order_id", sort: { pos: 1 }, limit: 50,
+           lookup: { product: { belongs_to: "products", fk: "sku", pk: "code" } } },
+  invoice: { has_one: "invoices", fk: "order_id" }
+).all
+
+# Rails: Order.where(status: "paid").order(created_at: :desc).includes(:customer, :invoice, items: :product)
+```
+
+```ts [TypeScript]
+const rows = await orders
+  .query({ status: 'paid' })
+  .sort({ created_at: -1 })
+  .limit(20)
+  .lookup('customer', belongsTo('customers', 'customer_id', { fields: ['name'] }))
+  .lookup('items', hasMany('order_items', 'order_id', { sort: { pos: 1 }, limit: 50,
+    lookup: { product: belongsTo('products', 'sku', { pk: 'code' }) } }))
+  .lookup('invoice', hasOne('invoices', 'order_id'))
+  .all()
+```
+
+:::
+
+```json
+{ "_id": "o1", "customer_id": "c1", "status": "paid",
+  "customer": { "name": "Ana" },
+  "items": [ { "_id": "i2", "order_id": "o1", "sku": "B", "pos": 1, "product": { "_id": "p2", "code": "B", "name": "Teclado" } } ],
+  "invoice": null }
+```
+
+| Relation | The foreign key is | Match | The row gets |
+|---|---|---|---|
+| `belongs_to: "customers"` | here | `row.fk == customers.pk` | an object, or `null` |
+| `has_many: "order_items"` | there | `order_items.fk == row.pk` | an array (100 documents unless `limit`, at most 1000) |
+| `has_one: "invoices"` | there | `invoices.fk == row.pk` | an object, or `null` |
+
+| Key | Meaning |
+|---|---|
+| `foreign_key`, `fk` | the field of the foreign key. Required. |
+| `primary_key`, `pk` | the field it points to. Default `_id`. |
+| `query`, `sort`, `limit` | filter, order and cut the documents of a `has_many` or `has_one` (the keys of a search). |
+| `fields` | keep these fields of the related documents. |
+| `lookup` | the lookups of the related documents. Two levels at most. |
+
+- **The other side must be indexed:** `_id`, or a field in its `indexes`. Else `400 lookup_unindexed` with the `_indexes` route to call. (The Rails associations create that index.)
+- **Cost:** a `belongs_to` is one query for every key of the page (`$in`). A `has_many` or `has_one` is one query for each row, with its own `limit`, four at a time. Keep pages small and `limit` set.
+- **Limits:** one answer attaches 10 000 documents at most, else `422 lookup_too_large`.
+- **A foreign key that is an array** (`"tags": ["A","B"]`) matches each element; a `belongs_to` then gives an array.
+- **`fields`** of the search: a foreign key it leaves out is read for the lookup and removed from the row.
+- **The name** of a lookup replaces a field of that name in the row.
+- **Scope:** a [scoped token](configuration.md#scoped-tokens) must read every collection of the lookup, else `403 forbidden`.
+- **Consistency:** each collection reads its own snapshot. A write between two reads can show on one side only (as MongoDB without a transaction).
+- Patterns (`logs-*`) and partitioned collections take a lookup, as source and as the other side. `_count` does not.
+- An `_aggregate` takes [`$lookup`](aggregate.md#lookup) at the end of the pipeline.
 
 ## Filters
 

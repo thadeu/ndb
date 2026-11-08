@@ -104,6 +104,7 @@ const res = await calls.aggregate<{ _id: string; n: number; avg: number }>(
 | `$group` | once | build one row per key, see below |
 | `$limit`, `$skip` | after `$group` | cut the group rows |
 | `$project` | after `$group` | keep or remove fields of the group rows |
+| `$lookup` | at the end | add documents of another collection to each output row, see [Lookup](#lookup) |
 
 ## Group key
 
@@ -140,6 +141,29 @@ Missing and `null` are the same key. Groups come out sorted by `_id`.
 ## Project
 
 `{"$project": {"n": 1}}` keeps fields; `{"$project": {"n": 0}}` removes them. Do not mix. `_id` stays unless listed with `0`.
+
+## Lookup
+
+`$lookup` stages go at the end of the pipeline: they add, to each output row, documents of another collection. They take the MongoDB names, or one relation of the [lookup of a search](query.md#lookup):
+
+```json
+{
+  "pipeline": [
+    { "$group": { "_id": "$customer_id", "total": { "$sum": "$total" } } },
+    { "$sort": { "total": -1 } },
+    { "$limit": 10 },
+    { "$lookup": { "from": "customers", "localField": "_id", "foreignField": "_id", "as": "customer" } }
+  ]
+}
+```
+
+```json
+{ "_id": "c1", "total": 125, "customer": [ { "_id": "c1", "name": "Ana" } ] }
+```
+
+- MongoDB names: `from`, `localField`, `foreignField`, `as`. As in MongoDB, `as` is always an array. `pipeline` and `let` are not supported.
+- One relation of a search: `{ "$lookup": { "customer": { "belongs_to": "customers", "fk": "_id" } } }` gives an object or `null`.
+- A `$lookup` before another stage is `400 lookup_invalid`. The rules of a search lookup apply: an indexed other side, 10 000 documents at most.
 
 ## Limits
 
