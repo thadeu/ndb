@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- Rails: the Minitest integration is `require "ndb/rails/minitest"` (it was `ndb/rails/test_help` in 1.4.3), next to `ndb/rails/rspec`.
+
 ## [1.4.3] - 2026-11-08
 
 ### Added

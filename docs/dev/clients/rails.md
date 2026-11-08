@@ -599,7 +599,7 @@ Every public method of the gem, grouped. The names and return values follow Acti
 
 ::: details Tests
 
-`Ndb::Testing.clean!`, `clean_all!`, `worker!`, `touched`; `ndb/rails/test_help` (Minitest), `ndb/rails/rspec`, `ndb/rails/database_cleaner`. See [Testing](#testing).
+`Ndb::Testing.clean!`, `clean_all!`, `worker!`, `touched`; `ndb/rails/minitest` (Minitest), `ndb/rails/rspec`, `ndb/rails/database_cleaner`. See [Testing](#testing).
 
 :::
 
@@ -653,7 +653,7 @@ ndb has no transactions, so a test cannot roll back like `use_transactional_test
 ENV["RAILS_ENV"] ||= "test"
 require_relative "../config/environment"
 require "rails/test_help"
-require "ndb/rails/test_help"
+require "ndb/rails/minitest"
 ```
 
 Every `ActiveSupport::TestCase` (models, controllers, integration, system tests) cleans after each test. To keep the data of a test case:
@@ -706,8 +706,8 @@ Both truncate: ndb has no `:transaction` or `:deletion` strategy.
 
 The daemon is shared by every worker, so each one gets collections of its own: the models read and write `test<n>_calls` instead of `calls`.
 
-- **Rails `parallelize`:** `ndb/rails/test_help` sets it in `parallelize_setup`.
-- **parallel_tests (`TEST_ENV_NUMBER`):** `ndb/rails/test_help` and `ndb/rails/rspec` read it.
+- **Rails `parallelize`:** `ndb/rails/minitest` sets it in `parallelize_setup`.
+- **parallel_tests (`TEST_ENV_NUMBER`):** `ndb/rails/minitest` and `ndb/rails/rspec` read it.
 - By hand: `Ndb::Testing.worker!(2)`, or `config.collection_prefix = "ci_"` in `Ndb::Rails.configure`.
 
 The prefix covers the models (and their associations). A collection written with the raw client (`Ndb::Rails.client`) is not prefixed and not cleaned unless you pass it: `Ndb::Testing.clean!(only: %w[raw_events])`.

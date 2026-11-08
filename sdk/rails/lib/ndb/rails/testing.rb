@@ -7,7 +7,7 @@ module Ndb
   # takes a few ms whatever their size and keeps their definition and
   # indexes.
   #
-  #   require "ndb/rails/test_help"             # Minitest (ActiveSupport::TestCase)
+  #   require "ndb/rails/minitest"              # Minitest (ActiveSupport::TestCase)
   #   require "ndb/rails/rspec"                 # RSpec
   #   require "ndb/rails/database_cleaner"      # DatabaseCleaner[:ndb]
   #
@@ -17,7 +17,7 @@ module Ndb
     # Raised when a clean would run outside the test environment.
     class UnsafeClean < Ndb::Error; end
 
-    # The Minitest hooks: truncate after each test. ndb/rails/test_help puts
+    # The Minitest hooks: truncate after each test. ndb/rails/minitest puts
     # them in ActiveSupport::TestCase; include them in another Minitest::Test.
     # `self.ndb_clean = false` turns them off for a test case.
     module Minitest

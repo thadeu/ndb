@@ -2,7 +2,7 @@
 
 # Minitest, the Rails way: in test/test_helper.rb, after rails/test_help,
 #
-#   require "ndb/rails/test_help"
+#   require "ndb/rails/minitest"
 #
 # Every ActiveSupport::TestCase truncates the ndb collections it used after
 # each test, and each worker of `parallelize` gets collections of its own.
