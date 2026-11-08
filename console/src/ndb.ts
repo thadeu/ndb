@@ -66,6 +66,18 @@ export interface Definition {
 
 export type Doc = Record<string, unknown>;
 
+// PitrInfo is the PITR window of one collection (GET /_pitr, GET
+// /{coll}/_pitr). oldest and newest are absent while nothing can be restored.
+export interface PitrInfo {
+  collection: string;
+  window: string;
+  oldest?: string;
+  newest?: string;
+  snapshots: number;
+  bytes: number;
+  dropped?: boolean;
+}
+
 export interface SearchResult {
   rows: Doc[];
   plan?: string;
@@ -180,6 +192,20 @@ export class Ndb {
     return this.json('DELETE', `/${encodeURIComponent(collection)}/_doc/${encodeURIComponent(id)}`);
   }
 
+  async pitr(): Promise<{ default: string; collections: PitrInfo[] }> {
+    return this.get('/_pitr');
+  }
+
+  // restore is POST /{coll}/_restore. It copies up to a day of WAL, so it
+  // gets a long timeout.
+  restore(collection: string, until: string, into: string): Promise<{ collection: string; duration_ms: number }> {
+    return this.json('POST', `/${encodeURIComponent(collection)}/_restore`, JSON.stringify({ until, into }), 600_000);
+  }
+
+  rename(collection: string, to: string, replace: boolean): Promise<{ collection: string }> {
+    return this.json('POST', `/${encodeURIComponent(collection)}/_rename`, JSON.stringify({ to, replace }), 60_000);
+  }
+
   // forward sends a request as it is and returns the response, even when the
   // status is not 2xx. Only a network failure throws.
   forward(method: string, path: string, body?: string): Promise<Response> {
@@ -200,8 +226,8 @@ export class Ndb {
     return this.json('GET', path);
   }
 
-  private async json<T>(method: string, path: string, body?: string): Promise<T> {
-    const response = await this.open(method, path, { body });
+  private async json<T>(method: string, path: string, body?: string, timeoutMs?: number): Promise<T> {
+    const response = await this.open(method, path, { body, timeoutMs });
     const parsed = await response.json().catch(() => null);
 
     if (response.ok) return parsed as T;

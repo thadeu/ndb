@@ -422,3 +422,47 @@ describe('discover route', () => {
     expect((await post({ host: 'http://x/y' })).status).toBe(400);
   });
 });
+
+describe('pitr tab', () => {
+  it('lists the windows and offers the restore form', async () => {
+    const html = await (await page('/c/local/pitr')).text();
+
+    expect(html).toContain('Point in time recovery');
+    expect(html).toContain('orders');
+    expect(html).toContain('Restore copy');
+  });
+
+  it('restores a copy, then renames it in place', async () => {
+    const until = new Date(Date.now() + 1000).toISOString().slice(0, 19);
+
+    await Bun.sleep(2100);
+    await new Ndb({ url }).remove('orders', 'a');
+
+    const restored = await page('/c/local/pitr/restore', form({ collection: 'orders', until, into: 'orders_restored' }));
+    const location = restored.headers.get('location') ?? '';
+
+    expect(restored.status).toBe(303);
+    expect(location).toContain('notice=');
+    expect(location).toContain('from=orders_restored');
+    expect((await new Ndb({ url }).document('orders_restored', 'a'))._id).toBe('a');
+
+    const renamed = await page('/c/local/pitr/rename', form({ from: 'orders_restored', to: 'orders', replace: '1' }));
+
+    expect(renamed.headers.get('location')).toContain('notice=');
+    expect((await new Ndb({ url }).document('orders', 'a'))._id).toBe('a');
+  });
+
+  it('comes back with the ndb error', async () => {
+    const response = await page('/c/local/pitr/restore', form({ collection: 'orders', until: '2020-01-01T00:00:00', into: 'x' }));
+
+    expect(decodeURIComponent(response.headers.get('location') ?? '')).toContain('error=');
+  });
+
+  it('reads a datetime-local value as UTC', async () => {
+    const { utc } = await import('@/routes/pitr');
+
+    expect(utc('2026-11-12T14:04')).toBe('2026-11-12T14:04:00Z');
+    expect(utc('2026-11-12T14:04:05')).toBe('2026-11-12T14:04:05Z');
+    expect(utc('2026-11-12T14:04:05Z')).toBe('2026-11-12T14:04:05Z');
+  });
+});
