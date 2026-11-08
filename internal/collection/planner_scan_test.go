@@ -668,3 +668,32 @@ func TestCountAddsVisibleGroupsWithoutReading(t *testing.T) {
 		t.Fatalf("row groups read = %d, want only the first and the ones near the cutoff", page.Explain.RowGroupsRead)
 	}
 }
+
+// A sort against the insertion order (newest first) makes each row the best
+// so far, and a skip passes rows: the documents are read only for the rows
+// of the page.
+func TestSortedTopKReadsOnlyTheDocumentsItReturns(t *testing.T) {
+	c := openSealed(t, t.TempDir(), collection.Config{})
+
+	sealBatch(t, c, rangeDocs(0, 1200, func(i int) string {
+		return fmt.Sprintf(`{"_id":"d%04d","status":"s%d","n":%d}`, i, i%3, i)
+	}))
+
+	for body, want := range map[string]int{
+		`{"query":{"status":"s1"},"sort":{"n":-1},"limit":5}`:            5,
+		`{"sort":{"n":-1},"limit":5}`:                                    5,
+		`{"query":{"status":"s1"},"sort":{"n":-1},"limit":20,"skip":40}`: 20,
+	} {
+		e := explainOf(t, c, body)
+
+		if e.RawFetched != want {
+			t.Fatalf("%s: raw fetched %d, want only the %d rows of the page (%+v)", body, e.RawFetched, want, e)
+		}
+	}
+
+	page := rq(t, c, `{"query":{"status":"s1"},"sort":{"n":-1},"limit":3}`)
+
+	if got := ids(t, page); !slices.Equal(got, []string{"d1198", "d1195", "d1192"}) {
+		t.Fatalf("top 3 = %v", got)
+	}
+}

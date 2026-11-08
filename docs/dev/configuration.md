@@ -67,6 +67,7 @@ An unknown key is an error at start (the file is read in strict mode). Sizes are
 | `listen.unix` | unix socket path. A relative path starts at the folder of `ndb.yml`. |
 | `listen.tcp` | TCP address. Bind to a private address only, and set `-token-file`. |
 | `memory_limit` | Go heap soft limit (`GOMEMLIMIT`). Default 384 MiB: with it the daemon stays under about 512 MB of RSS. The heap grows toward the limit before the GC works hard, so a higher limit is also a higher RSS: in `ndb bench`, 512 MiB loaded 6% faster and read at the same speed, with 125 to 180 MB more RSS in every phase. Raise it for very large aggregations or bulk loads. |
+| `read_cache` | memory for the decoded row groups of the segments, shared by every query (each group holds 1 024 documents). Default 32 MiB. In `ndb bench`, 64 MiB read at the same speed with 40 to 80 MB more RSS. |
 | `write_buffer` | memory for the documents not sealed yet, shared by every collection and partition. Over it, the largest memtable is written to a segment. Default 32 MiB. |
 | `group_limit` | memory limit of one aggregate group table. Over it: `group_limit_exceeded`. |
 | `blob_max_size` | largest blob. Default 1 GiB. |

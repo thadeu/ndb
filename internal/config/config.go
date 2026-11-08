@@ -79,6 +79,7 @@ type Config struct {
 	WriteBuffer   int64  `yaml:"-"`
 	GroupLimit    int64  `yaml:"-"`
 	BlobMaxSize   int64  `yaml:"-"`
+	ReadCache     int64  `yaml:"-"`
 	AllowImplicit bool   `yaml:"allow_implicit"`
 
 	// PITR is the point in time recovery window of every engine collection
@@ -116,6 +117,7 @@ type file struct {
 	WriteBuffer string                `yaml:"write_buffer"`
 	GroupLimit  string                `yaml:"group_limit"`
 	BlobMaxSize string                `yaml:"blob_max_size"`
+	ReadCache   string                `yaml:"read_cache"`
 	Collections map[string]collection `yaml:"collections"`
 }
 
@@ -177,6 +179,10 @@ func Load(path string) (Config, error) {
 
 	if cfg.GroupLimit, err = parseSize(f.GroupLimit); err != nil {
 		return Config{}, fmt.Errorf("%w: group_limit: %v", ErrInvalid, err)
+	}
+
+	if cfg.ReadCache, err = parseSize(f.ReadCache); err != nil {
+		return Config{}, fmt.Errorf("%w: read_cache: %v", ErrInvalid, err)
 	}
 
 	if cfg.BlobMaxSize, err = parseSize(f.BlobMaxSize); err != nil {

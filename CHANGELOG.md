@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- **Sorted searches read only the documents of the page.** A sort against the insertion order (newest first) made every matching row the best so far, so each one read its document, and a `skip` read the rows it passed. The rows are now sorted from the columns and only the rows of the page read a document, across segments and partitions: `last 20 of a customer` went from 185 ms to 29 ms, page 3 of a customer's finishcalls from 200 ms to 42 ms, a `has_many` lookup of 20 rows from 1.2 s to 0.32 s, a 2-level lookup from 580 ms to 160 ms. `make bench` budgets: slowest query 350 ms, slowest lookup 1 s.
+
+### Added
+
+- `read_cache` in ndb.yml: the memory of the decoded row groups (default 32 MiB).
+
 ### Added
 
 - `ndb bench -yml 'key: value'` adds a line to the ndb.yml of the daemon (repeat it), to compare settings such as `memory_limit`; the report header lists them.

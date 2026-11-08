@@ -20,6 +20,7 @@ import (
 
 	"github.com/thadeu/ndb/internal/config"
 	"github.com/thadeu/ndb/internal/engine"
+	"github.com/thadeu/ndb/internal/segment"
 	"github.com/thadeu/ndb/internal/server"
 )
 
@@ -105,6 +106,10 @@ func run(args []string) error {
 		debug.SetMemoryLimit(cfg.MemoryLimit)
 	case os.Getenv("GOMEMLIMIT") == "":
 		debug.SetMemoryLimit(config.DefaultMemoryLimit)
+	}
+
+	if cfg.ReadCache > 0 {
+		segment.GroupCacheBytes = cfg.ReadCache
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)

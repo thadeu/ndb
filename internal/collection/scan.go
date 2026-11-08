@@ -385,12 +385,7 @@ func (sc *segScan) row(rows segment.GroupRows, i, abs int) error {
 		return nil
 	}
 
-	doc, err := st.document()
-	if err != nil {
-		return err
-	}
-
-	sc.top.add(row{Pos: pos, doc: doc, v: rows.Vs[i]})
+	sc.top.add(row{Pos: pos, doc: st.doc, v: rows.Vs[i], lazy: st.doc == nil, seg: sc.r, at: abs})
 
 	return nil
 }

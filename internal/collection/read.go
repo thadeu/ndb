@@ -497,6 +497,46 @@ type row struct {
 
 	// v is the version of doc, from the same snapshot as doc.
 	v uint64
+
+	// lazy is a segment row whose doc is not read yet: at is its row in
+	// seg. Only the rows of the page read it (materialize).
+	lazy bool
+	seg  segment.Reader
+	at   int
+}
+
+// materialize reads the documents of the lazy rows. The segments must still
+// be held by the query. A sort against the insertion order (newest first)
+// makes every row the best so far in turn, and a skip passes rows that the
+// page does not show: neither reads a document it does not return.
+func materialize(rows []row, ex *Explain) error {
+	for i := range rows {
+		if !rows[i].lazy {
+			continue
+		}
+
+		raw, err := rows[i].seg.Raw(rows[i].at)
+		if err != nil {
+			return err
+		}
+
+		ex.RawFetched++
+		rows[i].doc, rows[i].lazy, rows[i].seg = raw, false, nil
+	}
+
+	return nil
+}
+
+// pageRows are the rows that slice puts in the page: after the skip, up to
+// the limit.
+func pageRows(q *query.Query, rows []row) []row {
+	rows = rows[min(q.Skip, len(rows)):]
+
+	if q.Limit > 0 && len(rows) > q.Limit {
+		rows = rows[:q.Limit]
+	}
+
+	return rows
 }
 
 // Query runs a find. See the package notes above for the snapshot rules.
@@ -529,6 +569,16 @@ func (c *Collection) Query(ctx context.Context, q *query.Query) (Page, error) {
 	}
 
 	rows, total, ex := merge(q, parts)
+
+	keep := pageRows(q, rows)
+
+	if q.Snapshot {
+		keep = rows
+	}
+
+	if err := materialize(keep, &ex); err != nil {
+		return Page{}, err
+	}
 
 	page, more := slice(q, rows)
 

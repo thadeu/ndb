@@ -68,13 +68,25 @@ func FindMany(ctx context.Context, pattern string, cols []Named, body []byte) (P
 		ex    Explain
 	)
 
+	releases := make([]func(), len(cols))
+
+	defer func() {
+		for _, release := range releases {
+			if release != nil {
+				release()
+			}
+		}
+	}()
+
 	parts, err := runPool(ctx, patternWorkers, len(cols), func(i int) (part, error) {
 		cur, hasCur, done := startIn(q, cols[i].Name, after, afterIn)
 		if done && !q.Count {
 			return part{}, nil
 		}
 
-		p, err := cols[i].C.queryRows(ctx, qs[i], cur, hasCur)
+		p, release, err := cols[i].C.queryRows(ctx, qs[i], cur, hasCur)
+		releases[i] = release
+
 		if done {
 			p.rows = nil
 		}
@@ -96,7 +108,34 @@ func FindMany(ctx context.Context, pattern string, cols []Named, body []byte) (P
 
 	slices.SortFunc(rows, func(a, b patternRow) int { return cmpAcross(q, a, b) })
 
+	if err := materializeAcross(q, rows, &ex); err != nil {
+		return Page{}, err
+	}
+
 	return pageAcross(q, pattern, rows, total, ex), nil
+}
+
+// materializeAcross reads the documents of the rows of the page only: after
+// the skip, up to the limit, over every collection.
+func materializeAcross(q *query.Query, rows []patternRow, ex *Explain) error {
+	lo := min(q.Skip, len(rows))
+	hi := len(rows)
+
+	if q.Limit > 0 {
+		hi = min(hi, lo+q.Limit)
+	}
+
+	for i := lo; i < hi; i++ {
+		one := []row{rows[i].row}
+
+		if err := materialize(one, ex); err != nil {
+			return err
+		}
+
+		rows[i].row = one[0]
+	}
+
+	return nil
 }
 
 // patternWorkers is how many collections of a pattern (or partitions) one
@@ -178,20 +217,21 @@ func (c *Collection) Reader() *Collection {
 }
 
 // queryRows is the top-k rows of q after cur in this collection, with the
-// total number of matches.
-func (c *Collection) queryRows(ctx context.Context, q *query.Query, cur query.Pos, hasCur bool) (part, error) {
+// total number of matches. Their documents are not read yet: release lets
+// the segments go once the caller materialized the rows it keeps.
+func (c *Collection) queryRows(ctx context.Context, q *query.Query, cur query.Pos, hasCur bool) (part, func(), error) {
 	src := c.source(q)
-
-	defer src.release()
 
 	parts, err := c.execute(ctx, q, src, cur, hasCur)
 	if err != nil {
-		return part{}, err
+		src.release()
+
+		return part{}, func() {}, err
 	}
 
 	rows, total, ex := merge(q, parts)
 
-	return part{rows: rows, total: total, ex: ex}, nil
+	return part{rows: rows, total: total, ex: ex}, src.release, nil
 }
 
 // idLast sorts after every _id; "" sorts before every one.
