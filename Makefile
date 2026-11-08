@@ -1,4 +1,4 @@
-.PHONY: test race lint fuzz-smoke bench bench-go build dist up docs docs-build
+.PHONY: test race lint fuzz-smoke bench bench-go build dist up docs docs-build tag tg
 
 test:
 	go test ./...
@@ -65,3 +65,23 @@ docs:
 
 docs-build:
 	cd docs-site && pnpm install --frozen-lockfile && pnpm docs:build
+
+# Release: make tag patch|minor|major (or make tg patch). Bumps the SDKs and
+# CHANGELOG.md, commits "Release X.Y.Z", tags vX.Y.Z, and asks before the
+# push. With make's --dry-run (-n) or DRY=1, it only shows the next version.
+# The + runs the script even under --dry-run. See scripts/release.sh.
+ifneq ($(filter tag tg,$(firstword $(MAKECMDGOALS))),)
+MAKEFLAGS += --silent
+BUMP := $(word 2,$(MAKECMDGOALS))
+
+ifneq ($(BUMP),)
+$(eval $(BUMP): tag ;)
+endif
+endif
+
+RELEASE_DRY := $(if $(or $(DRY),$(findstring n,$(firstword -$(MAKEFLAGS)))),--dry-run)
+
+tag:
+	+@scripts/release.sh $(or $(BUMP),patch) $(RELEASE_DRY)
+
+tg: tag
