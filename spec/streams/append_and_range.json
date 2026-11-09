@@ -1,0 +1,114 @@
+{
+  "name": "entries sort and compare by ID, not as text (1-9 before 1-10)",
+  "stream": "orders",
+  "steps": [
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-9"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-9"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 2
+        },
+        "id": "1-10"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-10"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 3
+        },
+        "id": "2-0"
+      },
+      "expect": {
+        "body": {
+          "_id": "2-0"
+        }
+      }
+    },
+    {
+      "op": "search",
+      "body": {
+        "query": {
+          "_id": {
+            "$gte": "1-9",
+            "$lte": "1-10"
+          }
+        },
+        "sort": {
+          "_id": 1
+        }
+      },
+      "expect": {
+        "rows": [
+          {
+            "_id": "1-9",
+            "n": 1
+          },
+          {
+            "_id": "1-10",
+            "n": 2
+          }
+        ],
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    },
+    {
+      "op": "search",
+      "body": {
+        "sort": {
+          "_id": -1
+        },
+        "limit": 1
+      },
+      "expect": {
+        "rows": [
+          {
+            "_id": "2-0",
+            "n": 3
+          }
+        ],
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    },
+    {
+      "op": "info",
+      "expect": {
+        "body": {
+          "length": 3,
+          "first_id": "1-9",
+          "last_id": "2-0",
+          "entries_added": 3,
+          "max_deleted_id": "0-0",
+          "groups": 0
+        }
+      }
+    }
+  ]
+}

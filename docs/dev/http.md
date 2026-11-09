@@ -11,6 +11,7 @@ The routes have pages by group:
 | [Documents](http/documents.md) | `_doc`, `_bulk`, `_update/{id}`, `_expire`, `_persist`, `_ttl` |
 | [Queries](http/queries.md) | `_search`, `_count`, `_aggregate`, `_update_by_query`, `_delete_by_query`, patterns |
 | [Watch](http/watch.md) | `_watch`, `_ack` |
+| [Streams](http/streams.md) | `_streams/append`, `_streams/groups/{g}/read`, `ack`, `pending`, `claim` (Redis Streams) |
 | [Errors](http/errors.md) | the error body and every code |
 
 The query language (operators, date math, `$elemMatch`) is on [Query](query.md), the pipeline stages are on [Aggregate](aggregate.md), and the events are on [Watch](watch.md). These pages link there and do not repeat it.

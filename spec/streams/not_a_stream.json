@@ -1,0 +1,43 @@
+{
+  "name": "stream routes on a normal collection are refused",
+  "stream": "plain",
+  "steps": [
+    {
+      "op": "put_doc",
+      "body": {
+        "_id": "a",
+        "n": 1
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        }
+      },
+      "expect": {
+        "error": "not_a_stream"
+      }
+    },
+    {
+      "op": "group_create",
+      "group": "g",
+      "body": {
+        "start": "0"
+      },
+      "expect": {
+        "error": "not_a_stream"
+      }
+    },
+    {
+      "op": "create",
+      "body": {
+        "stream": true
+      },
+      "expect": {
+        "error": "not_a_stream"
+      }
+    }
+  ]
+}

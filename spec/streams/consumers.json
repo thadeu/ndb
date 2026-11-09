@@ -1,0 +1,113 @@
+{
+  "name": "a consumer is made by a read or a create; delete gives its pending count",
+  "stream": "orders",
+  "steps": [
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-0"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-0"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 2
+        },
+        "id": "1-1"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-1"
+        }
+      }
+    },
+    {
+      "op": "group_create",
+      "group": "g",
+      "body": {
+        "start": "0"
+      }
+    },
+    {
+      "op": "consumer_create",
+      "group": "g",
+      "consumer": "c0",
+      "expect": {
+        "body": {
+          "created": true
+        }
+      }
+    },
+    {
+      "op": "consumer_create",
+      "group": "g",
+      "consumer": "c0",
+      "expect": {
+        "body": {
+          "created": false
+        }
+      }
+    },
+    {
+      "op": "read",
+      "group": "g",
+      "body": {
+        "consumer": "c1",
+        "count": 10
+      }
+    },
+    {
+      "op": "consumers",
+      "group": "g",
+      "expect": {
+        "body": [
+          {
+            "name": "c0",
+            "pending": 0
+          },
+          {
+            "name": "c1",
+            "pending": 2
+          }
+        ],
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    },
+    {
+      "op": "consumer_delete",
+      "group": "g",
+      "consumer": "c1",
+      "expect": {
+        "body": {
+          "pending": 2
+        }
+      }
+    },
+    {
+      "op": "pending",
+      "group": "g",
+      "body": {},
+      "expect": {
+        "body": {
+          "count": 0,
+          "lowest": null,
+          "highest": null,
+          "consumers": []
+        }
+      }
+    }
+  ]
+}

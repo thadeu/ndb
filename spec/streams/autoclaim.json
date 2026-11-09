@@ -1,0 +1,121 @@
+{
+  "name": "claim with a cursor scans the PEL in pages and ends with 0-0",
+  "stream": "orders",
+  "steps": [
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-0"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-0"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 2
+        },
+        "id": "1-1"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-1"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 3
+        },
+        "id": "1-2"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-2"
+        }
+      }
+    },
+    {
+      "op": "group_create",
+      "group": "g",
+      "body": {
+        "start": "0"
+      }
+    },
+    {
+      "op": "read",
+      "group": "g",
+      "body": {
+        "consumer": "c1",
+        "count": 10
+      }
+    },
+    {
+      "op": "claim",
+      "group": "g",
+      "body": {
+        "consumer": "c2",
+        "min_idle_ms": 0,
+        "cursor": "0-0",
+        "count": 2
+      },
+      "expect": {
+        "body": {
+          "cursor": "1-2",
+          "entries": [
+            {
+              "_id": "1-0",
+              "n": 1
+            },
+            {
+              "_id": "1-1",
+              "n": 2
+            }
+          ],
+          "deleted": []
+        },
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    },
+    {
+      "op": "claim",
+      "group": "g",
+      "body": {
+        "consumer": "c2",
+        "min_idle_ms": 0,
+        "cursor": "1-2",
+        "count": 2
+      },
+      "expect": {
+        "body": {
+          "cursor": "0-0",
+          "entries": [
+            {
+              "_id": "1-2",
+              "n": 3
+            }
+          ],
+          "deleted": []
+        },
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "name": "an ID not greater than the last one, or 0-0, is refused",
+  "stream": "orders",
+  "steps": [
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "5-0"
+      },
+      "expect": {
+        "body": {
+          "_id": "5-0"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 2
+        },
+        "id": "5-0"
+      },
+      "expect": {
+        "error": "stream_id_too_small"
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 2
+        },
+        "id": "4-9"
+      },
+      "expect": {
+        "error": "stream_id_too_small"
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 2
+        },
+        "id": "0-0"
+      },
+      "expect": {
+        "error": "invalid_stream_id"
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 2
+        },
+        "id": "abc"
+      },
+      "expect": {
+        "error": "invalid_stream_id"
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 2
+        },
+        "id": "5-*"
+      },
+      "expect": {
+        "body": {
+          "_id": "5-1"
+        }
+      }
+    }
+  ]
+}

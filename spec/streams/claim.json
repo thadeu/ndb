@@ -1,0 +1,141 @@
+{
+  "name": "claim moves idle entries to another consumer and counts the delivery; just_ids does not count it",
+  "stream": "orders",
+  "steps": [
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-0"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-0"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 2
+        },
+        "id": "1-1"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-1"
+        }
+      }
+    },
+    {
+      "op": "group_create",
+      "group": "g",
+      "body": {
+        "start": "0"
+      }
+    },
+    {
+      "op": "read",
+      "group": "g",
+      "body": {
+        "consumer": "c1",
+        "count": 10
+      }
+    },
+    {
+      "op": "claim",
+      "group": "g",
+      "body": {
+        "consumer": "c2",
+        "min_idle_ms": 0,
+        "ids": [
+          "1-0"
+        ]
+      },
+      "expect": {
+        "body": {
+          "entries": [
+            {
+              "_id": "1-0",
+              "n": 1
+            }
+          ],
+          "deleted": []
+        },
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    },
+    {
+      "op": "claim",
+      "group": "g",
+      "body": {
+        "consumer": "c2",
+        "min_idle_ms": 3600000,
+        "ids": [
+          "1-1"
+        ]
+      },
+      "expect": {
+        "body": {
+          "entries": [],
+          "deleted": []
+        }
+      }
+    },
+    {
+      "op": "claim",
+      "group": "g",
+      "body": {
+        "consumer": "c2",
+        "min_idle_ms": 0,
+        "ids": [
+          "1-1"
+        ],
+        "just_ids": true
+      },
+      "expect": {
+        "body": {
+          "entries": [
+            "1-1"
+          ],
+          "deleted": []
+        }
+      }
+    },
+    {
+      "op": "pending",
+      "group": "g",
+      "body": {
+        "start": "-",
+        "end": "+",
+        "count": 10
+      },
+      "expect": {
+        "body": [
+          {
+            "_id": "1-0",
+            "consumer": "c2",
+            "deliveries": 2
+          },
+          {
+            "_id": "1-1",
+            "consumer": "c2",
+            "deliveries": 1
+          }
+        ],
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # M20 — Streams (Redis Streams parity)
 
-Status: not started · Depends on: M09 (watch, cursors), M12 (retention) · Branch: `feature/redis-streams-compabitility`
+Status: in progress (E20.1 written: docs/dev/streams.md, docs/dev/http/streams.md, spec/streams/) · Depends on: M09 (watch, cursors), M12 (retention) · Branch: `feature/redis-streams-compabitility`
 
 ## Goal
 
@@ -37,6 +37,22 @@ What it does not try: the speed of RAM. A strict append costs one fsync.
 ## Epics
 
 ### E20.1 Contract (protocol)
+
+Done (2026-11-09): `docs/dev/http/streams.md` (routes, bodies, answers,
+IDs, errors, access), `docs/dev/streams.md` (use, cost model, Redis map),
+`spec/streams/` (12 multi-step cases and their format; outside
+`spec/cases`, whose runner reads one request per case). Decisions taken
+while writing it:
+
+- Entries get `_ts` (the `ms` of the ID, RFC 3339): it is the `time` of the
+  stream, so `retention`, zone maps and time filters work.
+- On a stream, `_id` sorts and compares as an ID (`ms`, then `seq`), not as
+  text (`1-9` before `1-10`): in `sort`, range filters and cursors.
+- `docs` appends many entries with one fsync.
+- A read gives 10 entries by default, 10 000 at most.
+- The 5 new error codes go into `docs/dev/http/errors.md` in E20.2, with the
+  SDK constants: the error code test of M22 fails on a code that an SDK
+  does not have.
 
 The wire contract, written as `docs/dev/streams.md` and
 `docs/dev/http/streams.md` before any code, with the spec cases that prove it
@@ -177,12 +193,10 @@ is done.
 
 ## Open questions
 
-1. Trim of entries that are still pending: keep the PEL references (Redis
-   up to 8.0) or drop them (`DELREF` of 8.2)? Default and option.
-2. Group store: in `cursors.bolt` or one bbolt file per stream (a drop
-   removes the file; no shared lock between streams)?
-3. Durability of a group read: one fsync per read batch (strict), or
-   `relaxed` per stream, as for the writes?
+1. ~~Trim of pending entries~~: keep the PEL references (Redis up to 8.0).
+2. ~~Group store~~: one bbolt file per stream.
+3. ~~Durability of a group read~~: `strict` by default (one fsync per read
+   batch), `relaxed` per stream as an option.
 4. The app that will use it first: language, the Redis commands it uses,
    messages per second and number of workers (sets the priority inside
    E20.2 and the budgets of E20.3).

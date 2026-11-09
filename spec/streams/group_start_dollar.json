@@ -1,0 +1,87 @@
+{
+  "name": "a group made with $ gives only the entries appended after it",
+  "stream": "orders",
+  "steps": [
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-0"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-0"
+        }
+      }
+    },
+    {
+      "op": "group_create",
+      "group": "g",
+      "body": {
+        "start": "$"
+      },
+      "expect": {
+        "body": {
+          "group": "g",
+          "last_delivered_id": "1-0"
+        }
+      }
+    },
+    {
+      "op": "read",
+      "group": "g",
+      "body": {
+        "consumer": "c1"
+      },
+      "expect": {
+        "rows": []
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 2
+        },
+        "id": "2-0"
+      },
+      "expect": {
+        "body": {
+          "_id": "2-0"
+        }
+      }
+    },
+    {
+      "op": "read",
+      "group": "g",
+      "body": {
+        "consumer": "c1"
+      },
+      "expect": {
+        "rows": [
+          {
+            "_id": "2-0",
+            "n": 2
+          }
+        ],
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    },
+    {
+      "op": "group_create",
+      "group": "g",
+      "body": {
+        "start": "$"
+      },
+      "expect": {
+        "error": "group_exists"
+      }
+    }
+  ]
+}
