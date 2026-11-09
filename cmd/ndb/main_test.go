@@ -81,9 +81,9 @@ func childArgs() []string {
 		"-unix", os.Getenv("NDB_SOCK"),
 	}
 
-	if tcp := os.Getenv("NDB_TCP"); tcp != "" {
-		args = append(args, "-tcp", tcp)
-	}
+	// -tcp is always set: the default of a user install listens on
+	// 127.0.0.1:7070, which a dev daemon may hold.
+	args = append(args, "-tcp", os.Getenv("NDB_TCP"))
 
 	if file := os.Getenv("NDB_TOKEN_FILE"); file != "" {
 		args = append(args, "-token-file", file)

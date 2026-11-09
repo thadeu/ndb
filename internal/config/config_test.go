@@ -69,6 +69,8 @@ collections:
 }
 
 func TestDefaults(t *testing.T) {
+	t.Cleanup(config.SetUserHome(""))
+
 	cfg, err := config.Load(write(t, "{}"))
 	if err != nil {
 		t.Fatal(err)
@@ -193,6 +195,8 @@ collections:
 }
 
 func TestDefaultsMatchTheImageAndTheUnit(t *testing.T) {
+	t.Cleanup(config.SetUserHome(""))
+
 	cfg, err := config.Load(filepath.Join(t.TempDir(), "missing.yml"))
 	if err != nil {
 		t.Fatal(err)
@@ -296,5 +300,18 @@ func TestParseIdleClose(t *testing.T) {
 		if _, err := config.ParseIdleClose(in); err == nil {
 			t.Fatalf("ParseIdleClose(%q): want an error", in)
 		}
+	}
+}
+
+func TestDefaultsOfAUserInstall(t *testing.T) {
+	t.Cleanup(config.SetUserHome("/home/ana"))
+
+	cfg, err := config.Load(filepath.Join(t.TempDir(), "missing.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.DataDir != "/home/ana/.ndb/data" || cfg.Listen.Unix != "/home/ana/.ndb/ndb.sock" || cfg.Listen.TCP != config.UserTCP {
+		t.Fatalf("got %+v", cfg)
 	}
 }

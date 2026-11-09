@@ -7,7 +7,7 @@ Type=simple
 User=ndb
 Group=ndb
 # No flags: /etc/ndb/ndb.yml, socket /run/ndb/ndb.sock, mode 0660.
-ExecStart=/usr/local/bin/ndb
+ExecStart=/usr/local/bin/ndb serve
 Restart=on-failure
 RestartSec=2
 

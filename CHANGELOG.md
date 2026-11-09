@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - **Streams: the Redis Streams model on disk** (`docs/dev/streams.md`). A collection with `"stream": true` is an append-only log with consumer groups, under `/{s}/_streams/...`: `append` (`XADD`, with `trim`, one ID `<ms>-<seq>` per entry, many entries in one fsync), `trim` (`XTRIM`, exact or in blocks of 1 024), groups (`XGROUP`), `read` (`XREADGROUP`, new or pending entries, `block_ms`, `no_ack`), `ack`, `pending`, `claim` (`XCLAIM` and `XAUTOCLAIM`) and info (`XINFO`). Every acked append and every group change is on disk before the answer; a stream is a collection, so `_search`, `_count` and `_aggregate` read it, and `_id` sorts as an ID. The group state is in backups (not in PITR). The cases of `spec/streams` give the same results on ndb and on a real Redis 7.4 (a CI test). `ndb bench -streams` measures it, with checks that a `kill -9` loses no acked append, delivered entry or ack.
 
+### Changed
+
+- **`ndb serve` with no flags works with no root.** When ndb does not run as root and `/var/lib/ndb` does not exist (a laptop), the defaults are `~/.ndb/data`, `~/.ndb/ndb.sock` and TCP on `127.0.0.1:7070`; the CLI commands find the daemon there too. A server (root, `--systemd`, Docker) keeps `/var/lib/ndb`, `/run/ndb/ndb.sock` and no TCP. The daemon makes the dir of the unix socket.
+- `ndb` alone in a terminal prints the help; `ndb serve` (or `ndb s`) runs the daemon. Without a terminal (systemd, Docker) `ndb` alone still runs the daemon, so old units keep working; the unit and the image now say `serve`.
+- `ndb -h` and `ndb serve -h` print the full help, now with the daemon flags and a "Try it" block at the end. The home page of the docs has a "Run it in one minute" section.
+
 ## [1.14.0] - 2026-11-09
 
 ### Added

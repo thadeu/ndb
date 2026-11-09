@@ -31,6 +31,8 @@ Install the binary (Linux and macOS, amd64 and arm64; the script checks the sha2
 curl -fsSL https://ndb.clowk.in/install.sh | bash
 ```
 
+Then `ndb serve` starts it with no flags and no root: data in `~/.ndb`, HTTP on `127.0.0.1:7070`.
+
 On a Linux server, add `--systemd`: it also creates the `ndb` user, `/var/lib/ndb`, `/etc/ndb/ndb.yml` (never overwritten) and starts `ndb.service`. The socket is `/run/ndb/ndb.sock`.
 
 ```bash

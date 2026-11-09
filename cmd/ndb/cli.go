@@ -111,8 +111,7 @@ var helpText = strings.TrimLeft(`
 ndb: NDJSON query daemon
 
 Usage:
-  ndb [daemon flags]            run the daemon (same as "ndb serve")
-  ndb serve [daemon flags]      run the daemon
+  ndb serve [daemon flags]      run the daemon (short: ndb s)
   ndb backup <dest|->           one .ndb file (daemon stopped or running); - is stdout
   ndb restore <file|->          put a backup in an empty data dir, after a check; - is stdin
   ndb restore <coll> -at T -to NAME
@@ -126,7 +125,7 @@ Usage:
   ndb drop <collection>         remove the collection, its definition and watch consumers
   ndb rename <collection> <to>  give the collection a new name (-replace: in place of <to>)
   ndb health                    exit 0 when the daemon is ready (for container health checks)
-  ndb bench [-stress-load] [-query] [-aggs]
+  ndb bench [-stress-load] [-query] [-aggs] [-streams]
                                 the ESL benchmark on a daemon of its own; none = all, about 2 minutes
   ndb get <coll> <_id>          one document by _id
   ndb update <coll> '<query>' '<update>'
@@ -173,4 +172,27 @@ borders when the locale is not UTF-8 or TERM=dumb, and no color with NO_COLOR.
 Piped output is not cut.
 
 Run "ndb <command> -h" for the flags of one command.
+
+Daemon flags (ndb serve):
+  -config FILE      ndb.yml (default NDB_CONFIG, ./ndb.yml, then /etc/ndb/ndb.yml)
+  -data-dir DIR     data dir
+  -unix PATH        unix socket ('' turns it off)
+  -unix-mode MODE   permission of the socket, octal (default 0660)
+  -tcp ADDR         TCP listener, e.g. 127.0.0.1:7070 ('' turns it off)
+  -token-file FILE  bearer token the TCP listener requires
+  -version          print the version
+
+  Defaults: ~/.ndb/data, ~/.ndb/ndb.sock and 127.0.0.1:7070; on a server
+  (root, or /var/lib/ndb exists): /var/lib/ndb, /run/ndb/ndb.sock, no TCP.
+
+Try it (no root, no ndb.yml):
+  ndb serve
+
+  # over TCP
+  curl localhost:7070/calls/_doc -d '{"status":"missed"}'
+  curl localhost:7070/calls/_search -d '{"query":{"status":"missed"}}'
+
+  # over the unix socket (the host after http:// is ignored)
+  curl --unix-socket ~/.ndb/ndb.sock http://ndb/calls/_doc -d '{"status":"missed"}'
+  curl --unix-socket ~/.ndb/ndb.sock http://ndb/calls/_search -d '{"query":{"status":"missed"}}'
 `, "\n")

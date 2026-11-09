@@ -302,7 +302,7 @@ main() {
   elif [ "$SYSTEMD" -eq 1 ]; then
     install_systemd
   else
-    log "run it: ndb -data-dir ~/ndb-data -unix ~/ndb.sock   (or re-run with --systemd)"
+    log "run it: ndb serve   (data in ~/.ndb, HTTP on 127.0.0.1:7070; or re-run with --systemd)"
   fi
 }
 

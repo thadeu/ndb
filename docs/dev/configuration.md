@@ -1,6 +1,11 @@
 # Configuration
 
-`ndb.yml` is optional. Without it, the defaults apply: data dir `/var/lib/ndb`, unix socket `/run/ndb/ndb.sock` with mode `0660`, no TCP.
+`ndb.yml` is optional. Without it, the defaults apply, and they depend on the install:
+
+- **Server** (ndb runs as root, or `/var/lib/ndb` exists, as with `--systemd` and the Docker image): data dir `/var/lib/ndb`, unix socket `/run/ndb/ndb.sock` with mode `0660`, no TCP.
+- **User** (any other case, such as a laptop): data dir `~/.ndb/data`, unix socket `~/.ndb/ndb.sock`, TCP on `127.0.0.1:7070`. So `ndb serve` with no flags works with no root.
+
+The CLI commands use the same rule to find the daemon.
 
 Without `-config`, the daemon and the CLI look for the file in this order: `NDB_CONFIG`, `./ndb.yml`, `/etc/ndb/ndb.yml`. So in Docker, mounting the file at `/etc/ndb/ndb.yml` is enough: no `command:` is needed. A flag overrides the file, even when empty (`-unix ""` turns the unix listener off).
 
