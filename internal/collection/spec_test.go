@@ -94,6 +94,19 @@ func (e *specEngine) Do(ctx context.Context, name string, step spec.Step) ([]jso
 			return nil, err
 		}
 
+		find := func(ctx context.Context, body []byte) (collection.Page, error) {
+			q, err := c.ParseQuery(body)
+			if err != nil {
+				return collection.Page{}, err
+			}
+
+			return c.Query(ctx, q)
+		}
+
+		if page, ok, err := collection.AggregateFind(ctx, step.Body, find); ok {
+			return page.Rows, specErr(err)
+		}
+
 		p, err := c.ParseAggregate(step.Body)
 		if err != nil {
 			return nil, specErr(err)

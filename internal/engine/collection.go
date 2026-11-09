@@ -140,6 +140,10 @@ func (c *Collection) Find(ctx context.Context, body []byte) (collection.Page, er
 
 // Aggregate runs the pipeline of an aggregate body (plan §10.2).
 func (c *Collection) Aggregate(ctx context.Context, body []byte) (collection.Page, error) {
+	if page, ok, err := collection.AggregateFind(ctx, body, c.Find); ok {
+		return page, err
+	}
+
 	if err := c.enter(); err != nil {
 		return collection.Page{}, err
 	}

@@ -1,5 +1,5 @@
 {
-  "name": "a pipeline with no $group is invalid",
+  "name": "a pipeline with no $group reads documents, like a find",
   "collection": "calls",
   "setup": {
     "catalog": {
@@ -68,12 +68,36 @@
     "body": {
       "pipeline": [
         {
-          "$match": {}
+          "$match": {
+            "status": "answered"
+          }
+        },
+        {
+          "$sort": {
+            "dur": -1
+          }
+        },
+        {
+          "$skip": 1
+        },
+        {
+          "$limit": 1
+        },
+        {
+          "$project": {
+            "dur": 1
+          }
         }
       ]
     }
   },
   "expect": {
-    "error": "invalid_pipeline"
+    "ordered": true,
+    "rows": [
+      {
+        "_id": "c2",
+        "dur": 20
+      }
+    ]
   }
 }

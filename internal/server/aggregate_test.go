@@ -103,7 +103,7 @@ func TestAggregateErrors(t *testing.T) {
 		path, body, code string
 		status           int
 	}{
-		"invalid pipeline": {"/posts/_aggregate", `{"pipeline":[{"$match":{}}]}`, "invalid_pipeline", http.StatusBadRequest},
+		"invalid pipeline": {"/posts/_aggregate", `{"pipeline":[{"$limit":1},{"$sort":{"n":1}}]}`, "invalid_pipeline", http.StatusBadRequest},
 		"cursor":           {"/posts/_aggregate", `{"pipeline":[{"$group":{"_id":null}}],"after":"!!!"}`, "cursor_invalid", http.StatusBadRequest},
 		"unknown coll":     {"/nope/_aggregate", `{"pipeline":[{"$group":{"_id":null}}]}`, "unknown_collection", http.StatusNotFound},
 	}

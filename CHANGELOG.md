@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **`_aggregate` takes a pipeline with no `$group`, as MongoDB does.** Such a pipeline reads documents: it runs as a find, with the same indexes, cursor and headers as `_search`. The stages are `$match` and one `$sort`, then `$skip` and `$limit`, and one `$project` (keep or remove fields); `$lookup` goes at the end, as before. A `$match` or a `$sort` after `$skip`, `$limit` or `$project` is still `invalid_pipeline`, because it would give other rows than MongoDB. Before, every pipeline with no `$group` was `invalid_pipeline`.
+
 ### Fixed
 
 - **Links between the pages of the docs site no longer open GitHub (404).** A link from one page to another (`[Aggregate](../aggregate.md)`) went to `github.com/.../blob/main/aggregate.md`, a path that does not exist; 70 links of the site did. They now stay on the site; a link to any other file of the repo still opens it on GitHub. The site no longer builds stray pages for `CHANGELOG.md` and `benchmark/README.md`.

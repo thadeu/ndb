@@ -141,6 +141,14 @@ func (db *DB) FindPattern(ctx context.Context, pattern string, body []byte) (col
 // AggregatePattern runs a pipeline over every collection of the pattern, as
 // if they were one collection.
 func (db *DB) AggregatePattern(ctx context.Context, pattern string, body []byte) (collection.Page, error) {
+	find := func(ctx context.Context, body []byte) (collection.Page, error) {
+		return db.FindPattern(ctx, pattern, body)
+	}
+
+	if page, ok, err := collection.AggregateFind(ctx, body, find); ok {
+		return page, err
+	}
+
 	return db.readPattern(pattern, func(cols []collection.Named) (collection.Page, error) {
 		if len(cols) == 0 {
 			p, err := agg.Parse(body, agg.Options{})
@@ -214,6 +222,14 @@ func (db *DB) FindPartitioned(ctx context.Context, def catalog.Def, body []byte)
 
 // AggregatePartitioned runs a pipeline over the live partitions.
 func (db *DB) AggregatePartitioned(ctx context.Context, def catalog.Def, body []byte) (collection.Page, error) {
+	find := func(ctx context.Context, body []byte) (collection.Page, error) {
+		return db.FindPartitioned(ctx, def, body)
+	}
+
+	if page, ok, err := collection.AggregateFind(ctx, body, find); ok {
+		return page, err
+	}
+
 	return db.readNames(db.Partitions(def, true, time.Now()), func(cols []collection.Named) (collection.Page, error) {
 		if len(cols) == 0 {
 			p, err := agg.Parse(body, agg.Options{TimeField: def.Time})
