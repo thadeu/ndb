@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-11-09
+
 ### Added
 
 - **The Go SDK limits its connections** (from the fsw-esl POC). Without a limit, a peak of goroutines opened hundreds of connections at once: over a Docker network calls took 1 s and 4 s, and over TCP some failed. `ndb.Connect` now opens at most `ndb.DefaultMaxConns` (64); over that a call waits for a free connection. `ndb.WithMaxConns(n)` and `ndb.WithIdleTimeout(d)` change it; a `Watch` has its own connections, out of the limit. With 1000 goroutines over the unix socket, p99 went from 35 ms to 9.5 ms and max from 137 ms to 12 ms.
@@ -564,7 +566,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.13.2...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.14.0...HEAD
+[1.14.0]: https://github.com/thadeu/ndb/compare/v1.13.2...v1.14.0
 [1.13.2]: https://github.com/thadeu/ndb/compare/v1.13.1...v1.13.2
 [1.13.1]: https://github.com/thadeu/ndb/compare/v1.13.0...v1.13.1
 [1.13.0]: https://github.com/thadeu/ndb/compare/v1.12.1...v1.13.0
