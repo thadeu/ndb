@@ -39,6 +39,7 @@ func directPlan(n int) []planned {
 	return []planned{
 		{"direct: write files", sec(float64(n) / 250_000)},
 		{"direct: start and read the files", sec(float64(n) / 40_000)},
+		{"direct: settle", sec(8)},
 		{"direct reads", sec(5)},
 		{"direct: append live", sec(float64(n) / 150_000)},
 		{"direct: catch up", sec(5)},
@@ -89,8 +90,15 @@ func directCold(dir string, n, users int) []string {
 	prog.end(fmt.Sprintf("%.1f s, %.0f lines/s, %d missing", took.Seconds(), float64(n+users)/took.Seconds(), missing))
 	record("direct.cold_missing", float64(missing))
 
+	prog.step("direct: settle", nil)
+
+	settle := d.settle("/cdrs")
+
+	prog.end("seals done")
+
 	lines := []string{
 		fmt.Sprintf("| direct cold start | %d cdrs and %d users read in %.1f s (%.0f lines/s), %d missing |", n, users, took.Seconds(), float64(n+users)/took.Seconds(), missing),
+		fmt.Sprintf("| direct settle | seals done %.0f s after the start (the reads below wait for them) |", settle.Seconds()),
 	}
 
 	lines = append(lines, timed(d, "direct reads", directProbes())...)
