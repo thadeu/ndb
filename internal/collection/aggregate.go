@@ -61,7 +61,7 @@ func (c *Collection) Aggregate(ctx context.Context, p *agg.Pipeline) (Page, erro
 
 // finishAgg runs the stages after the group stage on the merged table.
 func finishAgg(p *agg.Pipeline, part aggPart, plan string) (Page, error) {
-	res, err := p.Finish(part.tbl.Rows())
+	res, err := p.FinishTable(part.tbl)
 	if err != nil {
 		return Page{}, err
 	}
@@ -99,16 +99,20 @@ func (c *Collection) aggTable(ctx context.Context, p *agg.Pipeline, budget *agg.
 
 	defer src.release()
 
-	parts, err := runPool(ctx, c.scanWorkers, 1+len(src.segs), func(i int) (aggPart, error) {
+	segs := splitSegs(src.segs, c.scanWorkers)
+
+	parts, err := runPool(ctx, c.scanWorkers, 1+len(segs), func(i int) (aggPart, error) {
 		if i == 0 {
 			return c.aggCands(ctx, p, src, budget)
 		}
 
-		return c.aggSegment(ctx, p, src.segs[i-1], budget)
+		return c.aggSegment(ctx, p, segs[i-1], budget)
 	})
 	if err != nil {
 		return aggPart{}, "", err
 	}
+
+	countSegments(segs, func(i int) int { return parts[i+1].ex.RowGroupsRead }, &parts[0].ex)
 
 	tbl, matched, ex, err := mergeAgg(parts)
 	if err != nil {
@@ -197,7 +201,9 @@ func (c *Collection) aggSegment(ctx context.Context, p *agg.Pipeline, s segSnap,
 	part := aggPart{tbl: p.NewTable(budget)}
 	vals := make([]query.Value, len(groupPaths))
 
-	for gi, g := range s.groups {
+	for k, g := range s.groups {
+		gi := s.first + k
+
 		if err := ctx.Err(); err != nil {
 			return aggPart{}, err
 		}
@@ -210,7 +216,15 @@ func (c *Collection) aggSegment(ctx context.Context, p *agg.Pipeline, s segSnap,
 
 		part.ex.RowGroupsRead++
 
-		rows, err := s.r.ReadGroup(gi, sc.paths)
+		read := s.r.ReadGroup
+
+		if !p.NeedsPos() {
+			read = func(gi int, paths []string) (segment.GroupRows, error) {
+				return s.r.ReadCells(gi, paths, func(i int) bool { return isLive(s.live, g.Start+i) })
+			}
+		}
+
+		rows, err := read(gi, sc.paths)
 		if err != nil {
 			return aggPart{}, err
 		}
@@ -246,19 +260,19 @@ func (c *Collection) aggSegment(ctx context.Context, p *agg.Pipeline, s segSnap,
 				return aggPart{}, err
 			}
 
-			if err := part.tbl.Add(vals, query.Pos{Keys: keys, ID: rows.IDs[i], Seq: rows.Seqs[i]}); err != nil {
+			pos := query.Pos{Keys: keys, Seq: rows.Seqs[i]}
+
+			if rows.IDs != nil {
+				pos.ID = rows.IDs[i]
+			}
+
+			if err := part.tbl.Add(vals, pos); err != nil {
 				return aggPart{}, err
 			}
 		}
 	}
 
 	part.ex.RawFetched += sc.p.ex.RawFetched
-
-	if part.ex.RowGroupsRead > 0 {
-		part.ex.SegmentsRead = 1
-	} else {
-		part.ex.SegmentsSkipped = 1
-	}
 
 	return part, nil
 }

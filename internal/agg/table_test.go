@@ -2,6 +2,7 @@ package agg_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -298,4 +299,60 @@ func TestCursorErrors(t *testing.T) {
 	other, _ := parse(t, `{"pipeline":[{"$group":{"_id":"$b"}}],"limit":1,"after":"`+res.Next+`"}`)
 
 	wantCode(t, other.CheckCursor(), "cursor_mismatch")
+}
+
+// The top n of a group stage followed by $sort and $limit gives the rows of
+// the whole path (Rows, every stage), ties broken by the group key.
+func TestTopOfSortAndLimitEqualsTheWholePath(t *testing.T) {
+	var docs []string
+
+	for i := range 600 {
+		docs = append(docs, fmt.Sprintf(`{"u":"u%03d","n":%d}`, i%97, (i*7)%5))
+	}
+
+	for _, body := range []string{
+		`{"pipeline":[{"$group":{"_id":"$u","t":{"$sum":"$n"}}},{"$sort":{"t":-1}},{"$limit":10}]}`,
+		`{"pipeline":[{"$group":{"_id":"$u","t":{"$sum":"$n"}}},{"$sort":{"t":1}},{"$limit":5},{"$project":{"t":1}}]}`,
+		`{"pipeline":[{"$group":{"_id":"$u","t":{"$max":"$n"}}},{"$sort":{"_id":-1}},{"$limit":3}],"limit":2}`,
+		`{"pipeline":[{"$group":{"_id":"$u","t":{"$sum":"$n"}}},{"$sort":{"t":-1}},{"$limit":500}]}`,
+	} {
+		p, err := parse(t, body)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		table := p.NewTable(agg.NewBudget(1 << 30))
+
+		for i, d := range docs {
+			m, _ := query.Decode([]byte(d))
+
+			if err := table.Add(p.Values(m), query.Pos{Seq: uint64(i + 1)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		whole, err := p.Finish(table.Rows())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		top, err := p.FinishTable(table)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if fmt.Sprint(rowsText(whole), whole.Total, whole.Next) != fmt.Sprint(rowsText(top), top.Total, top.Next) {
+			t.Fatalf("%s\n whole %v (total %d)\n top   %v (total %d)", body, rowsText(whole), whole.Total, rowsText(top), top.Total)
+		}
+	}
+}
+
+func rowsText(r agg.Result) []string {
+	out := make([]string, len(r.Rows))
+
+	for i, row := range r.Rows {
+		out[i] = string(row)
+	}
+
+	return out
 }

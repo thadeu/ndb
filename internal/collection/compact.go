@@ -808,7 +808,7 @@ func columnMaxTime(r *segRef, path string) (time.Time, bool) {
 	var latest time.Time
 
 	for gi := range r.Groups() {
-		rows, err := r.ReadGroup(gi, []string{path})
+		rows, err := r.ReadCells(gi, []string{path}, nil)
 		if err != nil {
 			return time.Time{}, false
 		}

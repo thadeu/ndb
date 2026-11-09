@@ -34,7 +34,7 @@ func (r *segRef) timeZones(path string) []timeZone {
 	zones := make([]timeZone, len(r.Groups()))
 
 	for gi := range zones {
-		rows, err := r.ReadGroup(gi, []string{path})
+		rows, err := r.ReadCells(gi, []string{path}, nil)
 		if err != nil {
 			zones = nil
 

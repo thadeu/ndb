@@ -276,11 +276,26 @@ func (p *Pipeline) CheckCursor() error {
 // Finish runs the stages after the group on the rows of the group table and
 // cuts the page (skip, limit, after).
 func (p *Pipeline) Finish(rows []map[string]any) (Result, error) {
+	return p.finishFrom(rows, 0)
+}
+
+// FinishTable is Finish on the rows of t. When the group stage is followed
+// by $sort and $limit (the top n of a dashboard), only the first n groups
+// become rows.
+func (p *Pipeline) FinishTable(t *Table) (Result, error) {
+	if len(p.post) >= 2 && p.post[0].name == "$sort" && p.post[1].name == "$limit" {
+		return p.finishFrom(t.top(p.post[0], p.post[1].n), 2)
+	}
+
+	return p.Finish(t.Rows())
+}
+
+func (p *Pipeline) finishFrom(rows []map[string]any, first int) (Result, error) {
 	if err := p.CheckCursor(); err != nil {
 		return Result{}, err
 	}
 
-	for _, st := range p.post {
+	for _, st := range p.post[first:] {
 		rows = st.apply(rows)
 	}
 

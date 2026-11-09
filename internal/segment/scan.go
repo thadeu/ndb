@@ -248,24 +248,41 @@ func probeOf(t string, v Scalar) (parquet.Value, bool) {
 // ReadGroup reads the ids, positions and cells of paths for one row group.
 // Only the chunks of the paths and of _id, _seq, _v and _rest are read.
 func (r *parquetReader) ReadGroup(group int, paths []string) (GroupRows, error) {
+	return r.readRows(group, paths, true, nil)
+}
+
+// ReadCells is ReadGroup without the ids and the versions (IDs and Vs are
+// nil): a read that only counts or groups rows, with no row order to keep,
+// does not decode an id string for each row. keep, when set, tells the
+// rows (in the group) whose cells the caller reads: the others stay
+// unknown, so a filter that keeps one row in seven builds one cell in seven.
+func (r *parquetReader) ReadCells(group int, paths []string, keep func(row int) bool) (GroupRows, error) {
+	return r.readRows(group, paths, false, keep)
+}
+
+func (r *parquetReader) readRows(group int, paths []string, ids bool, keep func(int) bool) (GroupRows, error) {
 	rg := r.file.RowGroups()[group]
 	chunks := rg.ColumnChunks()
 
 	n := int(rg.NumRows())
 
 	out := GroupRows{
-		IDs:   make([]string, n),
 		Seqs:  make([]uint64, n),
-		Vs:    make([]uint64, n),
 		Cells: make([][]Cell, len(paths)),
 	}
 
-	err := errors.Join(
-		eachValue(chunks[r.cols.id], func(k int, v parquet.Value) { out.IDs[k] = string(v.ByteArray()) }),
-		eachValue(chunks[r.cols.seq], func(k int, v parquet.Value) { out.Seqs[k] = uint64(v.Int64()) }),
-		eachValue(chunks[r.cols.v], func(k int, v parquet.Value) { out.Vs[k] = uint64(v.Int64()) }),
-	)
-	if err != nil {
+	reads := []error{eachValue(chunks[r.cols.seq], func(k int, v parquet.Value) { out.Seqs[k] = uint64(v.Int64()) })}
+
+	if ids {
+		out.IDs, out.Vs = make([]string, n), make([]uint64, n)
+
+		reads = append(reads,
+			eachValue(chunks[r.cols.id], func(k int, v parquet.Value) { out.IDs[k] = string(v.ByteArray()) }),
+			eachValue(chunks[r.cols.v], func(k int, v parquet.Value) { out.Vs[k] = uint64(v.Int64()) }),
+		)
+	}
+
+	if err := errors.Join(reads...); err != nil {
 		return GroupRows{}, err
 	}
 
@@ -273,13 +290,8 @@ func (r *parquetReader) ReadGroup(group int, paths []string) (GroupRows, error) 
 		return out, nil
 	}
 
-	rest, err := restRows(chunks[r.cols.rest], n)
-	if err != nil {
-		return GroupRows{}, err
-	}
-
 	for i, p := range paths {
-		cells, err := r.cellsOf(rg, p, rest, n)
+		cells, err := r.cellsOf(rg, p, n, keep)
 		if err != nil {
 			return GroupRows{}, err
 		}
@@ -287,12 +299,41 @@ func (r *parquetReader) ReadGroup(group int, paths []string) (GroupRows, error) 
 		out.Cells[i] = cells
 	}
 
-	return out, nil
+	return out, r.fromRest(chunks[r.cols.rest], paths, out.Cells, n, keep)
+}
+
+// fromRest fills the kept cells that their column did not answer from
+// _rest, where a conflicting kind of a path goes. _rest is read only when
+// such a cell exists.
+func (r *parquetReader) fromRest(chunk parquet.ColumnChunk, paths []string, cells [][]Cell, n int, keep func(int) bool) error {
+	var rest [][]byte
+
+	for i, p := range paths {
+		for k := range cells[i] {
+			if cells[i][k].Known || (keep != nil && !keep(k)) {
+				continue
+			}
+
+			if rest == nil {
+				var err error
+
+				if rest, err = restRows(chunk, n); err != nil {
+					return err
+				}
+			}
+
+			if rest[k] != nil {
+				cells[i][k] = restCell(rest[k], p)
+			}
+		}
+	}
+
+	return nil
 }
 
 // cellsOf reads the cells of one path. A row with no column value takes its
 // value from _rest, where a conflicting kind of the path went.
-func (r *parquetReader) cellsOf(rg parquet.RowGroup, path string, rest [][]byte, n int) ([]Cell, error) {
+func (r *parquetReader) cellsOf(rg parquet.RowGroup, path string, n int, keep func(int) bool) ([]Cell, error) {
 	cells := make([]Cell, n)
 	col, ok := r.columns[path]
 
@@ -303,14 +344,8 @@ func (r *parquetReader) cellsOf(rg parquet.RowGroup, path string, rest [][]byte,
 			return cells, nil
 		}
 
-		if err := fillCells(cells, rg.ColumnChunks()[leaf.ColumnIndex], strings.HasPrefix(col.Type, "list<")); err != nil {
+		if err := fillCells(cells, rg.ColumnChunks()[leaf.ColumnIndex], strings.HasPrefix(col.Type, "list<"), keep); err != nil {
 			return nil, err
-		}
-	}
-
-	for k := range cells {
-		if !cells[k].Known && rest[k] != nil {
-			cells[k] = restCell(rest[k], path)
 		}
 	}
 
@@ -323,7 +358,7 @@ func (r *parquetReader) cellsOf(rg parquet.RowGroup, path string, rest [][]byte,
 //
 // A plain column has one value a row: the cells share one block of
 // scalars, so a group costs one allocation, not one a row.
-func fillCells(cells []Cell, chunk parquet.ColumnChunk, list bool) error {
+func fillCells(cells []Cell, chunk parquet.ColumnChunk, list bool, keep func(int) bool) error {
 	row := -1
 
 	var one []Scalar
@@ -332,27 +367,58 @@ func fillCells(cells []Cell, chunk parquet.ColumnChunk, list bool) error {
 		one = make([]Scalar, len(cells))
 	}
 
+	intern := map[string]string{}
+
 	return eachValue(chunk, func(_ int, v parquet.Value) {
 		if v.RepetitionLevel() == 0 {
 			row++
 		}
 
-		if v.DefinitionLevel() == 0 || row < 0 || row >= len(cells) {
+		if v.DefinitionLevel() == 0 || row < 0 || row >= len(cells) || (keep != nil && !keep(row)) {
 			return
 		}
 
 		cells[row].Known = true
 		cells[row].List = list
 
+		s := internScalar(v, intern)
+
 		if list || len(cells[row].Vals) > 0 {
-			cells[row].Vals = append(cells[row].Vals, scalarOf(v, v.Kind()))
+			cells[row].Vals = append(cells[row].Vals, s)
 
 			return
 		}
 
-		one[row] = scalarOf(v, v.Kind())
+		one[row] = s
 		cells[row].Vals = one[row : row+1 : row+1]
 	})
+}
+
+// internLimit is how many distinct strings one chunk shares: a column of
+// few values (a status, a type) makes one string per value, not per row.
+const internLimit = 4096
+
+// internScalar is scalarOf, with the strings of the chunk shared.
+func internScalar(v parquet.Value, intern map[string]string) Scalar {
+	k := v.Kind()
+
+	if k == parquet.Boolean || k == parquet.Int64 || k == parquet.Double {
+		return scalarOf(v, k)
+	}
+
+	b := v.ByteArray()
+
+	if s, ok := intern[string(b)]; ok {
+		return Scalar{Kind: ScalarString, Str: s}
+	}
+
+	s := string(b)
+
+	if len(intern) < internLimit {
+		intern[s] = s
+	}
+
+	return Scalar{Kind: ScalarString, Str: s}
 }
 
 // restRows returns the _rest JSON of each row, nil when the row has none.

@@ -42,6 +42,10 @@ type segSnap struct {
 	groups []segment.Group
 	live   bitset
 
+	// first is the index of groups[0] in the segment: a big segment is cut
+	// into units of row groups (splitSegs), so a read uses every core.
+	first int
+
 	// exact: live holds the matches themselves (the hits of an index for
 	// the only condition), so a count needs no read of the group.
 	exact bool
@@ -94,15 +98,78 @@ func liveIn(bits []uint64, g segment.Group) int {
 	return n
 }
 
-// execute runs unit 0 (the candidates) and one unit per segment on the pool.
+// execute runs unit 0 (the candidates) and one unit per segment (or part
+// of a big segment) on the pool.
 func (c *Collection) execute(ctx context.Context, q *query.Query, src source, cur query.Pos, hasCur bool) ([]part, error) {
-	return runPool(ctx, c.scanWorkers, 1+len(src.segs), func(i int) (part, error) {
+	segs := src.segs
+
+	// A count counts most row groups from their bits once its top-k holds
+	// the first rows; parts of one segment would each read a group for
+	// their own top-k first, so a count keeps one unit per segment.
+	if !q.Count {
+		segs = splitSegs(segs, c.scanWorkers)
+	}
+
+	parts, err := runPool(ctx, c.scanWorkers, 1+len(segs), func(i int) (part, error) {
 		if i == 0 {
 			return c.evalCands(ctx, q, src, cur, hasCur)
 		}
 
-		return c.scanSegment(ctx, q, src.segs[i-1], cur, hasCur)
+		return c.scanSegment(ctx, q, segs[i-1], cur, hasCur)
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	countSegments(segs, func(i int) int { return parts[i+1].ex.RowGroupsRead }, &parts[0].ex)
+
+	return parts, nil
+}
+
+// splitSegs cuts the segments into about n units of row groups when there
+// are fewer segments than n: one big segment (a large direct collection, a
+// partition just compacted) is read by every worker, not by one. Each unit
+// keeps its own top-k or group table, merged at the end.
+func splitSegs(segs []segSnap, n int) []segSnap {
+	if len(segs) == 0 || len(segs) >= n {
+		return segs
+	}
+
+	parts := (n + len(segs) - 1) / len(segs)
+
+	var out []segSnap
+
+	for _, s := range segs {
+		size := max((len(s.groups)+parts-1)/parts, 1)
+
+		for lo := 0; lo < len(s.groups); lo += size {
+			cut := s
+			cut.groups = s.groups[lo:min(lo+size, len(s.groups))]
+			cut.first = s.first + lo
+			out = append(out, cut)
+		}
+	}
+
+	return out
+}
+
+// countSegments adds to ex the segments read and skipped by the units segs
+// (read: one of its parts read a row group). read gives the row groups that
+// unit i read.
+func countSegments(segs []segSnap, read func(i int) int, ex *Explain) {
+	for i := 0; i < len(segs); {
+		start, groups := i, 0
+
+		for ; i < len(segs) && segs[i].r == segs[start].r; i++ {
+			groups += read(i)
+		}
+
+		if groups > 0 {
+			ex.SegmentsRead++
+		} else {
+			ex.SegmentsSkipped++
+		}
+	}
 }
 
 // runPool calls do for 0..n-1 with at most workers goroutines (at least one:
@@ -332,7 +399,9 @@ func (c *Collection) scanSegment(ctx context.Context, q *query.Query, s segSnap,
 	whole := !q.HasWhere() || s.exact
 	timeOnly := !whole && q.TimeOnly()
 
-	for gi, g := range s.groups {
+	for k, g := range s.groups {
+		gi := s.first + k
+
 		if err := ctx.Err(); err != nil {
 			return part{}, err
 		}
@@ -373,12 +442,6 @@ func (c *Collection) scanSegment(ctx context.Context, q *query.Query, s segSnap,
 		}
 	}
 
-	if sc.p.ex.RowGroupsRead > 0 {
-		sc.p.ex.SegmentsRead = 1
-	} else {
-		sc.p.ex.SegmentsSkipped = 1
-	}
-
 	sc.p.rows = sc.top.sorted()
 
 	return sc.p, nil
@@ -392,8 +455,8 @@ func visibleQuery(q *query.Query, s segSnap, bounds []hideBound) *query.Query {
 		return q
 	}
 
-	for gi, g := range s.groups {
-		if liveIn(s.live, g) > 0 && !allVisible(s.r, gi, bounds) {
+	for k, g := range s.groups {
+		if liveIn(s.live, g) > 0 && !allVisible(s.r, s.first+k, bounds) {
 			return q
 		}
 	}

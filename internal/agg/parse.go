@@ -273,3 +273,9 @@ func (p *Pipeline) Values(m map[string]any) []query.Value {
 
 	return out
 }
+
+// NeedsPos tells whether the group stage keeps an order ($first, $last):
+// only then does each row need its position (its id and sort keys).
+func (p *Pipeline) NeedsPos() bool {
+	return p.group.needPos
+}

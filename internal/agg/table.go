@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"math"
 	"slices"
+	"strings"
 	"sync/atomic"
 
 	"github.com/thadeu/ndb/internal/query"
@@ -256,7 +257,6 @@ func (t *Table) Len() int {
 
 // Rows are the output rows of the group stage, sorted by _id.
 func (t *Table) Rows() []map[string]any {
-	g := t.p.group
 	list := make([]*bucket, 0, len(t.groups))
 
 	for _, b := range t.groups {
@@ -268,15 +268,77 @@ func (t *Table) Rows() []map[string]any {
 	out := make([]map[string]any, len(list))
 
 	for i, b := range list {
-		row := make(map[string]any, len(g.accs)+1)
+		out[i] = t.row(b, nil)
+	}
 
+	return out
+}
+
+// row is the output row of a group; with only, just those top-level fields
+// (the fields a $sort reads).
+func (t *Table) row(b *bucket, only map[string]bool) map[string]any {
+	g := t.p.group
+	row := make(map[string]any, len(g.accs)+1)
+
+	if only == nil || only["_id"] {
 		row["_id"] = g.idOf(b.keys)
+	}
 
-		for j, def := range g.accs {
+	for j, def := range g.accs {
+		if only == nil || only[def.name] {
 			row[def.name] = b.accs[j].result(def.op)
 		}
+	}
 
-		out[i] = row
+	return row
+}
+
+// top is the first n output rows in the order of the $sort st, the group
+// keys breaking the ties as Rows does: the rows of a group stage followed by
+// $sort and $limit, without making a row (or sorting) every group.
+func (t *Table) top(st stage, n int) []map[string]any {
+	only := map[string]bool{}
+
+	for _, s := range st.q.Sort {
+		top, _, _ := strings.Cut(s.Path, ".")
+		only[top] = true
+	}
+
+	type cand struct {
+		b   *bucket
+		pos query.Pos
+	}
+
+	cmp := func(a, b cand) int {
+		if c := st.q.Cmp(a.pos, b.pos); c != 0 {
+			return c
+		}
+
+		return cmpKeys(a.b.keys, b.b.keys)
+	}
+
+	// best holds the n first rows so far, the worst of them at the end.
+	best := make([]cand, 0, n+1)
+
+	for _, b := range t.groups {
+		c := cand{b: b, pos: query.Pos{Keys: st.q.SortKeys(t.row(b, only))}}
+
+		if len(best) == n && cmp(c, best[n-1]) >= 0 {
+			continue
+		}
+
+		at, _ := slices.BinarySearchFunc(best, c, cmp)
+		best = slices.Insert(best, at, c)
+
+		if len(best) > n {
+			best = best[:n]
+		}
+	}
+
+	out := make([]map[string]any, len(best))
+
+	for i, c := range best {
+		out[i] = t.row(c.b, nil)
 	}
 
 	return out

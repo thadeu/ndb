@@ -436,6 +436,9 @@ func eachValue(chunk parquet.ColumnChunk, fn func(k int, v parquet.Value)) error
 
 	defer pages.Close()
 
+	bp := valueBufs.Get().(*[]parquet.Value)
+	defer valueBufs.Put(bp)
+
 	k := 0
 
 	for {
@@ -449,7 +452,7 @@ func eachValue(chunk parquet.ColumnChunk, fn func(k int, v parquet.Value)) error
 			return err
 		}
 
-		buf := make([]parquet.Value, min(page.NumValues(), 1024))
+		buf := (*bp)[:min(page.NumValues(), int64(len(*bp)))]
 		vr := page.Values()
 
 		for {
@@ -470,6 +473,14 @@ func eachValue(chunk parquet.ColumnChunk, fn func(k int, v parquet.Value)) error
 		}
 	}
 }
+
+// valueBufs are the read buffers of eachValue: one per read in flight, not
+// one per page.
+var valueBufs = sync.Pool{New: func() any {
+	b := make([]parquet.Value, 1024)
+
+	return &b
+}}
 
 // columnValues reads every value of a column chunk. The metadata columns are
 // required, so each row gives one value.

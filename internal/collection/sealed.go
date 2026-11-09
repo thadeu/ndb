@@ -357,12 +357,12 @@ func (c *Collection) sealedLen() int {
 // the snapshot segs, segment by segment in row order.
 func eachLive(segs []segSnap, fn func(id string, e *entry) error) error {
 	for _, s := range segs {
-		for gi, g := range s.groups {
+		for k, g := range s.groups {
 			if liveIn(s.live, g) == 0 {
 				continue
 			}
 
-			rows, err := s.r.ReadGroup(gi, nil)
+			rows, err := s.r.ReadGroup(s.first+k, nil)
 			if err != nil {
 				return err
 			}

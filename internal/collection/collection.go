@@ -15,6 +15,7 @@ import (
 	"iter"
 	"log"
 	"maps"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -31,7 +32,10 @@ import (
 
 const defaultMaxLine = 1 << 20
 
-const defaultScanWorkers = 2
+// defaultScanWorkers is how many units (the memtable, a segment) of one
+// read run at once: every core, so a read of one big collection uses the
+// whole machine (a pattern read runs up to 4 collections at once on top).
+var defaultScanWorkers = max(2, runtime.NumCPU())
 
 const defaultGroupLimit = 256 << 20
 

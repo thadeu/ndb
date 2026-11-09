@@ -56,6 +56,7 @@ type Reader interface {
 	Zone(group int, path string) (Zone, bool)
 	Bloom(group int, path string, v Scalar) (may, known bool)
 	ReadGroup(group int, paths []string) (GroupRows, error)
+	ReadCells(group int, paths []string, keep func(row int) bool) (GroupRows, error)
 }
 
 func NewWriter() Writer {
