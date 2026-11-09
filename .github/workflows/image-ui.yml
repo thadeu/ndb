@@ -8,8 +8,10 @@ permissions:
   contents: read
   packages: write
 
+# One build at a time for every tag: a newer tag cancels the build of an
+# older one (the images of the newer version replace them).
 concurrency:
-  group: image-ui-${{ github.ref }}
+  group: image-ui
   cancel-in-progress: true
 
 env:

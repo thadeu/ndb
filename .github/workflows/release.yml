@@ -8,6 +8,14 @@ on:
 permissions:
   contents: write
 
+
+# One release at a time, never cancelled halfway (a gem or a package can be
+# pushed only once): a newer tag waits, and only the newest one waiting
+# runs.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest

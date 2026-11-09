@@ -51,4 +51,6 @@ git push origin v0.1.0
 
 ## If a publish fails
 
+Workflows never run two at a time. CI, docs and the images cancel the run in progress when a newer push or tag comes. Release, publish-gem and publish-npm finish the run in progress (a gem or a package version can be pushed only once), and of the tags that wait, only the newest runs: push the tags of two releases close together and only the second publishes.
+
 A tag cannot be reused for a different build. Fix the cause and re-run the failed workflow in GitHub Actions. If the code must change, use a new patch version. A published npm or gem version cannot be replaced.

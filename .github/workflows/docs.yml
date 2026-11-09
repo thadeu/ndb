@@ -21,8 +21,9 @@ permissions:
   contents: read
   deployments: write
 
+# One deploy at a time: a newer run cancels the one in progress.
 concurrency:
-  group: docs-${{ github.ref }}
+  group: docs
   cancel-in-progress: true
 
 jobs:
