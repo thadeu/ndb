@@ -68,6 +68,41 @@ module Ndb
   # attaches too many documents.
   class LookupError < Error; end
 
+  # The daemon refused a token for this route, or a route over TCP.
+  class Forbidden < Error; end
+
+  # A document, an id, a batch, a path or an index definition is not valid.
+  class InvalidDocument < Error; end
+
+  # A collection pattern that is not valid, a write on one, or one that
+  # matches too many collections.
+  class InvalidPattern < Error; end
+
+  # The route does not exist for a direct-mode collection.
+  class NotSupported < Error; end
+
+  # The blob reference is not sha256:<64 hex>.
+  class InvalidBlobRef < Error; end
+
+  # No route has this path, or not with this method.
+  class UnknownRoute < Error; end
+
+  # The group table of an aggregate is over its memory limit.
+  class GroupLimitExceeded < Error; end
+
+  # The body or one line is over max_line_size (or the blob limit).
+  class RequestTooLarge < Error; end
+
+  # The watch position is not valid.
+  class InvalidPosition < Error; end
+
+  # The daemon is shutting down (HTTP 503). Not retried by the client: the
+  # request may have been taken, unlike NotReady.
+  class Closed < Error; end
+
+  # A bug or a disk error in the daemon; the message is in its log.
+  class Internal < Error; end
+
   # The daemon error code -> the Ruby class.
   CODE_TO_ERROR = {
     "unauthorized" => Unauthorized,
@@ -100,7 +135,30 @@ module Ndb
     "pitr_off" => PitrOff,
     "lookup_invalid" => LookupError,
     "lookup_unindexed" => LookupError,
-    "lookup_too_large" => LookupError
+    "lookup_too_large" => LookupError,
+    "invalid_pipeline" => InvalidQuery,
+    "forbidden" => Forbidden,
+    "invalid_doc" => InvalidDocument,
+    "missing_id" => InvalidDocument,
+    "invalid_id" => InvalidDocument,
+    "immutable_id" => InvalidDocument,
+    "invalid_batch" => InvalidDocument,
+    "invalid_path" => InvalidDocument,
+    "invalid_index" => InvalidDocument,
+    "invalid_pattern" => InvalidPattern,
+    "pattern_read_only" => InvalidPattern,
+    "pattern_too_wide" => InvalidPattern,
+    "not_supported" => NotSupported,
+    "invalid_blob_ref" => InvalidBlobRef,
+    "unknown_route" => UnknownRoute,
+    "method_not_allowed" => UnknownRoute,
+    "group_limit_exceeded" => GroupLimitExceeded,
+    "request_too_large" => RequestTooLarge,
+    "line_too_large" => RequestTooLarge,
+    "invalid_position" => InvalidPosition,
+    "closed" => Closed,
+    "stopping" => Closed,
+    "internal" => Internal
   }.freeze
 
   def self.error_for(code, message, status)

@@ -39,7 +39,6 @@ The SDKs turn each code into a typed error: Go `ndb.ErrUnknownCollection` (`erro
 | `invalid_position` | 400 | The watch position is not valid. |
 | `unauthorized` | 401 | A TCP request without a known bearer token (`-token-file` or `tokens:`). |
 | `forbidden` | 403 | A scoped token without the right for this route and collection; `POST /_backup` over TCP. |
-| `forbidden` | 403 | For example, `/_backup` over TCP. |
 | `not_found` | 404 | No document (or blob) with this id. |
 | `unknown_collection` | 404 | The collection does not exist. |
 | `collection_exists` | 409 | A rename to a name that exists (without `replace`), or a restore `to` a name that exists. |
@@ -56,5 +55,5 @@ The SDKs turn each code into a typed error: Go `ndb.ErrUnknownCollection` (`erro
 | `canceled` | 499 | The client left before the answer (logs and metrics only). |
 | `internal` | 500 | A bug or a disk error. The message stays in the daemon log. |
 | `not_ready` | 503 | The daemon is recovering. Retry. |
-| `closed` | 503 | The daemon is shutting down. |
+| `closed`, `stopping` | 503 | The daemon is shutting down. Retry on another daemon or later. |
 | `watch_lagged` | (stream) | The consumer was too slow. Reconnect: it resumes after the last ack. |

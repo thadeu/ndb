@@ -64,4 +64,22 @@ var (
 	ErrLookupInvalid     = &Error{Code: "lookup_invalid"}
 	ErrLookupUnindexed   = &Error{Code: "lookup_unindexed"}
 	ErrLookupTooLarge    = &Error{Code: "lookup_too_large"}
+	ErrInvalidRequest    = &Error{Code: "invalid_request"}
+	ErrInvalidDoc        = &Error{Code: "invalid_doc"}
+	ErrMissingID         = &Error{Code: "missing_id"}
+	ErrInvalidID         = &Error{Code: "invalid_id"}
+	ErrImmutableID       = &Error{Code: "immutable_id"}
+	ErrInvalidBatch      = &Error{Code: "invalid_batch"}
+	ErrInvalidPath       = &Error{Code: "invalid_path"}
+	ErrInvalidIndex      = &Error{Code: "invalid_index"}
+	ErrInvalidBlobRef    = &Error{Code: "invalid_blob_ref"}
+	ErrInvalidPattern    = &Error{Code: "invalid_pattern"}
+	ErrPatternReadOnly   = &Error{Code: "pattern_read_only"}
+	ErrPatternTooWide    = &Error{Code: "pattern_too_wide"}
+	ErrNotSupported      = &Error{Code: "not_supported"}
+	ErrForbidden         = &Error{Code: "forbidden"}
+	ErrUnknownRoute      = &Error{Code: "unknown_route"}
+	ErrMethodNotAllowed  = &Error{Code: "method_not_allowed"}
+	ErrStopping          = &Error{Code: "stopping"}
+	ErrInternal          = &Error{Code: "internal"}
 )
