@@ -649,6 +649,18 @@ func (l layout) current() time.Time {
 	return monthOf(l.start.Add(l.span))
 }
 
+// past is the path of the list of the months of a month layout before the
+// current one: /events-2026-06,events-2026-07,...
+func (l layout) past() string {
+	var names []string
+
+	for m := monthOf(l.start); m.Before(l.current()); m = m.AddDate(0, 1, 0) {
+		names = append(names, strings.TrimPrefix(l.part(m), "/"))
+	}
+
+	return "/" + strings.Join(names, ",")
+}
+
 func day() time.Time { return lay.day }
 
 // loadSeconds is the estimate of a load of calls: it slows down as the
@@ -703,6 +715,7 @@ func monthQueries() []probe {
 	return []probe{
 		{"count up to the previous month", "POST", "/events/_count", `{"query":{"ts":` + before + `}}`},
 		{"count up to the previous month (events-*)", "POST", "/events-*/_count", `{"query":{"ts":` + before + `}}`},
+		{"count up to the previous month (list of 5 months)", "POST", lay.past() + "/_count", `{"query":{"ts":` + before + `}}`},
 		{"last 20 of a customer, up to the previous month", "POST", "/events/_search", `{"query":{"customer":"cust-042","ts":` + before + `},"sort":{"ts":-1},"limit":20}`},
 		{"count of the previous month", "POST", "/events/_count", `{"query":{"ts":` + month + `}}`},
 	}
@@ -836,6 +849,7 @@ func aggregations() []probe {
 	return append(probes,
 		agg("events per type, up to the previous month", before),
 		probe{"events per type, up to the previous month (events-*)", "POST", "/events-*/_aggregate", `{"pipeline":` + before + `}`},
+		probe{"events per type, up to the previous month (list of 5 months)", "POST", lay.past() + "/_aggregate", `{"pipeline":` + before + `}`},
 	)
 }
 

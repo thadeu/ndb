@@ -247,6 +247,12 @@ To empty a whole collection, use [truncate](collections.md#post-coll-truncate): 
 
 A path with a name prefix and one `*` at the end reads every collection whose name starts with the prefix. It is made for collections split by time: write to `logs-2026-11`, read a year with `logs-2026-*` and everything with `logs-*`, and [drop](collections.md#delete-coll) a period when it ends.
 
+A path can also list collections, split by commas, and mix them with patterns: `logs-2026-11,logs-2026-10` reads two months, `logs-2026-1*,logs-2025-12` a quarter. You choose the collections a read touches; ndb does not choose them from the query. The name of a partitioned collection in a list reads its live partitions.
+
+```bash
+curl --unix-socket /run/ndb/ndb.sock http://ndb/logs-2026-11,logs-2026-10/_count -d '{"query":{"lvl":"error"}}'
+```
+
 ```bash
 curl --unix-socket /run/ndb/ndb.sock http://ndb/logs-2026-*/_search -d '{
   "query": { "lvl": "error" },
@@ -265,12 +271,13 @@ curl --unix-socket /run/ndb/ndb.sock http://ndb/logs-2026-*/_search -d '{
 | every other route | `400 pattern_read_only` |
 
 - **Pattern:** a prefix and one `*` at the end. `*` alone, a `*` in the middle or an upper-case prefix is `invalid_pattern`.
+- **List:** items split by commas, each a pattern, a collection name or a partitioned collection. A name that does not exist is `404 unknown_collection` (you asked for it); an empty item is `invalid_pattern`. A collection matched by two items is read once. A scoped token needs read access to every item.
 - **Plain prefix:** `logs-*` also matches `logs-archive`. Name the partitions so their prefix is unique.
 - **`_coll`:** each row starts with `_coll`, the name of its collection. A `_coll` field stored in the document is replaced.
 - **Order:** the `sort` keys, then `_coll`, then `_id`. With no `sort`: collections by name, then insertion order.
 - **Plans:** each collection uses its own indexes and zone maps, so a time filter on `logs-*` skips old row groups. `X-Ndb-Plan` is `pattern`.
 - **Pagination:** `skip`, `limit` and `after` work over the whole result. A cursor is bound to its pattern. `snapshot: true` is `invalid_query` on a pattern.
-- **Set of collections:** taken when the call starts. No match answers no rows (`[]`, `X-Ndb-Total: 0`), not `unknown_collection`. At most 256 collections, else `pattern_too_wide`.
+- **Set of collections:** taken when the call starts. A pattern with no match answers no rows (`[]`, `X-Ndb-Total: 0`), not `unknown_collection`. At most 256 collections, else `pattern_too_wide`.
 - **Definitions:** keep the same `time` field in every partition.
 
 ::: code-group

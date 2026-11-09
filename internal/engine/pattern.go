@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/thadeu/ndb/internal/catalog"
@@ -25,7 +26,7 @@ var prefixRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
 // IsPattern tells if name is a collection pattern and not a name: a name
 // never has "*".
 func IsPattern(name string) bool {
-	return strings.Contains(name, "*")
+	return strings.ContainsAny(name, "*,")
 }
 
 // PatternPrefix checks a pattern and returns its prefix.
@@ -39,9 +40,69 @@ func PatternPrefix(pattern string) (string, error) {
 	return prefix, nil
 }
 
-// Match lists the collections of a pattern, sorted by name.
+// Match lists the collections of a pattern, sorted by name, each once. The
+// pattern is a list of items split by commas: a name prefix with a * at the
+// end (calls-2026-*), the name of a collection, or the name of a partitioned
+// collection (its live partitions). The caller picks the collections; ndb
+// does not choose them from the query. A name that does not exist is an
+// error: the caller asked for it.
 func (db *DB) Match(pattern string) ([]string, error) {
-	prefix, err := PatternPrefix(pattern)
+	seen := map[string]bool{}
+
+	var names []string
+
+	for item := range strings.SplitSeq(pattern, ",") {
+		matched, err := db.matchItem(strings.TrimSpace(item))
+		if err != nil {
+			return nil, err
+		}
+
+		for _, name := range matched {
+			if !seen[name] {
+				seen[name] = true
+				names = append(names, name)
+			}
+		}
+	}
+
+	if len(names) > MaxPatternCollections {
+		return nil, query.NewError("pattern_too_wide", "the pattern matches more than 256 collections")
+	}
+
+	slices.Sort(names)
+
+	return names, nil
+}
+
+// matchItem is the collections of one item of a pattern list.
+func (db *DB) matchItem(item string) ([]string, error) {
+	if item == "" {
+		return nil, query.NewError("invalid_pattern", "a list of collections has an empty item: names are split by commas, like calls-2026-11,calls-2026-10")
+	}
+
+	if strings.Contains(item, "*") {
+		return db.matchPrefix(item)
+	}
+
+	db.mu.RLock()
+	_, open := db.cols[item]
+	db.mu.RUnlock()
+
+	if open {
+		return []string{item}, nil
+	}
+
+	if def, ok := db.cat.Get(item); ok && def.PartitionBy != "" {
+		return db.Partitions(def, true, time.Now()), nil
+	}
+
+	return nil, fmt.Errorf("%w: %s", catalog.ErrUnknown, item)
+}
+
+// matchPrefix is the collections whose name starts with the prefix of a
+// pattern item (calls-2026-*).
+func (db *DB) matchPrefix(item string) ([]string, error) {
+	prefix, err := PatternPrefix(item)
 	if err != nil {
 		return nil, err
 	}
@@ -56,12 +117,6 @@ func (db *DB) Match(pattern string) ([]string, error) {
 			names = append(names, name)
 		}
 	}
-
-	if len(names) > MaxPatternCollections {
-		return nil, query.NewError("pattern_too_wide", "the pattern matches more than 256 collections")
-	}
-
-	slices.Sort(names)
 
 	return names, nil
 }

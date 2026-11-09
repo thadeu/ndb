@@ -541,7 +541,7 @@ ndb delete calls '{"status":"expired"}' --many
 
 ## Collection patterns
 
-A collection name with one `*` at the end (`logs-2026-*`) reads every collection whose name starts with the prefix, for collections split by time: `_search`, `_count` and `_aggregate` work over all of them, and each row has `_coll`, the name of its collection. The rules are on [Collection patterns](http/queries.md#collection-patterns).
+A collection name with one `*` at the end (`logs-2026-*`), or a list split by commas (`logs-2026-11,logs-2026-10`, which can mix patterns), reads every collection it names, for collections split by time: `_search`, `_count` and `_aggregate` work over all of them, and each row has `_coll`, the name of its collection. The rules are on [Collection patterns](http/queries.md#collection-patterns).
 
 ## Pagination
 

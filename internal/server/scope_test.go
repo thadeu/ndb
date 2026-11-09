@@ -46,6 +46,10 @@ func TestScopedTokens(t *testing.T) {
 		{"calls-admin", "POST", "/_restore", `{"collection":"other","at":"2026-01-01T00:00:00Z","to":"calls_x"}`, false},
 		{"esl", "POST", "/_restore", `{"collection":"outbox","at":"2026-01-01T00:00:00Z","to":"outbox_x"}`, false},
 		{"dash", "GET", "/calls/_pitr", ``, true},
+		{"dash", "POST", "/calls-2026-11,calls-2026-10/_search", `{}`, true},
+		{"dash", "POST", "/calls-2026-11,calls-1*/_count", `{}`, true},
+		{"dash", "POST", "/calls-2026-11,logs-2026-11/_search", `{}`, false},
+		{"dash", "POST", "/calls-2026-11,/_search", `{}`, false},
 	}
 
 	for _, c := range cases {

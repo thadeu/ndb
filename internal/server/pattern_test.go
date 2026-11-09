@@ -283,3 +283,40 @@ func TestPatternErrors(t *testing.T) {
 		t.Fatalf("snapshot: code = %s", got)
 	}
 }
+
+// A list of collections split by commas reads each of them; it mixes with a
+// pattern, and each collection counts once.
+func TestListOfCollections(t *testing.T) {
+	h := seedLogs(t)
+
+	rec := call(h, "POST", "/logs-2026-12,logs-2026-10/_search", `{"sort":{"at":1}}`)
+	expectStatus(t, rec, http.StatusOK)
+
+	if got := ids(rowsOf(t, rec.Body.String())); !slices.Equal(got, []string{"a1", "c1", "a2", "a3"}) {
+		t.Fatalf("list: %v", got)
+	}
+
+	rec = call(h, "POST", "/logs-2026-1*,logs-2026-11,other/_count", `{}`)
+	expectStatus(t, rec, http.StatusOK)
+
+	if !strings.Contains(rec.Body.String(), `"count":8`) {
+		t.Fatalf("pattern, name and other: %s", rec.Body.String())
+	}
+
+	rec = call(h, "POST", "/logs-2026-10,logs-2026-11/_aggregate", `{"pipeline":[{"$group":{"_id":"$lvl","n":{"$count":{}}}},{"$sort":{"_id":1}}]}`)
+	expectStatus(t, rec, http.StatusOK)
+
+	if !strings.Contains(rec.Body.String(), `"n":3`) {
+		t.Fatalf("aggregate over a list: %s", rec.Body.String())
+	}
+}
+
+// A name of the list that does not exist is an error, not a silent skip; an
+// empty item is a bad request; a list only reads.
+func TestListOfCollectionsErrors(t *testing.T) {
+	h := seedLogs(t)
+
+	expectStatus(t, call(h, "POST", "/logs-2026-10,nope/_search", `{}`), http.StatusNotFound)
+	expectStatus(t, call(h, "POST", "/logs-2026-10,,other/_search", `{}`), http.StatusBadRequest)
+	expectStatus(t, call(h, "POST", "/logs-2026-10,other/_doc", `{"a":1}`), http.StatusBadRequest)
+}

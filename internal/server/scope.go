@@ -34,9 +34,19 @@ type Token struct {
 
 // allows tells if the token may do need on coll. An empty coll is a system
 // route: any collection at that level is enough. A pattern (logs-2026-*) is
-// allowed by a glob that covers it.
+// allowed by a glob that covers it, and a list (a,b) when each item is.
 func (t Token) allows(coll string, need access) bool {
 	if t.Full {
+		return true
+	}
+
+	if strings.Contains(coll, ",") {
+		for item := range strings.SplitSeq(coll, ",") {
+			if item = strings.TrimSpace(item); item == "" || !t.allows(item, need) {
+				return false
+			}
+		}
+
 		return true
 	}
 

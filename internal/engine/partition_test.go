@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -52,5 +53,42 @@ func TestPartitionSweepAndRestart(t *testing.T) {
 
 	if _, ok := db.Partitioned("logs"); !ok {
 		t.Fatal("the logical definition is gone")
+	}
+}
+
+// In a list of collections, the name of a partitioned collection reads its
+// live partitions; the caller picks the list, ndb does not choose from the
+// query.
+func TestMatchAListWithAPartitionedName(t *testing.T) {
+	db := open(t, cfg(t.TempDir(), nil))
+
+	def, err := db.EnsurePartitioned(catalog.Def{Name: "logs", Time: "ts", PartitionBy: "day"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	today := time.Now().UTC()
+
+	for _, at := range []time.Time{today.AddDate(0, 0, -1), today} {
+		if _, err := db.PartitionAt(def, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ensure(t, db, catalog.Def{Name: "other"})
+
+	names, err := db.Match("other,logs,logs-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"logs-" + today.AddDate(0, 0, -1).Format(time.DateOnly), "logs-" + today.Format(time.DateOnly), "other"}
+
+	if !slices.Equal(names, want) {
+		t.Fatalf("Match = %v, want %v", names, want)
+	}
+
+	if _, err := db.Match("other,nope"); !errors.Is(err, catalog.ErrUnknown) {
+		t.Fatalf("an unknown name: %v", err)
 	}
 }
