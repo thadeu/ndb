@@ -151,7 +151,7 @@ Find the writer that produced the line with `file` and `offset`, fix it, and wat
 
 ## Measure
 
-`ndb bench` runs the ESL outbox scenario (6 events and a `finishcall` per call) on a daemon of its own, from the same binary, in a temp dir. It has five parts; with no flag it runs all of them, in about three minutes, and then times the first call on the loaded partition after it sleeps (the daemon runs with `idle_close: 20s`):
+`ndb bench` runs the ESL outbox scenario (6 events and a `finishcall` per call) on a daemon of its own, from the same binary, in a temp dir. It has six parts; with no flag it runs all of them, in about three minutes, and then times the first call on the loaded partition after it sleeps (the daemon runs with `idle_close: 20s`):
 
 | Flag | Measures |
 |---|---|
@@ -159,6 +159,7 @@ Find the writer that produced the line with `file` and `offset`, fix it, and wat
 | `-query` | lookups by `_id`, indexed searches, sorted pages, a scan of a field with no index, counts |
 | `-aggs` | the dashboards: calls per customer, events per type, duration per hour, talk time, hangup causes |
 | `-lookup` | the lookups: finishcalls with their customer (`belongs_to`), customers with their last events (`has_many`, `has_one`), 2 levels, and `$lookup` at the end of an aggregate |
+| `-concurrent` | apps that share the daemon: 1, 3 and 10 clients read at the same time for 15 s each (the queries, aggregations and lookups above, in a random order), with reads per second, p50, p99, errors and the RSS peak |
 | `-idle` | what idle collections cost: 300 collections of 10 documents (`-collections`) and a partitioned collection with 365 daily partitions, on a daemon of their own with `idle_close: 2s`; once they sleep, disk, CPU, RSS and open files over 10 s, the first call on a sleeping collection, and a `kill -9` while writes wake collections |
 
 `-query` and `-aggs` load the calls first without measuring it. Each read runs 5 times: the table shows the median, the min and the max, and the RSS peak of each part. Copy the binary to a machine and run it there to compare machines (arm64, x86) or versions.
@@ -187,6 +188,8 @@ After the parts, each measurement is checked against a budget and the bench prin
 | live write p99 | 3.1 ms | ≤ 15 ms | PASS |
 | disk per idle collection | 4112.4 KB | ≤ 256 KB | **FAIL** |
 ```
+
+A bigger load (`-calls 285715` is 2 million documents) reads more, so the time budgets of the reads are shown but not judged; memory, lost writes and errors are judged at any size.
 
 The budgets (in `internal/bench/checks.go`) are about 3 times what the benchmark machine measures, so a slower machine passes and a regression does not: lost writes, a slower write p99, load, query or aggregation, more memory, or more disk, CPU or files per idle collection.
 

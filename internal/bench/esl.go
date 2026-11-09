@@ -61,6 +61,9 @@ type Options struct {
 	Lookup bool
 	Idle   bool
 
+	// Concurrent: clients that read at the same time (1, 3 and 10).
+	Concurrent bool
+
 	// Collections is how many collections the idle part creates.
 	Collections int
 
@@ -76,7 +79,14 @@ type Options struct {
 	Log io.Writer
 }
 
-func (o Options) all() bool { return !o.Stress && !o.Query && !o.Aggs && !o.Lookup && !o.Idle }
+func (o Options) all() bool {
+	return !o.Stress && !o.Query && !o.Aggs && !o.Lookup && !o.Idle && !o.Concurrent
+}
+
+// reads tells whether a part needs the loaded calls.
+func (o Options) reads() bool {
+	return o.Stress || o.Query || o.Aggs || o.Lookup || o.Concurrent || o.all()
+}
 
 func settings(yml []string) string {
 	if len(yml) == 0 {
@@ -95,7 +105,7 @@ func (o Options) plan() []planned {
 		steps = append(steps, planned{"live writes", o.Live}, planned{"crash", sec(17)})
 	}
 
-	if o.Stress || o.Query || o.Aggs || o.Lookup || o.all() {
+	if o.reads() {
 		steps = append(steps, planned{"bulk load", sec(float64(o.Calls) / 1300)}, planned{"settle", sec(12)})
 	}
 
@@ -109,6 +119,12 @@ func (o Options) plan() []planned {
 
 	if o.Lookup || o.all() {
 		steps = append(steps, planned{"lookups", sec(3)})
+	}
+
+	if o.Concurrent || o.all() {
+		for _, n := range clientLevels {
+			steps = append(steps, planned{clientsStep(n), concurrentFor})
+		}
 	}
 
 	if o.all() {
@@ -204,7 +220,7 @@ func Run(o Options, w io.Writer) (err error) {
 		report = append(report, crash(d)...)
 	}
 
-	if o.Stress || o.Query || o.Aggs || o.Lookup || o.all() {
+	if o.reads() {
 		loaded := load(d)
 
 		if o.Stress || o.all() {
@@ -226,9 +242,22 @@ func Run(o Options, w io.Writer) (err error) {
 		report = append(report, timed(d, "aggregations", aggregations())...)
 	}
 
+	var joins []probe
+
+	if o.Lookup || o.Concurrent || o.all() {
+		joins = lookups(d)
+	}
+
 	if o.Lookup || o.all() {
 		report = append(report, "| **lookups** (median of 5, min–max) | |")
-		report = append(report, timed(d, "lookups", lookups(d))...)
+		report = append(report, timed(d, "lookups", joins)...)
+	}
+
+	if o.Concurrent || o.all() {
+		mix := slices.Concat(queries(d), aggregations(), joins)
+
+		report = append(report, "| **concurrent reads** (the reads above, in a random order) | |")
+		report = append(report, concurrent(d, mix)...)
 	}
 
 	if o.all() {
@@ -251,7 +280,7 @@ func Run(o Options, w io.Writer) (err error) {
 
 	fmt.Fprintf(out, "| disk | %s |\n", du(dir))
 
-	if verify(out) > 0 {
+	if verify(out, o.Calls == Defaults().Calls) > 0 {
 		return ErrFailed
 	}
 

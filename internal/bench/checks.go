@@ -21,6 +21,11 @@ type gate struct {
 	max    float64
 	min    float64
 	unit   string
+
+	// sized: a time budget for the default size of the load (-calls
+	// 30000). A bigger load reads more, so the check shows the time but does
+	// not judge it; memory, lost writes and errors are judged at any size.
+	sized bool
 }
 
 var gates = []gate{
@@ -32,11 +37,16 @@ var gates = []gate{
 	{metric: "crash.restart", what: "restart after a kill -9", max: 3000, unit: "ms"},
 	{metric: "load.docs_s", what: "bulk load", min: 3_000, max: -1, unit: "docs/s"},
 	{metric: "load.rss", what: "load RSS peak", max: 600, unit: "MB"},
-	{metric: "queries.worst", what: "slowest query (median)", max: 150, unit: "ms"},
-	{metric: "lookups.worst", what: "slowest lookup (median)", max: 250, unit: "ms"},
-	{metric: "aggregations.worst", what: "slowest aggregation (median)", max: 200, unit: "ms"},
+	{metric: "queries.worst", what: "slowest query (median)", max: 150, unit: "ms", sized: true},
+	{metric: "lookups.worst", what: "slowest lookup (median)", max: 250, unit: "ms", sized: true},
+	{metric: "aggregations.worst", what: "slowest aggregation (median)", max: 200, unit: "ms", sized: true},
+	{metric: "concurrent.1.errors", what: "reads that failed, 1 client", max: 0},
+	{metric: "concurrent.3.errors", what: "reads that failed, 3 clients", max: 0},
+	{metric: "concurrent.10.errors", what: "reads that failed, 10 clients", max: 0},
+	{metric: "concurrent.3.p99", what: "read p99 with 3 clients", max: 500, unit: "ms", sized: true},
+	{metric: "concurrent.10.rss", what: "RSS peak with 10 clients", max: 450, unit: "MB"},
 	{metric: "wake.loaded_asleep", what: "the loaded partition stayed open after idle_close", max: 0},
-	{metric: "wake.loaded_ms", what: "first call on the loaded partition after it slept", max: 50, unit: "ms"},
+	{metric: "wake.loaded_ms", what: "first call on the loaded partition after it slept", max: 50, unit: "ms", sized: true},
 	{metric: "idle.asleep", what: "idle collections still open after idle_close", max: 0},
 	{metric: "idle.wake_ms", what: "first call on a sleeping collection (median)", max: 50, unit: "ms"},
 	{metric: "idle.missing", what: "acked writes lost by a kill -9 while collections wake", max: 0},
@@ -61,7 +71,7 @@ func record(metric string, v float64) {
 
 // verify prints the checks of the measurements taken and gives how many
 // failed.
-func verify(w io.Writer) int {
+func verify(w io.Writer, defaultSize bool) int {
 	failed := 0
 
 	fmt.Fprintln(w)
@@ -76,7 +86,10 @@ func verify(w io.Writer) int {
 
 		result := "PASS"
 
-		if !c.pass(v) {
+		switch {
+		case c.sized && !defaultSize:
+			result = "not judged (bigger load)"
+		case !c.pass(v):
 			result = "**FAIL**"
 			failed++
 		}

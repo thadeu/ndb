@@ -25,7 +25,7 @@ func TestVerifyPrintsOnlyWhatWasMeasured(t *testing.T) {
 
 	var out bytes.Buffer
 
-	if failed := verify(&out); failed != 1 {
+	if failed := verify(&out, true); failed != 1 {
 		t.Fatalf("failed = %d, want 1", failed)
 	}
 

@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- `ndb bench -concurrent`: apps that share the daemon, 1, 3 and 10 clients reading at the same time (the queries, aggregations and lookups, in a random order), with reads per second, p50, p99, errors and the RSS peak. On the benchmark machine (4 CPU): 24, 53 and 59 reads/s, p99 119, 157 and 550 ms, RSS peak 170, 203 and 224 MB, no error. Budgets: no failed read, p99 with 3 clients 500 ms, RSS peak with 10 clients 450 MB.
+- With a bigger load than the default (`-calls`), the time budgets of the reads are shown but not judged; memory, lost writes and errors still are.
+
 ## [1.12.1] - 2026-11-08
 
 ## [1.12.0] - 2026-11-08
