@@ -53,6 +53,11 @@ export type ErrorCode =
   | 'method_not_allowed'
   | 'stopping'
   | 'internal'
+  | 'not_a_stream'
+  | 'invalid_stream_id'
+  | 'stream_id_too_small'
+  | 'unknown_group'
+  | 'group_exists'
   | 'invalid_update'
   | 'http_status'
   | (string & {})

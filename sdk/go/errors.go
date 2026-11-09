@@ -82,4 +82,9 @@ var (
 	ErrMethodNotAllowed  = &Error{Code: "method_not_allowed"}
 	ErrStopping          = &Error{Code: "stopping"}
 	ErrInternal          = &Error{Code: "internal"}
+	ErrNotAStream        = &Error{Code: "not_a_stream"}
+	ErrInvalidStreamID   = &Error{Code: "invalid_stream_id"}
+	ErrStreamIDTooSmall  = &Error{Code: "stream_id_too_small"}
+	ErrUnknownGroup      = &Error{Code: "unknown_group"}
+	ErrGroupExists       = &Error{Code: "group_exists"}
 )

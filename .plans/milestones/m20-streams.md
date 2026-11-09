@@ -1,6 +1,6 @@
 # M20 — Streams (Redis Streams parity)
 
-Status: in progress (E20.1 written: docs/dev/streams.md, docs/dev/http/streams.md, spec/streams/) · Depends on: M09 (watch, cursors), M12 (retention) · Branch: `feature/redis-streams-compabitility`
+Status: in progress (E20.1 done; E20.2 routes, groups and spec runner done, console, backup and approx trim open) · Depends on: M09 (watch, cursors), M12 (retention) · Branch: `feature/redis-streams-compabitility`
 
 ## Goal
 
@@ -143,16 +143,27 @@ Routes (all under the collection; `_streams` reserves the prefix):
 `XRANGE`, `XREVRANGE`, `XLEN`, `XDEL` are the routes of every collection:
 `_search` (sort on `_id`, `after`), `_count`, `DELETE /{s}/_doc/{id}`.
 
-- [ ] Catalog: `stream: true`, implicit create on the first append; a
+- [x] Catalog: `stream: true`, implicit create on the first append; a
       `_streams` route on a normal collection is `400 not_a_stream`
-- [ ] ID generator per stream, under the writer (one place makes IDs)
-- [ ] Group store (bbolt), with its snapshot in backup and PITR
-- [ ] Wake of blocked reads on append (bounded waiters per stream)
-- [ ] Trim: approx by segments, exact by delete; `retention` still works
-- [ ] Access: append, trim, group changes, read, ack, claim are writes (a
+- [x] ID generator per stream, under the stream lock (`internal/streams`);
+      the `_id` on disk is padded (`%020d-%020d`) so the engine text order
+      is the ID order with no engine change; the HTTP routes give and take
+      `<ms>-<seq>` (`_search`, `_count`, `_doc/{id}` too)
+- [x] Group store: `streams.bolt` in the collection dir (one per stream)
+- [ ] The group store in backup and PITR (today a restore gives the
+      entries, not the groups: they are made again)
+- [x] Wake of blocked reads on append (one channel per stream, closed by
+      each append)
+- [x] Trim: by delete of IDs in batches of 10 000; `approx` deletes the
+      same entries for now (allowed: it may keep more, never fewer)
+- [ ] Trim `approx` by whole segments (the cheap path)
+- [x] Access: append, trim, group changes, read, ack, claim are writes (a
       read moves the PEL); info and pending are reads
-- [ ] Truncate and drop of a stream also clear its groups
-- [ ] `/_metrics`: per stream length, per group pending and lag
+- [x] Truncate and drop of a stream also clear its groups (and a refused
+      truncate keeps them)
+- [x] `/_metrics`: `ndb_stream_entries_added_total`, per group
+      `ndb_stream_group_pending` and `ndb_stream_group_lag` (streams used
+      since the start)
 - [ ] Console: the stream and its groups in the collection page (small)
 
 ### E20.3 Bench and e2e

@@ -88,6 +88,16 @@ again. Make the work safe to repeat.
   entries, a pending read gives them with `"_deleted": true`, and `claim`
   gives them in `deleted` and removes them.
 
+## Metrics
+
+`/_metrics` has, for each stream used since the daemon started:
+
+- `ndb_stream_entries_added_total{stream}`: every entry ever appended.
+- `ndb_stream_group_pending{stream,group}`: entries delivered and not acked.
+- `ndb_stream_group_lag{stream,group}`: entries not delivered to the group
+  yet (left out when it cannot be known, after a trim in the part the group
+  did not read).
+
 ## Redis command map
 
 | Redis | ndb |
@@ -118,6 +128,10 @@ again. Make the work safe to repeat.
 | `XINFO STREAM s` | `GET /s/_streams` |
 | `XINFO GROUPS s` | `GET /s/_streams/groups` |
 | `XINFO CONSUMERS s g` | `GET /s/_streams/groups/g/consumers` |
+
+Not yet: the group state is not in a [backup](operations.md) or a PITR
+restore. A restore gives the entries; make the groups again (with `start`
+at the last ID each one processed).
 
 Not supported: a read of many streams in one call (`XREAD` / `XREADGROUP`
 with many keys); `XSETID`; the Redis 8.2 options `KEEPREF`, `DELREF`,

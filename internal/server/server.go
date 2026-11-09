@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/thadeu/ndb/internal/engine"
+	"github.com/thadeu/ndb/internal/streams"
 )
 
 // StatusClientClosed is the status for a request whose client went away
@@ -38,11 +39,15 @@ type Server struct {
 
 	// tokens are the bearer tokens of the non-unix requests; none = open.
 	tokens []Token
+
+	// streams runs the /{s}/_streams routes.
+	streams *streams.Service
 }
 
 func New() *Server {
 	stopCtx, stop := context.WithCancel(context.Background())
 	s := &Server{heartbeat: defaultHeartbeat, stopCtx: stopCtx, started: time.Now()}
+	s.streams = streams.New(func() *engine.DB { return s.db.Load() })
 	s.handler = s.authenticate(s.routes())
 	s.http = &http.Server{
 		Handler:           s.handler,
@@ -97,8 +102,14 @@ func (s *Server) Serve(l net.Listener) error {
 
 // Shutdown stops the listeners and waits for the in-flight requests, until
 // ctx ends.
+// Shutdown stops the HTTP server, then closes the group stores of the
+// streams (after the last request, so no group write is lost).
 func (s *Server) Shutdown(ctx context.Context) error {
-	return s.http.Shutdown(ctx)
+	err := s.http.Shutdown(ctx)
+
+	s.streams.Close()
+
+	return err
 }
 
 func (s *Server) routes() http.Handler {
@@ -144,6 +155,10 @@ func (s *Server) routes() http.Handler {
 			"_watch":           {{"POST", s.ready(s.watch)}},
 			"_ack":             {{"POST", s.ready(s.ack)}},
 		},
+	}
+
+	for key, routes := range streamRoutes(s) {
+		rt.coll[key] = routes
 	}
 
 	return s.count(rt)

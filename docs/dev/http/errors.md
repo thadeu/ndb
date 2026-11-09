@@ -37,6 +37,10 @@ The SDKs turn each code into a typed error: Go `ndb.ErrUnknownCollection` (`erro
 | `invalid_doc`, `missing_id`, `invalid_id`, `immutable_id`, `invalid_batch`, `invalid_path`, `invalid_index` | 400 | A document or a definition is not valid. |
 | `invalid_blob_ref` | 400 | The blob reference is not `sha256:<64 hex>`. |
 | `invalid_position` | 400 | The watch position is not valid. |
+| `not_a_stream` | 400 | A [stream](../streams.md) route, or `"stream": true`, on a collection that is not a stream. |
+| `invalid_stream_id`, `stream_id_too_small` | 400 | A stream entry ID that is not `<ms>-<seq>` (or `0-0` in an append), or an append ID that is not greater than the last one. |
+| `unknown_group` | 404 | The stream group does not exist. |
+| `group_exists` | 409 | A stream group create with a name that exists. |
 | `unauthorized` | 401 | A TCP request without a known bearer token (`-token-file` or `tokens:`). |
 | `forbidden` | 403 | A scoped token without the right for this route and collection; `POST /_backup` over TCP. |
 | `not_found` | 404 | No document (or blob) with this id. |

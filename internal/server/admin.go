@@ -291,10 +291,16 @@ func cutLine(s string, max int) (string, bool) {
 func (s *Server) truncate(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
 
+	s.streams.Forget(name, false)
+
 	if err := db.Truncate(name, r.URL.Query().Get("confirm")); err != nil {
 		writeError(w, err)
 
 		return
+	}
+
+	if isStream(db, name) {
+		s.afterTruncate(db, name)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"collection": name, "truncated": true})
@@ -304,6 +310,8 @@ func (s *Server) truncate(w http.ResponseWriter, r *http.Request, db *engine.DB)
 // definition and the positions of its watch consumers.
 func (s *Server) drop(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
+
+	s.streams.Forget(name, false)
 
 	if err := db.Drop(name, r.URL.Query().Get("confirm")); err != nil {
 		writeError(w, err)
@@ -338,6 +346,9 @@ func (s *Server) rename(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
 
 	if err == nil {
+		s.streams.Forget(name, false)
+		s.streams.Forget(req.To, false)
+
 		err = db.Rename(name, req.To, req.Replace)
 	}
 

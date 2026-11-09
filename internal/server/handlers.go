@@ -68,7 +68,13 @@ func (s *Server) find(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
-	s.read(w, r, db, &s.metrics.find, s.withLookup(r, db, col.Find))
+	run := col.Find
+
+	if isStream(db, r.PathValue("coll")) {
+		run = streamFind(run)
+	}
+
+	s.read(w, r, db, &s.metrics.find, s.withLookup(r, db, run))
 }
 
 // findPattern is _search over every collection of a pattern (logs-2026-*).
@@ -136,7 +142,13 @@ func (s *Server) countDocs(w http.ResponseWriter, r *http.Request, db *engine.DB
 		return
 	}
 
-	s.runCount(w, r, db, col.Find)
+	run := col.Find
+
+	if isStream(db, r.PathValue("coll")) {
+		run = streamFind(run)
+	}
+
+	s.runCount(w, r, db, run)
 }
 
 // countPattern is _count over every collection of a pattern.
@@ -388,17 +400,30 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
-	doc, ok := col.Get(r.PathValue("id"))
+	id := r.PathValue("id")
+	stream := isStream(db, r.PathValue("coll"))
+
+	if stream {
+		id = streamDocID(id)
+	}
+
+	doc, ok := col.Get(id)
 	if !ok {
 		writeError(w, &apiError{status: http.StatusNotFound, code: "not_found", msg: "no such document"})
 
 		return
 	}
 
+	raw := doc.Doc
+
+	if stream {
+		raw = unpadRows([]json.RawMessage{raw})[0]
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
-	_, _ = w.Write(append(doc.Doc, '\n'))
+	_, _ = w.Write(append(raw, '\n'))
 }
 
 // removeID is DELETE /{coll}/_doc/{id}.
@@ -410,11 +435,22 @@ func (s *Server) removeID(w http.ResponseWriter, r *http.Request, db *engine.DB)
 		return
 	}
 
-	n, err := col.DeleteID(r.Context(), r.PathValue("id"))
+	id := r.PathValue("id")
+	stream := isStream(db, r.PathValue("coll"))
+
+	if stream {
+		id = streamDocID(id)
+	}
+
+	n, err := col.DeleteID(r.Context(), id)
 	if err != nil {
 		writeError(w, err)
 
 		return
+	}
+
+	if stream && n > 0 {
+		s.streams.Deleted(r.Context(), r.PathValue("coll"), id)
 	}
 
 	s.metrics.writes.Add(int64(n))

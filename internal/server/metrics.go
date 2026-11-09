@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"github.com/thadeu/ndb/internal/streams"
 	"io"
 	"net/http"
 	"sync/atomic"
@@ -82,6 +83,39 @@ func (s *Server) metricsPage(w http.ResponseWriter, _ *http.Request) {
 
 	if db != nil {
 		writeEngineMetrics(w, db)
+	}
+
+	writeStreamMetrics(w, s.streams.Metrics())
+}
+
+// writeStreamMetrics prints the series of the streams used since the start.
+func writeStreamMetrics(w io.Writer, all []streams.StreamMetrics) {
+	if len(all) == 0 {
+		return
+	}
+
+	fmt.Fprint(w, "# TYPE ndb_stream_entries_added_total counter\n")
+
+	for _, m := range all {
+		fmt.Fprintf(w, "ndb_stream_entries_added_total{stream=%q} %d\n", m.Name, m.Added)
+	}
+
+	fmt.Fprint(w, "# TYPE ndb_stream_group_pending gauge\n")
+
+	for _, m := range all {
+		for _, g := range m.Groups {
+			fmt.Fprintf(w, "ndb_stream_group_pending{stream=%q,group=%q} %d\n", m.Name, g.Name, g.Pending)
+		}
+	}
+
+	fmt.Fprint(w, "# TYPE ndb_stream_group_lag gauge\n")
+
+	for _, m := range all {
+		for _, g := range m.Groups {
+			if g.Lag != nil {
+				fmt.Fprintf(w, "ndb_stream_group_lag{stream=%q,group=%q} %d\n", m.Name, g.Name, *g.Lag)
+			}
+		}
 	}
 }
 

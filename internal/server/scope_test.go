@@ -50,6 +50,14 @@ func TestScopedTokens(t *testing.T) {
 		{"dash", "POST", "/calls-2026-11,calls-1*/_count", `{}`, true},
 		{"dash", "POST", "/calls-2026-11,logs-2026-11/_search", `{}`, false},
 		{"dash", "POST", "/calls-2026-11,/_search", `{}`, false},
+		{"esl", "POST", "/calls_s/_streams/append", `{"doc":{"a":1}}`, true},
+		{"dash", "POST", "/calls_s/_streams/append", `{"doc":{"a":1}}`, false},
+		{"dash", "PUT", "/calls_s/_streams/groups/g", `{}`, false},
+		{"dash", "POST", "/calls_s/_streams/groups/g/read", `{"consumer":"c"}`, false},
+		{"dash", "POST", "/calls_s/_streams/groups/g/ack", `{"ids":[]}`, false},
+		{"dash", "POST", "/calls_s/_streams/groups/g/claim", `{"consumer":"c","ids":[]}`, false},
+		{"dash", "GET", "/calls_s/_streams", ``, true},
+		{"dash", "POST", "/calls_s/_streams/groups/g/pending", `{}`, true},
 	}
 
 	for _, c := range cases {

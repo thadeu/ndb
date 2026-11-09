@@ -36,7 +36,8 @@ var param = map[string]string{"_indexes": "field", "_blobs": "ref"}
 
 func (rt *router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	segs, ok := segments(r.URL.EscapedPath())
-	if !ok || len(segs) == 0 || len(segs) > 3 {
+
+	if !ok || len(segs) == 0 || len(segs) > maxSegments {
 		unknownRoute(w)
 
 		return
@@ -70,6 +71,10 @@ func (rt *router) match(r *http.Request, segs []string) ([]route, bool) {
 	} else {
 		r.SetPathValue("coll", segs[0])
 		rest = segs[1:]
+	}
+
+	if len(rest) > 0 && rest[0] == "_streams" {
+		return rt.matchStreams(r, rest)
 	}
 
 	key := ""
@@ -134,4 +139,38 @@ func methodNotAllowed(w http.ResponseWriter, routes []route) {
 
 	w.Header().Set("Allow", strings.Join(methods, ", "))
 	writeError(w, &apiError{status: http.StatusMethodNotAllowed, code: "method_not_allowed", msg: "use " + strings.Join(methods, " or ")})
+}
+
+// maxSegments is the longest path: /{s}/_streams/groups/{g}/consumers/{c}.
+const maxSegments = 6
+
+// matchStreams matches the routes under /{s}/_streams: the segment after
+// "groups" is the group and the one after "consumers" is the consumer, so
+// the key of /{s}/_streams/groups/g/consumers/c is
+// "_streams/groups/{}/consumers/{}".
+func (rt *router) matchStreams(r *http.Request, rest []string) ([]route, bool) {
+	parts := make([]string, len(rest))
+
+	for i, seg := range rest {
+		parts[i] = seg
+
+		switch {
+		case i > 0 && rest[i-1] == "groups":
+			parts[i] = "{}"
+
+			r.SetPathValue("group", seg)
+		case i > 0 && rest[i-1] == "consumers":
+			parts[i] = "{}"
+
+			r.SetPathValue("consumer", seg)
+		}
+	}
+
+	key := strings.Join(parts, "/")
+
+	routes, ok := rt.coll[key]
+
+	r.SetPathValue("action", key)
+
+	return routes, ok
 }

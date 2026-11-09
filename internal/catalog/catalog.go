@@ -17,8 +17,11 @@ import (
 
 var (
 	ErrConflict = errors.New("catalog_conflict")
-	ErrInvalid  = errors.New("catalog_invalid")
-	ErrUnknown  = errors.New("unknown_collection")
+
+	// ErrNotStream: "stream": true on a collection that is not a stream.
+	ErrNotStream = errors.New("not_a_stream")
+	ErrInvalid   = errors.New("catalog_invalid")
+	ErrUnknown   = errors.New("unknown_collection")
 )
 
 type WriteMode string
@@ -77,6 +80,11 @@ type Def struct {
 	PartitionOf string `json:"partition_of,omitempty" yaml:"-"`
 
 	BlobThreshold int64 `json:"blob_threshold,omitempty" yaml:"-"`
+
+	// Stream makes an append-only log with consumer groups (docs/dev/
+	// streams.md). Its time field is StreamTime; it is set at creation and
+	// never changes.
+	Stream bool `json:"stream,omitempty" yaml:"stream"`
 
 	// OpsFromYAML: durability/retention were set by ndb.yml, so code
 	// declarations cannot change them.
@@ -327,7 +335,14 @@ func (c *Catalog) save(d Def) error {
 	return nil
 }
 
+// StreamTime is the time field of a stream: the ms of each entry ID.
+const StreamTime = "_ts"
+
 func withDefaults(d Def, src Source) Def {
+	if d.Stream && d.Time == "" {
+		d.Time = StreamTime
+	}
+
 	switch {
 	case d.Write == "" && d.Path != "":
 		d.Write = Direct
@@ -348,6 +363,14 @@ func withDefaults(d Def, src Source) Def {
 
 func merge(cur, decl Def, src Source) (Def, error) {
 	next := cur
+
+	if decl.Stream && !cur.Stream {
+		return Def{}, fmt.Errorf("%w: %s is a collection, not a stream", ErrNotStream, cur.Name)
+	}
+
+	if decl.Stream && decl.Time == "" {
+		decl.Time = StreamTime
+	}
 
 	fixed := []struct {
 		name      string
@@ -501,6 +524,8 @@ func validateFinal(d Def) error {
 		return fmt.Errorf("%w: partition_by needs a time field", ErrInvalid)
 	case d.PartitionBy != "" && d.Write == Direct:
 		return fmt.Errorf("%w: partition_by is for engine mode", ErrInvalid)
+	case d.Stream && (d.Write != Engine || d.Time != StreamTime || len(d.Unique) > 0 || d.PartitionBy != "" || d.TTL != "" || d.ExpiresField != ""):
+		return fmt.Errorf("%w: a stream is in engine mode, its time is %s, with no unique, partition_by, ttl or expires_field", ErrInvalid, StreamTime)
 	}
 
 	return nil

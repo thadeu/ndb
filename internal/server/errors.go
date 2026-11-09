@@ -65,6 +65,8 @@ func codeOf(err error) string {
 	switch {
 	case errors.Is(err, catalog.ErrConflict):
 		return "catalog_conflict"
+	case errors.Is(err, catalog.ErrNotStream):
+		return "not_a_stream"
 	case errors.Is(err, catalog.ErrInvalid):
 		return "catalog_invalid"
 	case errors.Is(err, catalog.ErrUnknown):
@@ -96,9 +98,9 @@ func codeOf(err error) string {
 
 func statusOf(code string) int {
 	switch code {
-	case "not_found", "unknown_collection", "unknown_route":
+	case "not_found", "unknown_collection", "unknown_route", "unknown_group":
 		return http.StatusNotFound
-	case "duplicate_id", "unique_violation", "catalog_conflict", "direct_collection", "collection_exists":
+	case "duplicate_id", "unique_violation", "catalog_conflict", "direct_collection", "collection_exists", "group_exists":
 		return http.StatusConflict
 	case "request_too_large", "line_too_large":
 		return http.StatusRequestEntityTooLarge
