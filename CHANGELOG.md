@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- **Memtable reads decode only the fields the query uses** (the recent documents, not sealed yet): each document skips the fields that no filter, sort, `per` or `$group` reads. On 2 million documents over six monthly partitions, with 22.8k unsealed documents: `count of all` 272 ms → 40 ms, the dashboards 0.6–2.2 s → 0.4–0.6 s, a `has_many` lookup 1.2 s → 0.5 s, 10 clients 1 → 3 reads/s.
+- **A count whose only condition is a time range counts the row groups wholly inside it without reading them** (from their time zone map and live bits); only the groups at the two edges are read. Up to the previous month over six monthly partitions: 500 ms → 40 ms (5.6 ms with the list of the five past months in the path), one month 165 ms → 32 ms.
+
 ### Added
 
 - **A list of collections in the path**: `POST /calls-2026-11,calls-2026-10/_search` reads the listed collections, like a pattern, and the list mixes with patterns (`calls-2026-1*,calls-2025-12`). The caller chooses the collections a read touches; ndb does not choose them from the query. The name of a partitioned collection in a list reads its live partitions; a name that does not exist is `404 unknown_collection`; a scoped token needs read access to every item. `_search`, `_count`, `_aggregate` and `GET`.

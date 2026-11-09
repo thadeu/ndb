@@ -31,3 +31,28 @@ func TestVisibleDropsWhatHideAdded(t *testing.T) {
 		t.Fatal("only the hidden query hides an expired row")
 	}
 }
+
+// TimeOnly is a request whose only condition is on the time field, with time
+// values; the hidden retention does not count.
+func TestTimeOnly(t *testing.T) {
+	for body, want := range map[string]bool{
+		`{"query":{"ts":{"$gte":"2026-10-01T00:00:00Z","$lt":"2026-11-01T00:00:00Z"}}}`: true,
+		`{"query":{"ts":{"$lt":"2026-11-01T00:00:00Z"},"type":"x"}}`:                    false,
+		`{"query":{"type":"x"}}`:                          false,
+		`{"query":{"ts":{"$ne":"2026-11-01T00:00:00Z"}}}`: false,
+		`{}`: false,
+	} {
+		q, err := Parse([]byte(body), Options{TimeField: "ts"})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := q.Hide(ExpiredWhere("ts", time.Now().AddDate(-1, 0, 0))); err != nil {
+			t.Fatal(err)
+		}
+
+		if got := q.TimeOnly(); got != want {
+			t.Errorf("%s: TimeOnly = %v, want %v", body, got, want)
+		}
+	}
+}

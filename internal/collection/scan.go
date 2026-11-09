@@ -328,7 +328,9 @@ func (c *Collection) scanSegment(ctx context.Context, q *query.Query, s segSnap,
 	conds := q.Indexable()
 	q = visibleQuery(q, s, bounds)
 	sc := newSegScan(q, s.r, cur, hasCur)
-	countable := (!q.HasWhere() || s.exact) && len(q.Sort) == 0 && !hasCur && !q.NeedsDoc()
+	countable := len(q.Sort) == 0 && !hasCur && !q.NeedsDoc()
+	whole := !q.HasWhere() || s.exact
+	timeOnly := !whole && q.TimeOnly()
 
 	for gi, g := range s.groups {
 		if err := ctx.Err(); err != nil {
@@ -344,7 +346,7 @@ func (c *Collection) scanSegment(ctx context.Context, q *query.Query, s segSnap,
 		// Rows come in insertion order, so once the top-k is full no later
 		// row of this segment enters it: a group whose rows all match only
 		// adds its live rows to the total.
-		if countable && sc.top.full() && allVisible(s.r, gi, bounds) {
+		if countable && sc.top.full() && allVisible(s.r, gi, bounds) && (whole || timeOnly && timeCovered(q, s.r, gi, conds)) {
 			sc.p.total += liveIn(s.live, g)
 			sc.p.ex.RowGroupsSkipped++
 

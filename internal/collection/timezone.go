@@ -2,6 +2,7 @@ package collection
 
 import (
 	"math"
+	"slices"
 
 	"github.com/thadeu/ndb/internal/query"
 	"github.com/thadeu/ndb/internal/segment"
@@ -139,6 +140,58 @@ func timeExcludes(z timeZone, cd query.Cond) bool {
 		return z.lo >= v
 	case "lte":
 		return z.lo > v
+	}
+
+	return false
+}
+
+// timeCovered tells whether every instant of row group g of r satisfies the
+// time conditions of q: the whole group matches a query whose only
+// condition is on time (TimeOnly).
+func timeCovered(q *query.Query, r any, g int, conds []query.Cond) bool {
+	ref, ok := r.(*segRef)
+	if !ok {
+		return false
+	}
+
+	covered := false
+
+	for _, cd := range conds {
+		if !q.IsTime(cd.Path) || !allTimes(cd.Vals) {
+			continue
+		}
+
+		zones := ref.timeZones(cd.Path)
+
+		if g >= len(zones) || !timeIncludes(zones[g], cd) {
+			return false
+		}
+
+		covered = true
+	}
+
+	return covered
+}
+
+// timeIncludes is true when every instant of the zone satisfies cd.
+func timeIncludes(z timeZone, cd query.Cond) bool {
+	if !z.ok || z.lo > z.hi {
+		return false
+	}
+
+	v := cd.Vals[0].Int
+
+	switch cd.Op {
+	case "gt":
+		return z.lo > v
+	case "gte":
+		return z.lo >= v
+	case "lt":
+		return z.hi < v
+	case "lte":
+		return z.hi <= v
+	case "eq", "in":
+		return z.lo == z.hi && slices.ContainsFunc(cd.Vals, func(val query.Value) bool { return val.Int == z.lo })
 	}
 
 	return false

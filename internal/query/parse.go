@@ -672,6 +672,40 @@ func (q *Query) Exact(path string) bool {
 	return !slices.ContainsFunc(o.vals, func(v Value) bool { return v.Kind != Number && v.Kind != String })
 }
 
+// TimeOnly tells whether the only condition of the request is a range (or
+// an equality) on the time field, with time values: a row group whose
+// instants are all inside it matches with every live row, unread.
+func (q *Query) TimeOnly() bool {
+	n := q.where
+
+	if q.user != nil {
+		n = q.user
+	}
+
+	if a, ok := n.(andNode); ok && len(a) == 1 {
+		n = a[0]
+	}
+
+	f, ok := n.(*fieldNode)
+	if !ok || q.needsDoc || !f.isTime || len(f.ops) == 0 {
+		return false
+	}
+
+	for _, o := range f.ops {
+		switch o.name {
+		case "gt", "gte", "lt", "lte", "eq", "in":
+		default:
+			return false
+		}
+
+		if slices.ContainsFunc(o.vals, func(v Value) bool { return v.Kind != Time }) {
+			return false
+		}
+	}
+
+	return true
+}
+
 func (q *Query) Paths() []string {
 	return slices.Clone(q.paths)
 }

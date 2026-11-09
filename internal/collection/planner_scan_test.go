@@ -897,3 +897,28 @@ func TestPerIsRefusedWithAPageKey(t *testing.T) {
 		}
 	}
 }
+
+// A count whose only condition is a time range counts the row groups wholly
+// inside it from their live bits: only the groups at the two edges are read.
+func TestTimeRangeCountsWholeGroupsUnread(t *testing.T) {
+	c := openTimed(t, catalog.Def{Name: "logs", Time: "ts", Indexes: []string{"status"}})
+	at := time.Date(2026, 11, 7, 0, 0, 0, 0, time.UTC)
+
+	sealBatch(t, c, rangeDocs(0, 3000, func(i int) string {
+		return fmt.Sprintf(`{"_id":"d%04d","status":"s%d","ts":%q}`, i, i%2, at.Add(time.Duration(i)*time.Second).Format(time.RFC3339))
+	}))
+
+	rng := fmt.Sprintf(`{"$gte":%q,"$lt":%q}`, at.Add(100*time.Second).Format(time.RFC3339), at.Add(2900*time.Second).Format(time.RFC3339))
+
+	page := parsedExplain(t, c, `{"query":{"ts":`+rng+`},"count":true,"limit":1,"explain":true}`)
+
+	if *page.Total != 2800 || page.Explain.RowGroupsRead > 2 {
+		t.Fatalf("total %d, row groups read %d: want 2800, reading only the 2 edge groups", *page.Total, page.Explain.RowGroupsRead)
+	}
+
+	mixed := parsedExplain(t, c, `{"query":{"ts":`+rng+`,"status":"s1"},"count":true,"limit":1,"explain":true}`)
+
+	if *mixed.Total != 1400 {
+		t.Fatalf("time and another condition: total %d, want 1400 (each row checked)", *mixed.Total)
+	}
+}
