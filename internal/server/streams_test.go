@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/thadeu/ndb/internal/backup"
 	"github.com/thadeu/ndb/internal/config"
 	"github.com/thadeu/ndb/internal/engine"
 	"github.com/thadeu/ndb/internal/server"
@@ -283,5 +285,79 @@ func TestStreamMetrics(t *testing.T) {
 		if !strings.Contains(page, want) {
 			t.Fatalf("/_metrics has no %q:\n%s", want, page)
 		}
+	}
+}
+
+// A backup keeps the groups of a stream: after a restore, the group has its
+// position and its pending entries.
+func TestStreamGroupsSurviveBackupAndRestore(t *testing.T) {
+	c := unixServer(t)
+
+	do(t, c, "POST", "/jobs/_streams/append", `{"docs":[{"n":1},{"n":2},{"n":3}]}`, nil)
+	do(t, c, "PUT", "/jobs/_streams/groups/g", `{"start":"0"}`, nil)
+	do(t, c, "POST", "/jobs/_streams/groups/g/read", `{"consumer":"c1","count":2}`, nil)
+
+	resp, body := do(t, c, "POST", "/_backup", `{}`, nil)
+
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, `{"_section":"stream","collection":"jobs"`) {
+		t.Fatalf("backup %d has no stream section", resp.StatusCode)
+	}
+
+	stage := filepath.Join(t.TempDir(), "restored")
+
+	if err := backup.Extract(strings.NewReader(body), stage); err != nil {
+		t.Fatal(err)
+	}
+
+	h, stop := openAt(t, stage)
+
+	defer stop()
+
+	var sum struct {
+		Count int `json:"count"`
+	}
+
+	jsonOf(t, call(h, "POST", "/jobs/_streams/groups/g/pending", `{}`).Body.String(), &sum)
+
+	if sum.Count != 2 {
+		t.Fatalf("pending after restore %d, want 2", sum.Count)
+	}
+
+	rows := call(h, "POST", "/jobs/_streams/groups/g/read", `{"consumer":"c1","count":10}`).Body.String()
+
+	if n := strings.Count(rows, "\n"); n != 1 {
+		t.Fatalf("the group read %d new entries after restore, want 1: %q", n, rows)
+	}
+}
+
+// An approximate trim deletes whole blocks of 1024 entries only: it keeps
+// more than asked, never fewer.
+func TestStreamApproxTrimDeletesWholeBlocks(t *testing.T) {
+	_, h := newHandler(t)
+
+	docs := strings.Repeat(`{"n":1},`, 2500)
+
+	expectStatus(t, call(h, "POST", "/jobs/_streams/append", `{"docs":[`+strings.TrimSuffix(docs, ",")+`]}`), http.StatusCreated)
+
+	var res struct {
+		Deleted int `json:"deleted"`
+	}
+
+	jsonOf(t, call(h, "POST", "/jobs/_streams/trim", `{"max_len":2000,"approx":true}`).Body.String(), &res)
+
+	if res.Deleted != 0 {
+		t.Fatalf("approx trim of 500 over max_len deleted %d, want 0 (less than a block)", res.Deleted)
+	}
+
+	jsonOf(t, call(h, "POST", "/jobs/_streams/trim", `{"max_len":100,"approx":true}`).Body.String(), &res)
+
+	if res.Deleted != 2048 {
+		t.Fatalf("approx trim of 2400 over max_len deleted %d, want 2048 (two blocks)", res.Deleted)
+	}
+
+	jsonOf(t, call(h, "POST", "/jobs/_streams/trim", `{"max_len":100}`).Body.String(), &res)
+
+	if res.Deleted != 352 {
+		t.Fatalf("exact trim deleted %d, want 352", res.Deleted)
 	}
 }

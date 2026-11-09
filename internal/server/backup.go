@@ -41,7 +41,7 @@ func (s *Server) backup(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 
 	out := &firstWrite{w: w}
 
-	err = db.Backup(r.Context(), out, backup.Options{Version: s.version, NoBlobs: req.NoBlobs})
+	err = db.Backup(r.Context(), out, backup.Options{Version: s.version, NoBlobs: req.NoBlobs, Streams: s.streams.Snapshot})
 	if err == nil {
 		return
 	}

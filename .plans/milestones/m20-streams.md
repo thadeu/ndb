@@ -1,6 +1,6 @@
 # M20 — Streams (Redis Streams parity)
 
-Status: in progress (E20.1 done; E20.2 routes, groups and spec runner done, console, backup and approx trim open) · Depends on: M09 (watch, cursors), M12 (retention) · Branch: `feature/redis-streams-compabitility`
+Status: in progress (E20.1 and E20.2 done; E20.3 bench and e2e next) · Depends on: M09 (watch, cursors), M12 (retention) · Branch: `feature/redis-streams-compabitility`
 
 ## Goal
 
@@ -150,13 +150,18 @@ Routes (all under the collection; `_streams` reserves the prefix):
       is the ID order with no engine change; the HTTP routes give and take
       `<ms>-<seq>` (`_search`, `_count`, `_doc/{id}` too)
 - [x] Group store: `streams.bolt` in the collection dir (one per stream)
-- [ ] The group store in backup and PITR (today a restore gives the
-      entries, not the groups: they are made again)
+- [x] The group store in a backup: a `stream` section after the WAL of the
+      stream (a consistent copy from a read transaction); the restore
+      writes it back
+- PITR restores the entries, not the groups: the PEL has no history, so a
+  group at an instant cannot be rebuilt (decision 2026-11-09, documented)
 - [x] Wake of blocked reads on append (one channel per stream, closed by
       each append)
 - [x] Trim: by delete of IDs in batches of 10 000; `approx` deletes the
       same entries for now (allowed: it may keep more, never fewer)
-- [ ] Trim `approx` by whole segments (the cheap path)
+- [x] Trim `approx` in whole blocks of 1 024 entries (a row group): a
+      trim on every append deletes once per block. A drop of whole segments
+      would need an engine change; not needed for the `~` behavior
 - [x] Access: append, trim, group changes, read, ack, claim are writes (a
       read moves the PEL); info and pending are reads
 - [x] Truncate and drop of a stream also clear its groups (and a refused
@@ -164,7 +169,8 @@ Routes (all under the collection; `_streams` reserves the prefix):
 - [x] `/_metrics`: `ndb_stream_entries_added_total`, per group
       `ndb_stream_group_pending` and `ndb_stream_group_lag` (streams used
       since the start)
-- [ ] Console: the stream and its groups in the collection page (small)
+- Console: not in M20 (decision 2026-11-09). The dev tools of the console
+  already call every route; a streams page is a plan of its own, later.
 
 ### E20.3 Bench and e2e
 

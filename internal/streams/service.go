@@ -1,6 +1,7 @@
 package streams
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -466,9 +467,14 @@ type TrimOptions struct {
 	Limit  int    `json:"limit"`
 }
 
-// Trim deletes the oldest entries, by count or by ID. Approx deletes the
-// same entries in this version (an exact trim keeps at most as many as
-// asked, which is what approx allows too); Limit caps the deletes.
+// ApproxBlock is the unit of an approximate trim: a row group of a segment.
+// Approx deletes only whole blocks of the oldest entries, so a stream trimmed
+// on every append (MAXLEN ~ in Redis) deletes once per block, not once per
+// append. It keeps more entries than asked, never fewer.
+const ApproxBlock = 1024
+
+// Trim deletes the oldest entries, by count or by ID; Limit caps the
+// deletes.
 func (s *Service) Trim(ctx context.Context, name string, o TrimOptions) (int, error) {
 	if (o.MaxLen == nil) == (o.MinID == "") {
 		return 0, badRequest("trim takes max_len or min_id")
@@ -495,6 +501,10 @@ func (s *Service) Trim(ctx context.Context, name string, o TrimOptions) (int, er
 		}
 
 		drop := int64(n) - *o.MaxLen
+
+		if o.Approx {
+			drop -= drop % ApproxBlock
+		}
 
 		if o.Limit > 0 {
 			drop = min(drop, int64(o.Limit))
@@ -527,6 +537,33 @@ func (s *Service) Trim(ctx context.Context, name string, o TrimOptions) (int, er
 		}
 
 		cut = below
+
+		if o.Approx {
+			n, err := st.count(ctx, map[string]any{"_id": map[string]any{"$lte": cut.Key()}})
+			if err != nil {
+				return 0, err
+			}
+
+			keep := n - n%ApproxBlock
+
+			if keep == 0 {
+				return 0, nil
+			}
+
+			if keep < n {
+				rows, err := st.find(ctx, map[string]any{"sort": map[string]any{"_id": 1}, "limit": keep, "fields": []string{"_id"}})
+				if err != nil || len(rows) == 0 {
+					return 0, err
+				}
+
+				var r struct {
+					ID string `json:"_id"`
+				}
+
+				_ = json.Unmarshal(rows[len(rows)-1], &r)
+				cut, _ = FromKey(r.ID)
+			}
+		}
 	}
 
 	return st.deleteUpTo(ctx, cut)
@@ -1657,4 +1694,45 @@ func (s *Service) Metrics() []StreamMetrics {
 	slices.SortFunc(out, func(a, b StreamMetrics) int { return strings.Compare(a.Name, b.Name) })
 
 	return out
+}
+
+// Snapshot is a consistent copy of the group store of a stream, for a
+// backup: from a read transaction of the open store, or the file when the
+// stream is not open. Nil when the stream has no store.
+func (s *Service) Snapshot(name string) ([]byte, error) {
+	s.mu.Lock()
+	st := s.streams[name]
+	s.mu.Unlock()
+
+	if st != nil {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+
+		if st.st != nil {
+			var buf bytes.Buffer
+
+			err := st.st.View(func(tx *bolt.Tx) error {
+				_, err := tx.WriteTo(&buf)
+
+				return err
+			})
+
+			return buf.Bytes(), err
+		}
+	}
+
+	db := s.db()
+
+	col, err := db.Get(name)
+	if err != nil {
+		return nil, nil
+	}
+
+	data, err := os.ReadFile(filepath.Join(col.Dir(), StoreFile))
+
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+
+	return data, err
 }

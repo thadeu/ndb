@@ -87,9 +87,10 @@ cannot become a normal collection.
 
 - `max_len`: keep the newest N entries. `min_id`: delete the entries with an
   ID lower than this one. One of the two.
-- `approx: true` deletes only whole segments, the cheap path (`~` in
-  Redis): the stream can keep a few more entries than asked. Default
-  `false` (exact).
+- `approx: true` deletes only whole blocks of 1 024 entries (`~` in
+  Redis): the stream keeps up to 1 023 more entries than asked, never fewer.
+  A stream trimmed on every append then deletes once per block, not once per
+  append. Default `false` (exact).
 - `limit`: with `approx`, delete at most this many entries.
 - A trim does not change the groups: a pending entry that the trim deleted
   stays in the PEL, and `claim` gives its ID in `deleted`.

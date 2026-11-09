@@ -81,7 +81,8 @@ again. Make the work safe to repeat.
 ## Trim and retention
 
 - `trim` with `max_len` or `min_id`, or `trim` in the append. `approx: true`
-  deletes whole segments only, which is much cheaper than an exact trim.
+  deletes whole blocks of 1 024 entries only: with a trim on every append,
+  it deletes once per block instead of once per append.
 - `retention` of the stream deletes old entries by time (`_ts`), as for any
   collection.
 - A trim does not change the groups: the PEL keeps the IDs of deleted
@@ -129,9 +130,15 @@ again. Make the work safe to repeat.
 | `XINFO GROUPS s` | `GET /s/_streams/groups` |
 | `XINFO CONSUMERS s g` | `GET /s/_streams/groups/g/consumers` |
 
-Not yet: the group state is not in a [backup](operations.md) or a PITR
-restore. A restore gives the entries; make the groups again (with `start`
-at the last ID each one processed).
+## Backup and PITR
+
+- A [backup](operations.md) keeps the groups: their position and their
+  pending entries, as they were when the backup ran. A pending entry that
+  points to an entry appended after the backup's WAL mark comes back as a
+  deleted entry (`claim` drops it).
+- A PITR restore gives the entries as they were at the instant, not the
+  groups: the PEL has no history of its changes. Make the groups again on
+  the restored stream, with `start` at the last ID each one processed.
 
 Not supported: a read of many streams in one call (`XREAD` / `XREADGROUP`
 with many keys); `XSETID`; the Redis 8.2 options `KEEPREF`, `DELREF`,
