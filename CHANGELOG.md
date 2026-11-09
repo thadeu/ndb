@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.13.2] - 2026-11-09
+
 ### Added
 
 - **`_aggregate` takes a pipeline with no `$group`, as MongoDB does.** Such a pipeline reads documents: it runs as a find, with the same indexes, cursor and headers as `_search`. The stages are `$match` and one `$sort`, then `$skip` and `$limit`, and one `$project` (keep or remove fields); `$lookup` goes at the end, as before. A `$match` or a `$sort` after `$skip`, `$limit` or `$project` is still `invalid_pipeline`, because it would give other rows than MongoDB. Before, every pipeline with no `$group` was `invalid_pipeline`.
@@ -546,7 +548,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.13.1...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.13.2...HEAD
+[1.13.2]: https://github.com/thadeu/ndb/compare/v1.13.1...v1.13.2
 [1.13.1]: https://github.com/thadeu/ndb/compare/v1.13.0...v1.13.1
 [1.13.0]: https://github.com/thadeu/ndb/compare/v1.12.1...v1.13.0
 [1.12.1]: https://github.com/thadeu/ndb/compare/v1.12.0...v1.12.1
