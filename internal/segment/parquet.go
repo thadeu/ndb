@@ -302,7 +302,7 @@ type parquetReader struct {
 	columns map[string]Column
 
 	// zones and blooms keep the column index and the bloom filter of each
-	// chunk read so far (chunkKey -> zoneCached, parquet.BloomFilter).
+	// chunk read so far (chunkKey -> zoneCached, *memBloom).
 	zones  sync.Map
 	blooms sync.Map
 }

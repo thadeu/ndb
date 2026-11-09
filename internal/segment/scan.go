@@ -214,12 +214,7 @@ func (r *parquetReader) Bloom(group int, path string, v Scalar) (may, known bool
 		return true, false
 	}
 
-	has, err := bf.Check(probe)
-	if err != nil {
-		return true, false
-	}
-
-	return has, true
+	return bf.Check(probe), true
 }
 
 // probeOf is the bloom probe of v for a column of type t. A number that is
@@ -520,21 +515,21 @@ func scalarOf(v parquet.Value, k parquet.Kind) Scalar {
 	return Scalar{Kind: ScalarString, Str: string(v.ByteArray())}
 }
 
-// bloomOf is the bloom filter of one chunk, read on first use and kept
-// (nil when the chunk has none).
-func (r *parquetReader) bloomOf(group int, path string) parquet.BloomFilter {
+// bloomOf is the bloom filter of one chunk, read into memory on first use
+// and kept (nil when the chunk has none).
+func (r *parquetReader) bloomOf(group int, path string) *memBloom {
 	k := chunkKey{group, path}
 
 	if bf, ok := r.blooms.Load(k); ok {
-		f, _ := bf.(parquet.BloomFilter)
-
-		return f
+		return bf.(*memBloom)
 	}
 
-	var bf parquet.BloomFilter
+	var bf *memBloom
 
 	if chunk, err := r.chunkOf(group, path); err == nil {
-		bf = chunk.BloomFilter()
+		if fb := chunk.BloomFilter(); fb != nil {
+			bf = loadBloom(fb)
+		}
 	}
 
 	r.blooms.Store(k, bf)
