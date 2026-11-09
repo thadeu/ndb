@@ -7,3 +7,19 @@ export { belongsTo, hasMany, hasOne } from './lookup.js'
 export * from './errors.js'
 export type * from './types.js'
 export type { ConnectOptions } from './transport.js'
+export { Stream, Group, idTime, startAll, startNew } from './stream.js'
+export type {
+  AppendOptions,
+  Claimed,
+  ConsumerInfo,
+  Doc,
+  Entry,
+  GroupInfo,
+  PendingEntry,
+  PendingQuery,
+  PendingSummary,
+  ReadOptions,
+  StreamInfo,
+  TrimOptions,
+} from './stream.js'
+export { PoisonError, type DeadEntry, type Handler, type WorkOptions } from './stream-worker.js'

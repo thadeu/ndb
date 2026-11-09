@@ -316,6 +316,73 @@ end
 - `HistoryTruncated` means the WAL files for the position were deleted (`wal_retention`).
 - A watch holds one connection until it ends. It is retried only for the initial open, never in the middle of a stream.
 
+## Streams
+
+A stream is an append-only log with consumer groups, with the behavior of
+Redis Streams (see [Streams](../../docs/dev/streams.md)). An entry is a Hash
+with any fields.
+
+```ruby
+orders = ndb.stream("orders")
+
+id = orders.append({ order: 42, total: 99.9 })            # "1731164400000-0"
+ids = orders.append_many([{ order: 43 }, { order: 44 }])  # one fsync
+orders.append({ order: 45 }, trim: { max_len: 10_000, approx: true })
+
+entries = orders.range("-", "+", count: 100) # XRANGE; entries[0].id, .time, .doc
+orders.info                                  # length, first and last ID, groups
+```
+
+A worker in a group. It reads its own pending entries first, then new ones
+(waiting up to `block` seconds). A block that returns acks the entry; a
+block that raises leaves it pending. The worker also claims the entries
+other workers left idle. An entry delivered `max_deliveries` times goes to
+the dead-letter stream as `{stream, group, id, deliveries, doc}`, is acked,
+and `on_error` gets an `Ndb::PoisonMessage`:
+
+```ruby
+group = orders.group("billing")
+group.ensure(Ndb::Stream::START_NEW) # or Ndb::Stream::START_ALL
+
+worker = group.worker(
+  "worker-1",
+  count: 100,
+  claim_idle: 60,
+  max_deliveries: 5,
+  dead_letter: "orders_dead",
+  on_error: ->(error) { warn error.message }
+) { |entry| charge(entry.doc) }
+
+trap("TERM") { worker.stop }
+
+worker.run # blocks until worker.stop; worker.start runs it in a Thread
+```
+
+`worker.stop` ends the loop after the current read (at most `block`
+seconds). `group.work("worker-1", stop: -> { done }, **options) { |entry| ... }`
+is the same loop in one call: it ends when the `stop` callable returns true.
+Delivery is at least once: make the work safe to repeat. Run many workers
+with different consumer names to share the work.
+
+The calls one by one, when you need your own loop:
+
+| Redis | Ruby |
+|---|---|
+| `XGROUP CREATE` | `group.create(Ndb::Stream::START_NEW)` / `group.ensure` |
+| `XGROUP SETID` / `DESTROY` | `group.set_id(id)` / `group.destroy` |
+| `XREADGROUP ... >` | `group.read("w1", count: 100, block: 5)` |
+| `XREADGROUP ... 0` | `group.read("w1", pending: true)` |
+| `XACK` | `group.ack(*ids)` |
+| `XPENDING` | `group.pending` / `group.pending_list(idle: 60)` |
+| `XCLAIM` / `XAUTOCLAIM` | `group.claim("w2", *ids, min_idle: 60)` / `group.auto_claim("w2", min_idle: 60, cursor: "0-0", count: 100)` |
+| `XTRIM` | `orders.trim(max_len: 1000)` / `orders.trim(min_id: id)` |
+| `XDEL` | `orders.delete(id)` |
+| `XREVRANGE` | `orders.rev_range("+", "-", count: 10)` |
+| `XINFO GROUPS` / `CONSUMERS` | `orders.groups` / `group.consumers` |
+
+A read with `block` waits longer than the client `timeout`: the read timeout
+of that one request is `block` + 5 seconds.
+
 ## Blobs
 
 Large values live in the blob store. A document keeps only a reference.
@@ -403,6 +470,8 @@ All errors inherit from `Ndb::Error`, which has `code` (the daemon code) and `st
 | `WatchLagged` | `watch_lagged` |
 | `HistoryTruncated` | `history_truncated` |
 | `TtlNotEnabled`, `TtlDerived` | `ttl_not_enabled`, `ttl_derived` |
+| `NotAStream`, `InvalidStreamID`, `StreamIDTooSmall` (all `StreamError`) | `not_a_stream`, `invalid_stream_id`, `stream_id_too_small` |
+| `UnknownGroup`, `GroupExists` | `unknown_group`, `group_exists` |
 | `ConnectionError` | cannot reach the daemon. Subclasses: `ConnectError` (nothing was sent), `TimeoutError` |
 
 Any other code (for example `unknown_route`, `pattern_read_only`) is a plain `Ndb::Error`. A response that is not a daemon error has the code `http_status`.

@@ -60,6 +60,49 @@ The loop of a worker:
 Delivery is **at least once**: after a crash or a claim, an entry can come
 again. Make the work safe to repeat.
 
+### The worker in the SDKs
+
+Each SDK runs this loop for you: a handler that returns acks the entry, one
+that fails leaves it pending. The details are in the README of each SDK.
+
+Go:
+
+```go
+orders, _ := ndb.StreamOf[Order](db, "orders")
+g := orders.Group("billing")
+
+g.Ensure(ctx, ndb.StartNew)
+
+g.Work(ctx, "worker-1", func(ctx context.Context, e ndb.Entry[Order]) error {
+	return charge(ctx, e.Doc)
+}, ndb.Work{ClaimIdle: time.Minute, MaxDeliveries: 5, DeadLetter: "orders_dead"})
+```
+
+Ruby:
+
+```ruby
+group = client.stream("orders").group("billing")
+group.ensure(Ndb::Stream::START_NEW)
+
+worker = group.worker("worker-1", claim_idle: 60, max_deliveries: 5, dead_letter: "orders_dead") do |entry|
+  charge(entry.doc)
+end
+
+worker.run # worker.stop from another thread ends it
+```
+
+TypeScript:
+
+```ts
+const group = db.stream<Order>('orders').group('billing')
+
+await group.ensure(startNew)
+
+await group.work('worker-1', async (entry) => {
+  await charge(entry.doc)
+}, { claimIdleMs: 60_000, maxDeliveries: 5, deadLetter: 'orders_dead', signal })
+```
+
 ## How the engine runs it
 
 - **Append** is a normal write: the whole entry goes to the WAL (`fsync` in

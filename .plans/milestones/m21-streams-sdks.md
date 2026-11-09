@@ -21,17 +21,17 @@ names over ndb). It comes when an app moves from Redis Streams to ndb.
   `WithMaxConns`.
 - Tests on the real daemon; README section.
 
-## E21.2 Ruby (sdk/ruby)
+## E21.2 Ruby (sdk/ruby) — done
 
 The same surface with Ruby names (`stream.append`, `group.read`,
 `group.work { |entry| ... }`), and the same tests.
 
-## E21.3 TypeScript (sdk/ts)
+## E21.3 TypeScript (sdk/ts) — done
 
 The same surface (`stream.append`, `group.read`, `group.work(handler)`),
 with an `AbortSignal` to stop the worker.
 
-## E21.4 Docs
+## E21.4 Docs — done
 
 A Clients section in `docs/dev/streams.md` with the worker of each SDK; the
 CHANGELOG entry.

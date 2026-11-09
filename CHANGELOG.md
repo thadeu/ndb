@@ -9,6 +9,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Added
 
 - **Streams: the Redis Streams model on disk** (`docs/dev/streams.md`). A collection with `"stream": true` is an append-only log with consumer groups, under `/{s}/_streams/...`: `append` (`XADD`, with `trim`, one ID `<ms>-<seq>` per entry, many entries in one fsync), `trim` (`XTRIM`, exact or in blocks of 1 024), groups (`XGROUP`), `read` (`XREADGROUP`, new or pending entries, `block_ms`, `no_ack`), `ack`, `pending`, `claim` (`XCLAIM` and `XAUTOCLAIM`) and info (`XINFO`). Every acked append and every group change is on disk before the answer; a stream is a collection, so `_search`, `_count` and `_aggregate` read it, and `_id` sorts as an ID. The group state is in backups (not in PITR). The cases of `spec/streams` give the same results on ndb and on a real Redis 7.4 (a CI test). `ndb bench -streams` measures it, with checks that a `kill -9` loses no acked append, delivered entry or ack.
+- **Streams in the Go, Ruby and TypeScript SDKs.** Each Redis Streams command has a call (`Append`, `Read`, `Ack`, `Pending`, `Claim`, `AutoClaim`, `Trim`, `Info`, ...), and a group worker (`Work` / `worker` / `work`) runs the loop: own pending entries first, new entries with a block, one ack per batch, claim of idle entries, and poison messages to a dead-letter stream after `MaxDeliveries`. A blocked read is not cut by the client timeout.
+- Ruby errors `NotAStream`, `InvalidStreamID`, `StreamIDTooSmall`; TypeScript errors `NotAStreamError`, `StreamIdError`, `UnknownGroupError`, `GroupExistsError`.
 
 ### Changed
 

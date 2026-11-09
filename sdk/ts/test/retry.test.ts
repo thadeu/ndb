@@ -50,7 +50,7 @@ describe('ready retry', () => {
     execFileSync('go', ['build', '-o', join(dir, 'ndb'), './cmd/ndb'], { cwd: resolve(import.meta.dirname, '../../..') })
 
     setTimeout(() => {
-      proc = spawn(join(dir, 'ndb'), ['-config', join(dir, 'absent.yml'), '-data-dir', join(dir, 'd'), '-unix', sock], { stdio: 'ignore' })
+      proc = spawn(join(dir, 'ndb'), ['-config', join(dir, 'absent.yml'), '-data-dir', join(dir, 'd'), '-unix', sock, '-tcp', ''], { stdio: 'ignore' })
     }, 300)
 
     const db = connect(`unix://${sock}`)

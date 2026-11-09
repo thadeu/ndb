@@ -43,6 +43,31 @@ module Ndb
       Collection.new(self, name, definition)
     end
 
+    # A stream (Redis Streams model) with its groups. See Ndb::Stream.
+    def stream(name)
+      Stream.new(self, name)
+    end
+
+    # One request to a stream route: /{coll}/{action} with a JSON body (nil:
+    # none). It returns the parsed JSON, or an Array of rows for an NDJSON
+    # answer. timeout (seconds) replaces the read timeout of this request.
+    def stream_request(method, coll, action, body, timeout: nil)
+      target = action.to_s.empty? ? path(coll) : "#{path(coll)}/#{action}"
+      response = request(method, target, body, timeout: timeout)
+
+      return ndjson(response.body) if response.headers["content-type"].to_s.include?("ndjson")
+
+      body = response.body.to_s.strip
+
+      body.empty? ? nil : JSON.parse(body)
+    end
+
+    # The timeout of the connections of this client, in seconds.
+    def timeout = @pool.timeout
+
+    # A path segment escaped for a URL (a group or consumer name).
+    def escape_segment(segment) = escape(segment)
+
     # POST /{coll}/_search: body is { "query", "sort", "fields", "limit",
     # "skip", "after", "count", ... }. Returns a Page.
     def search(coll, body = {})
@@ -320,15 +345,15 @@ module Ndb
       "#{path(coll)}/#{action}/#{escape(id)}"
     end
 
-    def request(method, target, body, headers: {}, wait: true)
+    def request(method, target, body, headers: {}, wait: true, timeout: nil)
       payload = encode(body)
       headers = authorize(headers)
 
       safe = idempotent?(method, target) && !payload.respond_to?(:read)
-      timeout = wait ? @ready_timeout : 0
+      ready = wait ? @ready_timeout : 0
 
-      with_ready_retry(idempotent: safe, timeout: timeout) do
-        response = @pool.with { |conn| conn.request(method, target, payload, headers: headers, idempotent: safe) }
+      with_ready_retry(idempotent: safe, timeout: ready) do
+        response = @pool.with { |conn| conn.request(method, target, payload, headers: headers, idempotent: safe, timeout: timeout) }
 
         raise_api_error(response) if response.status >= 300
 

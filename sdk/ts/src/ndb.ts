@@ -1,5 +1,6 @@
 import { Collection } from './collection.js'
-import { Transport, type ConnectOptions } from './transport.js'
+import { Stream, type Doc } from './stream.js'
+import { Transport, type ConnectOptions, type Streamed } from './transport.js'
 import type { Blob, Fields, Schema } from './types.js'
 
 export class Ndb {
@@ -63,8 +64,21 @@ export class Ndb {
     return this.transport.request<T>(method, path, body)
   }
 
-  stream(...args: Parameters<Transport['stream']>): ReturnType<Transport['stream']> {
-    return this.transport.stream(...args)
+  // With one argument: the stream of that name (see Stream). Nothing is sent
+  // until its first call. With a method and a path: a raw request whose
+  // answer is read as a stream of bytes or NDJSON rows.
+  stream<T = Doc>(name: string): Stream<T>
+  stream(...args: Parameters<Transport['stream']>): Promise<Streamed>
+  stream<T = Doc>(...args: unknown[]): Stream<T> | Promise<Streamed> {
+    if (args.length === 1) {
+      const full = this.prefix + String(args[0])
+
+      this.used.add(full)
+
+      return new Stream<T>(this, full)
+    }
+
+    return this.transport.stream(...(args as Parameters<Transport['stream']>))
   }
 
   close(): Promise<void> {

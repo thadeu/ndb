@@ -104,6 +104,19 @@ export class PitrError extends NdbError {}
 // (lookup_unindexed), or that attaches too many documents (lookup_too_large).
 export class LookupError extends NdbError {}
 
+// A stream route on a collection that is not a stream (not_a_stream).
+export class NotAStreamError extends NdbError {}
+
+// A bad entry ID (invalid_stream_id), or an append ID that is not greater
+// than the last one (stream_id_too_small).
+export class StreamIdError extends NdbError {}
+
+// The group does not exist (unknown_group).
+export class UnknownGroupError extends NdbError {}
+
+// A group create with a name that exists (group_exists).
+export class GroupExistsError extends NdbError {}
+
 const subclasses: Record<string, typeof NdbError> = {
   unauthorized: UnauthorizedError,
   not_found: NotFoundError,
@@ -131,6 +144,11 @@ const subclasses: Record<string, typeof NdbError> = {
   lookup_invalid: LookupError,
   lookup_unindexed: LookupError,
   lookup_too_large: LookupError,
+  not_a_stream: NotAStreamError,
+  invalid_stream_id: StreamIdError,
+  stream_id_too_small: StreamIdError,
+  unknown_group: UnknownGroupError,
+  group_exists: GroupExistsError,
 }
 
 export function makeError(code: ErrorCode, message: string, status = 0): NdbError {
