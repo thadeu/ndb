@@ -3,6 +3,7 @@ package jsondoc_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -45,5 +46,63 @@ func TestDecodeRejectsWhatIsNotAnObject(t *testing.T) {
 		if _, err := jsondoc.Decode([]byte(d)); err == nil {
 			t.Fatalf("%q decoded", d)
 		}
+	}
+}
+
+func eslDoc() []byte {
+	m := map[string]any{"type": "finishcall", "customer": "cust-042", "ts": "2026-11-07T10:11:12Z", "duration": 123, "call_id": "call-1-abcdef"}
+
+	vars := map[string]any{}
+
+	for i := range 21 {
+		vars[fmt.Sprintf("variable_%d", i)] = fmt.Sprintf("%016x", i*7919)
+	}
+
+	m["variables"] = vars
+
+	for i := range 15 {
+		m[fmt.Sprintf("field_%d", i)] = fmt.Sprintf("value %d with some text", i)
+	}
+
+	b, _ := json.Marshal(m)
+
+	return b
+}
+
+// Pick gives the same values as Decode for the keys it picks, and leaves out
+// the keys a document does not have.
+func TestPickMatchesDecode(t *testing.T) {
+	raw := eslDoc()
+	full, _ := jsondoc.Decode(raw)
+
+	got, err := jsondoc.Pick(raw, []string{"ts", "variables", "duration", "nope"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := got["nope"]; ok || len(got) != 3 {
+		t.Fatalf("Pick = %v", got)
+	}
+
+	for _, k := range []string{"ts", "variables", "duration"} {
+		if !reflect.DeepEqual(got[k], full[k]) {
+			t.Fatalf("%s: Pick %#v, Decode %#v", k, got[k], full[k])
+		}
+	}
+}
+
+func BenchmarkDecodeWhole(b *testing.B) {
+	raw := eslDoc()
+
+	for b.Loop() {
+		_, _ = jsondoc.Decode(raw)
+	}
+}
+
+func BenchmarkPickTwoFields(b *testing.B) {
+	raw := eslDoc()
+
+	for b.Loop() {
+		_, _ = jsondoc.Pick(raw, []string{"ts", "type"})
 	}
 }

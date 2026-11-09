@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/thadeu/ndb/internal/jsondoc"
 	"github.com/thadeu/ndb/internal/query"
 	"github.com/thadeu/ndb/internal/segment"
 )
@@ -176,6 +177,7 @@ func (c *Collection) evalCands(ctx context.Context, q *query.Query, src source, 
 
 	top := newTopK(q)
 	useCache := src.plan == "id"
+	keys := readKeys(q, perPaths(q))
 
 	for i, cd := range src.cands {
 		if i&1023 == 0 && ctx.Err() != nil {
@@ -184,7 +186,7 @@ func (c *Collection) evalCands(ctx context.Context, q *query.Query, src source, 
 
 		p.ex.RowsRead++
 
-		doc, m, err := c.docOf(cd.e, useCache, &p.ex)
+		doc, m, err := c.docOf(cd.e, useCache, &p.ex, keys)
 		if err != nil {
 			return part{}, err
 		}
@@ -217,7 +219,9 @@ func (c *Collection) evalCands(ctx context.Context, q *query.Query, src source, 
 
 // docOf returns the document of e and its decoded form. m is nil when the
 // document is not an object. useCache keeps the decoded forms of recent ids.
-func (c *Collection) docOf(e *entry, useCache bool, ex *Explain) (json.RawMessage, map[string]any, error) {
+// keys, when set, are the only top-level fields the read needs: m holds
+// those, and the rest of the document is skipped, not decoded.
+func (c *Collection) docOf(e *entry, useCache bool, ex *Explain, keys []string) (json.RawMessage, map[string]any, error) {
 	if useCache {
 		if hit, ok := c.docs.get(e); ok {
 			ex.CacheHits++
@@ -233,6 +237,15 @@ func (c *Collection) docOf(e *entry, useCache bool, ex *Explain) (json.RawMessag
 
 	ex.RawFetched++
 
+	if keys != nil && !useCache {
+		m, err := jsondoc.Pick(doc, keys)
+		if err != nil {
+			return doc, nil, nil
+		}
+
+		return doc, m, nil
+	}
+
 	m, err := query.Decode(doc)
 	if err != nil {
 		return doc, nil, nil
@@ -243,6 +256,49 @@ func (c *Collection) docOf(e *entry, useCache bool, ex *Explain) (json.RawMessag
 	}
 
 	return doc, m, nil
+}
+
+// readKeys are the top-level fields that a read of q needs from a document:
+// the paths of where (with the hidden ones), of sort, and more. It is nil
+// when the read needs the whole document ($elemMatch).
+func readKeys(q *query.Query, more []string) []string {
+	if q.NeedsDoc() {
+		return nil
+	}
+
+	seen := map[string]bool{}
+	keys := []string{}
+
+	add := func(path string) {
+		top, _, _ := strings.Cut(path, ".")
+
+		if !seen[top] {
+			seen[top] = true
+			keys = append(keys, top)
+		}
+	}
+
+	for _, p := range q.Paths() {
+		add(p)
+	}
+
+	for _, s := range q.Sort {
+		add(s.Path)
+	}
+
+	for _, p := range more {
+		add(p)
+	}
+
+	return keys
+}
+
+func perPaths(q *query.Query) []string {
+	if q.Per == nil {
+		return nil
+	}
+
+	return []string{q.Per.Field}
 }
 
 // segScan is the state of one segment scan: the paths of the groups read,

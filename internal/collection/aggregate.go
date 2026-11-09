@@ -147,6 +147,7 @@ func mergeAgg(parts []aggPart) (*agg.Table, int, Explain, error) {
 func (c *Collection) aggCands(ctx context.Context, p *agg.Pipeline, src source, budget *agg.Budget) (aggPart, error) {
 	part := aggPart{tbl: p.NewTable(budget)}
 	q := p.Query
+	keys := readKeys(q, p.Paths())
 
 	for i, cd := range src.cands {
 		if i&1023 == 0 && ctx.Err() != nil {
@@ -155,7 +156,7 @@ func (c *Collection) aggCands(ctx context.Context, p *agg.Pipeline, src source, 
 
 		part.ex.RowsRead++
 
-		_, m, err := c.docOf(cd.e, false, &part.ex)
+		_, m, err := c.docOf(cd.e, false, &part.ex, keys)
 		if err != nil {
 			return aggPart{}, err
 		}

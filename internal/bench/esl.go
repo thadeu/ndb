@@ -301,7 +301,7 @@ func Run(o Options, w io.Writer) (err error) {
 		fmt.Fprintln(out, line)
 	}
 
-	fmt.Fprintf(out, "| disk | %s |\n", du(dir))
+	fmt.Fprintf(out, "| disk | %s |\n", du(mainDir))
 
 	if verify(out, o.Calls == Defaults().Calls) > 0 {
 		return ErrFailed

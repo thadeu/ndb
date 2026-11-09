@@ -10,8 +10,10 @@ package jsondoc
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 
 	"github.com/bytedance/sonic"
+	"github.com/bytedance/sonic/ast"
 )
 
 // api decodes numbers as json.Number, like encoding/json with UseNumber, and
@@ -31,3 +33,32 @@ func Decode(raw []byte) (map[string]any, error) {
 
 // Number is the type of the numbers that Decode returns.
 type Number = json.Number
+
+// Pick decodes only the top-level fields keys of a stored JSON object (each
+// one whole), skipping the rest of the document: a read that needs three
+// fields of a forty-field document decodes three. A key the document does
+// not have is left out, as Decode would.
+func Pick(raw []byte, keys []string) (map[string]any, error) {
+	s := string(bytes.TrimSpace(raw))
+	m := make(map[string]any, len(keys))
+
+	for _, k := range keys {
+		node, err := ast.NewSearcher(s).GetByPathCopy(k)
+		if err != nil {
+			if errors.Is(err, ast.ErrNotExist) {
+				continue
+			}
+
+			return nil, err
+		}
+
+		v, err := node.InterfaceUseNumber()
+		if err != nil {
+			return nil, err
+		}
+
+		m[k] = v
+	}
+
+	return m, nil
+}
