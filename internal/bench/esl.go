@@ -62,6 +62,10 @@ type Options struct {
 	Lookup bool
 	Idle   bool
 
+	// Streams: the Redis Streams parity (appends, groups, latency, claim,
+	// kill -9), on a daemon of its own.
+	Streams bool
+
 	// Concurrent: clients that read at the same time (1, 3 and 10).
 	Concurrent bool
 
@@ -97,7 +101,7 @@ type Options struct {
 }
 
 func (o Options) all() bool {
-	return !o.Stress && !o.Query && !o.Aggs && !o.Lookup && !o.Idle && !o.Concurrent && !o.Direct
+	return !o.Stress && !o.Query && !o.Aggs && !o.Lookup && !o.Idle && !o.Concurrent && !o.Direct && !o.Streams
 }
 
 // reads tells whether a part needs the loaded calls.
@@ -150,6 +154,10 @@ func (o Options) plan(reuse bool) []planned {
 
 	if o.Direct {
 		steps = append(steps, directPlan(o.DirectRows)...)
+	}
+
+	if o.Streams || o.all() {
+		steps = append(steps, streamsPlan()...)
 	}
 
 	if o.Idle || o.all() {
@@ -301,6 +309,11 @@ func Run(o Options, w io.Writer) (err error) {
 	if o.Direct {
 		report = append(report, "| **direct mode** (NDJSON files the app writes) | |")
 		report = append(report, direct(dir, o.DirectRows)...)
+	}
+
+	if o.Streams || o.all() {
+		report = append(report, "| **streams** (Redis Streams parity) | |")
+		report = append(report, streamsPart(dir)...)
 	}
 
 	if o.Idle || o.all() {

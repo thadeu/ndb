@@ -56,6 +56,10 @@ func openStore(path string, relaxed bool) (*bolt.DB, error) {
 
 	db.NoSync = relaxed
 
+	// Batch (the acks) waits this long for other calls to join it. The
+	// default 10 ms made a lone worker wait on every ack.
+	db.MaxBatchDelay = time.Millisecond
+
 	err = db.Update(func(tx *bolt.Tx) error {
 		for _, b := range [][]byte{bMeta, bGroups} {
 			if _, err := tx.CreateBucketIfNotExists(b); err != nil {

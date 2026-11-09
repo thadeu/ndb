@@ -45,6 +45,22 @@ type stream struct {
 
 	// wake is closed by an append; a blocked read waits on it.
 	wake chan struct{}
+
+	// The appends that wait for the next insert (group commit): while one
+	// insert runs its fsync, the next appends queue, and one of them takes
+	// the whole queue into one insert.
+	qmu      sync.Mutex
+	queue    []*appendReq
+	flushing bool
+}
+
+// appendReq is one append in the queue of a stream.
+type appendReq struct {
+	docs  []map[string]any
+	idArg string
+	ids   []ID
+	err   error
+	done  chan struct{}
 }
 
 func New(db func() *engine.DB) *Service {
@@ -366,9 +382,9 @@ func (s *Service) Append(ctx context.Context, name string, docs []map[string]any
 		return nil, err
 	}
 
-	ids, err := s.appendLocked(ctx, st, docs, o.ID)
-
 	st.mu.Unlock()
+
+	ids, err := s.commit(ctx, st, &appendReq{docs: docs, idArg: o.ID, done: make(chan struct{})})
 
 	if err != nil || o.Trim == nil {
 		return ids, err
@@ -379,15 +395,115 @@ func (s *Service) Append(ctx context.Context, name string, docs []map[string]any
 	return ids, err
 }
 
-func (s *Service) appendLocked(ctx context.Context, st *stream, docs []map[string]any, idArg string) ([]ID, error) {
-	ids := make([]ID, len(docs))
-	raws := make([][]byte, len(docs))
+// commit queues req and waits for its insert. The first append of an
+// empty queue leads: it inserts the queue in rounds, one insert (one fsync)
+// per round, until the queue is empty. IDs are made in queue order under
+// the stream lock, so the insert order is the ID order: a group read never
+// sees an ID before a lower one is written.
+func (s *Service) commit(ctx context.Context, st *stream, req *appendReq) ([]ID, error) {
+	st.qmu.Lock()
+	st.queue = append(st.queue, req)
+
+	if st.flushing {
+		st.qmu.Unlock()
+
+		<-req.done
+
+		return req.ids, req.err
+	}
+
+	st.flushing = true
+	st.qmu.Unlock()
+
+	// The insert of a round is for every append in it: a caller that goes
+	// away does not cancel the others.
+	flushCtx := context.WithoutCancel(ctx)
+
+	for {
+		st.qmu.Lock()
+
+		batch := st.queue
+		st.queue = nil
+
+		if len(batch) == 0 {
+			st.flushing = false
+			st.qmu.Unlock()
+
+			break
+		}
+
+		st.qmu.Unlock()
+
+		st.mu.Lock()
+		s.insertRound(flushCtx, st, batch)
+		st.mu.Unlock()
+
+		for _, r := range batch {
+			close(r.done)
+		}
+	}
+
+	return req.ids, req.err
+}
+
+// insertRound gives the IDs of a round and inserts its documents at once.
+// An append with a bad ID fails alone; a failed insert fails the round.
+func (s *Service) insertRound(ctx context.Context, st *stream, batch []*appendReq) {
 	last := st.last
 
-	for i, d := range docs {
-		id, err := s.nextID(last, idArg)
+	var (
+		raws []json.RawMessage
+		ok   []*appendReq
+	)
+
+	for _, r := range batch {
+		ids, docs, next, err := s.prepare(r, last)
 		if err != nil {
-			return nil, err
+			r.err = err
+
+			continue
+		}
+
+		r.ids, last = ids, next
+		raws = append(raws, docs...)
+		ok = append(ok, r)
+	}
+
+	if len(raws) == 0 {
+		return
+	}
+
+	plain := make([][]byte, len(raws))
+
+	for i, raw := range raws {
+		plain[i] = raw
+	}
+
+	if _, err := st.col.Insert(ctx, plain...); err != nil {
+		for _, r := range ok {
+			r.ids, r.err = nil, err
+		}
+
+		return
+	}
+
+	st.last = last
+	st.added += int64(len(raws))
+
+	close(st.wake)
+	st.wake = make(chan struct{})
+}
+
+// prepare gives the IDs and the JSON of the documents of one append after
+// last, and the last ID it used.
+func (s *Service) prepare(r *appendReq, last ID) ([]ID, []json.RawMessage, ID, error) {
+	ids := make([]ID, len(r.docs))
+	raws := make([]json.RawMessage, len(r.docs))
+
+	for i, d := range r.docs {
+		id, err := s.nextID(last, r.idArg)
+		if err != nil {
+			return nil, nil, last, err
 		}
 
 		ids[i], last = id, id
@@ -396,21 +512,11 @@ func (s *Service) appendLocked(ctx context.Context, st *stream, docs []map[strin
 		d[catalog.StreamTime] = time.UnixMilli(int64(id.Ms)).UTC().Format(time.RFC3339Nano)
 
 		if raws[i], err = json.Marshal(d); err != nil {
-			return nil, err
+			return nil, nil, last, err
 		}
 	}
 
-	if _, err := st.col.Insert(ctx, raws...); err != nil {
-		return nil, err
-	}
-
-	st.last = last
-	st.added += int64(len(docs))
-
-	close(st.wake)
-	st.wake = make(chan struct{})
-
-	return ids, nil
+	return ids, raws, last, nil
 }
 
 // nextID is the ID of the next entry after last for the id argument of an
@@ -592,7 +698,8 @@ func (st *stream) lastBelow(ctx context.Context, id ID) (ID, bool, error) {
 }
 
 // deleteUpTo deletes every entry up to cut, in batches of IDs (a delete by
-// query takes the id, not a range of it), and records the max deleted ID.
+// query takes the id, not a range of it). A trim does not change the max
+// deleted ID: as in Redis, only a delete of one entry (XDEL) does.
 func (st *stream) deleteUpTo(ctx context.Context, cut ID) (int, error) {
 	total := 0
 
@@ -604,10 +711,6 @@ func (st *stream) deleteUpTo(ctx context.Context, cut ID) (int, error) {
 			"fields": []string{"_id"},
 		})
 		if err != nil || len(rows) == 0 {
-			if st.maxDeleted.Less(cut) && total > 0 {
-				st.maxDeleted = cut
-			}
-
 			if total > 0 {
 				err = errors.Join(err, st.st.Update(st.checkpoint))
 			}
@@ -1262,11 +1365,18 @@ func (s *Service) Ack(ctx context.Context, name, g string, ids []string) (int, e
 		return 0, err
 	}
 
-	defer st.mu.Unlock()
+	// An ack changes only the PEL: it does not need the stream lock, so it
+	// runs while a read holds it, and bbolt joins the acks that come at
+	// once into one transaction (one fsync).
+	store := st.st
+
+	st.mu.Unlock()
 
 	n := 0
 
-	err = st.st.Update(func(tx *bolt.Tx) error {
+	err = store.Batch(func(tx *bolt.Tx) error {
+		n = 0
+
 		b, err := groupBucket(tx, g)
 		if err != nil {
 			return errGroup(g)

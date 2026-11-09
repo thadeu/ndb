@@ -33,6 +33,7 @@ func runBench(args []string) error {
 	fl.StringVar(&o.Partition, "partition", "day", "partition_by of the loaded calls: day (all in yesterday) or month (six months up to now)")
 	fl.StringVar(&o.Data, "data", "", "keep the loaded calls in this dir and read them again on the next runs (read parts only)")
 	fl.BoolVar(&o.Concurrent, "concurrent", false, "measure reads from 1, 3 and 10 clients at the same time (loads the calls first)")
+	fl.BoolVar(&o.Streams, "streams", false, "measure streams: appends, group workers, append-to-delivery latency, claim, kill -9")
 	fl.BoolVar(&o.Idle, "idle", false, "measure idle collections: disk, CPU, RSS and files per collection at rest")
 	fl.IntVar(&o.Collections, "collections", o.Collections, "collections of the idle part")
 	fl.StringVar(&o.PITR, "pitr", "", "pitr of the daemon: off, 1d (default: the daemon default, 1d)")

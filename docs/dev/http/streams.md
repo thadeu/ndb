@@ -108,6 +108,10 @@ cannot become a normal collection.
 }
 ```
 
+- `entries_added` counts every entry ever appended, deleted ones too.
+- `max_deleted_id` is the highest ID deleted one by one (`DELETE
+  /{s}/_doc/{id}`, `XDEL`). A trim does not change it, as in Redis.
+
 ### Read, count and delete entries
 
 These are the routes of every collection, on the stream:

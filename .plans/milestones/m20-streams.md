@@ -1,6 +1,6 @@
 # M20 — Streams (Redis Streams parity)
 
-Status: in progress (E20.1 and E20.2 done; E20.3 bench and e2e next) · Depends on: M09 (watch, cursors), M12 (retention) · Branch: `feature/redis-streams-compabitility`
+Status: E20.1, E20.2 and E20.3 done; E20.4 is M21 (the SDKs) · Depends on: M09 (watch, cursors), M12 (retention) · Branch: `feature/redis-streams-compabitility`
 
 ## Goal
 
@@ -174,16 +174,30 @@ Routes (all under the collection; `_streams` reserves the prefix):
 
 ### E20.3 Bench and e2e
 
-- [ ] `ndb bench -streams`: append rate (strict and relaxed), group read and
-      ack rate with 1, 3 and 10 workers, end to end latency (append to
-      delivery with `block_ms`), a `kill -9` with no acked append and no
-      PEL change lost, a worker that dies and a claim that takes its entries
-- [ ] Budgets in `internal/bench/checks.go` from the first measured run
-      (about 3x, as the others)
-- [ ] e2e: the same scenarios against Redis and against ndb with one test
-      driver (`test/streams/`), to prove the parity of the contract: same
-      order, same delivery counts, same pending after a claim
-- [ ] Fuzz of the ID parser and of the trim
+Done (2026-11-09):
+
+- [x] `ndb bench -streams` (in `make bench` too): appends from 1 and 10
+      clients (strict, relaxed) and in batches of 100, group read + ack
+      with 1, 3 and 10 workers, append to delivery with `block_ms`, a claim
+      of a dead worker, a `kill -9` while apps append and a worker acks
+- [x] 13 checks in `internal/bench/checks.go`: no failed append, no
+      undelivered or unclaimed entry, no acked append, delivered entry or
+      ack lost by a `kill -9`; append p99 (1 client 20 ms, 10 clients
+      60 ms), latency p99 60 ms, 10 workers at least 1 500 entries/s
+      (about 3x of the first run on a Mac: 4.5 ms, 19 ms, 17-27 ms,
+      5 300 entries/s)
+- [x] Parity: `TestStreamCasesOnRedis` runs the cases of `spec/streams`
+      against a real Redis 7.4 (a service in CI). It found one difference,
+      fixed: a trim does not change `max_deleted_id` in Redis
+- [x] Fuzz of the ID parser
+- [x] From the first run: appends wait in a queue while an insert runs and
+      go in one insert (group commit: 10 clients 329 to 860 entries/s), and
+      an ack runs out of the stream lock in a bbolt batch (10 workers
+      4 000 to 5 300 entries/s)
+
+Known limit: the reads of one group take the stream lock and one fsync of
+the group store each, so 10 workers read about as fast as 3 (the fsync of
+macOS is slow; Linux is faster).
 
 ### E20.4 SDK specification → M21
 

@@ -62,3 +62,26 @@ func TestPadQueryKeepsTheSortOrder(t *testing.T) {
 		}
 	}
 }
+
+// FuzzParse: any text is an ID or an error, never a panic, and an ID comes
+// back from its key and from its text.
+func FuzzParse(f *testing.F) {
+	for _, s := range []string{"1-0", "-", "+", "18446744073709551615-18446744073709551615", "7", "1-", "-1", "0-0", "a-b"} {
+		f.Add(s)
+	}
+
+	f.Fuzz(func(t *testing.T, s string) {
+		id, err := Parse(s, 0)
+		if err != nil {
+			return
+		}
+
+		if back, ok := FromKey(id.Key()); !ok || back != id {
+			t.Fatalf("%q: key %q gives %v, %v", s, id.Key(), back, ok)
+		}
+
+		if again, err := Parse(id.String(), 0); err != nil || again != id {
+			t.Fatalf("%q: text %q gives %v, %v", s, id.String(), again, err)
+		}
+	})
+}
