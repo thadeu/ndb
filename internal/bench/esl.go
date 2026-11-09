@@ -36,8 +36,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -570,19 +572,57 @@ func load(d *daemon, retention string) []string {
 	prog.end(fmt.Sprintf("%.0f docs/s", float64(*calls*7)/el))
 	prog.step("settle", nil)
 
-	settle := d.settle(lay.part(lay.start.Add(lay.span - time.Nanosecond)))
+	last := lay.part(lay.start.Add(lay.span - time.Nanosecond))
+	settle := d.settle(last)
+
+	sealedMB, sealing := d.sealEvents()
+
+	if sealedMB > 0 {
+		d.settle(last)
+	}
+
 	rss := peak()
 
-	prog.end("seals and compactions done")
+	prog.end(fmt.Sprintf("seals and compactions done, %.1f MB of memtable sealed", sealedMB))
 
 	record("load.docs_s", float64(*calls*7)/el)
 	record("load.rss", float64(rss))
 
 	return []string{
 		fmt.Sprintf("| load | %d calls, %d docs in %.0f s, %.0f docs/s |", *calls, *calls*7, el, float64(*calls*7)/el),
-		fmt.Sprintf("| load settle | seals and compactions done %.0f s after the load |", settle.Seconds()),
+		fmt.Sprintf("| load settle | seals and compactions done %.0f s after the load; %.1f MB of memtable sealed with _compact in %.1f s |", settle.Seconds(), sealedMB, sealing.Seconds()),
 		fmt.Sprintf("| load RSS | peak %d MB, after %d MB |", rss, d.rss()),
 	}
+}
+
+// memtableLine is one ndb_memtable_bytes series of /_metrics.
+var memtableLine = regexp.MustCompile(`^ndb_memtable_bytes\{collection="(events[^"]*)"\} (\d+)$`)
+
+// sealEvents seals the documents that the load left in the memtables of the
+// events partitions, with _compact (a seal, then a merge). A memtable is
+// sealed at write_buffer or after 10 minutes, so after the load some runs
+// kept about 19k documents unsealed and others none: a count then decoded
+// them (11 ms against 0.4 ms), and two runs of one binary did not compare.
+// It gives the MB sealed and the time it took.
+func (d *daemon) sealEvents() (float64, time.Duration) {
+	start := time.Now()
+
+	var total int64
+
+	for line := range strings.Lines(string(d.must("GET", "/_metrics", ""))) {
+		m := memtableLine.FindStringSubmatch(strings.TrimSpace(line))
+
+		if m == nil || m[2] == "0" {
+			continue
+		}
+
+		n, _ := strconv.ParseInt(m[2], 10, 64)
+		total += n
+
+		d.must("POST", "/"+m[1]+"/_compact", "")
+	}
+
+	return float64(total) / (1 << 20), time.Since(start)
 }
 
 // settle waits until the segments of coll stop changing (no seal or

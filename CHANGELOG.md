@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- **A bloom filter check reads no file.** The filter of each column chunk is read into memory on first use (a few KB) and checked there; the filter of parquet-go read 32 bytes from the file on each check, so every lookup made one `pread` per segment. In the 10 client phase of `ndb bench`, these preads were 12.9 s of the 92 s of CPU in 10 s, and they are gone (reads/s +5 to 8%).
+
+### Fixed
+
+- **`Close` of a collection no longer races with a compaction started by a call** (`POST /{coll}/_compact`): it closed the segment readers while the compaction still read them. It now waits for the compaction, which stops at its next step. `TestCloseStopsACompaction` failed under `-race` in CI now and then; the CI of 1.13.2 failed on it.
+- **`ndb bench` measures the reads on the same state in every run.** After the load, 24 to 28 MB of documents could stay in the memtable of the loaded partition (it is sealed at `write_buffer` or after 10 minutes), or none: two runs of one binary then gave `count of all` 0.4 ms or 15 ms, and `events per type` 3 ms or 23 ms. The bench now seals that memtable with `_compact` after the load and waits again; the settle takes about 10 s more. The `ndb` daemon does not change.
+- The Go SDK test of `ErrInvalidPipeline` used a pipeline with no `$group`, which is valid since 1.13.2.
+
 ## [1.13.2] - 2026-11-09
 
 ### Added
