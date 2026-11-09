@@ -998,6 +998,16 @@ func (c *Collection) walHeld() bool {
 	return err == nil && len(files) > 1
 }
 
+// StopWork tells the seals and compactions in progress to stop, and none to
+// start: the first step of a shutdown, so it does not wait for the merge
+// of big segments (or for a request that runs one). Writes still work and
+// stay in the WAL. Close finishes the stop.
+func (c *Collection) StopWork() {
+	if c.seal != nil {
+		c.seal.stopOnce.Do(func() { close(c.seal.stop) })
+	}
+}
+
 func (c *Collection) stopSealer() {
 	if c.seal == nil {
 		return

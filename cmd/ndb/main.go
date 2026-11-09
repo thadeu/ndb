@@ -207,6 +207,10 @@ func serve(ctx context.Context, cfg config.Config, token string) error {
 
 	log.Info("ndb stopping")
 
+	// The seals and compactions stop first: a request that runs one (a
+	// _compact) returns, so the wait for the requests in flight is short.
+	db.Stop()
+
 	sctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 
 	defer cancel()
@@ -291,6 +295,15 @@ func removeStaleSocket(path string) error {
 
 	if fi.Mode()&os.ModeSocket == 0 {
 		return fmt.Errorf("%s exists and is not a socket", path)
+	}
+
+	// A socket that answers belongs to a running ndb: removing it would
+	// leave that daemon unreachable, and this one stops anyway on the lock
+	// of its data dir.
+	if conn, err := net.DialTimeout("unix", path, time.Second); err == nil {
+		conn.Close()
+
+		return fmt.Errorf("%s: another ndb is listening on it; stop it first or use another socket", path)
 	}
 
 	return os.Remove(path)

@@ -201,7 +201,10 @@ func (c *Collection) commitAndSwap(plan compactPlan, lo, hi int, name string, in
 
 // errStopped ends a seal or a compaction because the collection is closing
 // (a drop, a truncate, a shutdown): its result would be thrown away.
-var errStopped = errors.New("compaction stopped: the collection is closing")
+// ErrStopped is a seal or a compaction stopped by a shutdown (StopWork).
+var ErrStopped = errors.New("stopping: the daemon is shutting down; retry")
+
+var errStopped = ErrStopped
 
 // stopping tells if the sealer was asked to stop.
 func (s *sealer) stopping() bool {

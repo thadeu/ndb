@@ -1,8 +1,10 @@
 package main
 
 import (
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/thadeu/ndb/internal/config"
@@ -40,5 +42,35 @@ func TestParseUnixMode(t *testing.T) {
 		if _, err := parseUnixMode(in); err == nil {
 			t.Errorf("parseUnixMode(%q) should fail", in)
 		}
+	}
+}
+
+// A socket that answers belongs to a running ndb: a second daemon does not
+// remove it (that daemon would become unreachable). A dead one is removed.
+func TestRemoveStaleSocketKeepsALiveOne(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ndb.sock")
+
+	live, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := removeStaleSocket(path); err == nil || !strings.Contains(err.Error(), "another ndb") {
+		t.Fatalf("a live socket: %v, want an error", err)
+	}
+
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("the live socket was removed: %v", err)
+	}
+
+	live.(*net.UnixListener).SetUnlinkOnClose(false)
+	live.Close()
+
+	if err := removeStaleSocket(path); err != nil {
+		t.Fatalf("a dead socket: %v", err)
+	}
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("the dead socket is still there")
 	}
 }

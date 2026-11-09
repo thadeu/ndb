@@ -353,6 +353,11 @@ func (d *daemon) sock() string {
 }
 
 func (d *daemon) start() {
+	if conn, err := net.Dial("unix", d.sock()); err == nil {
+		conn.Close()
+		check(fmt.Errorf("a daemon already listens on %s: stop it first", d.sock()))
+	}
+
 	os.Remove(d.sock())
 
 	d.cmd = exec.Command(*bin, "-config", filepath.Join(d.dir, "ndb.yml"), "-data-dir", filepath.Join(d.dir, "data"), "-unix", d.sock())
@@ -372,6 +377,8 @@ func (d *daemon) start() {
 		}
 	}
 
+	// A daemon that did not answer in time is not left running.
+	d.kill()
 	check(errors.New("the daemon did not start"))
 }
 

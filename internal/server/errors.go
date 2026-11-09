@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/thadeu/ndb/internal/catalog"
+	"github.com/thadeu/ndb/internal/collection"
 	"github.com/thadeu/ndb/internal/engine"
 	"github.com/thadeu/ndb/internal/wal"
 	"github.com/thadeu/ndb/internal/writer"
@@ -84,6 +85,8 @@ func codeOf(err error) string {
 		return "line_too_large"
 	case errors.Is(err, writer.ErrClosed):
 		return "closed"
+	case errors.Is(err, collection.ErrStopped):
+		return "stopping"
 	case errors.Is(err, context.Canceled):
 		return "canceled"
 	}
@@ -111,7 +114,7 @@ func statusOf(code string) int {
 		return http.StatusUnprocessableEntity
 	case "canceled":
 		return StatusClientClosed
-	case "not_ready", "closed":
+	case "not_ready", "closed", "stopping":
 		return http.StatusServiceUnavailable
 	case "internal":
 		return http.StatusInternalServerError

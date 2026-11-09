@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/thadeu/ndb/internal/catalog"
+	"github.com/thadeu/ndb/internal/collection"
 	"github.com/thadeu/ndb/internal/engine"
 )
 
@@ -245,5 +247,55 @@ func TestIdleCloseOffKeepsCollectionsOpen(t *testing.T) {
 
 	if asleep(t, col) {
 		t.Fatal("a collection slept with idle_close off")
+	}
+}
+
+// Stop, the first step of a shutdown, ends a compaction in progress: the
+// request that runs it returns ErrStopped at once, not after the merge.
+func TestStopEndsACompaction(t *testing.T) {
+	db := open(t, cfg(t.TempDir(), nil))
+	col := ensure(t, db, catalog.Def{Name: "big"})
+
+	for b := 0; b < 200_000; b += 1000 {
+		docs := make([][]byte, 0, 1000)
+
+		for i := b; i < b+1000; i++ {
+			docs = append(docs, fmt.Appendf(nil, `{"_id":"d%07d","n":%d,"pad":"%064d"}`, i, i, i))
+		}
+
+		if _, err := col.Insert(ctx, docs...); err != nil {
+			t.Fatal(err)
+		}
+
+		if b%25_000 == 24_000 {
+			if err := col.Seal(); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	done := make(chan error, 1)
+
+	go func() {
+		_, err := col.Compact()
+		done <- err
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+
+	stopped := time.Now()
+	db.Stop()
+
+	select {
+	case err := <-done:
+		if took := time.Since(stopped); took > 2*time.Second {
+			t.Fatalf("the compaction returned %s after Stop", took)
+		}
+
+		if !errors.Is(err, collection.ErrStopped) {
+			t.Fatalf("compaction: %v, want ErrStopped (it was still merging)", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("the compaction did not stop")
 	}
 }

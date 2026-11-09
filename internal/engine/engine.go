@@ -182,6 +182,21 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 	return db, nil
 }
 
+// Stop is the first step of a shutdown: the background loops end, and the
+// seals and compactions in progress stop (a compaction that a request runs
+// returns), so the requests in flight finish soon. Reads and writes still
+// work until Close.
+func (db *DB) Stop() {
+	db.cancel()
+
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+
+	for _, col := range db.cols {
+		col.stopWork()
+	}
+}
+
 // Close stops the tailers, closes the collections and the catalog, and
 // releases the lock. Writes that were acked are durable before it returns.
 func (db *DB) Close() error {

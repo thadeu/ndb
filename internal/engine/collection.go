@@ -484,6 +484,16 @@ func (c *Collection) close() error {
 	return errors.Join(c.tail.Close(), c.mem.Close())
 }
 
+// stopWork stops the seals and compactions of the collection (Stop).
+func (c *Collection) stopWork() {
+	c.live.RLock()
+	defer c.live.RUnlock()
+
+	if st := c.store(); st != nil && !c.asleep {
+		st.StopWork()
+	}
+}
+
 // engine tells an engine-mode collection (a WAL of its own) from a direct
 // one.
 func (c *Collection) engine() bool {
