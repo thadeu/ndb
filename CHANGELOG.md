@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- **Links between the pages of the docs site no longer open GitHub (404).** A link from one page to another (`[Aggregate](../aggregate.md)`) went to `github.com/.../blob/main/aggregate.md`, a path that does not exist; 70 links of the site did. They now stay on the site; a link to any other file of the repo still opens it on GitHub. The site no longer builds stray pages for `CHANGELOG.md` and `benchmark/README.md`.
+
 ## [1.13.1] - 2026-11-09
 
 ### Added

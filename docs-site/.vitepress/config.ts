@@ -207,6 +207,8 @@ export default defineConfig({
     'CONTRIBUTING.md',
     'CODE_OF_CONDUCT.md',
     'SECURITY.md',
+    'CHANGELOG.md',
+    'benchmark/**',
     '.plans/**',
     'brand/**',
     'sdk/**',
@@ -252,8 +254,12 @@ export default defineConfig({
     config(md) {
       md.use(codeGroup)
 
+      // A link to a page of the site stays on the site; a link to any other
+      // file of the repo opens it on GitHub. env.realPath is the file before
+      // the rewrites (env.path is the rewritten one, e.g. http/queries.md).
       md.core.ruler.push('ndb-repo-links', (state) => {
-        const source = posix.relative(repoRoot, String(state.env.path ?? '').split(sep).join('/'))
+        const file = String(state.env.realPath ?? state.env.path ?? '')
+        const source = posix.relative(repoRoot, file.split(sep).join('/'))
 
         for (const block of state.tokens) {
           for (const token of block.children ?? []) {
