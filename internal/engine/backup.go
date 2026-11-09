@@ -93,7 +93,22 @@ func (db *DB) Backup(ctx context.Context, w io.Writer, opts backup.Options) erro
 		snaps[d.Name] = backup.Snapshot{Tx: m.Tx, Lines: snapshotLines(ctx, snap)}
 	}
 
+	streams := opts.Streams
+
+	if streams == nil {
+		streams = func(name string) ([]byte, error) {
+			data, err := os.ReadFile(filepath.Join(db.dir, "collections", name, backup.StreamFile))
+
+			if errors.Is(err, os.ErrNotExist) {
+				return nil, nil
+			}
+
+			return data, err
+		}
+	}
+
 	src := backup.Source{
+		Streams:   streams,
 		Defs:      defs,
 		Cursors:   entries,
 		Blobs:     db.blobs,

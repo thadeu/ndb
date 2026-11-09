@@ -1,0 +1,61 @@
+{
+  "name": "a read with no_ack adds nothing to the PEL",
+  "stream": "orders",
+  "steps": [
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-0"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-0"
+        }
+      }
+    },
+    {
+      "op": "group_create",
+      "group": "g",
+      "body": {
+        "start": "0"
+      }
+    },
+    {
+      "op": "read",
+      "group": "g",
+      "body": {
+        "consumer": "c1",
+        "no_ack": true
+      },
+      "expect": {
+        "rows": [
+          {
+            "_id": "1-0",
+            "n": 1
+          }
+        ],
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    },
+    {
+      "op": "pending",
+      "group": "g",
+      "body": {},
+      "expect": {
+        "body": {
+          "count": 0,
+          "lowest": null,
+          "highest": null,
+          "consumers": []
+        }
+      }
+    }
+  ]
+}

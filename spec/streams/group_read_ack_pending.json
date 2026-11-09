@@ -1,0 +1,219 @@
+{
+  "name": "a group gives each new entry once, keeps it pending until ack, and a pending read gives it again",
+  "stream": "orders",
+  "steps": [
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-0"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-0"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 2
+        },
+        "id": "1-1"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-1"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 3
+        },
+        "id": "1-2"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-2"
+        }
+      }
+    },
+    {
+      "op": "group_create",
+      "group": "g",
+      "body": {
+        "start": "0"
+      },
+      "expect": {
+        "body": {
+          "group": "g",
+          "last_delivered_id": "0-0"
+        }
+      }
+    },
+    {
+      "op": "read",
+      "group": "g",
+      "body": {
+        "consumer": "c1",
+        "count": 2
+      },
+      "expect": {
+        "rows": [
+          {
+            "_id": "1-0",
+            "n": 1
+          },
+          {
+            "_id": "1-1",
+            "n": 2
+          }
+        ],
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    },
+    {
+      "op": "read",
+      "group": "g",
+      "body": {
+        "consumer": "c2",
+        "count": 10
+      },
+      "expect": {
+        "rows": [
+          {
+            "_id": "1-2",
+            "n": 3
+          }
+        ],
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    },
+    {
+      "op": "read",
+      "group": "g",
+      "body": {
+        "consumer": "c2",
+        "count": 10
+      },
+      "expect": {
+        "rows": []
+      }
+    },
+    {
+      "op": "pending",
+      "group": "g",
+      "body": {},
+      "expect": {
+        "body": {
+          "count": 3,
+          "lowest": "1-0",
+          "highest": "1-2",
+          "consumers": [
+            {
+              "name": "c1",
+              "count": 2
+            },
+            {
+              "name": "c2",
+              "count": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "op": "ack",
+      "group": "g",
+      "body": {
+        "ids": [
+          "1-0",
+          "9-9"
+        ]
+      },
+      "expect": {
+        "body": {
+          "acked": 1
+        }
+      }
+    },
+    {
+      "op": "read",
+      "group": "g",
+      "body": {
+        "consumer": "c1",
+        "pending": true
+      },
+      "expect": {
+        "rows": [
+          {
+            "_id": "1-1",
+            "n": 2
+          }
+        ],
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    },
+    {
+      "op": "pending",
+      "group": "g",
+      "body": {
+        "start": "-",
+        "end": "+",
+        "count": 10
+      },
+      "expect": {
+        "body": [
+          {
+            "_id": "1-1",
+            "consumer": "c1",
+            "deliveries": 1
+          },
+          {
+            "_id": "1-2",
+            "consumer": "c2",
+            "deliveries": 1
+          }
+        ],
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    },
+    {
+      "op": "groups",
+      "expect": {
+        "body": [
+          {
+            "name": "g",
+            "consumers": 2,
+            "pending": 2,
+            "last_delivered_id": "1-2",
+            "entries_read": 3,
+            "lag": 0
+          }
+        ]
+      }
+    }
+  ]
+}

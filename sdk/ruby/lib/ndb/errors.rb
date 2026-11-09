@@ -103,6 +103,14 @@ module Ndb
   # A bug or a disk error in the daemon; the message is in its log.
   class Internal < Error; end
 
+  # A stream route on a collection that is not a stream, a bad entry ID, or
+  # an append ID not greater than the last one.
+  class StreamError < Error; end
+
+  # The stream group does not exist, or a create names one that does.
+  class UnknownGroup < StreamError; end
+  class GroupExists < StreamError; end
+
   # The daemon error code -> the Ruby class.
   CODE_TO_ERROR = {
     "unauthorized" => Unauthorized,
@@ -158,7 +166,12 @@ module Ndb
     "invalid_position" => InvalidPosition,
     "closed" => Closed,
     "stopping" => Closed,
-    "internal" => Internal
+    "internal" => Internal,
+    "not_a_stream" => StreamError,
+    "invalid_stream_id" => StreamError,
+    "stream_id_too_small" => StreamError,
+    "unknown_group" => UnknownGroup,
+    "group_exists" => GroupExists
   }.freeze
 
   def self.error_for(code, message, status)

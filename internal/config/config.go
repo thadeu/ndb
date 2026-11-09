@@ -129,14 +129,53 @@ type collection struct {
 }
 
 func defaults() Config {
-	return Config{
-		DataDir:       "/var/lib/ndb",
+	cfg := Config{
+		DataDir:       SystemDataDir,
 		Listen:        Listen{Unix: "/run/ndb/ndb.sock", UnixMode: 0o660},
 		AllowImplicit: true,
 		PITR:          DefaultPITR,
 		IdleClose:     DefaultIdleClose,
 		Collections:   map[string]catalog.Def{},
 	}
+
+	if home, ok := userHomeFunc(); ok {
+		cfg.DataDir = filepath.Join(home, ".ndb", "data")
+		cfg.Listen.Unix = filepath.Join(home, ".ndb", "ndb.sock")
+		cfg.Listen.TCP = UserTCP
+	}
+
+	return cfg
+}
+
+// SystemDataDir is the data dir of a server install (systemd, Docker).
+const SystemDataDir = "/var/lib/ndb"
+
+// UserTCP is the TCP listener of a user install.
+const UserTCP = "127.0.0.1:7070"
+
+// userHomeFunc is userHome; tests replace it.
+var userHomeFunc = userHome
+
+// userHome gives the home dir when ndb runs as a user install: not root,
+// and no SystemDataDir on the machine. Then "ndb serve" with no flags works
+// with no root: ~/.ndb/data, ~/.ndb/ndb.sock and 127.0.0.1:7070. A server
+// install keeps the system paths, for the daemon and for the CLI clients.
+func userHome() (string, bool) {
+	if os.Geteuid() == 0 {
+		return "", false
+	}
+
+	if info, err := os.Stat(SystemDataDir); err == nil && info.IsDir() {
+		return "", false
+	}
+
+	home, err := os.UserHomeDir()
+
+	if err != nil || home == "" {
+		return "", false
+	}
+
+	return home, true
 }
 
 // Load reads path. A missing file gives the defaults: ndb.yml is optional.

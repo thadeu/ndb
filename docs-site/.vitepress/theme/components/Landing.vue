@@ -170,6 +170,23 @@ interface Step {
   code: string
 }
 
+const runSteps: Step[] = [
+  {
+    title: 'Start the daemon',
+    text: 'No flags, no root, no config file: data in ~/.ndb, HTTP on 127.0.0.1:7070.',
+    code: `ndb serve`,
+  },
+  {
+    title: 'Write and search',
+    text: 'The first write makes the collection. Ctrl+C stops the daemon.',
+    code: `curl localhost:7070/calls/_doc \\
+  -d '{"status":"missed"}'
+
+curl localhost:7070/calls/_search \\
+  -d '{"query":{"status":"missed"}}'`,
+  },
+]
+
 const steps: Step[] = [
   {
     title: 'Point ndb at your files',
@@ -355,12 +372,30 @@ const reasons: Reason[] = [
 
           <div class="hero-buttons">
             <a class="install-button large" :href="withBase('/http')">Read the API</a>
-            <a class="ghost-button" href="#best-of-both">Why ndb</a>
+            <a class="ghost-button" href="#try">Run it</a>
           </div>
         </div>
       </div>
 
       <HeroDemo class="hero-demo" />
+    </section>
+
+    <section id="try" class="quick">
+      <h2 class="quick-title">Run it in one minute</h2>
+
+      <p class="quick-lead">Start a daemon, write a document. Run <code>ndb help</code> for every command.</p>
+
+      <ol class="steps steps-two">
+        <li v-for="(step, index) in runSteps" :key="step.title" class="step">
+          <span class="step-number">{{ index + 1 }}</span>
+
+          <h3 class="step-title">{{ step.title }}</h3>
+
+          <p class="step-text">{{ step.text }}</p>
+
+          <pre class="step-code"><code>{{ step.code }}</code></pre>
+        </li>
+      </ol>
     </section>
 
     <section id="best-of-both" class="both">

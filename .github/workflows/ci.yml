@@ -18,6 +18,14 @@ jobs:
   go:
     runs-on: ubuntu-latest
 
+    # The streams parity test runs the cases of spec/streams against a real
+    # Redis too (TestStreamCasesOnRedis).
+    services:
+      redis:
+        image: redis:7.4
+        ports:
+          - 6379:6379
+
     steps:
       - uses: actions/checkout@v4
 
@@ -26,6 +34,8 @@ jobs:
           go-version-file: go.mod
 
       - name: Test daemon
+        env:
+          NDB_REDIS_ADDR: 127.0.0.1:6379
         run: go test -race -p 2 -parallel=2 -timeout 300s ./...
 
       - name: Test Go SDK

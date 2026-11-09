@@ -134,7 +134,20 @@ func required(method string, segs []string) (string, access) {
 		return coll, accessWrite
 	case "_bulk", "_update", "_expire", "_persist", "_update_by_query", "_delete_by_query", "_ack":
 		return coll, accessWrite
+	case "_streams":
+		return coll, streamAccess(method, segs)
 	}
 
 	return coll, accessRead
+}
+
+// streamAccess is the right of a /{s}/_streams route: a GET and pending
+// read; every other route changes the stream or its groups (a group read
+// moves the PEL), so it is a write.
+func streamAccess(method string, segs []string) access {
+	if method == "GET" || segs[len(segs)-1] == "pending" {
+		return accessRead
+	}
+
+	return accessWrite
 }

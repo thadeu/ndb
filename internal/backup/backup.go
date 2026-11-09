@@ -8,6 +8,7 @@
 //	{"_section":"cursor","collection":"users","consumer":"mailer","pos":"e1.3"}
 //	{"_section":"wal","collection":"users"}
 //	<WAL lines of the collection, byte for byte, each with its _crc>
+//	{"_section":"stream","collection":"jobs","data":"<base64>"}
 //	{"_section":"blob","ref":"sha256:...","type":"...","size":N,"data":"<base64>"}
 //	{"_section":"end","lines":N,"crc":"<crc32 hex>"}
 //
@@ -19,7 +20,8 @@
 // direct-mode collection keeps its data in the app's own files, so only its
 // catalog line is saved. Watch positions (e<tx>.<n>) name a tx, not a WAL
 // file, so they stay valid when the restore writes the WAL of a collection as
-// one file.
+// one file. The group store of a stream (streams.bolt: its groups and
+// their pending entries) is saved whole after the WAL of the stream.
 package backup
 
 import (
@@ -86,6 +88,10 @@ type Source struct {
 
 	// Blobs is where blob content is read; nil saves no blob.
 	Blobs *blob.Store
+
+	// Streams gives a consistent copy of the group store of a stream, or
+	// nil when it has none.
+	Streams func(name string) ([]byte, error)
 }
 
 // Snapshot is the state of one collection at tx Tx.
@@ -103,6 +109,10 @@ type Options struct {
 
 	// NoBlobs leaves the blob content out. Documents keep their references.
 	NoBlobs bool
+
+	// Streams gives a consistent copy of the group store of a stream while
+	// the daemon holds it open. Nil reads the file (a stopped daemon).
+	Streams func(name string) ([]byte, error)
 }
 
 type lineWriter struct {
@@ -178,6 +188,15 @@ type blobLine struct {
 	Data    string `json:"data"`
 }
 
+type streamLine struct {
+	Section    string `json:"_section"`
+	Collection string `json:"collection"`
+	Data       string `json:"data"`
+}
+
+// StreamFile is the group store of a stream in its collection dir.
+const StreamFile = "streams.bolt"
+
 type endLine struct {
 	Section string `json:"_section"`
 	Lines   int    `json:"lines"`
@@ -232,6 +251,10 @@ func Write(w io.Writer, src Source, opts Options) error {
 		if err := write(lw, src, d.Name, refs); err != nil {
 			return fmt.Errorf("collection %s: %w", d.Name, err)
 		}
+
+		if err := writeStream(lw, src, d); err != nil {
+			return fmt.Errorf("stream %s: %w", d.Name, err)
+		}
 	}
 
 	if src.Blobs != nil && !opts.NoBlobs {
@@ -241,6 +264,20 @@ func Write(w io.Writer, src Source, opts Options) error {
 	}
 
 	return finish(lw)
+}
+
+// writeStream saves the group store of a stream.
+func writeStream(lw *lineWriter, src Source, d catalog.Def) error {
+	if !d.Stream || src.Streams == nil {
+		return nil
+	}
+
+	data, err := src.Streams(d.Name)
+	if err != nil || data == nil {
+		return err
+	}
+
+	return lw.section(streamLine{Section: "stream", Collection: d.Name, Data: base64.StdEncoding.EncodeToString(data)})
 }
 
 // writeSnapshot saves the state at one tx, then an empty wal section: no
@@ -725,6 +762,8 @@ func (x *extractor) section(sec string, line []byte) error {
 		return x.walStart(line)
 	case "blob":
 		return x.blobLine(line)
+	case "stream":
+		return x.streamStore(line)
 	}
 
 	return fmt.Errorf("line %d: unknown section %q", x.lines, sec)
@@ -744,6 +783,32 @@ func (x *extractor) catalogLine(line []byte) error {
 	x.defs[c.Name] = c.Definition
 
 	return x.cat.Put(c.Definition)
+}
+
+// streamStore writes the group store of a stream into its dir.
+func (x *extractor) streamStore(line []byte) error {
+	var sl streamLine
+
+	if err := json.Unmarshal(line, &sl); err != nil {
+		return fmt.Errorf("line %d: %w", x.lines, err)
+	}
+
+	if !x.names[sl.Collection] {
+		return fmt.Errorf("line %d: stream section of %q is not in the header", x.lines, sl.Collection)
+	}
+
+	data, err := base64.StdEncoding.DecodeString(sl.Data)
+	if err != nil {
+		return fmt.Errorf("line %d: %w", x.lines, err)
+	}
+
+	dir := filepath.Join(x.stage, "collections", sl.Collection)
+
+	if err := disk.MkdirAll(dir); err != nil {
+		return err
+	}
+
+	return os.WriteFile(filepath.Join(dir, StreamFile), data, 0o644)
 }
 
 func (x *extractor) cursorLine(line []byte) error {

@@ -1,6 +1,6 @@
 # M20 — Streams (Redis Streams parity)
 
-Status: not started · Depends on: M09 (watch, cursors), M12 (retention) · Branch: `feature/redis-streams-compabitility`
+Status: E20.1, E20.2 and E20.3 done; E20.4 is M21 (the SDKs) · Depends on: M09 (watch, cursors), M12 (retention) · Branch: `feature/redis-streams-compabitility`
 
 ## Goal
 
@@ -37,6 +37,22 @@ What it does not try: the speed of RAM. A strict append costs one fsync.
 ## Epics
 
 ### E20.1 Contract (protocol)
+
+Done (2026-11-09): `docs/dev/http/streams.md` (routes, bodies, answers,
+IDs, errors, access), `docs/dev/streams.md` (use, cost model, Redis map),
+`spec/streams/` (12 multi-step cases and their format; outside
+`spec/cases`, whose runner reads one request per case). Decisions taken
+while writing it:
+
+- Entries get `_ts` (the `ms` of the ID, RFC 3339): it is the `time` of the
+  stream, so `retention`, zone maps and time filters work.
+- On a stream, `_id` sorts and compares as an ID (`ms`, then `seq`), not as
+  text (`1-9` before `1-10`): in `sort`, range filters and cursors.
+- `docs` appends many entries with one fsync.
+- A read gives 10 entries by default, 10 000 at most.
+- The 5 new error codes go into `docs/dev/http/errors.md` in E20.2, with the
+  SDK constants: the error code test of M22 fails on a code that an SDK
+  does not have.
 
 The wire contract, written as `docs/dev/streams.md` and
 `docs/dev/http/streams.md` before any code, with the spec cases that prove it
@@ -127,30 +143,61 @@ Routes (all under the collection; `_streams` reserves the prefix):
 `XRANGE`, `XREVRANGE`, `XLEN`, `XDEL` are the routes of every collection:
 `_search` (sort on `_id`, `after`), `_count`, `DELETE /{s}/_doc/{id}`.
 
-- [ ] Catalog: `stream: true`, implicit create on the first append; a
+- [x] Catalog: `stream: true`, implicit create on the first append; a
       `_streams` route on a normal collection is `400 not_a_stream`
-- [ ] ID generator per stream, under the writer (one place makes IDs)
-- [ ] Group store (bbolt), with its snapshot in backup and PITR
-- [ ] Wake of blocked reads on append (bounded waiters per stream)
-- [ ] Trim: approx by segments, exact by delete; `retention` still works
-- [ ] Access: append, trim, group changes, read, ack, claim are writes (a
+- [x] ID generator per stream, under the stream lock (`internal/streams`);
+      the `_id` on disk is padded (`%020d-%020d`) so the engine text order
+      is the ID order with no engine change; the HTTP routes give and take
+      `<ms>-<seq>` (`_search`, `_count`, `_doc/{id}` too)
+- [x] Group store: `streams.bolt` in the collection dir (one per stream)
+- [x] The group store in a backup: a `stream` section after the WAL of the
+      stream (a consistent copy from a read transaction); the restore
+      writes it back
+- PITR restores the entries, not the groups: the PEL has no history, so a
+  group at an instant cannot be rebuilt (decision 2026-11-09, documented)
+- [x] Wake of blocked reads on append (one channel per stream, closed by
+      each append)
+- [x] Trim: by delete of IDs in batches of 10 000; `approx` deletes the
+      same entries for now (allowed: it may keep more, never fewer)
+- [x] Trim `approx` in whole blocks of 1 024 entries (a row group): a
+      trim on every append deletes once per block. A drop of whole segments
+      would need an engine change; not needed for the `~` behavior
+- [x] Access: append, trim, group changes, read, ack, claim are writes (a
       read moves the PEL); info and pending are reads
-- [ ] Truncate and drop of a stream also clear its groups
-- [ ] `/_metrics`: per stream length, per group pending and lag
-- [ ] Console: the stream and its groups in the collection page (small)
+- [x] Truncate and drop of a stream also clear its groups (and a refused
+      truncate keeps them)
+- [x] `/_metrics`: `ndb_stream_entries_added_total`, per group
+      `ndb_stream_group_pending` and `ndb_stream_group_lag` (streams used
+      since the start)
+- Console: not in M20 (decision 2026-11-09). The dev tools of the console
+  already call every route; a streams page is a plan of its own, later.
 
 ### E20.3 Bench and e2e
 
-- [ ] `ndb bench -streams`: append rate (strict and relaxed), group read and
-      ack rate with 1, 3 and 10 workers, end to end latency (append to
-      delivery with `block_ms`), a `kill -9` with no acked append and no
-      PEL change lost, a worker that dies and a claim that takes its entries
-- [ ] Budgets in `internal/bench/checks.go` from the first measured run
-      (about 3x, as the others)
-- [ ] e2e: the same scenarios against Redis and against ndb with one test
-      driver (`test/streams/`), to prove the parity of the contract: same
-      order, same delivery counts, same pending after a claim
-- [ ] Fuzz of the ID parser and of the trim
+Done (2026-11-09):
+
+- [x] `ndb bench -streams` (in `make bench` too): appends from 1 and 10
+      clients (strict, relaxed) and in batches of 100, group read + ack
+      with 1, 3 and 10 workers, append to delivery with `block_ms`, a claim
+      of a dead worker, a `kill -9` while apps append and a worker acks
+- [x] 13 checks in `internal/bench/checks.go`: no failed append, no
+      undelivered or unclaimed entry, no acked append, delivered entry or
+      ack lost by a `kill -9`; append p99 (1 client 20 ms, 10 clients
+      60 ms), latency p99 60 ms, 10 workers at least 1 500 entries/s
+      (about 3x of the first run on a Mac: 4.5 ms, 19 ms, 17-27 ms,
+      5 300 entries/s)
+- [x] Parity: `TestStreamCasesOnRedis` runs the cases of `spec/streams`
+      against a real Redis 7.4 (a service in CI). It found one difference,
+      fixed: a trim does not change `max_deleted_id` in Redis
+- [x] Fuzz of the ID parser
+- [x] From the first run: appends wait in a queue while an insert runs and
+      go in one insert (group commit: 10 clients 329 to 860 entries/s), and
+      an ack runs out of the stream lock in a bbolt batch (10 workers
+      4 000 to 5 300 entries/s)
+
+Known limit: the reads of one group take the stream lock and one fsync of
+the group store each, so 10 workers read about as fast as 3 (the fsync of
+macOS is slow; Linux is faster).
 
 ### E20.4 SDK specification → M21
 
@@ -177,12 +224,10 @@ is done.
 
 ## Open questions
 
-1. Trim of entries that are still pending: keep the PEL references (Redis
-   up to 8.0) or drop them (`DELREF` of 8.2)? Default and option.
-2. Group store: in `cursors.bolt` or one bbolt file per stream (a drop
-   removes the file; no shared lock between streams)?
-3. Durability of a group read: one fsync per read batch (strict), or
-   `relaxed` per stream, as for the writes?
+1. ~~Trim of pending entries~~: keep the PEL references (Redis up to 8.0).
+2. ~~Group store~~: one bbolt file per stream.
+3. ~~Durability of a group read~~: `strict` by default (one fsync per read
+   batch), `relaxed` per stream as an option.
 4. The app that will use it first: language, the Redis commands it uses,
    messages per second and number of workers (sets the priority inside
    E20.2 and the budgets of E20.3).

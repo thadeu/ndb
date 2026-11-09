@@ -12,11 +12,14 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"golang.org/x/term"
 
 	"github.com/thadeu/ndb/internal/config"
 	"github.com/thadeu/ndb/internal/engine"
@@ -38,17 +41,26 @@ func main() {
 
 // run reads the flags and ndb.yml, then serves until SIGTERM or SIGINT.
 func run(args []string) error {
+	// "ndb" alone in a terminal is a person who wants the help. Without a
+	// terminal (systemd, Docker, an old unit with no "serve") it still runs
+	// the daemon.
+	if len(args) == 0 && term.IsTerminal(int(os.Stdout.Fd())) {
+		return runHelp(nil)
+	}
+
 	if len(args) > 0 {
 		if cmd, ok := subcommands[args[0]]; ok {
 			return cmd(args[1:])
 		}
 
-		if args[0] == "serve" {
+		if args[0] == "serve" || args[0] == "s" {
 			args = args[1:]
 		}
 	}
 
 	fl := flag.NewFlagSet("ndb", flag.ContinueOnError)
+
+	fl.Usage = func() { fmt.Fprint(fl.Output(), helpText) }
 
 	cfgPath := fl.String("config", "", "config file (default: NDB_CONFIG, then ./ndb.yml, then /etc/ndb/ndb.yml; absent = defaults)")
 	dataDir := fl.String("data-dir", "", "data dir (overrides ndb.yml)")
@@ -60,6 +72,10 @@ func run(args []string) error {
 	tokenFile := fl.String("token-file", "", "file with the bearer token the TCP listener requires (unix socket stays open)")
 
 	if err := fl.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+
 		return err
 	}
 
@@ -235,6 +251,11 @@ func listen(l config.Listen) ([]net.Listener, error) {
 
 	if l.Unix != "" {
 		if err := checkSocketPath(l.Unix); err != nil {
+			return nil, err
+		}
+
+		// The dir of the socket may not exist yet: ~/.ndb on a first run.
+		if err := os.MkdirAll(filepath.Dir(l.Unix), 0o750); err != nil {
 			return nil, err
 		}
 
