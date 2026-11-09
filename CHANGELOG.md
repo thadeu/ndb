@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- **Aggregations and scans are 2 to 3 times faster** (2 million documents in one partition): `events per type` 422 ms → 123 ms, `talk time per customer` 591 ms → 220 ms, `calls per customer` 495 ms → 179 ms, `long calls` (a scan) 412 ms → 281 ms, a `$lookup` dashboard 500 ms → 175 ms. A read of a row group for an aggregation decodes no `_id` (unless `$first` or `$last` needs the order), builds cells only for the rows a filter or an index kept, and reads `_rest` only when a kept row needs it; the strings of a column chunk are shared (a status or a type is one string per value, not per row); `$group` then `$sort` and `$limit` keeps only the first groups instead of sorting them all; reads use every core, and a collection with fewer segments than cores splits its segments into units of row groups. `make bench` budgets: slowest aggregation 160 ms, lookup 150 ms.
+
 - **Memtable reads decode only the fields the query uses** (the recent documents, not sealed yet): each document skips the fields that no filter, sort, `per` or `$group` reads. On 2 million documents over six monthly partitions, with 22.8k unsealed documents: `count of all` 272 ms → 40 ms, the dashboards 0.6–2.2 s → 0.4–0.6 s, a `has_many` lookup 1.2 s → 0.5 s, 10 clients 1 → 3 reads/s.
 - **A count whose only condition is a time range counts the row groups wholly inside it without reading them** (from their time zone map and live bits); only the groups at the two edges are read. Up to the previous month over six monthly partitions: 500 ms → 40 ms (5.6 ms with the list of the five past months in the path), one month 165 ms → 32 ms.
 
