@@ -18,6 +18,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `ndb bench -concurrent`: apps that share the daemon, 1, 3 and 10 clients reading at the same time (the queries, aggregations and lookups, in a random order), with reads per second, p50, p99, errors and the RSS peak. On the benchmark machine (4 CPU): 24, 53 and 59 reads/s, p99 119, 157 and 550 ms, RSS peak 170, 203 and 224 MB, no error. Budgets: no failed read, p99 with 3 clients 500 ms, RSS peak with 10 clients 450 MB.
 - With a bigger load than the default (`-calls`), the time budgets of the reads are shown but not judged; memory, lost writes and errors still are.
 - `ndb bench -data <dir>` keeps the loaded calls and reads them again on the next runs, without loading; `make bench-read` reads 2 million documents kept in `.bench/2m` (8 minutes the first time, about 3 after).
+- `ndb bench -direct`: direct mode with 500k cdrs and their users in NDJSON files, read at start and appended live (64 KiB writes that cut lines, a new file every 100k lines), with every line checked (counts and 1000 ids), then the reads of the cdrs and their users (`belongs_to`, `has_many`).
 - `ndb bench -partition month`: the calls over six monthly partitions, with reads up to the previous month (also by the `events-*` alias) and of one month; `make bench-read-month`.
 
 ## [1.12.1] - 2026-11-08

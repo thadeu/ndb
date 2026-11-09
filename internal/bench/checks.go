@@ -45,6 +45,8 @@ var gates = []gate{
 	{metric: "concurrent.10.errors", what: "reads that failed, 10 clients", max: 0},
 	{metric: "concurrent.3.p99", what: "read p99 with 3 clients", max: 500, unit: "ms", sized: true},
 	{metric: "concurrent.10.rss", what: "RSS peak with 10 clients", max: 450, unit: "MB"},
+	{metric: "direct.cold_missing", what: "lines of the direct files not read at start", max: 0},
+	{metric: "direct.live_missing", what: "lines appended live that are not documents", max: 0},
 	{metric: "wake.loaded_asleep", what: "the loaded partition stayed open after idle_close", max: 0},
 	{metric: "wake.loaded_ms", what: "first call on the loaded partition after it slept", max: 50, unit: "ms", sized: true},
 	{metric: "idle.asleep", what: "idle collections still open after idle_close", max: 0},

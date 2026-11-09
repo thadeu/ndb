@@ -64,6 +64,12 @@ type Options struct {
 	// Concurrent: clients that read at the same time (1, 3 and 10).
 	Concurrent bool
 
+	// Direct: users and cdrs in NDJSON files that ndb tails (write:
+	// direct), read at start and appended live, then read. DirectRows is
+	// the number of cdrs (users are a tenth).
+	Direct     bool
+	DirectRows int
+
 	// Partition is the partition_by of the loaded calls: day (default) puts
 	// them all in yesterday; month spreads them from five months ago to now,
 	// in six monthly partitions.
@@ -90,7 +96,7 @@ type Options struct {
 }
 
 func (o Options) all() bool {
-	return !o.Stress && !o.Query && !o.Aggs && !o.Lookup && !o.Idle && !o.Concurrent
+	return !o.Stress && !o.Query && !o.Aggs && !o.Lookup && !o.Idle && !o.Concurrent && !o.Direct
 }
 
 // reads tells whether a part needs the loaded calls.
@@ -141,6 +147,10 @@ func (o Options) plan(reuse bool) []planned {
 		steps = append(steps, planned{"wake: loaded partition", loadedIdle + 3*time.Second})
 	}
 
+	if o.Direct {
+		steps = append(steps, directPlan(o.DirectRows)...)
+	}
+
 	if o.Idle || o.all() {
 		steps = append(steps, planned{"idle: create", sec(float64(o.Collections)/40 + 2)}, planned{"idle: sleep", sec(4)},
 			planned{"idle: at rest", sec(10)}, planned{"idle: wake", sec(0.2)}, planned{"idle: crash", sec(5)})
@@ -151,7 +161,7 @@ func (o Options) plan(reuse bool) []planned {
 
 // Defaults run in about two and a half minutes.
 func Defaults() Options {
-	return Options{Live: 30 * time.Second, Rate: 400, Calls: 30_000, Collections: 300}
+	return Options{Live: 30 * time.Second, Rate: 400, Calls: 30_000, Collections: 300, DirectRows: 500_000}
 }
 
 var (
@@ -287,6 +297,11 @@ func Run(o Options, w io.Writer) (err error) {
 		report = append(report, wakeLoaded(d)...)
 	}
 
+	if o.Direct {
+		report = append(report, "| **direct mode** (NDJSON files the app writes) | |")
+		report = append(report, direct(dir, o.DirectRows)...)
+	}
+
 	if o.Idle || o.all() {
 		report = append(report, "| **idle collections** | |")
 		report = append(report, idle(dir, o.Collections)...)
@@ -312,7 +327,12 @@ func Run(o Options, w io.Writer) (err error) {
 
 // daemon is the ndb process under test, with its RSS peak per phase.
 type daemon struct {
-	dir  string
+	dir string
+
+	// ready is how long start waits for /_health (default 5 s): a daemon
+	// that reads big direct files answers only when it has read them.
+	ready time.Duration
+
 	cmd  *exec.Cmd
 	http *http.Client
 
@@ -344,12 +364,12 @@ func (d *daemon) start() {
 		MaxIdleConnsPerHost: 512,
 	}}
 
-	for range 200 {
+	wait := cmp.Or(d.ready, 5*time.Second)
+
+	for start := time.Now(); time.Since(start) < wait; time.Sleep(25 * time.Millisecond) {
 		if code, _, _ := d.call("GET", "/_health", nil); code == 200 {
 			return
 		}
-
-		time.Sleep(25 * time.Millisecond)
 	}
 
 	check(errors.New("the daemon did not start"))

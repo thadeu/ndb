@@ -28,6 +28,8 @@ func runBench(args []string) error {
 	fl.BoolVar(&o.Query, "query", false, "measure the queries (loads the calls first)")
 	fl.BoolVar(&o.Aggs, "aggs", false, "measure the aggregations (loads the calls first)")
 	fl.BoolVar(&o.Lookup, "lookup", false, "measure the lookups: belongs_to, has_many, has_one, 2 levels, $lookup (loads the calls first)")
+	fl.BoolVar(&o.Direct, "direct", false, "measure direct mode: users and cdrs in NDJSON files, read at start and appended live, then read")
+	fl.IntVar(&o.DirectRows, "direct-rows", o.DirectRows, "cdrs of the direct part (users are a tenth)")
 	fl.StringVar(&o.Partition, "partition", "day", "partition_by of the loaded calls: day (all in yesterday) or month (six months up to now)")
 	fl.StringVar(&o.Data, "data", "", "keep the loaded calls in this dir and read them again on the next runs (read parts only)")
 	fl.BoolVar(&o.Concurrent, "concurrent", false, "measure reads from 1, 3 and 10 clients at the same time (loads the calls first)")
