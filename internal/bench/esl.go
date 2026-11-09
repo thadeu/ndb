@@ -64,6 +64,11 @@ type Options struct {
 	// Concurrent: clients that read at the same time (1, 3 and 10).
 	Concurrent bool
 
+	// Partition is the partition_by of the loaded calls: day (default) puts
+	// them all in yesterday; month spreads them from five months ago to now,
+	// in six monthly partitions.
+	Partition string
+
 	// Data keeps the loaded calls in this dir for the next runs (a
 	// dataset): the first run loads them, the next ones read them. Only the
 	// read parts go with it.
@@ -188,8 +193,8 @@ func Run(o Options, w io.Writer) (err error) {
 		defer os.RemoveAll(dir)
 	}
 
-	ds := openDataset(o.Data, o.Calls)
-	benchDay = ds.day()
+	ds := openDataset(o.Data, o.Calls, cmp.Or(o.Partition, "day"))
+	lay = ds.layout()
 
 	mainDir := dir
 
@@ -504,10 +509,9 @@ func load(d *daemon, retention string) []string {
 	var loaded atomic.Int64
 
 	prog.step("bulk load", func() string { return fmt.Sprintf("%d of %d docs", loaded.Load(), *calls*7) })
-	d.must("PUT", "/events", `{"time":"ts","indexes":["call_id","customer","type"],"partition_by":"day","retention":"`+retention+`","max_line_size":16777216}`)
+	d.must("PUT", "/events", `{"time":"ts","indexes":["call_id","customer","type"],"partition_by":"`+lay.by+`","retention":"`+retention+`","max_line_size":16777216}`)
 
 	peak := d.phase()
-	day := day()
 	start := time.Now()
 
 	const writers = 4
@@ -531,7 +535,7 @@ func load(d *daemon, retention string) []string {
 			}
 
 			for n := w; n < *calls; n += writers {
-				at := day.Add(time.Duration(float64(n) / float64(*calls) * float64(24*time.Hour)))
+				at := lay.start.Add(time.Duration(float64(n) / float64(*calls) * float64(lay.span)))
 				batch = append(batch, callDocs(r, at, n)...)
 
 				if len(batch) >= 1400 {
@@ -552,7 +556,7 @@ func load(d *daemon, retention string) []string {
 	prog.end(fmt.Sprintf("%.0f docs/s", float64(*calls*7)/el))
 	prog.step("settle", nil)
 
-	settle := d.settle("/events-" + day.Format("2006-01-02"))
+	settle := d.settle(lay.part(lay.start.Add(lay.span - time.Nanosecond)))
 	rss := peak()
 
 	prog.end("seals and compactions done")
@@ -599,15 +603,53 @@ func (d *daemon) settle(coll string) time.Duration {
 // probe is one read of the queries or aggregations parts.
 type probe struct{ name, method, path, body string }
 
-// benchDay is the daily partition the load fills: yesterday in UTC, or the
-// day of a dataset loaded before (-data).
-var benchDay = yesterday()
+// layout is how the load spreads the calls in time and in partitions.
+type layout struct {
+	by    string        // partition_by: day or month
+	start time.Time     // the first call
+	span  time.Duration // the calls spread over [start, start+span)
+	day   time.Time     // the day the probes of one hour read
+}
+
+// lay is the layout of the run.
+var lay = dayLayout(yesterday())
 
 func yesterday() time.Time {
 	return time.Now().UTC().Truncate(24 * time.Hour).Add(-24 * time.Hour)
 }
 
-func day() time.Time { return benchDay }
+// dayLayout puts every call in one day, one partition.
+func dayLayout(day time.Time) layout {
+	return layout{by: "day", start: day, span: 24 * time.Hour, day: day}
+}
+
+// monthLayout spreads the calls from the first day of five months before
+// end to end: six monthly partitions, the last one partial. The probes of
+// one hour read the 11th of the month before end's.
+func monthLayout(start, end time.Time) layout {
+	return layout{by: "month", start: start, span: end.Sub(start), day: monthOf(end).AddDate(0, -1, 10)}
+}
+
+func monthOf(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
+}
+
+// part is the path of the partition that holds t.
+func (l layout) part(t time.Time) string {
+	if l.by == "month" {
+		return "/events-" + t.UTC().Format("2006-01")
+	}
+
+	return "/events-" + t.UTC().Format(time.DateOnly)
+}
+
+// current is the start of the last month of a month layout: "up to the
+// previous month" is before it.
+func (l layout) current() time.Time {
+	return monthOf(l.start.Add(l.span))
+}
+
+func day() time.Time { return lay.day }
 
 // loadSeconds is the estimate of a load of calls: it slows down as the
 // partition grows (10k docs/s at 30k calls, 4.4k at 286k).
@@ -619,7 +661,7 @@ func loadSeconds(calls int) float64 {
 
 // queries are the reads of the ESL: lookups, pages and counts.
 func queries(d *daemon) []probe {
-	part := "/events-" + day().Format("2006-01-02")
+	part := lay.part(day())
 
 	var row struct {
 		ID       string `json:"_id"`
@@ -631,7 +673,7 @@ func queries(d *daemon) []probe {
 
 	hour := fmt.Sprintf(`{"$gte":%q,"$lt":%q}`, day().Add(10*time.Hour).Format(time.RFC3339), day().Add(11*time.Hour).Format(time.RFC3339))
 
-	return []probe{
+	return append([]probe{
 		{"get by id", "GET", part + "/_doc/" + row.ID, ""},
 		{"get by id, missing", "GET", part + "/_doc/none", ""},
 		{"events of a call (indexed call_id)", "POST", "/events/_search", fmt.Sprintf(`{"query":{"call_id":%q},"sort":{"seq":1}}`, row.CallID)},
@@ -643,6 +685,26 @@ func queries(d *daemon) []probe {
 		{"count of the finishcalls", "POST", "/events/_count", `{"query":{"type":"finishcall"}}`},
 		{"count of one hour", "POST", "/events/_count", fmt.Sprintf(`{"query":{"ts":%s}}`, hour)},
 		{"count of all", "POST", "/events/_count", `{}`},
+	}, monthQueries()...)
+}
+
+// monthQueries are the reads of a month layout over a time window: up to
+// the previous month (by the collection and by the events-* alias), and one
+// month.
+func monthQueries() []probe {
+	if lay.by != "month" {
+		return nil
+	}
+
+	cur := lay.current()
+	before := fmt.Sprintf(`{"$lt":%q}`, cur.Format(time.RFC3339))
+	month := fmt.Sprintf(`{"$gte":%q,"$lt":%q}`, cur.AddDate(0, -1, 0).Format(time.RFC3339), cur.Format(time.RFC3339))
+
+	return []probe{
+		{"count up to the previous month", "POST", "/events/_count", `{"query":{"ts":` + before + `}}`},
+		{"count up to the previous month (events-*)", "POST", "/events-*/_count", `{"query":{"ts":` + before + `}}`},
+		{"last 20 of a customer, up to the previous month", "POST", "/events/_search", `{"query":{"customer":"cust-042","ts":` + before + `},"sort":{"ts":-1},"limit":20}`},
+		{"count of the previous month", "POST", "/events/_count", `{"query":{"ts":` + month + `}}`},
 	}
 }
 
@@ -654,7 +716,7 @@ const loadedIdle = 20 * time.Second
 // loadedIdle), then times the first call on it: the cost of opening a big
 // collection again.
 func wakeLoaded(d *daemon) []string {
-	part := "/events-" + day().Format("2006-01-02")
+	part := lay.part(day())
 
 	var row struct {
 		ID string `json:"_id"`
@@ -756,7 +818,7 @@ func aggregations() []probe {
 		return probe{name, "POST", "/events/_aggregate", `{"pipeline":` + pipeline + `}`}
 	}
 
-	return []probe{
+	probes := []probe{
 		agg("calls per customer, top 5", `[{"$match":{"type":"finishcall"}},{"$group":{"_id":"$customer","n":{"$count":{}}}},{"$sort":{"n":-1}},{"$limit":5}]`),
 		agg("events per type", `[{"$group":{"_id":"$type","n":{"$count":{}}}}]`),
 		agg("avg duration per hour", `[{"$match":{"type":"finishcall"}},{"$group":{"_id":{"$dateTrunc":{"date":"$ts","unit":"hour"}},"avg":{"$avg":"$duration"}}}]`),
@@ -764,6 +826,17 @@ func aggregations() []probe {
 		agg("hangup causes", `[{"$match":{"type":"finishcall"}},{"$group":{"_id":"$hangup_cause","n":{"$count":{}}}}]`),
 		agg("one customer per hour", `[{"$match":{"customer":"cust-042"}},{"$group":{"_id":{"$dateTrunc":{"date":"$ts","unit":"hour"}},"n":{"$count":{}}}}]`),
 	}
+
+	if lay.by != "month" {
+		return probes
+	}
+
+	before := fmt.Sprintf(`[{"$match":{"ts":{"$lt":%q}}},{"$group":{"_id":"$type","n":{"$count":{}}}}]`, lay.current().Format(time.RFC3339))
+
+	return append(probes,
+		agg("events per type, up to the previous month", before),
+		probe{"events per type, up to the previous month (events-*)", "POST", "/events-*/_aggregate", `{"pipeline":` + before + `}`},
+	)
 }
 
 // timed runs each probe 5 times and gives one line per probe: the median,

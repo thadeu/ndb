@@ -1,4 +1,4 @@
-.PHONY: test race lint fuzz-smoke bench bench-read bench-go build dist up docs docs-build tag tg
+.PHONY: test race lint fuzz-smoke bench bench-read bench-read-month bench-go build dist up docs docs-build tag tg
 
 test:
 	go test ./...
@@ -30,6 +30,12 @@ bench: build
 # first run loads them (about 8 min), the next ones only read (about 3 min).
 bench-read: build
 	./bin/ndb bench -data .bench/2m -calls 285715
+
+# The same 2 million documents over six monthly partitions, kept in
+# .bench/2m-month: reads of all of them, up to the previous month (also by
+# the events-* alias) and of one month.
+bench-read-month: build
+	./bin/ndb bench -data .bench/2m-month -calls 285715 -partition month
 
 # The Go micro-benchmarks of the packages.
 bench-go:

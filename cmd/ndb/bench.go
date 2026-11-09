@@ -28,6 +28,7 @@ func runBench(args []string) error {
 	fl.BoolVar(&o.Query, "query", false, "measure the queries (loads the calls first)")
 	fl.BoolVar(&o.Aggs, "aggs", false, "measure the aggregations (loads the calls first)")
 	fl.BoolVar(&o.Lookup, "lookup", false, "measure the lookups: belongs_to, has_many, has_one, 2 levels, $lookup (loads the calls first)")
+	fl.StringVar(&o.Partition, "partition", "day", "partition_by of the loaded calls: day (all in yesterday) or month (six months up to now)")
 	fl.StringVar(&o.Data, "data", "", "keep the loaded calls in this dir and read them again on the next runs (read parts only)")
 	fl.BoolVar(&o.Concurrent, "concurrent", false, "measure reads from 1, 3 and 10 clients at the same time (loads the calls first)")
 	fl.BoolVar(&o.Idle, "idle", false, "measure idle collections: disk, CPU, RSS and files per collection at rest")

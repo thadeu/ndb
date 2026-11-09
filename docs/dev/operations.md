@@ -193,7 +193,7 @@ A bigger load (`-calls 285715` is 2 million documents) reads more, so the time b
 
 The budgets (in `internal/bench/checks.go`) are about 3 times what the benchmark machine measures, so a slower machine passes and a regression does not: lost writes, a slower write p99, load, query or aggregation, more memory, or more disk, CPU or files per idle collection.
 
-`-data <dir>` keeps the loaded calls for the next runs: the first run loads them and writes `bench.json` (the calls and their day), the next ones read them again without loading. It goes with the read parts only (`-query`, `-aggs`, `-lookup`, `-concurrent`, all of them by default), the kept partition has a ten-year retention and PITR is off. `make bench-read` reads 2 million documents kept in `.bench/2m`: about 8 minutes the first time, then about 3.
+`-data <dir>` keeps the loaded calls for the next runs: the first run loads them and writes `bench.json` (the calls and their day), the next ones read them again without loading. It goes with the read parts only (`-query`, `-aggs`, `-lookup`, `-concurrent`, all of them by default), the kept partition has a ten-year retention and PITR is off. `make bench-read` reads 2 million documents kept in `.bench/2m`: about 8 minutes the first time, then about 3. `-partition month` spreads the calls over six monthly partitions (five months ago up to now) and adds reads of a time window: up to the previous month, by the collection and by the `events-*` alias, and one month; `make bench-read-month` keeps them in `.bench/2m-month`.
 
 From a checkout, `make bench` runs it on `bin/ndb`. Run it for any change to storage, the WAL, memory, or the read and write paths.
 
