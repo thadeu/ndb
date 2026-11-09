@@ -1,6 +1,7 @@
 /ndb
 /ndbgen
 /bin/
+/.bench/
 *.test
 *.out
 /testdata/fuzz/

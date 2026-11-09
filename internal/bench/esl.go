@@ -64,6 +64,11 @@ type Options struct {
 	// Concurrent: clients that read at the same time (1, 3 and 10).
 	Concurrent bool
 
+	// Data keeps the loaded calls in this dir for the next runs (a
+	// dataset): the first run loads them, the next ones read them. Only the
+	// read parts go with it.
+	Data string
+
 	// Collections is how many collections the idle part creates.
 	Collections int
 
@@ -97,7 +102,7 @@ func settings(yml []string) string {
 }
 
 // plan is the steps of the run with a first estimate of each, for the ETA.
-func (o Options) plan() []planned {
+func (o Options) plan(reuse bool) []planned {
 	sec := func(s float64) time.Duration { return time.Duration(s * float64(time.Second)) }
 	steps := []planned{{"daemon start", sec(0.5)}}
 
@@ -105,8 +110,8 @@ func (o Options) plan() []planned {
 		steps = append(steps, planned{"live writes", o.Live}, planned{"crash", sec(17)})
 	}
 
-	if o.reads() {
-		steps = append(steps, planned{"bulk load", sec(float64(o.Calls) / 1300)}, planned{"settle", sec(12)})
+	if o.reads() && !reuse {
+		steps = append(steps, planned{"bulk load", sec(loadSeconds(o.Calls))}, planned{"settle", sec(12)})
 	}
 
 	if o.Query || o.all() {
@@ -127,7 +132,7 @@ func (o Options) plan() []planned {
 		}
 	}
 
-	if o.all() {
+	if o.all() || o.Data != "" {
 		steps = append(steps, planned{"wake: loaded partition", loadedIdle + 3*time.Second})
 	}
 
@@ -183,25 +188,38 @@ func Run(o Options, w io.Writer) (err error) {
 		defer os.RemoveAll(dir)
 	}
 
+	ds := openDataset(o.Data, o.Calls)
+	benchDay = ds.day()
+
+	mainDir := dir
+
+	if o.Data != "" {
+		mainDir = o.Data
+		check(os.MkdirAll(mainDir, 0o755))
+	}
+
 	conf := "idle_close: " + loadedIdle.String() + "\n"
 
-	if o.PITR != "" {
+	switch {
+	case o.PITR != "":
 		conf += "pitr: " + o.PITR + "\n"
+	case o.Data != "":
+		conf += "pitr: off\n"
 	}
 
 	for _, line := range o.YML {
 		conf += line + "\n"
 	}
 
-	check(os.WriteFile(filepath.Join(dir, "ndb.yml"), []byte(conf), 0o644))
+	check(os.WriteFile(filepath.Join(mainDir, "ndb.yml"), []byte(conf), 0o644))
 
-	prog = newProgress(cmp.Or[io.Writer](o.Log, io.Discard), o.plan())
+	prog = newProgress(cmp.Or[io.Writer](o.Log, io.Discard), o.plan(ds.found))
 
 	defer prog.end("")
 
 	prog.step("daemon start", nil)
 
-	d := &daemon{dir: dir}
+	d := &daemon{dir: mainDir}
 	d.start()
 
 	prog.end("")
@@ -221,7 +239,7 @@ func Run(o Options, w io.Writer) (err error) {
 	}
 
 	if o.reads() {
-		loaded := load(d)
+		loaded := ds.load(d)
 
 		if o.Stress || o.all() {
 			report = append(report, loaded...)
@@ -260,7 +278,7 @@ func Run(o Options, w io.Writer) (err error) {
 		report = append(report, concurrent(d, mix)...)
 	}
 
-	if o.all() {
+	if o.all() || o.Data != "" {
 		report = append(report, wakeLoaded(d)...)
 	}
 
@@ -482,11 +500,11 @@ func crash(d *daemon) []string {
 }
 
 // load: bulk load of calls into a daily partition.
-func load(d *daemon) []string {
+func load(d *daemon, retention string) []string {
 	var loaded atomic.Int64
 
 	prog.step("bulk load", func() string { return fmt.Sprintf("%d of %d docs", loaded.Load(), *calls*7) })
-	d.must("PUT", "/events", `{"time":"ts","indexes":["call_id","customer","type"],"partition_by":"day","retention":"7d","max_line_size":16777216}`)
+	d.must("PUT", "/events", `{"time":"ts","indexes":["call_id","customer","type"],"partition_by":"day","retention":"`+retention+`","max_line_size":16777216}`)
 
 	peak := d.phase()
 	day := day()
@@ -581,9 +599,22 @@ func (d *daemon) settle(coll string) time.Duration {
 // probe is one read of the queries or aggregations parts.
 type probe struct{ name, method, path, body string }
 
-// day is the daily partition the load fills: yesterday, in UTC.
-func day() time.Time {
+// benchDay is the daily partition the load fills: yesterday in UTC, or the
+// day of a dataset loaded before (-data).
+var benchDay = yesterday()
+
+func yesterday() time.Time {
 	return time.Now().UTC().Truncate(24 * time.Hour).Add(-24 * time.Hour)
+}
+
+func day() time.Time { return benchDay }
+
+// loadSeconds is the estimate of a load of calls: it slows down as the
+// partition grows (10k docs/s at 30k calls, 4.4k at 286k).
+func loadSeconds(calls int) float64 {
+	docs := float64(calls * 7)
+
+	return docs / (10_000 / (1 + docs/1_600_000))
 }
 
 // queries are the reads of the ESL: lookups, pages and counts.
@@ -674,6 +705,24 @@ func wakeLoaded(d *daemon) []string {
 func lookups(d *daemon) []probe {
 	d.must("PUT", "/customers", `{"indexes":["plan"]}`)
 
+	var have struct {
+		Count int `json:"count"`
+	}
+
+	check(json.Unmarshal(d.must("POST", "/customers/_count", "{}"), &have))
+
+	if have.Count < 400 {
+		addCustomers(d)
+	}
+
+	finishcalls := `"query":{"customer":"cust-042","type":"finishcall"},"sort":{"ts":-1},"limit":20`
+	belongs := `"customer":{"belongs_to":"customers","fk":"customer"}`
+
+	return lookupProbes(finishcalls, belongs)
+}
+
+// addCustomers writes the 400 customers that the calls point to.
+func addCustomers(d *daemon) {
 	var b strings.Builder
 
 	b.WriteString(`{"docs":[`)
@@ -688,10 +737,9 @@ func lookups(d *daemon) []probe {
 
 	b.WriteString(`]}`)
 	d.must("POST", "/customers/_bulk", b.String())
+}
 
-	finishcalls := `"query":{"customer":"cust-042","type":"finishcall"},"sort":{"ts":-1},"limit":20`
-	belongs := `"customer":{"belongs_to":"customers","fk":"customer"}`
-
+func lookupProbes(finishcalls, belongs string) []probe {
 	return []probe{
 		{"20 finishcalls with their customer (belongs_to)", "POST", "/events/_search", `{` + finishcalls + `,"lookup":{` + belongs + `}}`},
 		{"100 finishcalls of any customer, belongs_to", "POST", "/events/_search", `{"query":{"type":"finishcall"},"limit":100,"lookup":{` + belongs + `}}`},

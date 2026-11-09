@@ -1,4 +1,4 @@
-.PHONY: test race lint fuzz-smoke bench bench-go build dist up docs docs-build tag tg
+.PHONY: test race lint fuzz-smoke bench bench-read bench-go build dist up docs docs-build tag tg
 
 test:
 	go test ./...
@@ -25,6 +25,11 @@ fuzz-smoke:
 # before and after a change of impact; it is not part of CI.
 bench: build
 	./bin/ndb bench
+
+# The reads on 2 million documents (286k calls), kept in .bench/2m: the
+# first run loads them (about 8 min), the next ones only read (about 3 min).
+bench-read: build
+	./bin/ndb bench -data .bench/2m -calls 285715
 
 # The Go micro-benchmarks of the packages.
 bench-go:
