@@ -1,4 +1,4 @@
-.PHONY: test race lint fuzz-smoke bench bench-read bench-read-month bench-go build dist up docs docs-build tag tg
+.PHONY: test race lint fuzz-smoke bench bench-read bench-read-month bench-go build dist up ui-dev docs docs-build tag tg
 
 test:
 	go test ./...
@@ -69,6 +69,12 @@ DEV_TCP ?= 127.0.0.1:7070
 up: build
 	mkdir -p $(DEV_DIR)/data
 	./bin/ndb -data-dir $(DEV_DIR)/data -unix $(DEV_DIR)/ndb.sock -tcp $(DEV_TCP)
+
+# Console (ndb-ui) with hot reload at http://127.0.0.1:4321. Run `make up`
+# in another terminal for a local daemon. Set NDB_URL to fix one connection,
+# for example NDB_URL=unix://$(CURDIR)/.dev/ndb.sock.
+ui-dev:
+	cd console && mise exec -- bun install --frozen-lockfile && mise exec -- bun run dev
 
 # Docs site with hot reload at http://localhost:5173.
 docs:
