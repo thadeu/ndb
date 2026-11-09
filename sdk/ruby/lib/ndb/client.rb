@@ -14,7 +14,7 @@ module Ndb
   # reads the answers; it has no query semantics. Ndb::Collection is the
   # friendlier layer on top of it.
   class Client
-    DEFAULT_SOCKET = "/var/run/ndb/ndb.sock"
+    DEFAULT_SOCKET = "/run/ndb/ndb.sock"
 
     attr_reader :pool, :endpoint
 

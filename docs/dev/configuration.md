@@ -93,7 +93,6 @@ Every collection has `_id`, the primary key. It is not configurable.
 | `unique` | fields whose value can belong to one live document only (a natural key such as `email` or `call_id`). Dot paths allowed. A duplicate is `409 unique_violation`. |
 | `time` | time field. Used for zone maps, `$dateTrunc`, TTL and retention. |
 | `indexes` | fields with a secondary index (dot paths allowed). |
-| `unique` | fields with a unique constraint (engine mode). |
 | `durability` | `strict` or `relaxed`. Engine mode only. See below. |
 | `wal_retention` | engine mode: delete a WAL file once it is older than this, the checkpoint is past it, and no `watch` consumer still needs it. Default: keep forever. See [operations.md](operations.md#compaction-retention-and-ttl). |
 | `retention` | hide and drop derived data older than this (by `time`). The source NDJSON is never deleted. |

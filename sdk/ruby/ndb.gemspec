@@ -11,9 +11,10 @@ Gem::Specification.new do |spec|
                      "documents with versions, queries, aggregates, watch streams and blobs. " \
                      "Stdlib only, no runtime dependencies. The daemon decides every query semantic."
   spec.license = "MIT"
-  spec.homepage = "https://github.com/thadeu/ndb"
+  spec.homepage = "https://ndb.clowk.in"
   spec.metadata = {
     "homepage_uri" => spec.homepage,
+    "documentation_uri" => "https://ndb.clowk.in/clients/ruby",
     "source_code_uri" => "https://github.com/thadeu/ndb/tree/main/sdk/ruby",
     "changelog_uri" => "https://github.com/thadeu/ndb/blob/main/CHANGELOG.md",
     "bug_tracker_uri" => "https://github.com/thadeu/ndb/issues",

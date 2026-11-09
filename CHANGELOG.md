@@ -10,8 +10,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - **`_aggregate` takes a pipeline with no `$group`, as MongoDB does.** Such a pipeline reads documents: it runs as a find, with the same indexes, cursor and headers as `_search`. The stages are `$match` and one `$sort`, then `$skip` and `$limit`, and one `$project` (keep or remove fields); `$lookup` goes at the end, as before. A `$match` or a `$sort` after `$skip`, `$limit` or `$project` is still `invalid_pipeline`, because it would give other rows than MongoDB. Before, every pipeline with no `$group` was `invalid_pipeline`.
 
+- **The docs site serves `/sitemap.xml` and `/robots.txt`** (they were 404), so search crawlers find every page. `robots.txt` lets every crawler in and points to the sitemap.
+- **`context7.json`** at the root of the repo: the docs and SDK READMEs that [Context7](https://context7.com) indexes for coding agents, with the main rules of ndb.
+
+### Changed
+
+- The gems and the npm package link to the docs site: `homepage` is https://ndb.clowk.in, and `documentation_uri` (gems) or `homepage` (npm) is the client page.
+
 ### Fixed
 
+- **The Ruby SDK default socket is `/run/ndb/ndb.sock`, the one of the daemon.** It was `/var/run/ndb/ndb.sock`, which works only where `/var/run` links to `/run` (most Linux systems, not macOS). The Ruby and Rails pages said the old path, against the configuration page.
+- The collection keys table of the configuration page listed `unique` twice.
+- **A collection on macOS (Apple Silicon) used 4x the disk for its `meta.bolt`.** bbolt takes the page of the OS for a new file, 16 KiB there, so each `meta.bolt` was 128 KiB (32 KiB on Linux). New ones now use 4 KiB pages on every OS: in `ndb bench`, an idle collection went from 142.8 KB to 46.8 KB of disk on a Mac. An existing `meta.bolt` keeps the page size of its header.
+- **`ndb bench` on macOS measures the physical footprint of the daemon, not the RSS of `ps`.** There, the RSS still counts the memory that Go gave back until the system takes it, so it stayed near the peak of the load: the idle part showed 127 MB of RSS for a footprint of 35 MB, and three checks failed on a Mac (RSS with 10 clients 488 MB, RSS per idle collection 177 KB, disk per idle collection 142.8 KB). They now pass: 384 MB, 87.9 KB and 46.8 KB. Linux still reads the RSS of `ps`.
 - **Links between the pages of the docs site no longer open GitHub (404).** A link from one page to another (`[Aggregate](../aggregate.md)`) went to `github.com/.../blob/main/aggregate.md`, a path that does not exist; 70 links of the site did. They now stay on the site; a link to any other file of the repo still opens it on GitHub. The site no longer builds stray pages for `CHANGELOG.md` and `benchmark/README.md`.
 
 ## [1.13.1] - 2026-11-09

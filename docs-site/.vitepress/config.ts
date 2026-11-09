@@ -19,6 +19,11 @@ const brandFiles = ['svg/favicon.svg', 'favicon.ico', 'png/apple-touch-icon.png'
 
 const base = process.env.DOCS_BASE ?? '/'
 
+// The public address of the site, for the sitemap and robots.txt: a
+// crawler needs absolute URLs. robots.txt lets every crawler in.
+const publicUrl = (process.env.DOCS_URL || 'https://ndb.clowk.in').replace(/\/$/, '')
+const robots = `User-agent: *\nAllow: /\n\nSitemap: ${publicUrl}/sitemap.xml\n`
+
 // The web app manifest: added to the home screen, the docs open full
 // screen, like an app. Its URLs are relative to it, so DOCS_BASE works.
 const manifest = JSON.stringify({
@@ -197,6 +202,7 @@ export default defineConfig({
   cleanUrls: true,
   appearance: false,
   lastUpdated: false,
+  sitemap: { hostname: `${publicUrl}/` },
 
   themeConfig: {
     version: docsVersion(),
@@ -306,6 +312,7 @@ export default defineConfig({
     }
 
     writeFileSync(resolve(config.outDir, 'manifest.webmanifest'), manifest)
+    writeFileSync(resolve(config.outDir, 'robots.txt'), robots)
     writeLlms(config.outDir, docsVersion())
   },
 

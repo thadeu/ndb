@@ -1,0 +1,16 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "ndb",
+  "description": "One Go daemon with the HTTP API of Elasticsearch and the filters of MongoDB over plain NDJSON files: collections, queries, aggregates, lookups, watch and ack for outbox consumers, with SDKs for Go, Ruby, Rails and TypeScript.",
+  "folders": ["docs/dev", "docs/examples", "sdk/go", "sdk/ruby", "sdk/rails", "sdk/ts"],
+  "excludeFolders": ["sdk/ts/node_modules", "sdk/ts/dist", "sdk/ruby/test", "sdk/rails/test", "sdk/ts/test", "internal", "spec", "benchmark", ".plans", "console", "docs-site"],
+  "excludeFiles": ["CHANGELOG.md"],
+  "rules": [
+    "Connect over the unix socket by default (unix:///run/ndb/ndb.sock), or set NDB_URL (unix://, tcp://, http(s)://).",
+    "Filters use the MongoDB operators ($eq, $in, $gt, $and, $or, $elemMatch); routes are the Elasticsearch ones (POST /{coll}/_search, /_aggregate, /_bulk, /_count).",
+    "An update with a filter is atomic: send the _v (version) of the document in the filter for optimistic concurrency.",
+    "Use a unique field (unique: [field]) for a natural key such as email or call_id, not a custom id.",
+    "Page with the next cursor (X-Ndb-Next, after), not with a large skip.",
+    "For an outbox, use _watch and ack: a consumer resumes from its cursor after a restart."
+  ]
+}

@@ -10,9 +10,10 @@ Gem::Specification.new do |spec|
   spec.description = "Ndb::Record, a lazy Relation, validations, blobs and a Rails railtie on top of " \
                      "the ndb client gem. The gem only builds JSON; the daemon decides every query semantic."
   spec.license = "MIT"
-  spec.homepage = "https://github.com/thadeu/ndb"
+  spec.homepage = "https://ndb.clowk.in"
   spec.metadata = {
     "homepage_uri" => spec.homepage,
+    "documentation_uri" => "https://ndb.clowk.in/clients/rails",
     "source_code_uri" => "https://github.com/thadeu/ndb/tree/main/sdk/rails",
     "changelog_uri" => "https://github.com/thadeu/ndb/blob/main/CHANGELOG.md",
     "bug_tracker_uri" => "https://github.com/thadeu/ndb/issues",
