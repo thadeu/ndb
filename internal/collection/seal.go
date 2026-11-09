@@ -1019,13 +1019,20 @@ func (c *Collection) stopSealer() {
 }
 
 // closeSegments closes the segment readers and meta.bolt. It runs after the
-// writer has stopped, so no read is in flight.
+// writer has stopped, so no read is in flight. A compaction started by a
+// call (Compact, not the sealer) can still run: it sees the stop at its next
+// step, and closeSegments waits for it under compacting, so the compaction
+// never reads a reader that is closed or gone.
 func (c *Collection) closeSegments() {
 	s := c.seal
 
 	if s == nil {
 		return
 	}
+
+	s.compacting.Lock()
+
+	defer s.compacting.Unlock()
 
 	for _, r := range s.readers {
 		r.closeFiles()

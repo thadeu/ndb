@@ -141,7 +141,7 @@ func TestAggregateSkip(t *testing.T) {
 func TestAggregateErrorCodes(t *testing.T) {
 	c, ctx := seedAggCalls(t)
 
-	_, err := c.Aggregate(ctx, Pipeline{{"$match": map[string]any{}}})
+	_, err := c.Aggregate(ctx, Pipeline{{"$limit": 1}, {"$match": map[string]any{}}})
 
 	if !errors.Is(err, ErrInvalidPipeline) {
 		t.Fatalf("want ErrInvalidPipeline, got %v", err)
