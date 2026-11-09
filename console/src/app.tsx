@@ -27,8 +27,25 @@ export interface Assets {
   libCss: () => Response;
   ui: () => Response;
   favicon: () => Response;
+  icons?: Record<string, () => Response>;
   islands?: Record<string, () => Response>;
 }
+
+// The web app manifest: added to the home screen, the console opens full
+// screen, like an app. Its URLs are relative to it, so a mount path works.
+const MANIFEST = {
+  name: 'Ndb Console',
+  short_name: 'ndb',
+  start_url: './',
+  scope: './',
+  display: 'standalone',
+  background_color: '#ffffff',
+  theme_color: '#ffffff',
+  icons: [
+    { src: 'assets/icon-192.png', sizes: '192x192', type: 'image/png' },
+    { src: 'assets/icon-512.png', sizes: '512x512', type: 'image/png' },
+  ],
+};
 
 export interface AppOptions {
   timeoutMs?: number;
@@ -100,6 +117,12 @@ export function createApp(connections: Connections, assets: Assets, options: App
 
     return render ? render() : c.text('Not found', 404);
   });
+  app.get('/assets/:file{[a-z0-9-]+\\.png}', c => {
+    const render = assets.icons?.[c.req.param('file')];
+
+    return render ? render() : c.text('Not found', 404);
+  });
+  app.get('/manifest.webmanifest', c => c.body(JSON.stringify(MANIFEST), 200, { 'content-type': 'application/manifest+json' }));
   app.get('/favicon.ico', c => c.redirect(`${c.var.prefix}/assets/favicon.svg`, 301));
   app.get('/ui', c => c.html(<UiPage />));
 

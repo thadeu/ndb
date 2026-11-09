@@ -1,6 +1,9 @@
 import css from '@/assets/app.css' with { type: 'file' };
 import datePickerCss from '../lib/ui/styles/date-picker.css' with { type: 'file' };
 import favicon from '@/assets/favicon.svg' with { type: 'file' };
+import appleTouchIcon from '@/assets/apple-touch-icon.png' with { type: 'file' };
+import icon192 from '@/assets/icon-192.png' with { type: 'file' };
+import icon512 from '@/assets/icon-512.png' with { type: 'file' };
 import devtools from '../dist/devtools.js' with { type: 'file' };
 import documentEditor from '../dist/document-editor.js' with { type: 'file' };
 import ui from '../dist/ui.js' with { type: 'file' };
@@ -16,11 +19,14 @@ const connections = new Connections(defaultPath(), fixedFromEnv());
 
 const script = (path: string) => () => new Response(Bun.file(path), { headers: { 'content-type': 'text/javascript; charset=utf-8' } });
 
+const png = (path: string) => () => new Response(Bun.file(path), { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' } });
+
 const app = createApp(connections, {
   css: () => new Response(Bun.file(css), { headers: { 'content-type': 'text/css; charset=utf-8' } }),
   libCss: () => new Response(Bun.file(datePickerCss), { headers: { 'content-type': 'text/css; charset=utf-8' } }),
   ui: script(ui),
   favicon: () => new Response(Bun.file(favicon), { headers: { 'content-type': 'image/svg+xml', 'cache-control': 'public, max-age=86400' } }),
+  icons: { 'apple-touch-icon.png': png(appleTouchIcon), 'icon-192.png': png(icon192), 'icon-512.png': png(icon512) },
   islands: { devtools: script(devtools), 'document-editor': script(documentEditor), watch: script(watch) },
 });
 

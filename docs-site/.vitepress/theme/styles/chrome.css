@@ -336,6 +336,7 @@
 
   .search:focus-within .search-input {
     display: block;
+    font-size: 16px;
   }
 
   .search-results {

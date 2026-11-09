@@ -22,9 +22,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `ndb bench -data <dir>` keeps the loaded calls and reads them again on the next runs, without loading; `make bench-read` reads 2 million documents kept in `.bench/2m` (8 minutes the first time, about 3 after).
 - `ndb bench -direct`: direct mode with 500k cdrs and their users in NDJSON files, read at start and appended live (64 KiB writes that cut lines, a new file every 100k lines), with every line checked (counts and 1000 ids), then the reads of the cdrs and their users (`belongs_to`, `has_many`).
 - `ndb bench -partition month`: the calls over six monthly partitions, with reads up to the previous month (also by the `events-*` alias) and of one month; `make bench-read-month`.
+- **The console and the docs site behave like an app on a phone**: a web app manifest and the iOS home screen tags (they open full screen, with their icon), no pinch or double tap zoom, no tap flash, no rubber band scroll, and the safe areas of the screen. The console top bar stays at the top while the page scrolls; the docs site hides its scrollbars (it still scrolls).
 
 ### Fixed
 
+- **The console Watch tab no longer stops after about 10 seconds.** With no change to show, the stream sent nothing for 15 s (ndb's heartbeat), and Bun closes a connection after 10 s without bytes; the console now sends its own keep-alive every 5 s.
 - **A shutdown no longer waits for a compaction.** On SIGTERM the seals and compactions stop first, then the requests in flight finish: a daemon stopped during the compaction of a big partition took as long as the merge (15 s for 210k documents, minutes for millions); it now stops in 0.05 s, and a `_compact` cut by the shutdown answers `503 stopping` (retry). Nothing is lost: the WAL has every acked write.
 - **A second daemon no longer takes the socket of a running one.** At start ndb removed any socket file at its path, then stopped on the lock of the data dir: the running daemon kept working but nobody could reach it. A socket that answers is now an error (`another ndb is listening on it`); only a dead one is removed.
 

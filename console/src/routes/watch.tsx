@@ -10,6 +10,12 @@ import { readWhere } from './browser';
 
 const COLLECTION = /^[A-Za-z0-9._-]{1,128}$/;
 const encoder = new TextEncoder();
+const PING = encoder.encode(': ping\n\n');
+
+// PING_MS keeps the stream busy while the collection is quiet: Bun closes a
+// connection after 10 s without bytes (and proxies have limits of their
+// own), and ndb's heartbeat comes every 15 s. EventSource skips comments.
+const PING_MS = 5_000;
 
 function frame(event: string | undefined, data: string): Uint8Array {
   return encoder.encode(`${event ? `event: ${event}\n` : ''}data: ${data}\n\n`);
@@ -57,6 +63,12 @@ export function watchRoutes(app: Hono<Env>, deps: RouteDeps): void {
           return;
         }
 
+        const ping = setInterval(() => {
+          if (!abort.signal.aborted) controller.enqueue(PING);
+        }, PING_MS);
+
+        abort.signal.addEventListener('abort', () => clearInterval(ping));
+
         const consumer = `ndb-ui-${crypto.randomUUID().slice(0, 8)}`;
         const request: Record<string, unknown> = { consumer, from };
 
@@ -71,6 +83,8 @@ export function watchRoutes(app: Hono<Env>, deps: RouteDeps): void {
         } catch (error) {
           if (!abort.signal.aborted) controller.enqueue(frame('problem', error instanceof NdbError ? error.message : 'The watch failed.'));
         }
+
+        clearInterval(ping);
 
         if (!abort.signal.aborted) controller.enqueue(frame('end', 'closed'));
 

@@ -94,6 +94,20 @@ describe('connections store', () => {
 });
 
 describe('pages', () => {
+  it('works as a home screen app', async () => {
+    const html = await (await page('/')).text();
+
+    expect(html).toContain('user-scalable=no');
+    expect(html).toContain('apple-mobile-web-app-capable');
+    expect(html).toContain('<link rel="manifest" href="manifest.webmanifest"');
+
+    const manifest = await (await page('/manifest.webmanifest')).json();
+
+    expect(manifest.display).toBe('standalone');
+    expect(manifest.start_url).toBe('./');
+    expect((await page('/assets/icon-192.png')).status).toBe(404);
+  });
+
   it('shows an online connection card', async () => {
     const html = await (await page('/')).text();
 

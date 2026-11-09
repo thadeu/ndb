@@ -15,7 +15,25 @@ const repoRoot = resolve(here, '../..').split(sep).join('/')
 const require = createRequire(import.meta.url)
 const repoUrl = 'https://github.com/thadeu/ndb'
 const installScripts = ['install.sh', 'uninstall.sh']
-const brandFiles = ['svg/favicon.svg', 'favicon.ico', 'png/apple-touch-icon.png']
+const brandFiles = ['svg/favicon.svg', 'favicon.ico', 'png/apple-touch-icon.png', 'png/icon-192.png', 'png/icon-512.png']
+
+const base = process.env.DOCS_BASE ?? '/'
+
+// The web app manifest: added to the home screen, the docs open full
+// screen, like an app. Its URLs are relative to it, so DOCS_BASE works.
+const manifest = JSON.stringify({
+  name: 'ndb docs',
+  short_name: 'ndb',
+  start_url: './',
+  scope: './',
+  display: 'standalone',
+  background_color: '#ffffff',
+  theme_color: '#f0047f',
+  icons: [
+    { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
+    { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
+  ],
+})
 
 // The docs version: DOCS_VERSION (set by CI from the latest release tag),
 // else the latest git tag, else the SDK package version.
@@ -148,6 +166,13 @@ function brandAssets(): Plugin {
 
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
+        if (req.url?.split('?')[0].endsWith('/manifest.webmanifest')) {
+          res.setHeader('Content-Type', 'application/manifest+json')
+          res.end(manifest)
+
+          return
+        }
+
         const name = brandFiles.find((f) => req.url?.split('?')[0].endsWith(`/${posix.basename(f)}`))
 
         if (!name) {
@@ -167,7 +192,7 @@ export default defineConfig({
   title: 'ndb',
   description: 'The API of Elasticsearch with the filters of MongoDB, on plain NDJSON, from one Go binary.',
   lang: 'en-US',
-  base: process.env.DOCS_BASE ?? '/',
+  base,
   srcDir: '..',
   cleanUrls: true,
   appearance: false,
@@ -209,7 +234,14 @@ export default defineConfig({
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
     ['link', { rel: 'alternate icon', href: '/favicon.ico' }],
     ['link', { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' }],
+    ['link', { rel: 'manifest', href: `${base}manifest.webmanifest` }],
+    ['meta', { name: 'viewport', content: 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover' }],
     ['meta', { name: 'theme-color', content: '#f0047f' }],
+    ['meta', { name: 'mobile-web-app-capable', content: 'yes' }],
+    ['meta', { name: 'apple-mobile-web-app-capable', content: 'yes' }],
+    ['meta', { name: 'apple-mobile-web-app-status-bar-style', content: 'default' }],
+    ['meta', { name: 'apple-mobile-web-app-title', content: 'ndb' }],
+    ['meta', { name: 'format-detection', content: 'telephone=no' }],
     ['script', {}, themeScript],
   ],
 
@@ -267,6 +299,7 @@ export default defineConfig({
       copyFileSync(resolve(here, '../..', name), resolve(config.outDir, name))
     }
 
+    writeFileSync(resolve(config.outDir, 'manifest.webmanifest'), manifest)
     writeLlms(config.outDir, docsVersion())
   },
 

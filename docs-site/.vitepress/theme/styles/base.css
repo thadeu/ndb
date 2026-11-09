@@ -139,32 +139,27 @@ pre {
   white-space: nowrap;
 }
 
-/* part: scrollbars, thin and transparent (still scrollable) */
+/* part: scrollbars, hidden (still scrollable) */
 * {
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
-}
-
-*:hover {
-  scrollbar-color: color-mix(in srgb, var(--ndb-muted) 35%, transparent) transparent;
+  scrollbar-width: none;
 }
 
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 0;
+  height: 0;
   background: transparent;
 }
 
-::-webkit-scrollbar-track,
-::-webkit-scrollbar-corner {
-  background: transparent;
+/* part: native app feel on phones (no zoom, no tap flash, no rubber band) */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  touch-action: manipulation;
+  overscroll-behavior: none;
 }
 
-::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: transparent;
-}
-
-:hover::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--ndb-muted) 35%, transparent);
+body {
+  -webkit-tap-highlight-color: transparent;
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }

@@ -51,6 +51,8 @@
 }
 
 /* part: base */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; touch-action: manipulation; overscroll-behavior: none; }
+body { -webkit-tap-highlight-color: transparent; padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
 body { margin: 0; background: var(--bg); color: var(--ink); font-family: Inter, system-ui, sans-serif; font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
 a { color: var(--ink); text-decoration: none; }
 a:hover { color: var(--pink); }
@@ -61,7 +63,7 @@ h1 { margin: 0; font-size: 40px; font-weight: 800; letter-spacing: -0.03em; line
 .strong { font-weight: 500; }
 
 /* part: header */
-.top { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 14px var(--gutter); border-bottom: 1px solid var(--border); }
+.top { position: sticky; top: 0; z-index: 20; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 14px var(--gutter); border-bottom: 1px solid var(--border); background: var(--bg); }
 .brand { display: flex; align-items: center; gap: 10px; color: var(--ink); }
 .wordmark { font-weight: 800; font-size: 20px; letter-spacing: -0.02em; }
 .pill { display: inline-block; font-size: 12px; font-weight: 500; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; }
