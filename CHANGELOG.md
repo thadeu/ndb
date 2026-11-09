@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **The Go SDK limits its connections** (from the fsw-esl POC). Without a limit, a peak of goroutines opened hundreds of connections at once: over a Docker network calls took 1 s and 4 s, and over TCP some failed. `ndb.Connect` now opens at most `ndb.DefaultMaxConns` (64); over that a call waits for a free connection. `ndb.WithMaxConns(n)` and `ndb.WithIdleTimeout(d)` change it; a `Watch` has its own connections, out of the limit. With 1000 goroutines over the unix socket, p99 went from 35 ms to 9.5 ms and max from 137 ms to 12 ms.
+- **`ndb.Testing.Clean` in Go and `clean` in TypeScript**, like `Ndb::Testing` in Rails: truncate the collections a test used, `CleanAll` / `cleanAll` for every collection with a prefix, `WithPrefix` / `prefix` for collections per parallel worker. A clean runs only in a test run (`go test`; `NODE_ENV=test`, vitest, jest, `node --test`), else it fails; `NDB_ALLOW_CLEAN=1` forces it.
+- **A constant for every error code in every SDK.** Go has a sentinel per code (`ErrInvalidPath`, `ErrInvalidDoc`, `ErrInvalidRequest`, `ErrForbidden`, ... 18 new); the TypeScript `ErrorCode` union has every code; Ruby has a class per code (`InvalidDocument`, `InvalidPattern`, `Forbidden`, `RequestTooLarge`, `GroupLimitExceeded`, `Closed`, ...). A test of the repository fails when the daemon answers a code that the error table or an SDK does not have. The error table now lists `stopping` and no longer lists `forbidden` twice.
+
 ### Changed
 
 - **A bloom filter check reads no file.** The filter of each column chunk is read into memory on first use (a few KB) and checked there; the filter of parquet-go read 32 bytes from the file on each check, so every lookup made one `pread` per segment. In the 10 client phase of `ndb bench`, these preads were 12.9 s of the 92 s of CPU in 10 s, and they are gone (reads/s +5 to 8%).

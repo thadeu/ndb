@@ -383,9 +383,29 @@ try {
 }
 ```
 
-`ErrorCode` is the union of the known codes.
+`ErrorCode` is the union of every code of the [error table](../http/errors.md), so `err.code === 'invalid_path'` is type-checked. A test of the repository fails when the daemon gets a code that is not in it.
 
 ## Testing
+
+ndb has no transactions, so a test cannot roll back. `clean(db)` truncates the collections that `db` used since the last clean (a few ms at any size; the definition and the indexes stay), like `Ndb::Testing` in Rails. It has no test framework in it, so vitest, jest, `node --test` and `bun test` all use it the same way:
+
+```ts
+import { clean, cleanAll, connect } from '@thadeu/ndb'
+
+const db = connect(process.env.NDB_URL, { prefix: `test${process.env.VITEST_POOL_ID ?? 1}_` })
+
+beforeAll(() => cleanAll(db))  // every collection with the prefix
+afterEach(() => clean(db))     // the ones this test used
+```
+
+- `clean(db, { only, except })`: truncate these, or leave some out.
+- `cleanAll(db)` truncates every engine collection with the prefix of `db`. Direct collections and partitions are left out.
+- `prefix` (a `connect` option) goes before the name of every collection: each parallel worker gets collections of its own.
+- A collection that does not exist is not an error.
+- A clean runs only in a test run: `NODE_ENV=test` (jest, `bun test`), `VITEST`, `JEST_WORKER_ID` or `NODE_TEST_CONTEXT` (`node --test`). Anywhere else it throws `UnsafeCleanError`. `NDB_ALLOW_CLEAN=1` forces it.
+- The SDK does not start a daemon: start it in CI as a service, with `make up`, or with Docker, and connect with `NDB_URL`.
+
+### Tests of this package
 
 The tests of this package (vitest) build the daemon from the repository (`go build ./cmd/ndb`) in a global setup. They start it on a temp unix socket and a free TCP port, wait for `GET /_health` to return 200, and stop it at the end. To do the same by hand:
 

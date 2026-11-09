@@ -38,7 +38,9 @@ defer db.Close()
 - The address must be `unix:///path`, `tcp://host:port`, or `https://host[:port]` (ndb behind a TLS proxy; `http://` works too). Anything else returns an error.
 - The token goes only in the `Authorization` header. A unix socket does not need it.
 - `WithReadyTimeout` sets how long a call retries when the daemon is not ready (HTTP 503 `not_ready`, or the socket is missing or refuses). The default is `ndb.DefaultReadyTimeout` (10 s). Zero turns the retry off. Writes are retried only when the daemon certainly did not process them. Reads are also retried after a dropped connection.
-- The pool keeps up to 16 idle connections per host. There is no setting for it.
+- The pool opens at most `ndb.DefaultMaxConns` (64) connections. Over that, a call waits for a free one (until its `ctx` ends) instead of opening another. `ndb.WithMaxConns(n)` changes the limit (0 is no limit); `ndb.WithIdleTimeout(d)` sets how long an unused connection stays open (90 s). A `Watch` has its own connections, out of the limit.
+- Without a limit, a peak of goroutines opens hundreds of connections at once. Measured on a Mac, 1000 goroutines of 20 counts each over the unix socket: no limit gives p99 35 ms and max 137 ms; the limit of 64 gives p99 9.5 ms and max 12 ms. Over TCP with no limit, some calls failed. In a Docker network (the fsw-esl test), the limit took the peaks of 1 s and 4 s away. Measure it with `NDB_POOL_BENCH=1 go test -run TestPoolBench -v .` in `sdk/go`.
+- Use the unix socket when the app and ndb share a host or a pod: it was 2x faster than TCP in the same test.
 - `*DB` is safe for concurrent use. `Close` closes idle connections. The handle stays usable.
 
 ## Define a collection
@@ -466,32 +468,34 @@ if errors.As(err, &apiErr) {
 }
 ```
 
-| Sentinel | Code |
-|---|---|
-| `ErrNotFound` | `not_found` |
-| `ErrDuplicateID` | `duplicate_id` |
-| `ErrUniqueViolation` | `unique_violation` |
-| `ErrCatalogConflict` | `catalog_conflict` |
-| `ErrCatalogInvalid` | `catalog_invalid` |
-| `ErrUnknownCollection` | `unknown_collection` |
-| `ErrDirectCollection` | `direct_collection` |
-| `ErrInvalidQuery` | `invalid_query` |
-| `ErrInvalidPipeline` | `invalid_pipeline` |
-| `ErrGroupLimit` | `group_limit_exceeded` |
-| `ErrCursorInvalid`, `ErrCursorMismatch`, `ErrCursorExpired` | `cursor_invalid`, `cursor_mismatch`, `cursor_expired` |
-| `ErrRequestTooLarge`, `ErrLineTooLarge` | `request_too_large`, `line_too_large` |
-| `ErrUnauthorized` | `unauthorized` |
-| `ErrUnknownOperator`, `ErrNoUpdate`, `ErrConflictingUpdate`, `ErrInvalidField`, `ErrUnindexedMany`, `ErrEmptyFilter` | `unknown_operator`, `no_update`, `conflicting_update`, `invalid_field`, `unindexed_many`, `empty_filter` |
-| `ErrNotReady` | `not_ready` |
-| `ErrClosed` | `closed` |
-| `ErrWatchLagged` | `watch_lagged` |
-| `ErrInvalidPosition` | `invalid_position` |
-| `ErrHistoryTruncated` | `history_truncated` |
-| `ErrTTLNotEnabled`, `ErrTTLDerived` | `ttl_not_enabled`, `ttl_derived` |
+Each code of the [error table](../http/errors.md) has a sentinel: `ndb.Err` and the code in CamelCase, for example `ErrNotFound` (`not_found`), `ErrInvalidPath` (`invalid_path`), `ErrUniqueViolation` (`unique_violation`). The exceptions are `ErrGroupLimit` (`group_limit_exceeded`), `ErrTTLNotEnabled` and `ErrTTLDerived`, and `ErrPITROff`. A test of the repository fails when the daemon gets a code that has no sentinel.
 
-Other codes (for example `invalid_request`) are still `*ndb.Error`, but have no sentinel. A response that is not a daemon error has the code `http_status`. A failed connection returns the normal `net` error.
+A response that is not a daemon error has the code `http_status`. A failed connection returns the normal `net` error.
 
 ## Testing
+
+ndb has no transactions, so a test cannot roll back. `ndb.Testing.Clean` truncates the collections that the `*DB` used since the last clean (a few ms at any size; the definition and the indexes stay), like `Ndb::Testing` in Rails:
+
+```go
+func TestMain(m *testing.M) {
+	code := m.Run()
+
+	ndb.Testing.Clean(context.Background(), db)
+	os.Exit(code)
+}
+
+// or after each test
+t.Cleanup(func() { ndb.Testing.Clean(ctx, db) })
+```
+
+- `ndb.CleanOnly(names...)` truncates these, not the ones used; `ndb.CleanExcept(names...)` leaves some out.
+- `ndb.Testing.CleanAll(ctx, db)` truncates every engine collection with the prefix of the DB, for the start of a run. Direct collections and partitions are left out.
+- `ndb.WithPrefix("test1_")` on `Connect` puts a prefix before the name of every `Collection`: each parallel package or worker gets collections of its own.
+- A collection that does not exist is not an error.
+- A clean runs only under `go test` (`testing.Testing()`). Anywhere else it returns `ndb.ErrUnsafeClean`, so it never truncates production data. `NDB_ALLOW_CLEAN=1` forces it.
+- The SDK does not start a daemon: start it in CI as a service, with `make up`, or with Docker, and connect with `NDB_URL`.
+
+### Tests of this module
 
 The tests of this module build the daemon from the repository (`go build ./cmd/ndb`) in `TestMain`. They start it on a temp unix socket and a free TCP port, with a temp data dir, and stop it at the end:
 

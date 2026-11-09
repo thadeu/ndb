@@ -33,6 +33,10 @@ func Collection[T any](db *DB, name string) (*Coll[T], error) {
 		return nil, err
 	}
 
+	name = db.prefix + name
+
+	db.use(name)
+
 	return &Coll[T]{db: db, name: name, schema: s}, nil
 }
 

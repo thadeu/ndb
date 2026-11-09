@@ -27,6 +27,9 @@ export interface ConnectOptions {
   // How long (ms) a call retries while the daemon starts or recovers
   // (503 not_ready, socket missing or refusing). Default 10000; 0 disables.
   readyTimeout?: number
+  // Goes before the name of every collection: "test1_" gives each parallel
+  // test worker collections of its own (see clean in testing.ts).
+  prefix?: string
 }
 
 // Bun has its own undici, whose Pool cannot dial a unix socket. On Bun the

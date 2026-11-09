@@ -4,15 +4,25 @@ import type { Blob, Fields, Schema } from './types.js'
 
 export class Ndb {
   readonly transport: Transport
+  readonly prefix: string
+
+  // The collections used since the last clean (testing.ts). A pattern
+  // (logs-*) is not one.
+  readonly used = new Set<string>()
 
   constructor(addr?: string, opts?: ConnectOptions) {
     this.transport = new Transport(addr, opts)
+    this.prefix = opts?.prefix ?? ''
   }
 
   // A collection of the daemon; see Collection. Nothing is sent until its
   // first call.
   collection<const F extends Fields>(name: string, schema: Schema<F>): Collection<F> {
-    return new Collection<F>(this, name, schema)
+    const full = this.prefix + name
+
+    if (!full.includes('*')) this.used.add(full)
+
+    return new Collection<F>(this, full, schema)
   }
 
   // Resolves when the daemon is ready (GET /_health).
