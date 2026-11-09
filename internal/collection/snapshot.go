@@ -3,7 +3,6 @@ package collection
 import (
 	"encoding/json"
 	"path/filepath"
-	"time"
 
 	bolt "go.etcd.io/bbolt"
 
@@ -24,7 +23,7 @@ func WriteSnapshot(fsys fs.FS, dir string, def catalog.Def, tx uint64, rows []se
 		return err
 	}
 
-	db, err := bolt.Open(filepath.Join(dir, metaFile), 0o644, &bolt.Options{Timeout: time.Second})
+	db, err := bolt.Open(filepath.Join(dir, metaFile), 0o644, metaOptions())
 	if err != nil {
 		return err
 	}

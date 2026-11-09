@@ -167,7 +167,7 @@ func (c *Collection) openSegments(cfg Config) (recovery.Position, error) {
 		return recovery.Position{}, err
 	}
 
-	db, err := bolt.Open(filepath.Join(cfg.Data, metaFile), 0o644, &bolt.Options{Timeout: time.Second})
+	db, err := bolt.Open(filepath.Join(cfg.Data, metaFile), 0o644, metaOptions())
 	if err != nil {
 		return recovery.Position{}, err
 	}
@@ -1037,4 +1037,13 @@ func (c *Collection) closeSegments() {
 		s.meta.Close()
 		s.meta = nil
 	}
+}
+
+// metaPageSize is the page of a new meta.bolt. bbolt takes the OS page by
+// default: 16 KiB on Apple Silicon made every meta.bolt 128 KiB, against
+// 32 KiB on Linux. An existing file keeps the page of its header.
+const metaPageSize = 4096
+
+func metaOptions() *bolt.Options {
+	return &bolt.Options{Timeout: time.Second, PageSize: metaPageSize}
 }

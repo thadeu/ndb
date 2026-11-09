@@ -38,7 +38,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -391,18 +390,6 @@ func (d *daemon) stop() {
 	if d.cmd != nil && d.cmd.ProcessState == nil {
 		d.kill()
 	}
-}
-
-// rss is the daemon RSS in MB (ps works on Linux and macOS).
-func (d *daemon) rss() int64 {
-	out, err := exec.Command("ps", "-o", "rss=", "-p", strconv.Itoa(d.cmd.Process.Pid)).Output()
-	if err != nil {
-		return 0
-	}
-
-	kb, _ := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
-
-	return kb / 1024
 }
 
 func (d *daemon) sample() {

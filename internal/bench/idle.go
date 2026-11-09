@@ -46,7 +46,7 @@ func idle(dir string, n int) []string {
 
 	time.Sleep(time.Second)
 
-	rss0, fds0 := d.rss(), d.fds()
+	rss0, fds0 := d.rssKB(), d.fds()
 
 	for i := range n {
 		coll := fmt.Sprintf("/idle_%03d", i)
@@ -77,7 +77,7 @@ func idle(dir string, n int) []string {
 
 	blocks, reserve := diskOf(filepath.Join(d.dir, "data"))
 	disk := blocks / 1024
-	rss, fds := d.rss()-rss0, d.fds()-fds0
+	rss, fds := d.rssKB()-rss0, d.fds()-fds0
 	pct := 100 * cpu.Seconds() / idleWindow.Seconds()
 
 	prog.end(fmt.Sprintf("%d ms of CPU in %s, %s open files", cpu.Milliseconds(), idleWindow, count(fds, fds0)))
@@ -86,7 +86,7 @@ func idle(dir string, n int) []string {
 	record("idle.disk_kb", float64(disk)/float64(total))
 	record("idle.reserve_kb", float64(reserve)/1024/float64(total))
 	record("idle.cpu_pct", pct)
-	record("idle.rss_kb", float64(rss)*1024/float64(total))
+	record("idle.rss_kb", float64(rss)/float64(total))
 
 	if fds0 >= 0 {
 		record("idle.fds", float64(fds)/float64(total))
@@ -110,7 +110,7 @@ func idle(dir string, n int) []string {
 		fmt.Sprintf("| idle collections | %d of 10 docs and %d daily partitions, %d asleep |", n, idleDays, slept),
 		fmt.Sprintf("| idle disk | %.1f MB, %d KB per collection, %.1f KB of it past the data |", float64(disk)/1024, disk/int64(total), float64(reserve)/1024/float64(total)),
 		fmt.Sprintf("| idle CPU | %.1f%% of a core (%d ms in %s) |", pct, cpu.Milliseconds(), idleWindow),
-		fmt.Sprintf("| idle RSS | +%d MB, %d KB per collection |", rss, rss*1024/int64(total)),
+		fmt.Sprintf("| idle RSS | +%d MB, %d KB per collection |", rss/1024, rss/int64(total)),
 		fmt.Sprintf("| idle files | +%s open |", count(fds, fds0)),
 		fmt.Sprintf("| idle wake | first call on a sleeping collection: median %.1f ms |", wake),
 		fmt.Sprintf("| idle crash | kill -9 while collections wake and sleep: %d acked, %d missing |", acked, missing),
