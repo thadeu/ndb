@@ -59,11 +59,14 @@ const (
 	opMax
 	opFirst
 	opLast
+	opDistinct
+	opAddToSet
 )
 
 var accOps = map[string]accOp{
 	"$count": opCount, "$sum": opSum, "$avg": opAvg, "$min": opMin,
 	"$max": opMax, "$first": opFirst, "$last": opLast,
+	"$distinct": opDistinct, "$addToSet": opAddToSet,
 }
 
 type accDef struct {

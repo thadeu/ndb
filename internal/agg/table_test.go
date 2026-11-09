@@ -356,3 +356,60 @@ func rowsText(r agg.Result) []string {
 
 	return out
 }
+
+// $distinct counts the distinct values of a group and $addToSet lists them,
+// sorted; missing and null are not values. Tables merged from parts give
+// the same answer.
+func TestDistinctAndAddToSet(t *testing.T) {
+	docs := []string{
+		`{"c":"a","ani":"1"}`, `{"c":"a","ani":"2"}`, `{"c":"a","ani":"1"}`,
+		`{"c":"a"}`, `{"c":"a","ani":null}`, `{"c":"a","ani":3}`,
+		`{"c":"b","ani":"1"}`, `{"c":"b","ani":"1"}`,
+	}
+
+	body := `{"pipeline":[{"$group":{"_id":"$c","n":{"$distinct":"$ani"},"anis":{"$addToSet":"$ani"}}},{"$sort":{"_id":1}}]}`
+
+	for _, split := range []int{0, 1, 2, 3} {
+		eq(t, run(t, body, split, docs...),
+			`{"_id":"a","anis":[3,"1","2"],"n":3}`,
+			`{"_id":"b","anis":["1"],"n":1}`)
+	}
+}
+
+// $having filters the groups after $group, like $match there; before
+// $group it is an error that points to $match.
+func TestHaving(t *testing.T) {
+	docs := []string{`{"c":"a"}`, `{"c":"a"}`, `{"c":"a"}`, `{"c":"b"}`, `{"c":"b"}`, `{"c":"d"}`}
+
+	eq(t, run(t, `{"pipeline":[{"$group":{"_id":"$c","n":{"$count":{}}}},{"$having":{"n":{"$gte":2}}},{"$sort":{"n":-1}}]}`, 0, docs...),
+		`{"_id":"a","n":3}`,
+		`{"_id":"b","n":2}`)
+
+	_, err := parse(t, `{"pipeline":[{"$having":{"c":"a"}},{"$group":{"_id":"$c","n":{"$count":{}}}}]}`)
+	wantCode(t, err, "invalid_pipeline")
+
+	if err == nil || !strings.Contains(err.Error(), "use $match") {
+		t.Fatalf("$having before $group: %v", err)
+	}
+}
+
+// The distinct values count against group_limit: a set over the limit is an
+// error, not a wrong count.
+func TestDistinctIsBoundedByTheGroupLimit(t *testing.T) {
+	p, err := parse(t, `{"pipeline":[{"$group":{"_id":null,"n":{"$distinct":"$v"}}}]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	table := p.NewTable(agg.NewBudget(64 << 10))
+
+	for i := range 100_000 {
+		m, _ := query.Decode(fmt.Appendf(nil, `{"v":"value-%d"}`, i))
+
+		if err = table.Add(p.Values(m), query.Pos{}); err != nil {
+			break
+		}
+	}
+
+	wantCode(t, err, "group_limit_exceeded")
+}

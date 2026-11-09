@@ -112,6 +112,8 @@ var aggPipelines = []string{
 	`{"pipeline":[{"$group":{"_id":null,"c":{"$count":{}},"lo":{"$min":"$ts"},"hi":{"$max":"$ts"},"f":{"$first":"$ts"}}}]}`,
 	`{"pipeline":[{"$group":{"_id":"$status","c":{"$count":{}}}},{"$match":{"c":{"$gt":5}}},{"$project":{"c":1,"_id":0}},{"$skip":1}]}`,
 	`{"pipeline":[{"$group":{"_id":{"w":{"$dateTrunc":{"date":"$ts","unit":"week"}},"m":{"$dateTrunc":{"date":"$ts","unit":"month"}}},"c":{"$count":{}}}}]}`,
+	`{"pipeline":[{"$group":{"_id":"$status","cities":{"$distinct":"$meta.city"},"durs":{"$distinct":"$dur"},"set":{"$addToSet":"$meta.city"}}}]}`,
+	`{"pipeline":[{"$group":{"_id":"$meta.city","tags":{"$addToSet":"$tags"},"n":{"$distinct":"$n"}}},{"$having":{"n":{"$gt":100}}},{"$sort":{"n":-1}},{"$limit":2}]}`,
 }
 
 func TestAggregateEnginesAgree(t *testing.T) {

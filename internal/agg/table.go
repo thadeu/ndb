@@ -37,6 +37,15 @@ type accState struct {
 	has bool
 	val query.Value
 	pos query.Pos
+
+	// set holds the distinct values of $distinct and $addToSet, by their
+	// key (appendKey); $distinct keeps only the keys.
+	set map[string]query.Value
+}
+
+// setCost is what one distinct value of key costs in the group table.
+func setCost(key string, v query.Value) int64 {
+	return int64(2*len(key)+48) + int64(len(v.Str))
 }
 
 type bucket struct {
@@ -54,6 +63,7 @@ type Table struct {
 	budget *Budget
 	key    []byte
 	keyVal []query.Value
+	setKey []byte
 }
 
 // NewTable makes an empty table that charges its groups to budget.
@@ -104,8 +114,51 @@ func (t *Table) Add(vals []query.Value, pos query.Pos) error {
 			v = def.arg.eval(vals)
 		}
 
+		if def.op == opDistinct || def.op == opAddToSet {
+			if err := t.addToSet(b, &b.accs[i], def.op, v); err != nil {
+				return err
+			}
+
+			continue
+		}
+
 		b.accs[i].add(def.op, v, pos, t.p.Query)
 	}
+
+	return nil
+}
+
+// addToSet adds v to the set of a $distinct or $addToSet, and charges a new
+// value to the budget. Missing and null are not values: they are left out,
+// like COUNT(DISTINCT) leaves out NULL.
+func (t *Table) addToSet(b *bucket, a *accState, op accOp, v query.Value) error {
+	if v.Kind <= query.Null {
+		return nil
+	}
+
+	t.setKey = appendKey(t.setKey[:0], v)
+
+	if _, ok := a.set[string(t.setKey)]; ok {
+		return nil
+	}
+
+	if op == opDistinct {
+		v = query.Value{}
+	}
+
+	key := string(t.setKey)
+	cost := setCost(key, v)
+
+	if err := t.budget.add(cost); err != nil {
+		return err
+	}
+
+	if a.set == nil {
+		a.set = map[string]query.Value{}
+	}
+
+	a.set[key] = v
+	b.cost += cost
 
 	return nil
 }
@@ -206,6 +259,24 @@ func (a *accState) merge(op accOp, o accState, order *query.Query) {
 
 func (a *accState) result(op accOp) any {
 	switch op {
+	case opDistinct:
+		return float64(len(a.set))
+	case opAddToSet:
+		vals := make([]query.Value, 0, len(a.set))
+
+		for _, v := range a.set {
+			vals = append(vals, v)
+		}
+
+		slices.SortFunc(vals, query.Compare)
+
+		out := make([]any, len(vals))
+
+		for i, v := range vals {
+			out[i] = outRaw(v)
+		}
+
+		return out
 	case opCount:
 		return float64(a.n)
 	case opSum:
@@ -239,6 +310,14 @@ func (t *Table) Merge(o *Table) error {
 		}
 
 		for i, def := range g.accs {
+			if def.op == opDistinct || def.op == opAddToSet {
+				if err := t.mergeSet(b, &b.accs[i], ob.accs[i]); err != nil {
+					return err
+				}
+
+				continue
+			}
+
 			b.accs[i].merge(def.op, ob.accs[i], t.p.Query)
 		}
 
@@ -246,6 +325,31 @@ func (t *Table) Merge(o *Table) error {
 	}
 
 	o.groups = nil
+
+	return nil
+}
+
+// mergeSet adds the values of o that a does not have; the budget charges
+// them again, since the bucket of o is released whole.
+func (t *Table) mergeSet(b *bucket, a *accState, o accState) error {
+	for key, v := range o.set {
+		if _, ok := a.set[key]; ok {
+			continue
+		}
+
+		cost := setCost(key, v)
+
+		if err := t.budget.add(cost); err != nil {
+			return err
+		}
+
+		if a.set == nil {
+			a.set = map[string]query.Value{}
+		}
+
+		a.set[key] = v
+		b.cost += cost
+	}
 
 	return nil
 }

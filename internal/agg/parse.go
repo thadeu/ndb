@@ -42,7 +42,7 @@ type Pipeline struct {
 
 var topKeys = []string{"pipeline", "limit", "skip", "after", "count", "explain"}
 
-var knownStages = []string{"$match", "$group", "$sort", "$limit", "$skip", "$project"}
+var knownStages = []string{"$match", "$group", "$sort", "$limit", "$skip", "$project", "$having"}
 
 // Parse validates the body of POST /{coll}/_aggregate. Every error has
 // the code invalid_pipeline.
@@ -198,6 +198,10 @@ func beforeGroup(name string, arg json.RawMessage, matches []json.RawMessage, so
 		}
 
 		return matches, arg, nil
+	}
+
+	if name == "$having" {
+		return nil, nil, invalid("$having filters the groups, after $group; before it, use $match")
 	}
 
 	return nil, nil, invalid("%s before $group is not supported: use $match and $sort", name)

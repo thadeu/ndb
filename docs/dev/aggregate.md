@@ -100,6 +100,7 @@ const res = await calls.aggregate<{ _id: string; n: number; avg: number }>(
 | Stage | Where | Meaning |
 |---|---|---|
 | `$match` | before and after `$group` | keep the documents (or groups) that match a filter |
+| `$having` | after `$group` | the same as `$match` there, named as in SQL: keep the groups that match (`{"calls": {"$gt": 10}}`). Before `$group` it is `invalid_pipeline`: use `$match`. |
 | `$sort` | before `$group` (once), after `$group` | order. Before the group it only decides `$first` and `$last`. |
 | `$group` | once | build one row per key, see below |
 | `$limit`, `$skip` | after `$group` | cut the group rows |
@@ -126,6 +127,32 @@ Missing and `null` are the same key. Groups come out sorted by `_id`.
 | `$avg` | sum / count of the numbers. No number gives `null`. |
 | `$min`, `$max` | lowest / highest value in the cross-type order. Nothing gives `null`. |
 | `$first`, `$last` | value of the first / last document of the group, in the order of the `$sort` before the group. |
+| `$distinct` | number of distinct values (`COUNT(DISTINCT)`, the `cardinality` of Elasticsearch), exact. Missing and `null` are not counted. |
+| `$addToSet` | the distinct values, as an array sorted in the cross-type order. Missing and `null` are left out. |
+
+The distinct values of `$distinct` and `$addToSet` count against `group_limit`: a group over it is `group_limit_exceeded`, not a wrong count.
+
+How many times each caller called, and the callers that called more than 10 times:
+
+```json
+{"pipeline": [
+  {"$match": {"type": "finishcall"}},
+  {"$group": {"_id": "$ani", "calls": {"$count": {}}}},
+  {"$having": {"calls": {"$gt": 10}}},
+  {"$sort": {"calls": -1}}
+]}
+```
+
+How many distinct callers each customer had, and which hangup causes:
+
+```json
+{"pipeline": [
+  {"$match": {"type": "finishcall"}},
+  {"$group": {"_id": "$customer", "callers": {"$distinct": "$ani"}, "causes": {"$addToSet": "$hangup_cause"}}},
+  {"$sort": {"callers": -1}},
+  {"$limit": 10}
+]}
+```
 
 ## Time buckets
 

@@ -858,6 +858,10 @@ func aggregations() []probe {
 		agg("talk time per customer, top 10", `[{"$match":{"type":"finishcall"}},{"$group":{"_id":"$customer","total":{"$sum":"$duration"},"max":{"$max":"$duration"}}},{"$sort":{"total":-1}},{"$limit":10}]`),
 		agg("hangup causes", `[{"$match":{"type":"finishcall"}},{"$group":{"_id":"$hangup_cause","n":{"$count":{}}}}]`),
 		agg("one customer per hour", `[{"$match":{"customer":"cust-042"}},{"$group":{"_id":{"$dateTrunc":{"date":"$ts","unit":"hour"}},"n":{"$count":{}}}}]`),
+		agg("distinct callers per customer, top 10 ($distinct)", `[{"$match":{"type":"finishcall"}},{"$group":{"_id":"$customer","callers":{"$distinct":"$caller"}}},{"$sort":{"callers":-1}},{"$limit":10}]`),
+		agg("distinct callers of all calls ($distinct)", `[{"$match":{"type":"finishcall"}},{"$group":{"_id":null,"callers":{"$distinct":"$caller"}}}]`),
+		agg("hangup causes of 5 customers ($addToSet)", `[{"$match":{"type":"finishcall"}},{"$group":{"_id":"$customer","causes":{"$addToSet":"$hangup_cause"}}},{"$sort":{"_id":1}},{"$limit":5}]`),
+		agg("customers with more calls than the mean ($having)", fmt.Sprintf(`[{"$match":{"type":"finishcall"}},{"$group":{"_id":"$customer","n":{"$count":{}}}},{"$having":{"n":{"$gt":%d}}},{"$sort":{"n":-1}}]`, *calls/400)),
 	}
 
 	if lay.by != "month" {
