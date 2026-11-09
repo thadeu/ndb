@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-11-09
+
 ### Changed
 
 - **Aggregations and scans are 2 to 3 times faster** (2 million documents in one partition): `events per type` 422 ms → 123 ms, `talk time per customer` 591 ms → 220 ms, `calls per customer` 495 ms → 179 ms, `long calls` (a scan) 412 ms → 281 ms, a `$lookup` dashboard 500 ms → 175 ms. A read of a row group for an aggregation decodes no `_id` (unless `$first` or `$last` needs the order), builds cells only for the rows a filter or an index kept, and reads `_rest` only when a kept row needs it; the strings of a column chunk are shared (a status or a type is one string per value, not per row); `$group` then `$sort` and `$limit` keeps only the first groups instead of sorting them all; reads use every core, and a collection with fewer segments than cores splits its segments into units of row groups. `make bench` budgets: slowest aggregation 160 ms, lookup 150 ms.
@@ -517,7 +519,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.12.1...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.13.0...HEAD
+[1.13.0]: https://github.com/thadeu/ndb/compare/v1.12.1...v1.13.0
 [1.12.1]: https://github.com/thadeu/ndb/compare/v1.12.0...v1.12.1
 [1.12.0]: https://github.com/thadeu/ndb/compare/v1.11.1...v1.12.0
 [1.11.1]: https://github.com/thadeu/ndb/compare/v1.11.0...v1.11.1
