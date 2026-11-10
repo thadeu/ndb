@@ -51,6 +51,87 @@ class StreamTest < Minitest::Test
     assert_equal 2, @stream.info["length"]
   end
 
+  def test_read_without_a_group
+    assert_raises(Ndb::UnknownCollection) { @stream.read }
+
+    ids = append_orders(1, 4)
+
+    all = @stream.read
+
+    assert_equal ids, all.map(&:id)
+    assert_equal({ "order" => 1, "total" => 10.0 }, all.first.doc)
+    assert_instance_of Time, all.first.time
+
+    assert_equal ids[2..], @stream.read(after: ids[1]).map(&:id)
+    assert_equal [ids[0]], @stream.read(after: Ndb::Stream::START_ALL, count: 1).map(&:id)
+    assert_equal [{ "order" => 4 }], @stream.read(after: ids[2], fields: ["order"]).map(&:doc)
+
+    assert_empty @stream.read(after: ids.last)
+    assert_empty @stream.read(after: Ndb::Stream::START_NEW)
+    assert_empty @stream.group("workers").tap(&:create).pending_list
+  end
+
+  def test_read_without_a_group_blocks_until_an_append
+    append_orders(1, 1)
+
+    writer = Thread.new do
+      sleep 0.2
+
+      @stream.append({ order: 7 })
+    end
+
+    started = now
+    got = @stream.read(after: Ndb::Stream::START_NEW, block: 5)
+
+    assert_equal [writer.value], got.map(&:id)
+    assert_operator now - started, :<, 4
+
+    assert_empty @stream.read(after: got.last.id, block: 0.05)
+  end
+
+  def test_blocking_read_without_a_group_outlives_the_client_timeout
+    short = Ndb::Client.new(socket: TestDaemon.socket, timeout: 0.3)
+
+    append_orders(1, 1)
+
+    started = now
+
+    assert_empty short.stream(@stream.name).read(after: Ndb::Stream::START_NEW, block: 0.8)
+    assert_operator now - started, :>=, 0.7
+  end
+
+  def test_claim_options
+    group = @stream.group("workers")
+
+    group.create(Ndb::Stream::START_ALL)
+
+    ids = append_orders(1, 2)
+
+    group.read("w1", count: 1)
+
+    just = group.claim("w2", ids[0], just_ids: true)
+
+    assert_equal [ids[0]], just.entries
+    assert_equal 1, group.pending_list.first["deliveries"]
+
+    forced = group.claim("w2", ids[1], force: true, retry_count: 5, idle: 90)
+
+    assert_equal [ids[1]], forced.entries.map(&:id)
+
+    row = group.pending_list(start: ids[1], stop: ids[1]).first
+
+    assert_equal 5, row["deliveries"]
+    assert_operator row["idle_ms"], :>=, 90_000
+
+    assert_equal ids, group.auto_claim("w3", just_ids: true).entries
+  end
+
+  def test_group_create_with_no_create
+    group = client.stream(NdbTestHelpers.next_name).group("workers")
+
+    assert_raises(Ndb::UnknownCollection) { group.create(Ndb::Stream::START_NEW, no_create: true) }
+  end
+
   def test_not_a_stream
     name = NdbTestHelpers.next_name
 

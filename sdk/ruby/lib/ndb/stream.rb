@@ -36,6 +36,10 @@ module Ndb
     # The group reads every entry of the stream (0).
     START_ALL = "0"
 
+    # A blocking read waits this many seconds more than block before the
+    # client gives up on the answer.
+    BLOCK_MARGIN = 5
+
     attr_reader :client, :name
 
     # The time of an entry ID (its ms part), or nil for a bad ID.
@@ -110,6 +114,17 @@ module Ndb
       range_of(start, stop, count, -1)
     end
 
+    # Up to count entries with an ID greater than after, in ID order, without
+    # a group (XREAD). after is an ID ("0": from the start) or "$": only the
+    # entries appended after the request starts. block (seconds, a Float is
+    # fine) waits for an entry when there is none. To read on, give the last
+    # ID of the answer as after (not "$" again). Returns an Array of Entry.
+    def read(after: START_ALL, count: nil, block: nil, fields: nil)
+      body = { after: after, count: count, fields: fields }.compact
+
+      entries("_streams/read", body, **block_options(body, block))
+    end
+
     # Removes one entry by ID (XDEL). Returns 1, or 0 when it is not there.
     def delete(id)
       call("DELETE", "_doc/#{@client.escape_segment(id)}", nil).fetch("deleted")
@@ -130,6 +145,18 @@ module Ndb
       rows = call("POST", action, body, timeout: timeout) || []
 
       rows.map { |row| Entry.from(row) }
+    end
+
+    # Puts block (seconds) in body as block_ms. Returns the options of the
+    # request: a read timeout long enough for the wait.
+    def block_options(body, block)
+      block_ms = block ? (block * 1000).round : 0
+
+      return {} unless block_ms.positive?
+
+      body[:block_ms] = block_ms
+
+      { timeout: [@client.timeout, block + BLOCK_MARGIN].max }
     end
 
     private
@@ -160,9 +187,7 @@ module Ndb
   # One consumer group of a stream. Each entry goes to one consumer of the
   # group and stays pending until it is acked.
   class Group
-    # A blocking read waits this many seconds more than block before the
-    # client gives up on the answer.
-    BLOCK_MARGIN = 5
+    BLOCK_MARGIN = Stream::BLOCK_MARGIN
 
     attr_reader :stream, :name
 
@@ -173,9 +198,13 @@ module Ndb
 
     # Makes the group (XGROUP CREATE ... MKSTREAM). start is Stream::START_NEW
     # ("$"), Stream::START_ALL ("0") or an ID. A group that exists raises
-    # GroupExists.
-    def create(start = Stream::START_NEW)
-      @stream.call("PUT", path, { start: start })
+    # GroupExists. no_create: true raises UnknownCollection when the stream
+    # does not exist.
+    def create(start = Stream::START_NEW, no_create: false)
+      body = { start: start }
+      body[:no_create] = true if no_create
+
+      @stream.call("PUT", path, body)
     end
 
     # Makes the group, or does nothing when it exists.
@@ -221,12 +250,7 @@ module Ndb
       body[:pending] = true if pending
       body[:no_ack] = true if no_ack
 
-      block_ms = block ? (block * 1000).round : 0
-      body[:block_ms] = block_ms if block_ms.positive?
-
-      timeout = block_ms.positive? ? [@stream.client.timeout, block + BLOCK_MARGIN].max : nil
-
-      @stream.entries(path("read"), body, timeout: timeout)
+      @stream.entries(path("read"), body, **@stream.block_options(body, block))
     end
 
     # Ends the work on the entries. Returns how many were pending (XACK). An
@@ -257,14 +281,26 @@ module Ndb
 
     # Moves the entries idle for at least min_idle seconds to consumer
     # (XCLAIM). Each one gets one more delivery. Returns a Claimed.
-    def claim(consumer, *ids, min_idle: 0)
-      claim_with(consumer: consumer, min_idle_ms: (min_idle * 1000).round, ids: ids.flatten)
+    # idle: (seconds) sets the idle time of the entries; retry_count: sets
+    # their delivery count; force: true also takes an ID that is not pending.
+    # just_ids: true gives IDs (Strings) as entries, and the delivery count
+    # does not change.
+    def claim(consumer, *ids, min_idle: 0, idle: nil, retry_count: nil, force: false, just_ids: false)
+      body = { consumer: consumer, min_idle_ms: (min_idle * 1000).round, ids: ids.flatten }
+      body[:idle_ms] = (idle * 1000).round if idle
+      body[:retry_count] = retry_count if retry_count
+      body[:force] = true if force
+
+      claim_with(body, just_ids)
     end
 
     # Scans the pending list from cursor and moves up to count entries idle
-    # for at least min_idle seconds to consumer (XAUTOCLAIM).
-    def auto_claim(consumer, min_idle: 0, cursor: "0-0", count: nil)
-      claim_with({ consumer: consumer, min_idle_ms: (min_idle * 1000).round, cursor: cursor, count: count }.compact)
+    # for at least min_idle seconds to consumer (XAUTOCLAIM). just_ids: as
+    # in #claim.
+    def auto_claim(consumer, min_idle: 0, cursor: "0-0", count: nil, just_ids: false)
+      body = { consumer: consumer, min_idle_ms: (min_idle * 1000).round, cursor: cursor, count: count }.compact
+
+      claim_with(body, just_ids)
     end
 
     private
@@ -275,9 +311,11 @@ module Ndb
       segments.join("/")
     end
 
-    def claim_with(body)
+    def claim_with(body, just_ids = false)
+      body[:just_ids] = true if just_ids
+
       out = @stream.call("POST", path("claim"), body)
-      entries = (out["entries"] || []).map { |row| Entry.from(row) }
+      entries = (out["entries"] || []).map { |row| row.is_a?(Hash) ? Entry.from(row) : row }
 
       Claimed.new(cursor: out["cursor"], entries: entries, deleted: out["deleted"] || [])
     end
