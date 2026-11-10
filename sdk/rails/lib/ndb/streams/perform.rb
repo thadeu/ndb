@@ -12,21 +12,13 @@ module Ndb
         # logged and the call returns :discarded, so the entry is acked.
         # Any other error goes to the caller.
         def call(klass, event)
-          wrap do
-            klass = Streams.current(klass)
-            options = klass.stream_options
-            payload = { stream: klass.stream_name, group: options[:group], class: klass, event: event }
+          run(klass, event).first
+        end
 
-            begin
-              Streams.instrument("perform.ndb_streams", payload) { chain(klass, event).call }
-
-              :done
-            rescue *options[:discard_on] => e
-              Streams.logger.warn("ndb streams: #{klass.stream_label} discarded #{event.id}: #{e.class}: #{e.message}")
-
-              :discarded
-            end
-          end
+        # perform_now: the same path as a delivery, and the value that
+        # perform returns (nil when discarded).
+        def now(klass, event)
+          run(klass, event).last
         end
 
         # Inline mode: gives the new entries to each consumer of the stream.
@@ -49,6 +41,25 @@ module Ndb
         end
 
         private
+
+        # Returns [:done, value of perform] or [:discarded, nil].
+        def run(klass, event)
+          wrap do
+            klass = Streams.current(klass)
+            options = klass.stream_options
+            payload = { stream: klass.stream_name, group: options[:group], class: klass, event: event }
+
+            begin
+              value = Streams.instrument("perform.ndb_streams", payload) { chain(klass, event).call }
+
+              [:done, value]
+            rescue *options[:discard_on] => e
+              Streams.logger.warn("ndb streams: #{klass.stream_label} discarded #{event.id}: #{e.class}: #{e.message}")
+
+              [:discarded, nil]
+            end
+          end
+        end
 
         def wrap(&block)
           app = Streams.rails_app

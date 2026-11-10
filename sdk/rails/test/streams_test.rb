@@ -157,6 +157,44 @@ class StreamsTest < Minitest::Test
     assert_equal [second], Ndb::Streams.classes
   end
 
+  def test_perform_now_runs_the_delivery_path_with_no_request
+    seen = []
+
+    klass = stream_class("perform_now_#{NdbTestHelpers.next_name}", group: :billing, discard_on: [KeyError]) do
+      around_perform { |event, block| seen << [:around, event[:n]] && block.call }
+
+      define_method(:perform) do |event|
+        raise KeyError, "missing" if event[:n] == 0
+
+        seen << [event[:n], event["n"], event.id, event.deliveries, event.time.class]
+
+        event[:n] * 10
+      end
+    end
+
+    assert_equal 70, klass.perform_now(n: 7)
+    assert_equal 30, klass.perform_now('{"n":3}', _id: "1731163600000-0", _deliveries: 3)
+    assert_nil klass.perform_now(n: 0)
+
+    assert_equal [:around, 7], seen[0]
+    assert_equal [7, 7, seen[1][2], 1, Time], seen[1]
+    assert_equal [3, 3, "1731163600000-0", 3, Time], seen[3]
+    assert_equal 0, klass.count
+  end
+
+  def test_perform_now_needs_a_consumer_and_one_entry
+    writer = stream_class
+
+    assert_raises(ArgumentError) { writer.perform_now(n: 1) }
+
+    consumer = stream_class(writer.stream_name, group: :billing) { def perform(event) = event[:n] }
+
+    assert_raises(ArgumentError) { consumer.perform_now([{ n: 1 }, { n: 2 }]) }
+    assert_raises(ArgumentError) { consumer.perform_now(42) }
+    assert_raises(ArgumentError) { consumer.perform_now(n: 1, _bad: 2) }
+    assert_equal 5, consumer.perform_now({ "n" => 5 })
+  end
+
   def test_a_class_without_perform_is_a_writer
     writer = stream_class
     consumer = stream_class(writer.stream_name, group: :billing) { def perform(_event) = nil }

@@ -663,6 +663,22 @@ end
 - Delivery is at least once: after a crash or a retry, an entry can come again. Make `perform` safe to repeat.
 - A deleted entry (a trim or a delete while it was pending) is acked without a `perform`.
 
+### perform_now
+
+Runs `perform` on one payload now, in the caller's thread, with no request: nothing is written to ndb and nothing is acked. It takes the path of a delivery (the Rails reloader, `around_perform`, `discard_on`) and returns the value of `perform` (`nil` when `discard_on` took the error). Use it in a unit test, or to run one entry by hand in a console.
+
+```ruby
+PostCallJob.perform_now(call_id: 42)                       # the fields as keywords
+PostCallJob.perform_now({ "call_id" => 42 })               # a Hash
+PostCallJob.perform_now('{"call_id":42}')                  # a JSON string
+PostCallJob.perform_now(call_id: 42, _id: "1731163600000-0", _deliveries: 3)
+```
+
+- `_id` and `_deliveries` set `event.id` and `event.deliveries` (default: an ID of now, and 1). They are not payload fields: a name that starts with `_` is reserved in a stream.
+- An error of `perform` (not one of `discard_on`) goes to the caller. There is no retry, no dead letter and no group.
+- A class without `perform` (a writer) raises `ArgumentError`, and so does an Array (one entry only).
+- To test the whole path, with the append and the consumers of the stream, use `Ndb::Streams.inline!` (see [Test the streams](#test-the-streams)).
+
 ### around_perform
 
 ```ruby
@@ -870,6 +886,7 @@ require "ndb/rails/minitest"
 Ndb::Streams.inline!
 ```
 
+- **`PostCallJob.perform_now(...)`** runs one consumer on one payload, with no ndb: see [perform_now](#perform-now).
 - **`Ndb::Streams.inline!`**: an append writes the entry, then calls `perform` of each consumer class of that stream, in the same thread. No `ndb streams` process is necessary. `Ndb::Streams.inline = false` turns it off.
 - In inline mode, an error in `perform` goes to the caller of `append` (an error of `discard_on` is only logged). `event.deliveries` is 1. There is no retry and no dead letter, and the groups are not used.
 - The first inline `append` loads `app/streams` (in the reloader of the app), so the consumers are there also right after the boot, when the app does not eager load.

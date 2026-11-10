@@ -111,6 +111,39 @@ module Ndb
       alias enqueue append
       alias perform_async append
 
+      # Runs perform on one payload now, in this thread, with no request:
+      # nothing is written to ndb and nothing is acked. It takes the path of
+      # a delivery (the Rails reloader, around_perform, discard_on) and
+      # returns the value of perform (nil when discard_on took the error).
+      # For a test, or one entry by hand in a console.
+      #
+      # The payload is a Hash, a JSON string or the fields as keywords. The
+      # names that start with _ are not payload fields (they are reserved in
+      # a stream): _id is the entry ID of the event, _deliveries its count.
+      #
+      #   PostCallJob.perform_now(call_id: 42)
+      #   PostCallJob.perform_now({ "call_id" => 42 }, _id: "1731163600000-0", _deliveries: 3)
+      #   PostCallJob.perform_now('{"call_id":42}')
+      def perform_now(payload = nil, **fields)
+        raise ArgumentError, "#{stream_label} has no perform: perform_now runs a consumer" unless stream_consumer?
+
+        meta = fields.select { |key, _| key.to_s.start_with?("_") }
+        fields = fields.reject { |key, _| meta.key?(key) }
+        docs, many = Options.payload(payload.nil? ? fields : payload)
+
+        raise ArgumentError, "perform_now takes one entry, not an Array" if many
+
+        unknown = meta.keys.map(&:to_s) - %w[_id _deliveries]
+
+        raise ArgumentError, "perform_now: unknown option #{unknown.first}" if unknown.any?
+
+        id = meta[:_id] || "#{Process.clock_gettime(Process::CLOCK_REALTIME, :millisecond)}-0"
+        payload = JSON.parse(JSON.generate(docs.first)).reject { |key, _| key.start_with?("_") }
+        event = Event.new(id: id.to_s, payload: payload, deliveries: meta.fetch(:_deliveries, 1))
+
+        Perform.now(self, event)
+      end
+
       # The newest entry, or nil. With n: the n newest entries, oldest first.
       def last(count = nil)
         events = read_events { |stream| stream.rev_range(count: count || 1) }
