@@ -186,6 +186,15 @@ session.persist_ttl!         # PERSIST: removes the expiry
 
 Relations are lazy and immutable. The request goes out when you call `to_a`, `first`, `each`, `count` and so on.
 
+`to_ndb` gives the JSON body that a relation sends to the daemon (`POST /{collection}/_search`), with no request, like `to_sql` in ActiveRecord:
+
+```ruby
+Call.where(status: "failed").order(created_at: :desc).limit(10).to_ndb
+# => {"query":{"status":"failed"},"sort":{"created_at":-1},"limit":10,"versions":true}
+
+puts Call.where(status: "failed").to_ndb(pretty: true)
+```
+
 ```ruby
 Call.where(status: "answered")
 Call.where(status: %w[answered failed])      # $in
@@ -905,6 +914,7 @@ Every public method of the gem, grouped. The names and return values follow Acti
 | `group(*fields)` | a relation for `count`/`sum`/... by group |
 | `find(id)`, `find(id1, id2)` | a record, or an Array; `Ndb::NotFound` when missing |
 | `find_by(hash)`, `find_by!(hash)`, `find_by_<attr>[_and_<attr>](values)` | a record or `nil` (`!`: `Ndb::NotFound`) |
+| `to_ndb`, `to_ndb(pretty: true)` | the JSON body of the search, as a String; no request |
 | `first`, `first(n)`, `last`, `last(n)` | a record or `nil`, or an Array. The daemon gives only `n` rows. With no `order`, the order is `_id` (first and last are its two ends). On a relation with `limit`, `offset` or `page`, or a loaded one, `last` uses the loaded rows. |
 | `to_a`, `each`, `map`... (Enumerable), `load`, `loaded?`, `records` | the records (one call, then memory) |
 | `size`, `length`, `empty?` | from the loaded records, else a count |

@@ -82,6 +82,18 @@ module Ndb
       with(group: fields.flatten.map(&:to_s))
     end
 
+    # The JSON body that this relation sends to the daemon, as a String,
+    # with no request (like to_sql of ActiveRecord). It is the body of
+    # POST /{collection}/_search; pretty: true gives it on many lines.
+    #
+    #   Call.where(status: "failed").order(created_at: :desc).limit(10).to_ndb
+    #   # => {"query":{"status":"failed"},"sort":{"created_at":-1},"limit":10,"versions":true}
+    def to_ndb(pretty: false)
+      body = to_query.merge("versions" => true)
+
+      pretty ? JSON.pretty_generate(body) : JSON.generate(body)
+    end
+
     # The find body: JSON only, the daemon decides what it means.
     def to_query
       query = {}

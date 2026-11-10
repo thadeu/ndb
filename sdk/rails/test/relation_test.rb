@@ -92,6 +92,23 @@ class RelationTest < Minitest::Test
     assert_equal [1, 1], bodies.first(2).map { |body| body["limit"] }
   end
 
+  def test_to_ndb_gives_the_body_and_sends_nothing
+    bodies = spy_finds
+    relation = @post.where(status: "odd").order(n: :desc).limit(2)
+
+    assert_equal '{"query":{"status":"odd"},"sort":{"n":-1},"limit":2,"versions":true}', relation.to_ndb
+    assert_equal JSON.parse(relation.to_ndb), JSON.parse(relation.to_ndb(pretty: true))
+    assert_includes relation.to_ndb(pretty: true), "\n"
+    assert_equal '{"versions":true}', @post.to_ndb
+    refute_predicate relation, :loaded?
+    assert_empty bodies
+
+    relation.to_a
+
+    # ndb_find adds "versions" to the body it is given.
+    assert_equal JSON.parse(relation.to_ndb), bodies.first.merge("versions" => true)
+  end
+
   def test_exists_pluck_count
     assert @post.where(n: 1).exists?
     refute @post.where(n: 99).exists?
