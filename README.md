@@ -45,44 +45,43 @@ Or build from source. You need Go 1.26 or newer.
 git clone https://github.com/thadeu/ndb && cd ndb
 make build                                  # static binary in bin/ndb
 
-mkdir -p /tmp/ndb
-bin/ndb -data-dir /tmp/ndb/data -unix /tmp/ndb/ndb.sock
+bin/ndb serve                               # data in ~/.ndb, HTTP on 127.0.0.1:7070
 ```
 
 ## Quick start (5 minutes)
 
-Keep the daemon running, and open a second terminal.
+Keep `ndb serve` running, and open a second terminal.
 
 ```bash
-alias nq='curl -s --unix-socket /tmp/ndb/ndb.sock -H "Content-Type: application/json"'
-
 # 1. Is it ready?
-nq http://ndb/_health
+curl localhost:7070/_health
 # {"status":"ok"}
 
 # 2. Insert. The first insert creates the collection.
-nq -X POST http://ndb/calls/_bulk -d '{"docs":[
+curl localhost:7070/calls/_bulk -d '{"docs":[
   {"_id":"c1","status":"answered","dnis":"1133","duration":42,"ts":"2026-11-04T12:00:00Z"},
   {"_id":"c2","status":"failed","dnis":"1144","duration":0,"ts":"2026-11-04T12:30:00Z"},
   {"_id":"c3","status":"answered","dnis":"1133","duration":90,"ts":"2026-11-04T13:10:00Z"}]}'
 # {"results":[{"_id":"c1","_v":1},{"_id":"c2","_v":1},{"_id":"c3","_v":1}]}
 
 # 3. Search. The answer is a JSON array of documents.
-nq -X POST http://ndb/calls/_search -d '{"query":{"status":"answered"},"sort":{"ts":-1},"limit":10}'
+curl localhost:7070/calls/_search -d '{"query":{"status":"answered"},"sort":{"ts":-1},"limit":10}'
 # [{"_id":"c3","status":"answered",...},{"_id":"c1","status":"answered",...}]
 
 # 4. Aggregate: calls by status and hour.
-nq -X POST http://ndb/calls/_aggregate -d '{"pipeline":[
+curl localhost:7070/calls/_aggregate -d '{"pipeline":[
   {"$group":{"_id":{"status":"$status","hour":{"$dateTrunc":{"date":"$ts","unit":"hour"}}},
              "n":{"$count":{}},"avg":{"$avg":"$duration"}}},
   {"$sort":{"_id":1}}]}'
 
 # 5. Declare an index (optional), then look at the collection.
-nq -X PUT http://ndb/calls -d '{"time":"ts","indexes":["status"]}'
-nq http://ndb/calls/_stats
+curl -X PUT localhost:7070/calls -d '{"time":"ts","indexes":["status"]}'
+curl localhost:7070/calls/_stats
 ```
 
-Stop the daemon with Ctrl-C. It finishes the running requests, then closes. Start it again with the same `-data-dir` and the data is there.
+`curl -d` sends a POST, so only the PUT needs `-X`. The same calls work on the unix socket: `curl --unix-socket ~/.ndb/ndb.sock http://ndb/_health`.
+
+Stop the daemon with Ctrl-C. It finishes the running requests, then closes. Run `ndb serve` again and the data is there.
 
 Next: [docs/dev/query.md](docs/dev/query.md) for the query language, and [docs/dev/clients.md](docs/dev/clients.md) for Go, Rails and TypeScript.
 
