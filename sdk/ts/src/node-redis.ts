@@ -233,6 +233,11 @@ function trimOf(strategy: 'MAXLEN' | 'MINID' | undefined, threshold: number | st
 
   const trim: TrimOptions = strategy === 'MINID' ? { minId: String(threshold) } : { maxLen: integer(threshold, 'MAXLEN') }
 
+  // Redis takes LIMIT only with "~".
+  if (limit !== undefined && modifier !== '~') {
+    throw syntaxError('syntax error, LIMIT cannot be used without the special ~ option')
+  }
+
   trim.approx = modifier === '~'
   trim.limit = limit
 

@@ -1,4 +1,4 @@
-import { NdbError } from './errors.js'
+import { NdbError, UnknownGroupError } from './errors.js'
 import type { Entry, Group } from './stream.js'
 
 // Does the work on one entry. It resolves to ack the entry. A throw leaves it
@@ -24,7 +24,8 @@ export interface WorkOptions {
   // The stream that gets the poison messages, as a DeadEntry.
   deadLetter?: string
   // Gets the errors that do not stop the worker: a failed read, a handler
-  // error, a poison message (PoisonError).
+  // error, a poison message (PoisonError). An error that onError throws is
+  // ignored: it does not stop the worker or its acks.
   onError?: (err: unknown) => void
   // Stops the worker. Without it, the worker runs forever.
   signal?: AbortSignal
@@ -62,6 +63,7 @@ interface Settings {
 }
 
 function settingsOf(opts: WorkOptions): Settings {
+  const onError = opts.onError ?? (() => {})
   const claimIdleMs = opts.claimIdleMs === undefined || opts.claimIdleMs === 0 ? 60_000 : opts.claimIdleMs
   const claimEveryMs = opts.claimEveryMs && opts.claimEveryMs > 0 ? opts.claimEveryMs : Math.max(claimIdleMs / 2, 1000)
 
@@ -72,7 +74,14 @@ function settingsOf(opts: WorkOptions): Settings {
     claimEveryMs,
     maxDeliveries: opts.maxDeliveries ?? 0,
     deadLetter: opts.deadLetter ?? '',
-    report: opts.onError ?? (() => {}),
+    report: (err) => {
+      // A throw in onError must not drop the acks of the batch.
+      try {
+        onError(err)
+      } catch {
+        // Nothing to do: onError is the place for errors.
+      }
+    },
     signal: opts.signal ?? new AbortController().signal,
   }
 }
@@ -94,19 +103,12 @@ function wrap(what: string, err: unknown): Error {
 //     the ones delivered maxDeliveries times to deadLetter.
 //
 // Delivery is at least once: the work on an entry must be safe to repeat.
-// The group must exist (Group.ensure).
+// The group must exist (Group.ensure): when it does not exist at the start,
+// the promise rejects with UnknownGroupError.
 export async function workGroup<T>(g: Group<T>, consumer: string, h: Handler<T>, opts: WorkOptions): Promise<void> {
   const w = settingsOf(opts)
 
-  try {
-    await workPending(g, consumer, h, w)
-  } catch (err) {
-    if (w.signal.aborted) {
-      return
-    }
-
-    throw err
-  }
+  await workPending(g, consumer, h, w)
 
   let nextClaim = Date.now() + w.claimEveryMs
   let backoff = 0
@@ -145,12 +147,37 @@ export async function workGroup<T>(g: Group<T>, consumer: string, h: Handler<T>,
 }
 
 // workPending does the work on the consumer's own pending entries, in ID
-// order. An entry that fails stays pending; the loop moves past it.
+// order. An entry that fails stays pending; the loop moves past it. A read
+// that fails is reported and tried again after a wait, as in the main loop.
+// Only a group that does not exist rejects: a retry does not fix it.
 async function workPending<T>(g: Group<T>, consumer: string, h: Handler<T>, w: Settings): Promise<void> {
   let after = '0'
+  let backoff = 0
 
   while (!w.signal.aborted) {
-    const entries = await g.read(consumer, { pending: true, after, count: w.count, signal: w.signal })
+    let entries: Entry<T>[]
+
+    try {
+      entries = await g.read(consumer, { pending: true, after, count: w.count, signal: w.signal })
+    } catch (err) {
+      if (w.signal.aborted) {
+        return
+      }
+
+      if (err instanceof UnknownGroupError || (err instanceof NdbError && err.code === 'unknown_collection')) {
+        throw err
+      }
+
+      w.report(wrap(`pending read ${g.stream.name}/${g.name}`, err))
+
+      backoff = Math.min(Math.max(backoff * 2, 100), 5000)
+
+      await sleep(backoff, w.signal)
+
+      continue
+    }
+
+    backoff = 0
 
     if (entries.length === 0) {
       return
@@ -283,6 +310,12 @@ async function handle<T>(g: Group<T>, h: Handler<T>, w: Settings, entries: Entry
 
       done.push(e.id)
     } catch (err) {
+      // A stop (the signal aborted) is not a failure of the entry: it stays
+      // pending, with no report and no bury, and the worker stops.
+      if (w.signal.aborted) {
+        break
+      }
+
       w.report(wrap(`handler ${g.stream.name}/${g.name} ${e.id}`, err))
 
       const n = counts.get(e.id) ?? 1

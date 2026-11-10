@@ -620,7 +620,8 @@ await g.work('worker-1', async (entry, signal) => {
 Notes:
 
 - The handler is `(entry, signal) => unknown`. When it resolves, the entry is acked. When it throws, the entry stays pending, and `onError` gets the error.
-- The group must exist. Call `ensure()` first.
+- A throw after the signal aborted is a stop, not a failure: the entry stays pending for the next start. `onError` does not get it, and the entry does not go to the dead letter.
+- The group must exist. Call `ensure()` first. When it does not exist, `work` rejects with `UnknownGroupError`. Other errors of the first read (of the pending entries) go to `onError`, and the worker tries again, as for a read of new entries.
 - Options and defaults:
   - `count`: the most entries per read. Default 10.
   - `blockMs`: how long a read waits for new entries. Default 5000.
@@ -628,7 +629,7 @@ Notes:
   - `claimEveryMs`: default `claimIdleMs / 2`, at least 1000.
   - `maxDeliveries`: default 0 (no limit).
   - `deadLetter`: the stream name for poison messages. Default none.
-  - `onError`: gets the errors that do not stop the worker: a failed read (the worker then waits, from 100 ms up to 5 s), a handler error, a failed ack or claim, and a `PoisonError`.
+  - `onError`: gets the errors that do not stop the worker: a failed read (the worker then waits, from 100 ms up to 5 s), a handler error, a failed ack or claim, and a `PoisonError`. An error that `onError` throws is ignored: the worker and its acks go on.
   - `signal`: an `AbortSignal` that stops the worker. Without it, the worker runs forever.
 - Stop: abort the signal. The abort also ends a blocked read. The acks of the work that is done are still sent.
 - Poison message: an entry that fails on its `maxDeliveries`-th delivery. At that failure, when `deadLetter` is set, the worker appends a `DeadEntry` to that stream: `{ stream, group, id, deliveries, doc }`. Then it acks the entry, and `onError` gets a `PoisonError` (with `id` and `deliveries`). Without `deadLetter`, the entry is only acked and reported.
@@ -695,6 +696,7 @@ await streams.xack('orders', 'billing', '1731164400000-0')
 | `xinfo` | `STREAM key`, `GROUPS key`, `CONSUMERS key group` | flat `[name, value, ...]` arrays, with the field names of Redis |
 
 - The return types are those of ioredis: `unknown[]` for `xreadgroup`, `xpending`, `xclaim` and `xautoclaim`; `unknown` for `xgroup` and `xinfo`. The subpath exports `EntryReply`, `PendingEntryReply`, `StreamsReply` and `GroupStreamsReply` for a cast.
+- The option words go in any order where Redis takes them: `xadd key MAXLEN 10 NOMKSTREAM * f v`, `xautoclaim ... JUSTID COUNT 5`, `xgroup CREATE key g $ ENTRIESREAD 0 MKSTREAM`.
 - There are no `Buffer` variants (`xreadBuffer`, ...).
 
 ### node-redis
@@ -784,13 +786,15 @@ try {
 - **Values are text.** Redis keeps strings, so the adapters give every value as a string, and they store the values of `xadd` as strings. An entry that other ndb code appended with JSON types comes back as text: `42` is `'42'`, `true` is `'true'`, and `null`, an array or an object are JSON text.
 - **Field order.** The daemon gives the fields of an entry in name order, not in the order of the `xadd`. A field name that starts with `_` is reserved, and a field name given two times is kept one time.
 - **Stream names.** A stream is an ndb collection, so its name follows the rules of a collection name. `orders:eu` is not a valid name.
-- **One stream for each request.** `xread` and `xreadgroup` with many streams send one request for each stream. With `BLOCK` and more than one stream they throw (`not_supported`).
-- **No `COUNT`.** Redis gives every entry. The adapters give at most 10 000 in one read (`xrange` has no limit).
+- **One stream for each request.** `xread` and `xreadgroup` with many streams send one request for each stream. With `BLOCK` and more than one stream they throw (`not_supported`). Before an `xreadgroup` of `>` on many streams, the adapters check the group of each stream, so a `NOGROUP` on one stream gives nothing from the others, as in Redis.
+- **No `COUNT`, or `COUNT 0` or less.** Redis gives every entry. The adapters give at most 10 000 in one read (`xrange` has no limit). A `COUNT` over 10 000 is read as 10 000.
 - **`BLOCK 0`** waits with no limit, as in Redis: the adapter repeats a 30 s read. A blocked `xread` on a stream that does not exist looks for it each 500 ms.
 - **Not supported** (the call throws): `XREAD` with the ID `+`, `XREADGROUP ... CLAIM`, `XCLAIM ... TIME`, `XINFO STREAM ... FULL`, `XGROUP HELP` and `XINFO HELP`, the Redis 8.2 options `DELREF` and `ACKED`, and the idempotent `XADD` options. `LASTID` and `KEEPREF` are read and have no effect.
 - **Not there:** `XSETID`, `XACKDEL`, `XDELEX`, the `Buffer` variants of ioredis, pipelines and `MULTI`. The object has only the methods of the tables.
 - **`xinfo`:** `radix-tree-keys` and `radix-tree-nodes` are `0`.
 - **A range of `xpending`** does not take `(id`.
+- **Errors in the arguments** are those of Redis: a negative `BLOCK` (`ERR timeout is negative`), `LIMIT` without `~`, an argument after the end of `xtrim`, and a number that is not decimal digits (`0x10`, `5000.0`).
+- **`(id` without a seq** in `xrange` is read as in Redis: `(1000` as a start leaves out only `1000-0`, and `(2000` as an end leaves out only `2000-<max seq>`.
 
 ## Admin and blobs
 

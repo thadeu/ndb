@@ -18,6 +18,14 @@ interface Backend {
 
 const idShape = /^\d+-\d+$/
 
+// The commands with no argument types: the ioredis types do not take every
+// order of options that Redis takes.
+type Loose = Record<keyof IoredisStreams, (...args: unknown[]) => Promise<unknown>>
+
+function loose(c: Commands): Loose {
+  return c as unknown as Loose
+}
+
 function suite(name: string, open: () => Backend): void {
   describe(`ioredis commands on ${name}`, () => {
     const keys: string[] = []
@@ -304,6 +312,92 @@ function suite(name: string, open: () => Backend): void {
 
       expect(await streams.xautoclaim(key, 'g', 'w2', 0, '0')).toEqual(['0-0', [['1-2', ['order', '2', 'total', '20']]], ['1-1']])
       expect(await streams.xpending(key, 'g')).toEqual([1, '1-2', '1-2', [['w2', '1']]])
+    })
+
+    it('reads "(ms" as Redis does at the two ends of a range', async () => {
+      const key = newKey()
+
+      for (const id of ['1000-0', '1000-5', '2000-3', '3000-0']) {
+        await streams.xadd(key, id, 'a', '1')
+      }
+
+      const ids = (rows: [string, string[]][]) => rows.map((row) => row[0])
+
+      expect(ids(await streams.xrange(key, '(1000', '+'))).toEqual(['1000-5', '2000-3', '3000-0'])
+      expect(ids(await streams.xrange(key, '(2000', '+'))).toEqual(['2000-3', '3000-0'])
+      expect(ids(await streams.xrange(key, '-', '(2000'))).toEqual(['1000-0', '1000-5', '2000-3'])
+      expect(ids(await streams.xrange(key, '-', '(3000'))).toEqual(['1000-0', '1000-5', '2000-3', '3000-0'])
+      expect(ids(await streams.xrevrange(key, '(2000', '-'))).toEqual(['2000-3', '1000-5', '1000-0'])
+      expect(ids(await streams.xrevrange(key, '+', '(2000'))).toEqual(['3000-0', '2000-3'])
+
+      await expect(streams.xrange(key, '-', '(0-0')).rejects.toThrow(/^ERR invalid end ID for the interval/)
+    })
+
+    it('reads every entry with no COUNT, COUNT 0 or a COUNT over the limit', async () => {
+      const key = newKey()
+
+      await streams.xgroup('CREATE', key, 'g', '0', 'MKSTREAM')
+
+      for (let i = 1; i <= 15; i++) {
+        await streams.xadd(key, `${i}-1`, 'i', String(i))
+      }
+
+      const size = (reply: unknown) => (reply as [string, unknown[]][])[0]![1].length
+
+      expect(size(await streams.xread('STREAMS', key, '0'))).toBe(15)
+      expect(size(await streams.xread('COUNT', 0, 'STREAMS', key, '0'))).toBe(15)
+      expect(size(await streams.xread('COUNT', -1, 'STREAMS', key, '0'))).toBe(15)
+      expect(size(await streams.xread('COUNT', 20_000, 'STREAMS', key, '0'))).toBe(15)
+      expect(size(await streams.xreadgroup('GROUP', 'g', 'w1', 'COUNT', 0, 'STREAMS', key, '>'))).toBe(15)
+    })
+
+    it('rejects a negative BLOCK', async () => {
+      const key = await orders()
+
+      await streams.xgroup('CREATE', key, 'g', '0')
+
+      await expect(streams.xread('BLOCK', -1, 'STREAMS', key, '$')).rejects.toThrow(/^ERR timeout is negative/)
+      await expect(streams.xreadgroup('GROUP', 'g', 'w1', 'BLOCK', -1, 'STREAMS', key, '>')).rejects.toThrow(/^ERR timeout is negative/)
+    })
+
+    it('rejects bad trim and number arguments', async () => {
+      const key = await orders()
+
+      await expect(loose(streams).xtrim(key, 'MAXLEN', 1, 'garbage')).rejects.toThrow(/^ERR syntax error/)
+      await expect(loose(streams).xtrim(key, 'MAXLEN', 0, 'LIMIT', 10)).rejects.toThrow(/^ERR syntax error, LIMIT cannot be used without the special ~ option/)
+      await expect(streams.xtrim(key, 'MAXLEN', '0x10')).rejects.toThrow(/not an integer or out of range/)
+      await expect(streams.xtrim(key, 'MAXLEN', '5000.0')).rejects.toThrow(/not an integer or out of range/)
+      await expect(streams.xread('COUNT', '0x10', 'STREAMS', key, '0')).rejects.toThrow(/not an integer or out of range/)
+
+      expect(await streams.xlen(key)).toBe(3)
+    })
+
+    it('takes the options in any order where Redis does', async () => {
+      const key = await orders()
+
+      expect(await streams.xadd(key, 'MAXLEN', 10, 'NOMKSTREAM', '3-0', 'f', 'v')).toBe('3-0')
+      expect(await streams.xadd(newKey(), 'MAXLEN', 10, 'NOMKSTREAM', '*', 'f', 'v')).toBeNull()
+
+      expect(await loose(streams).xgroup('CREATE', key, 'g', '$', 'ENTRIESREAD', 0, 'MKSTREAM')).toBe('OK')
+      expect(await loose(streams).xgroup('CREATE', newKey(), 'g', '$', 'ENTRIESREAD', 0, 'MKSTREAM')).toBe('OK')
+
+      await streams.xgroup('SETID', key, 'g', '0')
+      await streams.xreadgroup('GROUP', 'g', 'w1', 'STREAMS', key, '>')
+
+      expect(await loose(streams).xautoclaim(key, 'g', 'w2', 0, '0', 'JUSTID', 'COUNT', 2)).toEqual(['2-0', ['1-1', '1-2'], []])
+    })
+
+    it('delivers nothing when one group of a multi-stream xreadgroup does not exist', async () => {
+      const one = newKey()
+      const two = newKey()
+
+      await streams.xgroup('CREATE', one, 'g', '0', 'MKSTREAM')
+      await streams.xadd(one, '1-1', 'x', '1')
+      await streams.xadd(two, '1-1', 'x', '1')
+
+      await expect(streams.xreadgroup('GROUP', 'g', 'w1', 'STREAMS', one, two, '>', '>')).rejects.toThrow(/^NOGROUP/)
+
+      expect(await streams.xpending(one, 'g')).toEqual([0, null, null, null])
     })
 
     it('xinfo', async () => {

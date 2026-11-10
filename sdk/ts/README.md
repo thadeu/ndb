@@ -335,7 +335,7 @@ await g.work('worker-1', async (e, signal) => {
 })
 ```
 
-`work` resolves when the signal aborts; the abort also ends a blocked read. Delivery is at least once: make the work safe to repeat. Run many workers with different consumer names to share the work. A deleted entry is acked without the handler. Defaults: `count` 10, `blockMs` 5000, `claimIdleMs` 60000 (negative turns the claim off), `claimEveryMs` `claimIdleMs / 2` (at least 1000).
+`work` resolves when the signal aborts; the abort also ends a blocked read. Delivery is at least once: make the work safe to repeat. Run many workers with different consumer names to share the work. A deleted entry is acked without the handler. Defaults: `count` 10, `blockMs` 5000, `claimIdleMs` 60000 (negative turns the claim off), `claimEveryMs` `claimIdleMs / 2` (at least 1000). A handler that throws after the abort leaves its entry pending: it is not reported and not buried. When the group does not exist, `work` rejects with `UnknownGroupError`; other failed reads go to `onError` and are tried again. An error that `onError` throws is ignored.
 
 The calls one by one, when you need your own loop:
 
@@ -448,13 +448,15 @@ The answers are those of the default client (RESP 2, no type mapping). A `TRIM` 
 
 - **Values are text.** Redis keeps strings, so the adapters give every value as a string, and they store the values of `xadd` as strings. An entry that other ndb code appended with JSON types comes back as text: `42` is `'42'`, `true` is `'true'`, and `null`, an array or an object are JSON text.
 - **Field order.** The daemon gives the fields of an entry in name order, not in the order of the `xadd`. A field name that starts with `_` is reserved, and a field name given two times is kept one time.
-- **One stream for each request.** `xread` and `xreadgroup` with many streams send one request for each stream. With `BLOCK` and more than one stream they throw (`not_supported`).
-- **No `COUNT`.** Redis gives every entry. The adapters give at most 10 000 in one read (`xrange` has no limit).
+- **One stream for each request.** `xread` and `xreadgroup` with many streams send one request for each stream. With `BLOCK` and more than one stream they throw (`not_supported`). Before an `xreadgroup` of `>` on many streams, the adapters check the group of each stream, so a `NOGROUP` on one stream gives nothing from the others, as in Redis.
+- **No `COUNT`, or `COUNT 0` or less.** Redis gives every entry. The adapters give at most 10 000 in one read (`xrange` has no limit). A `COUNT` over 10 000 is read as 10 000.
 - **`BLOCK 0`** waits with no limit, as in Redis: the adapter repeats a 30 s read. A blocked `xread` on a stream that does not exist looks for it each 500 ms.
 - **Not supported** (the call throws): `XREAD` with the ID `+`, `XREADGROUP ... CLAIM`, `XCLAIM ... TIME`, `XINFO STREAM ... FULL`, `XGROUP HELP` and `XINFO HELP`, the Redis 8.2 options `DELREF` and `ACKED`, and the idempotent `XADD` options. `LASTID` and `KEEPREF` are read and have no effect.
 - **Not there**: `XSETID`, `XACKDEL`, `XDELEX`, the `Buffer` variants of ioredis (`xreadBuffer`, ...), pipelines and `MULTI`. The object has only the methods of the tables.
 - **`xinfo`**: `radix-tree-keys` and `radix-tree-nodes` are `0`.
 - **A range of `xpending`** does not take `(id`.
+- **Errors in the arguments** are those of Redis: a negative `BLOCK`, `LIMIT` without `~`, an argument after the end of `xtrim`, and a number that is not decimal digits (`0x10`, `5000.0`). The option words go in any order where Redis takes them.
+- **`(id` without a seq** in `xrange` is read as in Redis: `(1000` as a start leaves out only `1000-0`, and `(2000` as an end leaves out only `2000-<max seq>`.
 - **Errors** are `ReplyError` (exported by the two subpaths), a subclass of `NdbError`. Its `message` is the text of Redis, so a check such as `err.message.startsWith('BUSYGROUP')` works on the two backends. `code` and `status` are those of ndb, and `cause` is the ndb error.
 
 | Case | `message` starts with | `code` |

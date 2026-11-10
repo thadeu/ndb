@@ -117,23 +117,59 @@ export function text(value: unknown): string {
 }
 
 // integer reads a number argument, which the libraries also take as text.
+// As in Redis, the text is decimal digits with an optional "-": "0x10",
+// "5000.0", "1e3" and " 5" fail.
 export function integer(value: unknown, what: string): number {
   const n = typeof value === 'number' ? value : Number(String(value))
 
-  if (!Number.isInteger(n) || String(value).trim() === '') {
+  if (!Number.isSafeInteger(n) || (typeof value !== 'number' && !/^-?\d+$/.test(String(value)))) {
     throw syntaxError(`${what} is not an integer or out of range`)
   }
 
   return n
 }
 
+// countOf is the COUNT of one read. Redis gives every entry without a COUNT
+// or with a COUNT of 0 or less; the daemon gives at most maxCount.
+function countOf(count: number | undefined): number {
+  return count === undefined || count <= 0 ? maxCount : Math.min(count, maxCount)
+}
+
+// checkBlock fails on a negative BLOCK, as Redis does.
+function checkBlock(block: number | undefined): void {
+  if (block !== undefined && block < 0) {
+    throw syntaxError('timeout is negative')
+  }
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-// One side of an XRANGE interval: "(id" leaves the ID out.
-function bound(id: string, open: '$gt' | '$lt', closed: '$gte' | '$lte'): Doc {
-  return id.startsWith('(') ? { [open]: id.slice(1) } : { [closed]: id }
+// The highest seq of an ID.
+const maxSeq = '18446744073709551615'
+
+// One side of an XRANGE interval: "(id" leaves the ID out. An ID without a
+// seq is <ms>-0 as a start and <ms>-<max> as an end, also after "(": so
+// "(1000" as a start leaves out only 1000-0, and "(2000" as an end leaves
+// out only 2000-<max>, as in Redis. The daemon reads an ID without a seq
+// the other way with $gt and $lt, so the SDK sends the full ID.
+function bound(id: string, side: 'start' | 'end'): Doc {
+  const closed = side === 'start' ? '$gte' : '$lte'
+
+  if (!id.startsWith('(')) {
+    return { [closed]: id }
+  }
+
+  const bare = id.slice(1)
+  const full = bare.includes('-') ? bare : `${bare}-${side === 'start' ? '0' : maxSeq}`
+  const edge = side === 'start' ? `${maxSeq}-${maxSeq}` : '0-0'
+
+  if (full === edge) {
+    throw syntaxError(`invalid ${side} ID for the interval`)
+  }
+
+  return side === 'start' ? { $gt: full } : { $lt: full }
 }
 
 export interface StreamId {
@@ -225,8 +261,16 @@ export class RedisStreams {
       return Promise.resolve([])
     }
 
+    let query: Doc
+
+    try {
+      query = { _id: { ...bound(start, 'start'), ...bound(end, 'end') } }
+    } catch (err) {
+      return Promise.reject(err)
+    }
+
     const body: Doc = {
-      query: { _id: { ...bound(start, '$gt', '$gte'), ...bound(end, '$lt', '$lte') } },
+      query,
       sort: { _id: rev ? -1 : 1 },
       limit: count,
     }
@@ -236,6 +280,8 @@ export class RedisStreams {
 
   // XREAD. null: no stream has an entry.
   async read(streams: StreamId[], spec: ReadSpec = {}): Promise<StreamEntries[] | null> {
+    checkBlock(spec.block)
+
     if (spec.block !== undefined && streams.length > 1) {
       throw notSupported('XREAD with BLOCK on more than one stream')
     }
@@ -249,9 +295,20 @@ export class RedisStreams {
   // XREADGROUP. The ID ">" gives new entries; any other ID gives the pending
   // entries of the consumer after it, and its stream is in the answer also
   // when it has none, as in Redis. null: no stream is in the answer.
+  //
+  // With more than one stream, each group is checked first: a read of ">"
+  // moves entries to the pending list, so a NOGROUP on one stream after the
+  // read of the others would lose them. As in Redis, the call then fails
+  // and gives nothing.
   async readGroup(group: string, consumer: string, streams: StreamId[], spec: ReadGroupSpec = {}): Promise<StreamEntries[] | null> {
+    checkBlock(spec.block)
+
     if (spec.block !== undefined && streams.length > 1) {
       throw notSupported('XREADGROUP with BLOCK on more than one stream')
+    }
+
+    if (streams.length > 1 && streams.some((s) => s.id === '>')) {
+      await Promise.all(streams.map((s) => this.on({ key: s.key, group }, (stream) => stream.group(group).pending())))
     }
 
     const all = await Promise.all(
@@ -401,7 +458,7 @@ export class RedisStreams {
       throw notSupported('XREAD with the ID "+"')
     }
 
-    const count = spec.count ?? maxCount
+    const count = countOf(spec.count)
 
     // A blocked read can be more than one request. "$" in each request loses
     // the entries appended between two of them: the last ID replaces it.
@@ -416,7 +473,7 @@ export class RedisStreams {
   }
 
   private readGroupOne(group: string, consumer: string, s: StreamId, spec: ReadGroupSpec): Promise<Entry<Doc>[]> {
-    const count = spec.count ?? maxCount
+    const count = countOf(spec.count)
     const scope = { key: s.key, group }
 
     if (s.id !== '>') {

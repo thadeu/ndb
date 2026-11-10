@@ -1,3 +1,4 @@
+import { createServer } from 'node:http'
 import { afterAll, describe, expect, it } from 'vitest'
 import {
   GroupExistsError,
@@ -11,6 +12,7 @@ import {
   type DeadEntry,
   type Entry,
   type Stream,
+  connect,
 } from '../src/index.js'
 import { collName, unixDb } from './helpers.js'
 
@@ -370,5 +372,125 @@ describe('stream worker', () => {
     await run
 
     expect(got).toEqual([1, 2, 3])
+  })
+
+  it('leaves an entry pending when the handler stops on the abort', async () => {
+    for (const deadLetter of [true, false]) {
+      const s = orders()
+      const g = s.group('workers')
+
+      await g.create(startAll)
+
+      const ids = await appendOrders(s, 1, 1)
+      const deadName = `${s.name}_dead`
+      const ctl = new AbortController()
+      const errors: unknown[] = []
+
+      let started = false
+
+      // A long job that stops on the abort, as fetch(url, { signal }) does.
+      const handler = (_e: Entry<Order>, signal: AbortSignal) => {
+        started = true
+
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+        })
+      }
+
+      const run = g.work('w1', handler, {
+        blockMs: 50,
+        claimIdleMs: -1,
+        maxDeliveries: 1,
+        deadLetter: deadLetter ? deadName : undefined,
+        signal: ctl.signal,
+        onError: (err) => void errors.push(err),
+      })
+
+      await waitFor(() => started)
+
+      ctl.abort()
+      await run
+
+      expect(errors).toEqual([])
+      expect(await db.stream(deadName).range().catch(() => [])).toEqual([])
+
+      const pending = await g.pendingList()
+
+      expect(pending.map((p) => p.id)).toEqual(ids)
+    }
+  })
+
+  it('rejects when the group does not exist', async () => {
+    const s = orders()
+
+    await appendOrders(s, 1, 1)
+
+    await expect(s.group('nope').work('w1', () => {}, { blockMs: 50 })).rejects.toBeInstanceOf(UnknownGroupError)
+  })
+
+  it('reports a failed pending read at the start and tries again', async () => {
+    let calls = 0
+
+    const http = createServer((_req, res) => {
+      calls += 1
+      res.writeHead(503, { 'content-type': 'application/json' }).end('{"error":{"code":"not_ready","message":"recovering"}}')
+    })
+
+    await new Promise<void>((done) => http.listen(0, '127.0.0.1', () => done()))
+
+    const { port } = http.address() as { port: number }
+    const down = connect(`tcp://127.0.0.1:${port}`, { readyTimeout: 0 })
+    const ctl = new AbortController()
+    const errors: unknown[] = []
+
+    const run = down.stream('x').group('g').work('w1', () => {}, { signal: ctl.signal, onError: (err) => void errors.push(err) })
+
+    await waitFor(() => errors.length >= 2)
+
+    ctl.abort()
+
+    await expect(run).resolves.toBeUndefined()
+    expect(calls).toBeGreaterThanOrEqual(2)
+    expect(String(errors[0])).toMatch(/pending read x\/g/)
+
+    await down.close()
+    http.closeAllConnections()
+    await new Promise((done) => http.close(done))
+  })
+
+  it('still acks the batch when onError throws', async () => {
+    const s = orders()
+    const g = s.group('workers')
+
+    await g.create(startAll)
+
+    const ids = await appendOrders(s, 1, 2)
+    const ctl = new AbortController()
+    const seen: number[] = []
+
+    const run = g.work('w1', (e) => {
+      seen.push(e.doc.order)
+
+      if (e.doc.order === 1) {
+        throw new Error('boom')
+      }
+    }, {
+      blockMs: 50,
+      claimIdleMs: -1,
+      signal: ctl.signal,
+      onError: () => {
+        throw new Error('onError failed')
+      },
+    })
+
+    await waitFor(() => seen.length === 2)
+    await new Promise((r) => setTimeout(r, 200))
+
+    ctl.abort()
+    await run
+
+    const pending = await g.pendingList()
+
+    expect(pending.map((p) => p.id)).toEqual([ids[0]])
   })
 })

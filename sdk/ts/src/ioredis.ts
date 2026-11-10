@@ -153,6 +153,11 @@ function trimOf(a: Args): TrimOptions {
   trim.approx = approx
 
   if (a.take('LIMIT')) {
+    // Redis takes LIMIT only with "~".
+    if (!approx) {
+      throw syntaxError('syntax error, LIMIT cannot be used without the special ~ option')
+    }
+
     trim.limit = a.integer('LIMIT')
   }
 
@@ -322,10 +327,20 @@ export function ioredis(db: Ndb): IoredisStreams {
     switch (sub) {
       case 'CREATE': {
         const id = a.next()
-        const mkStream = a.take('MKSTREAM')
-        const entriesRead = a.take('ENTRIESREAD') ? a.integer('ENTRIESREAD') : undefined
 
-        a.end()
+        let mkStream = false
+        let entriesRead: number | undefined
+
+        // [MKSTREAM] [ENTRIESREAD n], in any order.
+        while (!a.done) {
+          if (a.take('MKSTREAM')) {
+            mkStream = true
+          } else if (a.take('ENTRIESREAD')) {
+            entriesRead = a.integer('ENTRIESREAD')
+          } else {
+            throw syntaxError()
+          }
+        }
 
         await core.groupCreate(key, group, id, { mkStream, entriesRead })
 
@@ -410,10 +425,20 @@ export function ioredis(db: Ndb): IoredisStreams {
     const consumer = a.next()
     const minIdle = a.integer('min-idle-time')
     const start = a.next()
-    const count = countOf(a)
-    const justId = a.take('JUSTID')
 
-    a.end()
+    let count: number | undefined
+    let justId = false
+
+    // [COUNT n] [JUSTID], in any order.
+    while (!a.done) {
+      if (a.take('COUNT')) {
+        count = a.integer('COUNT')
+      } else if (a.take('JUSTID')) {
+        justId = true
+      } else {
+        throw syntaxError()
+      }
+    }
 
     const out = await core.autoClaim(key, group, consumer, minIdle, start, count, justId)
 
@@ -477,8 +502,21 @@ export function ioredis(db: Ndb): IoredisStreams {
   return {
     xadd: command('xadd', (a) => {
       const key = a.next()
-      const noCreate = a.take('NOMKSTREAM')
-      const trim = a.is('MAXLEN', 'MINID') ? trimOf(a) : undefined
+
+      let noCreate = false
+      let trim: TrimOptions | undefined
+
+      // [NOMKSTREAM] [MAXLEN|MINID ...], in any order, before the ID.
+      for (;;) {
+        if (a.take('NOMKSTREAM')) {
+          noCreate = true
+        } else if (a.is('MAXLEN', 'MINID')) {
+          trim = trimOf(a)
+        } else {
+          break
+        }
+      }
+
       const id = a.next()
 
       return core.add(key, id, docOf('xadd', a.rest()), { noCreate, trim })
@@ -495,7 +533,15 @@ export function ioredis(db: Ndb): IoredisStreams {
     }),
 
     xdel: command('xdel', (a) => core.del(a.next(), a.rest())),
-    xtrim: command('xtrim', (a) => core.trim(a.next(), trimOf(a))),
+    xtrim: command('xtrim', (a) => {
+      const key = a.next()
+      const trim = trimOf(a)
+
+      a.end()
+
+      return core.trim(key, trim)
+    }),
+
     xgroup: command('xgroup', xgroup),
 
     xreadgroup: command('xreadgroup', async (a) => {

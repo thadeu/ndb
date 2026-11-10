@@ -148,6 +148,27 @@ function suite(name: string, open: () => Promise<Backend>): void {
       ])
     })
 
+    it('reads every entry with COUNT 0, and rejects a negative BLOCK and LIMIT without ~', async () => {
+      const key = newKey()
+
+      await streams.xGroupCreate(key, 'g', '0', { MKSTREAM: true })
+
+      for (let i = 1; i <= 15; i++) {
+        await streams.xAdd(key, `${i}-1`, { i: String(i) })
+      }
+
+      const read = await streams.xRead({ key, id: '0' }, { COUNT: 0 })
+      const group = await streams.xReadGroup('g', 'w1', { key, id: '>' }, { COUNT: 0 })
+
+      expect(read![0]!.messages).toHaveLength(15)
+      expect(group![0]!.messages).toHaveLength(15)
+
+      await expect(streams.xRead({ key, id: '$' }, { BLOCK: -1 })).rejects.toThrow(/^ERR timeout is negative/)
+      await expect(streams.xTrim(key, 'MAXLEN', 0, { LIMIT: 10 })).rejects.toThrow(/^ERR syntax error, LIMIT cannot be used without the special ~ option/)
+
+      expect(await streams.xLen(key)).toBe(15)
+    })
+
     it('xRead with BLOCK waits for an append', async () => {
       const key = await orders()
 
