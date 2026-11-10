@@ -132,7 +132,8 @@
               "name": "c2",
               "count": 1
             }
-          ]
+          ],
+          "waiting": 0
         }
       }
     },
@@ -185,12 +186,14 @@
           {
             "_id": "1-1",
             "consumer": "c1",
-            "deliveries": 2
+            "deliveries": 2,
+            "retry_at": null
           },
           {
             "_id": "1-2",
             "consumer": "c2",
-            "deliveries": 1
+            "deliveries": 1,
+            "retry_at": null
           }
         ],
         "ignore": [

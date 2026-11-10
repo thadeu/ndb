@@ -1,0 +1,205 @@
+{
+  "name": "claim idle_ms in the future (negative) or before 1970 is now, as XCLAIM IDLE: a claim never delays an entry",
+  "note": "Redis 7.4 clamps the delivery time of XCLAIM to now when it is in the future or negative: IDLE -60000, TIME <now + 60 s> and TIME -5 all give an idle time of about 0. A negative min-idle-time is 0 (XCLAIM and XAUTOCLAIM). ndb has no time key; idle_ms does the same clamp.",
+  "stream": "orders",
+  "steps": [
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-0"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-0"
+        }
+      }
+    },
+    {
+      "op": "group_create",
+      "group": "g",
+      "body": {
+        "start": "0"
+      }
+    },
+    {
+      "op": "read",
+      "group": "g",
+      "body": {
+        "consumer": "c1",
+        "count": 10
+      }
+    },
+    {
+      "op": "claim",
+      "group": "g",
+      "body": {
+        "consumer": "c2",
+        "min_idle_ms": 0,
+        "ids": [
+          "1-0"
+        ],
+        "idle_ms": -60000,
+        "just_ids": true
+      },
+      "expect": {
+        "body": {
+          "entries": [
+            "1-0"
+          ],
+          "deleted": []
+        }
+      }
+    },
+    {
+      "op": "pending",
+      "group": "g",
+      "body": {
+        "start": "-",
+        "end": "+",
+        "count": 10,
+        "idle_ms": 0
+      },
+      "expect": {
+        "body": [
+          {
+            "_id": "1-0",
+            "consumer": "c2",
+            "deliveries": 1,
+            "retry_at": null
+          }
+        ],
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    },
+    {
+      "op": "claim",
+      "group": "g",
+      "body": {
+        "consumer": "c3",
+        "min_idle_ms": 0,
+        "ids": [
+          "1-0"
+        ],
+        "just_ids": true
+      },
+      "expect": {
+        "body": {
+          "entries": [
+            "1-0"
+          ],
+          "deleted": []
+        }
+      }
+    },
+    {
+      "op": "claim",
+      "group": "g",
+      "body": {
+        "consumer": "c4",
+        "min_idle_ms": -5,
+        "ids": [
+          "1-0"
+        ],
+        "just_ids": true
+      },
+      "expect": {
+        "body": {
+          "entries": [
+            "1-0"
+          ],
+          "deleted": []
+        }
+      }
+    },
+    {
+      "op": "claim",
+      "group": "g",
+      "body": {
+        "consumer": "c5",
+        "min_idle_ms": -5,
+        "cursor": "0-0",
+        "count": 10,
+        "just_ids": true
+      },
+      "expect": {
+        "body": {
+          "cursor": "0-0",
+          "entries": [
+            "1-0"
+          ],
+          "deleted": []
+        }
+      }
+    },
+    {
+      "op": "claim",
+      "group": "g",
+      "body": {
+        "consumer": "c6",
+        "min_idle_ms": 0,
+        "ids": [
+          "1-0"
+        ],
+        "idle_ms": 99999999999999,
+        "just_ids": true
+      },
+      "expect": {
+        "body": {
+          "entries": [
+            "1-0"
+          ],
+          "deleted": []
+        }
+      }
+    },
+    {
+      "op": "claim",
+      "group": "g",
+      "body": {
+        "consumer": "c7",
+        "min_idle_ms": 3600000,
+        "ids": [
+          "1-0"
+        ],
+        "just_ids": true
+      },
+      "expect": {
+        "body": {
+          "entries": [],
+          "deleted": []
+        }
+      }
+    },
+    {
+      "op": "pending",
+      "group": "g",
+      "body": {
+        "start": "-",
+        "end": "+",
+        "count": 10
+      },
+      "expect": {
+        "body": [
+          {
+            "_id": "1-0",
+            "consumer": "c6",
+            "deliveries": 1,
+            "retry_at": null
+          }
+        ],
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    }
+  ]
+}

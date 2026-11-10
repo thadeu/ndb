@@ -123,6 +123,59 @@ await group.work('worker-1', async (entry) => {
 }, { claimIdleMs: 60_000, maxDeliveries: 5, deadLetter: 'orders_dead', signal })
 ```
 
+## Delayed retry
+
+ndb only: Redis has no delayed retry. A worker that fails an entry can say
+**when** the entry comes back, and the wait can grow with the number of
+deliveries (15 s, 1 min, 10 min, 1 h, 6 h). With `claim` and `min_idle_ms`
+alone, every retry has the same wait.
+
+```bash
+# the handler failed on its 2nd delivery: give the entry back in 1 min
+curl --unix-socket /run/ndb/ndb.sock http://ndb/orders/_streams/groups/workers/nack \
+  -d '{"consumer":"w1","ids":["1731163600000-0"],"delay_ms":60000}'
+# {"nacked":1}
+
+# each worker, on a short tick (1 s): take the entries whose wait is over
+curl --unix-socket /run/ndb/ndb.sock http://ndb/orders/_streams/groups/workers/claim \
+  -d '{"consumer":"w1","due":true,"count":100}'
+# {"cursor":"0-0","entries":[{"_id":"1731163600000-0","order":42}],"deleted":[]}
+```
+
+- The wait is in the PEL entry, on disk with the rest of the PEL: no second
+  queue, and the entry is never in two places. A restart, a backup and a
+  restore keep it.
+- While it waits, the entry has **no owner**: the pending read of a worker
+  that restarts does not take it early, and any worker of the group takes
+  it when it is due. No read or claim gives it before its time, whatever
+  `min_idle_ms` or `force`. When it is due, a claim takes it at once.
+- The delivery count goes on: the claim that takes it again adds 1, so the
+  worker can choose the next wait from `deliveries`, and send the entry to
+  a dead-letter stream after the last one.
+- `ack` of a waiting entry removes it: so an app can cancel a retry.
+- The daemon knows nothing of tiers: the worker computes the wait and sends
+  it. At most 30 days.
+- `claim` with `due` reads only an index of the nacked entries, not the
+  whole PEL, so a short tick is cheap.
+
+The loop of a worker with retries: steps 1 to 4 of [A worker](#a-worker),
+plus a due claim on each tick; on a failure, `nack` with the wait of this
+delivery instead of leaving the entry pending.
+
+### ndb only
+
+These are not in Redis. An app that never uses them sees the behavior of
+Redis:
+
+- the route `POST /{s}/_streams/groups/{g}/nack`;
+- `due` in `claim` (a scan of the due entries) and in the `pending` list;
+- `retry_at` in each row of the `pending` list (`null` when the entry is
+  not nacked) and `waiting` in its summary;
+- the metric `ndb_stream_group_waiting`.
+
+The contract cases of these features are marked `"ndb_only": true` in
+`spec/streams`, so the run on a real Redis skips them.
+
 ## How the engine runs it
 
 - **Append** is a normal write: the whole entry goes to the WAL (`fsync` in
@@ -169,6 +222,8 @@ never fails with an internal error.
 
 - `ndb_stream_entries_added_total{stream}`: every entry ever appended.
 - `ndb_stream_group_pending{stream,group}`: entries delivered and not acked.
+- `ndb_stream_group_waiting{stream,group}`: nacked entries whose retry time
+  has not come (ndb only, see [Delayed retry](#delayed-retry)).
 - `ndb_stream_group_lag{stream,group}`: entries not delivered to the group
   yet, the `lag` of `GET /{s}/_streams/groups` (Redis 7 rules: exact, or an
   estimate after a trim or a delete; left out when it cannot be known).
@@ -200,6 +255,8 @@ never fails with an internal error.
 | `XCLAIM s g c min-idle id ...` | `POST /s/_streams/groups/g/claim {"consumer":"c","min_idle_ms":ms,"ids":[...]}` |
 | `XAUTOCLAIM s g c min-idle start COUNT n` | `... /claim {"consumer":"c","min_idle_ms":ms,"cursor":"start","count":n}` |
 | `JUSTID` | `"just_ids": true` |
+| `XCLAIM ... IDLE ms` / `TIME t` | `"idle_ms": ms` (no `time` key). A time in the future is now, in both |
+| none (ndb only) | `POST /s/_streams/groups/g/nack {"consumer":"c","ids":[...],"delay_ms":ms}`, `claim {"due":true}` |
 | `XINFO STREAM s` | `GET /s/_streams` |
 | `XINFO GROUPS s` | `GET /s/_streams/groups` |
 | `XINFO CONSUMERS s g` | `GET /s/_streams/groups/g/consumers` |

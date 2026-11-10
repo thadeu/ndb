@@ -375,6 +375,7 @@ func TestContractEveryRouteMethodNotAllowed(t *testing.T) {
 		{"/s/_streams/groups/g/ack", []string{"POST"}},
 		{"/s/_streams/groups/g/pending", []string{"POST"}},
 		{"/s/_streams/groups/g/claim", []string{"POST"}},
+		{"/s/_streams/groups/g/nack", []string{"POST"}},
 	}
 
 	all := []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"}

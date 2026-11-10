@@ -1,0 +1,118 @@
+{
+  "name": "a nacked entry whose entry is trimmed leaves the PEL at its next claim, in deleted",
+  "stream": "orders",
+  "ndb_only": true,
+  "steps": [
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-0"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-0"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 2
+        },
+        "id": "1-1"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-1"
+        }
+      }
+    },
+    {
+      "op": "group_create",
+      "group": "g",
+      "body": {
+        "start": "0"
+      }
+    },
+    {
+      "op": "read",
+      "group": "g",
+      "body": {
+        "consumer": "c1",
+        "count": 10
+      }
+    },
+    {
+      "op": "nack",
+      "group": "g",
+      "body": {
+        "consumer": "c1",
+        "ids": [
+          "1-0"
+        ],
+        "delay_ms": 0
+      },
+      "expect": {
+        "body": {
+          "nacked": 1
+        }
+      }
+    },
+    {
+      "op": "trim",
+      "body": {
+        "max_len": 1
+      },
+      "expect": {
+        "body": {
+          "deleted": 1
+        }
+      }
+    },
+    {
+      "op": "claim",
+      "group": "g",
+      "body": {
+        "consumer": "c2",
+        "due": true
+      },
+      "expect": {
+        "body": {
+          "cursor": "0-0",
+          "entries": [],
+          "deleted": [
+            "1-0"
+          ]
+        }
+      }
+    },
+    {
+      "op": "pending",
+      "group": "g",
+      "body": {},
+      "expect": {
+        "body": {
+          "count": 1,
+          "lowest": "1-1",
+          "highest": "1-1",
+          "consumers": [
+            {
+              "name": "c1",
+              "count": 1
+            }
+          ],
+          "waiting": 0
+        },
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    }
+  ]
+}

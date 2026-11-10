@@ -15,6 +15,7 @@ import (
 //	groups/<g>                last, read (entries_read, -1 unknown)
 //	groups/<g>/pel            entry key -> pending
 //	groups/<g>/consumers      name -> consumer
+//	groups/<g>/retry          entry key -> "" (the PEL entries with a RetryAt)
 //
 // Every change is one bbolt transaction, fsync'd before it returns (unless
 // the stream is relaxed).
@@ -27,13 +28,27 @@ var (
 	bGroups    = []byte("groups")
 	bPEL       = []byte("pel")
 	bConsumers = []byte("consumers")
+	bRetry     = []byte("retry")
 )
 
-// pending is one entry of a PEL.
+// pending is one entry of a PEL. A nack clears Consumer and sets RetryAt:
+// the entry has no owner until a claim takes it. A record written before
+// RetryAt existed has no "r" key, so it reads as 0 (no retry).
 type pending struct {
 	Consumer   string `json:"c"`
 	Delivered  int64  `json:"t"` // unix ms of the last delivery
 	Deliveries int64  `json:"n"`
+	RetryAt    int64  `json:"r,omitempty"` // unix ms; 0 = none
+}
+
+// waiting tells that the entry waits for its retry time.
+func (p pending) waiting(now int64) bool {
+	return p.RetryAt > now
+}
+
+// due tells that the entry was nacked and its retry time passed.
+func (p pending) due(now int64) bool {
+	return p.RetryAt != 0 && p.RetryAt <= now
 }
 
 // consumer is one consumer of a group.
@@ -142,6 +157,29 @@ func putPending(b *bolt.Bucket, key string, p pending) error {
 	}
 
 	return b.Put([]byte(key), v)
+}
+
+// markRetry adds key to the retry index of group bucket b.
+func markRetry(b *bolt.Bucket, key string) error {
+	idx, err := b.CreateBucketIfNotExists(bRetry)
+
+	if err != nil {
+		return err
+	}
+
+	return idx.Put([]byte(key), []byte("1"))
+}
+
+// unmarkRetry removes key from the retry index of group bucket b, if the
+// index exists (a group made before it has none).
+func unmarkRetry(b *bolt.Bucket, key []byte) error {
+	idx := b.Bucket(bRetry)
+
+	if idx == nil {
+		return nil
+	}
+
+	return idx.Delete(key)
 }
 
 func getConsumer(b *bolt.Bucket, name string) (consumer, bool) {

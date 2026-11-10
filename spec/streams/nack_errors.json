@@ -1,0 +1,127 @@
+{
+  "name": "nack needs a consumer and a delay_ms of 0 to 30 days; claim due is a scan, not ids",
+  "stream": "orders",
+  "ndb_only": true,
+  "steps": [
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-0"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-0"
+        }
+      }
+    },
+    {
+      "op": "group_create",
+      "group": "g",
+      "body": {
+        "start": "0"
+      }
+    },
+    {
+      "op": "nack",
+      "group": "g",
+      "body": {
+        "ids": [
+          "1-0"
+        ],
+        "delay_ms": 0
+      },
+      "expect": {
+        "error": "invalid_request"
+      }
+    },
+    {
+      "op": "nack",
+      "group": "g",
+      "body": {
+        "consumer": "c1",
+        "ids": [
+          "1-0"
+        ],
+        "delay_ms": -1
+      },
+      "expect": {
+        "error": "invalid_request"
+      }
+    },
+    {
+      "op": "nack",
+      "group": "g",
+      "body": {
+        "consumer": "c1",
+        "ids": [
+          "1-0"
+        ],
+        "delay_ms": 2592000001
+      },
+      "expect": {
+        "error": "invalid_request"
+      }
+    },
+    {
+      "op": "nack",
+      "group": "g",
+      "body": {
+        "consumer": "c1",
+        "ids": [
+          "nope"
+        ],
+        "delay_ms": 0
+      },
+      "expect": {
+        "error": "invalid_stream_id"
+      }
+    },
+    {
+      "op": "nack",
+      "group": "g",
+      "body": {
+        "consumer": "c1",
+        "ids": [
+          "1-0"
+        ],
+        "delay_ms": 2592000000
+      },
+      "expect": {
+        "body": {
+          "nacked": 0
+        }
+      }
+    },
+    {
+      "op": "nack",
+      "group": "h",
+      "body": {
+        "consumer": "c1",
+        "ids": [
+          "1-0"
+        ],
+        "delay_ms": 0
+      },
+      "expect": {
+        "error": "unknown_group"
+      }
+    },
+    {
+      "op": "claim",
+      "group": "g",
+      "body": {
+        "consumer": "c1",
+        "due": true,
+        "ids": [
+          "1-0"
+        ]
+      },
+      "expect": {
+        "error": "invalid_request"
+      }
+    }
+  ]
+}

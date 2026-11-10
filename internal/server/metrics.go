@@ -122,6 +122,14 @@ func writeStreamMetrics(w io.Writer, all []streams.StreamMetrics) {
 		}
 	}
 
+	fmt.Fprint(w, "# TYPE ndb_stream_group_waiting gauge\n")
+
+	for _, m := range all {
+		for _, g := range m.Groups {
+			fmt.Fprintf(w, "ndb_stream_group_waiting{stream=%q,group=%q} %d\n", m.Name, g.Name, g.Waiting)
+		}
+	}
+
 	fmt.Fprint(w, "# TYPE ndb_stream_group_lag gauge\n")
 
 	for _, m := range all {

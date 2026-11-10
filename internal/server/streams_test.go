@@ -656,3 +656,139 @@ func TestStreamTailBlocksOnAMissingStream(t *testing.T) {
 		t.Fatal("the blocked read did not end after the stream was made")
 	}
 }
+
+// A nack survives a restart of the daemon: the entry waits with no owner,
+// the restarted consumer does not get it in its pending read, and the
+// metric counts it.
+func TestStreamNackSurvivesARestart(t *testing.T) {
+	dir := t.TempDir()
+	h, stop := openAt(t, dir)
+
+	expectStatus(t, call(h, "POST", "/jobs/_streams/append", `{"doc":{"n":1},"id":"5-0"}`), http.StatusCreated)
+	expectStatus(t, call(h, "POST", "/jobs/_streams/append", `{"doc":{"n":2},"id":"5-1"}`), http.StatusCreated)
+	expectStatus(t, call(h, "PUT", "/jobs/_streams/groups/g", `{"start":"0"}`), http.StatusCreated)
+	expectStatus(t, call(h, "POST", "/jobs/_streams/groups/g/read", `{"consumer":"c1","count":10}`), http.StatusOK)
+
+	rec := call(h, "POST", "/jobs/_streams/groups/g/nack", `{"consumer":"c1","ids":["5-0","5-1"],"delay_ms":3600000}`)
+
+	if strings.TrimSpace(rec.Body.String()) != `{"nacked":2}` {
+		t.Fatalf("nack: %d %s", rec.Code, rec.Body.String())
+	}
+
+	stop()
+
+	h, stop = openAt(t, dir)
+
+	defer stop()
+
+	if rows := call(h, "POST", "/jobs/_streams/groups/g/read", `{"consumer":"c1","pending":true}`).Body.String(); strings.Contains(rows, "_id") {
+		t.Fatalf("the pending read of c1 after restart gave %s", rows)
+	}
+
+	var list []struct {
+		Consumer string `json:"consumer"`
+		RetryAt  *int64 `json:"retry_at"`
+	}
+
+	jsonOf(t, call(h, "POST", "/jobs/_streams/groups/g/pending", `{"count":10}`).Body.String(), &list)
+
+	if len(list) != 2 || list[0].Consumer != "" || list[0].RetryAt == nil || *list[0].RetryAt < time.Now().UnixMilli()+3_500_000 {
+		t.Fatalf("pending after restart: %+v", list)
+	}
+
+	if body := call(h, "POST", "/jobs/_streams/groups/g/claim", `{"consumer":"c2","due":true}`).Body.String(); !strings.Contains(body, `"entries":[]`) {
+		t.Fatalf("due claim before the retry time: %s", body)
+	}
+
+	if page := call(h, "GET", "/_metrics", "").Body.String(); !strings.Contains(page, `ndb_stream_group_waiting{stream="jobs",group="g"} 2`) {
+		t.Fatalf("/_metrics has no waiting 2:\n%s", page)
+	}
+}
+
+// A backup keeps the retry time of a nacked entry; a restore after that
+// time makes it due at once.
+func TestStreamNackSurvivesBackupAndRestore(t *testing.T) {
+	c := unixServer(t)
+
+	do(t, c, "POST", "/jobs/_streams/append", `{"doc":{"n":1},"id":"5-0"}`, nil)
+	do(t, c, "POST", "/jobs/_streams/append", `{"doc":{"n":2},"id":"5-1"}`, nil)
+	do(t, c, "PUT", "/jobs/_streams/groups/g", `{"start":"0"}`, nil)
+	do(t, c, "POST", "/jobs/_streams/groups/g/read", `{"consumer":"c1","count":10}`, nil)
+
+	if _, body := do(t, c, "POST", "/jobs/_streams/groups/g/nack", `{"consumer":"c1","ids":["5-0"],"delay_ms":200}`, nil); !strings.Contains(body, `"nacked":1`) {
+		t.Fatalf("nack: %s", body)
+	}
+
+	resp, body := do(t, c, "POST", "/_backup", `{}`, nil)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("backup %d", resp.StatusCode)
+	}
+
+	stage := filepath.Join(t.TempDir(), "restored")
+
+	if err := backup.Extract(strings.NewReader(body), stage); err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(250 * time.Millisecond)
+
+	h, stop := openAt(t, stage)
+
+	defer stop()
+
+	got := call(h, "POST", "/jobs/_streams/groups/g/claim", `{"consumer":"c2","due":true,"min_idle_ms":3600000,"just_ids":true}`).Body.String()
+
+	if !strings.Contains(got, `"entries":["5-0"]`) {
+		t.Fatalf("due claim after restore: %s", got)
+	}
+
+	var list []struct {
+		ID       string `json:"_id"`
+		Consumer string `json:"consumer"`
+	}
+
+	jsonOf(t, call(h, "POST", "/jobs/_streams/groups/g/pending", `{"count":10}`).Body.String(), &list)
+
+	if len(list) != 2 || list[0].Consumer != "c2" || list[1].Consumer != "c1" {
+		t.Fatalf("pending after restore and claim: %+v", list)
+	}
+}
+
+// A truncate, a drop or a rename can close the store while nacks run:
+// each nack opens the stream again and none fails with a closed store.
+func TestStreamNackRacesATruncate(t *testing.T) {
+	_, h := newHandler(t)
+
+	expectStatus(t, call(h, "POST", "/jobs/_streams/append", `{"doc":{"n":1},"id":"5-0"}`), http.StatusCreated)
+	expectStatus(t, call(h, "PUT", "/jobs/_streams/groups/g", `{"start":"0"}`), http.StatusCreated)
+
+	var wg sync.WaitGroup
+
+	var bad atomic.Int64
+
+	for range 4 {
+		wg.Go(func() {
+			for range 50 {
+				rec := call(h, "POST", "/jobs/_streams/groups/g/nack", `{"consumer":"c1","ids":["5-0"],"delay_ms":0}`)
+
+				if rec.Code != http.StatusOK && errorCode(t, rec) != "unknown_group" {
+					bad.Add(1)
+				}
+			}
+		})
+	}
+
+	wg.Go(func() {
+		for range 5 {
+			call(h, "POST", "/jobs/_truncate", "")
+			call(h, "PUT", "/jobs/_streams/groups/g", `{"start":"0"}`)
+		}
+	})
+
+	wg.Wait()
+
+	if n := bad.Load(); n != 0 {
+		t.Fatalf("%d nacks failed with an error other than unknown_group", n)
+	}
+}

@@ -295,7 +295,8 @@ Redis: `XREADGROUP`.
 - `pending: true` (`0` in Redis): the entries of this consumer's PEL, with
   an ID greater than `after` (default `0`). Each one counts as a new
   delivery, as in Redis: delivery count + 1 and a new delivery time. An entry deleted from the stream comes as `{"_id": "...",
-  "_deleted": true}`.
+  "_deleted": true}`. A nacked entry has no owner, so it is not in this
+  read (see [nack](#post-s-streams-groups-g-nack)).
 - `count`: the most entries to give (default 10, at most 10 000).
 - `block_ms`: with no new entry, wait up to this long for one (`BLOCK`). `0`
   answers at once (the default). An empty answer is `[]`. Not with
@@ -319,7 +320,43 @@ Redis: `XACK`.
 { "acked": 2 }
 ```
 
-An ID that is not pending in the group counts 0; it is not an error.
+An ID that is not pending in the group counts 0; it is not an error. An ack
+of a nacked entry removes it: so an app can cancel a retry.
+
+### `POST /{s}/_streams/groups/{g}/nack`
+
+ndb only: Redis has no delayed retry. Gives entries back to the group after
+a wait, for a retry.
+
+```json
+{ "consumer": "w1", "ids": ["1731163600000-5"], "delay_ms": 60000 }
+```
+
+```json
+{ "nacked": 1 }
+```
+
+- Only the IDs pending **for this consumer** count; other IDs count 0, not
+  an error (as `ack`). So a worker that lost an entry to a claim cannot
+  nack it.
+- The entry stays in the PEL with no owner (`"consumer": ""`) and a retry
+  time `retry_at` = now + `delay_ms`. Its delivery count does not change;
+  the claim that takes it again adds 1.
+- `delay_ms`: `0` (the default) makes the entry due at once (a plain "give
+  it back"). At most 2 592 000 000 (30 days). A negative or larger value is
+  `400 invalid_request`; so is a body with no `consumer`.
+- All the IDs of one call are one transaction: one fsync.
+- While it waits, no route gives the entry: not `read` (it is no one's), not
+  `claim` by IDs or by a scan, whatever `min_idle_ms` or `force`. After
+  `retry_at`, any consumer of the group takes it with `claim`, at once:
+  `min_idle_ms` does not count, the wait was already chosen. A claim clears
+  `retry_at`.
+- `DELETE` of the consumer keeps its nacked entries (they have no owner).
+- A trim that deletes a nacked entry: the entry leaves the PEL at its next
+  claim, in `deleted`.
+- The retry time is on disk with the PEL, so it survives a restart, a
+  backup and a restore. A restore after the retry time makes the entry due
+  at once.
 
 ### `POST /{s}/_streams/groups/{g}/pending`
 
@@ -328,8 +365,11 @@ Redis: `XPENDING`.
 Summary (an empty body):
 
 ```json
-{ "count": 12, "lowest": "1731163600000-1", "highest": "1731163600000-12", "consumers": [{ "name": "w1", "count": 4 }] }
+{ "count": 12, "lowest": "1731163600000-1", "highest": "1731163600000-12", "consumers": [{ "name": "w1", "count": 4 }], "waiting": 1 }
 ```
+
+`waiting` (ndb only): the nacked entries whose retry time has not come.
+A nacked entry counts in `count`, and for no consumer in `consumers`.
 
 List (with `count`):
 
@@ -338,10 +378,20 @@ List (with `count`):
 ```
 
 ```json
-[{ "_id": "1731163600000-1", "consumer": "w1", "idle_ms": 61000, "deliveries": 2 }]
+[
+  { "_id": "1731163600000-1", "consumer": "w1", "idle_ms": 61000, "deliveries": 2, "retry_at": null },
+  { "_id": "1731163600000-2", "consumer": "", "idle_ms": 3000, "deliveries": 1, "retry_at": 1731163660000 }
+]
 ```
 
 `consumer` and `idle_ms` are optional filters.
+
+- `retry_at` (ndb only): the retry time of a nacked entry, Unix time in
+  milliseconds (the unit of the `ms` of an ID); `null` when the entry is not
+  nacked. A nacked entry has `"consumer": ""`.
+- `due` (ndb only, optional): `true` gives only the nacked entries whose
+  retry time passed (a claim takes them now); `false` only the ones that
+  still wait. With no `due`, every entry.
 
 ### `POST /{s}/_streams/groups/{g}/claim`
 
@@ -371,6 +421,30 @@ With a scan (`XAUTOCLAIM`), instead of `ids`:
 - `just_ids: true` (`JUSTID`): `entries` are IDs only, and the delivery
   count does not change.
 - By IDs only: `idle_ms`, `retry_count` and `force` as in `XCLAIM`.
+  `idle_ms` sets the delivery time to now − `idle_ms`. A time in the future
+  (a negative `idle_ms`) or before 1970 is now, as Redis 7.4 does with
+  `IDLE` and `TIME` (it clamps them to now): a claim never delays an entry.
+  ndb has no `time` key. A negative `min_idle_ms` is 0, as in Redis.
+- A nacked entry is never claimed before its retry time; after it, it is
+  claimed at once, whatever `min_idle_ms` (see
+  [nack](#post-s-streams-groups-g-nack)).
+
+Due scan (ndb only), instead of `ids`:
+
+```json
+{ "consumer": "w2", "due": true, "cursor": "0-0", "count": 100 }
+```
+
+```json
+{ "cursor": "0-0", "entries": [{ "_id": "1731163600000-2", "order": 41 }], "deleted": [] }
+```
+
+- It looks only at the nacked entries (an index of them), so it does not
+  read the entries in flight at live workers: a worker can call it on a
+  short tick. It claims the ones whose retry time passed, in ID order.
+- `cursor` is optional (default `0-0`) and the answer has the next one, as
+  a scan. `min_idle_ms` does not count; `just_ids` works. `due` with `ids`
+  is `400 invalid_request`.
 
 ## Errors
 
@@ -385,6 +459,6 @@ With a scan (`XAUTOCLAIM`), instead of `ids`:
 
 ## Access
 
-`append`, `trim`, every group change, `read` (it moves the PEL), `ack` and
-`claim` are writes. `GET /{s}/_streams`, the `GET` of groups and consumers,
+`append`, `trim`, every group change, `read` (it moves the PEL), `ack`,
+`nack` and `claim` are writes. `GET /{s}/_streams`, the `GET` of groups and consumers,
 `pending` and `POST /{s}/_streams/read` are reads.
