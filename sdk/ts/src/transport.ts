@@ -68,9 +68,18 @@ export class Transport {
     }
   }
 
-  async stream(method: Method, path: string, body?: unknown, signal?: AbortSignal, contentType?: string): Promise<Streamed> {
+  // untimed turns off the header and body timeouts of undici: a blocked
+  // stream read waits as long as the server holds it. The signal ends it.
+  async stream(
+    method: Method,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+    contentType?: string,
+    untimed = false,
+  ): Promise<Streamed> {
     const res = await this.withReadyRetry(method, path, signal, async () => {
-      const r = await this.send(method, path, body, signal, contentType)
+      const r = await this.send(method, path, body, signal, contentType, untimed)
 
       if (r.statusCode >= 300) {
         throw await apiError(r)
@@ -144,14 +153,17 @@ export class Transport {
     body: unknown,
     signal?: AbortSignal,
     contentType?: string,
+    untimed = false,
   ): Promise<Dispatcher.ResponseData> {
     const raw = contentType !== undefined
+    const timeouts = untimed ? { headersTimeout: 0, bodyTimeout: 0 } : {}
     const opts = {
       method,
       path,
       signal,
       headers: this.headers(contentType),
       body: body === undefined ? undefined : raw ? (body as Uint8Array | string) : JSON.stringify(body),
+      ...timeouts,
     }
 
     const client = this.client
@@ -179,8 +191,10 @@ export class Transport {
     signal?: AbortSignal
     headers: Record<string, string>
     body?: Uint8Array | string
+    bodyTimeout?: number
   }): Promise<Dispatcher.ResponseData> {
-    const init = { method: opts.method, headers: opts.headers, body: opts.body, signal: opts.signal, unix: this.socketPath }
+    const timeout = opts.bodyTimeout === 0 ? false : undefined
+    const init = { method: opts.method, headers: opts.headers, body: opts.body, signal: opts.signal, unix: this.socketPath, timeout }
     const res = await fetch(this.base + opts.path, init as RequestInit)
     const headers: Record<string, string> = {}
 

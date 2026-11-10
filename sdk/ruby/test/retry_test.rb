@@ -49,7 +49,7 @@ class RetryTest < Minitest::Test
     starter = Thread.new do
       sleep 0.3
 
-      pid = Process.spawn(TestDaemon.binary, "-config", File.join(dir, "absent.yml"), "-data-dir", File.join(dir, "d"), "-unix", sock, out: File::NULL, err: File::NULL)
+      pid = Process.spawn(TestDaemon.binary, "-config", File.join(dir, "absent.yml"), "-data-dir", File.join(dir, "d"), "-unix", sock, "-tcp", "", out: File::NULL, err: File::NULL)
     end
 
     result = Ndb::Client.new(socket: sock, timeout: 5).collections

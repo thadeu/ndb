@@ -105,12 +105,15 @@ module Ndb
     # body is a String, or an IO that is sent chunked and never retried. A
     # dropped reused connection is sent again only when idempotent is true
     # (a read): a write may already have been processed.
-    def request(method, target, body, headers: {}, idempotent: false)
+    #
+    # timeout replaces the read timeout for this one request (a blocking
+    # stream read waits longer than the default).
+    def request(method, target, body, headers: {}, idempotent: false, timeout: nil)
       reused = !@socket.nil?
 
       begin
         send_request(method, target, body, headers)
-        read_response
+        read_within(timeout)
       rescue EOFError, Errno::EPIPE, Errno::ECONNRESET, IOError
         close
 
@@ -196,6 +199,20 @@ module Ndb
       @socket.write("0\r\n\r\n")
     end
 
+    # Reads the response with a longer read timeout, then sets the default
+    # back for the next request on this connection.
+    def read_within(timeout)
+      return read_response unless timeout && @socket.respond_to?(:timeout=)
+
+      @socket.timeout = timeout
+
+      begin
+        read_response
+      ensure
+        @socket.timeout = @timeout if @socket
+      end
+    end
+
     def read_response
       status = @socket.gets("\r\n") or raise EOFError
       headers = read_headers
@@ -261,7 +278,7 @@ module Ndb
   # A small thread-safe pool: one connection per in-flight request, idle
   # ones are kept for keep-alive. It drops its connections after a fork.
   class Pool
-    attr_reader :created
+    attr_reader :created, :timeout
 
     def initialize(endpoint, timeout:, size:)
       @endpoint = endpoint

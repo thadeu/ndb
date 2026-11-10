@@ -106,6 +106,9 @@ module Ndb
   # A stream route on a collection that is not a stream, a bad entry ID, or
   # an append ID not greater than the last one.
   class StreamError < Error; end
+  class NotAStream < StreamError; end
+  class InvalidStreamID < StreamError; end
+  class StreamIDTooSmall < StreamError; end
 
   # The stream group does not exist, or a create names one that does.
   class UnknownGroup < StreamError; end
@@ -167,9 +170,9 @@ module Ndb
     "closed" => Closed,
     "stopping" => Closed,
     "internal" => Internal,
-    "not_a_stream" => StreamError,
-    "invalid_stream_id" => StreamError,
-    "stream_id_too_small" => StreamError,
+    "not_a_stream" => NotAStream,
+    "invalid_stream_id" => InvalidStreamID,
+    "stream_id_too_small" => StreamIDTooSmall,
     "unknown_group" => UnknownGroup,
     "group_exists" => GroupExists
   }.freeze

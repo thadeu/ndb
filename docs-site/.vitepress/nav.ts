@@ -112,6 +112,7 @@ export const tabs: Tab[] = [
         items: [
           { text: 'Overview', link: '/streams' },
           { text: 'A worker', link: '/streams#a-worker' },
+          { text: 'The worker in the SDKs', link: '/streams#the-worker-in-the-sdks' },
           { text: 'How the engine runs it', link: '/streams#how-the-engine-runs-it' },
           { text: 'Trim and retention', link: '/streams#trim-and-retention' },
           { text: 'Redis command map', link: '/streams#redis-command-map' },

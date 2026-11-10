@@ -11,10 +11,10 @@ The routes have pages by group:
 | [Documents](http/documents.md) | `_doc`, `_bulk`, `_update/{id}`, `_expire`, `_persist`, `_ttl` |
 | [Queries](http/queries.md) | `_search`, `_count`, `_aggregate`, `_update_by_query`, `_delete_by_query`, patterns |
 | [Watch](http/watch.md) | `_watch`, `_ack` |
-| [Streams](http/streams.md) | `_streams/append`, `_streams/groups/{g}/read`, `ack`, `pending`, `claim` (Redis Streams) |
+| [Streams](http/streams.md) | `_streams`, `append`, `trim`, `groups`, `read`, `ack`, `pending`, `claim` (Redis Streams) |
 | [Errors](http/errors.md) | the error body and every code |
 
-The query language (operators, date math, `$elemMatch`) is on [Query](query.md), the pipeline stages are on [Aggregate](aggregate.md), and the events are on [Watch](watch.md). These pages link there and do not repeat it.
+The query language (operators, date math, `$elemMatch`) is on [Query](query.md), the pipeline stages are on [Aggregate](aggregate.md), the events are on [Watch](watch.md), and the stream model is on [Streams](streams.md). These pages link there and do not repeat it.
 
 ## Rules
 
@@ -67,6 +67,20 @@ The query language (operators, date math, `$elemMatch`) is on [Query](query.md),
 | POST | `/{coll}/_delete_by_query` | [Queries](http/queries.md#post-coll-delete-by-query) |
 | POST | `/{coll}/_watch` | [Watch](http/watch.md#post-coll-watch) |
 | POST | `/{coll}/_ack` | [Watch](http/watch.md#post-coll-ack) |
+| GET | `/{s}/_streams` | [Streams](http/streams.md#get-s-streams) |
+| POST | `/{s}/_streams/append` | [Streams](http/streams.md#post-s-streams-append) |
+| POST | `/{s}/_streams/trim` | [Streams](http/streams.md#post-s-streams-trim) |
+| GET | `/{s}/_streams/groups` | [Streams](http/streams.md#get-s-streams-groups) |
+| PUT | `/{s}/_streams/groups/{g}` | [Streams](http/streams.md#put-s-streams-groups-g) |
+| DELETE | `/{s}/_streams/groups/{g}` | [Streams](http/streams.md#delete-s-streams-groups-g) |
+| POST | `/{s}/_streams/groups/{g}/setid` | [Streams](http/streams.md#post-s-streams-groups-g-setid) |
+| GET | `/{s}/_streams/groups/{g}/consumers` | [Streams](http/streams.md#get-s-streams-groups-g-consumers) |
+| PUT | `/{s}/_streams/groups/{g}/consumers/{c}` | [Streams](http/streams.md#put-s-streams-groups-g-consumers-c) |
+| DELETE | `/{s}/_streams/groups/{g}/consumers/{c}` | [Streams](http/streams.md#delete-s-streams-groups-g-consumers-c) |
+| POST | `/{s}/_streams/groups/{g}/read` | [Streams](http/streams.md#post-s-streams-groups-g-read) |
+| POST | `/{s}/_streams/groups/{g}/ack` | [Streams](http/streams.md#post-s-streams-groups-g-ack) |
+| POST | `/{s}/_streams/groups/{g}/pending` | [Streams](http/streams.md#post-s-streams-groups-g-pending) |
+| POST | `/{s}/_streams/groups/{g}/claim` | [Streams](http/streams.md#post-s-streams-groups-g-claim) |
 
 Any other path is `404 unknown_route`. A known path with another method is `405 method_not_allowed`, with an `Allow` header.
 
@@ -151,15 +165,21 @@ See [Pagination](query.md#pagination).
 - **Not safe to retry blindly:** a write whose connection dropped after it was sent; it may have been applied. Use an explicit `_id` (a second insert is `409 duplicate_id`) or a `_v` guard.
 - The SDKs retry `not_ready` and refused connections for 10 s by default (`readyTimeout`), with backoff and jitter, and repeat a read whose connection dropped. They never repeat such a write.
 
-## Streams
+## Long-lived requests
 
-`_watch` is NDJSON, one event per line, open until the client closes it, `limit` events were sent, or the daemon ends it.
+Two routes keep the request open. They are not the same feature.
+
+**`_watch`** sends the changes of a collection as NDJSON, one event per line. It stays open until the client closes it, `limit` events were sent, or the daemon ends it.
 
 - After 15 s with no event, the daemon writes a heartbeat line `{"heartbeat":true}`. Ignore it.
-- The stream ends on a truncate or a drop of the collection, on shutdown, and when the consumer is too slow (an error line `watch_lagged`). Reconnect: the consumer continues after its last `_ack`.
-- An error after the stream started is a line `{"error":{"code","message"}}`.
+- The response ends on a truncate or a drop of the collection, on shutdown, and when the consumer is too slow (an error line `watch_lagged`). Reconnect: the consumer continues after its last `_ack`.
+- An error after the response started is a line `{"error":{"code","message"}}`.
+- See [Watch routes](http/watch.md).
 
-See [Watch](http/watch.md).
+**A stream group read with `block_ms`** (`POST /{s}/_streams/groups/{g}/read`) is a normal JSON request that waits up to `block_ms` for new entries. With none, the answer is `[]`. It sends no heartbeat.
+
+- Set the client read timeout above `block_ms`. The SDKs do this for you.
+- See [Stream routes](http/streams.md#post-s-streams-groups-g-read).
 
 ## Limits
 
@@ -174,6 +194,7 @@ See [Watch](http/watch.md).
 | Snapshot cursor idle time | 60 s | `400 cursor_expired` |
 | Watch heartbeat | 15 s of silence | — |
 | `_quarantine` `limit` | 1000 | — |
+| Stream read or claim `count` | 10 000 | `400 invalid_request` |
 
 ## Versioning
 

@@ -65,7 +65,7 @@ module TestDaemon
     def spawn_daemon(binary)
       log = File.join(@tmp, "ndb.log")
 
-      @pid = Process.spawn(binary, "-data-dir", @data_dir, "-unix", socket, out: log, err: log)
+      @pid = Process.spawn(binary, "-data-dir", @data_dir, "-unix", socket, "-tcp", "", out: log, err: log)
     end
 
     def wait_ready

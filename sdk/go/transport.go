@@ -243,7 +243,9 @@ func (db *DB) doOnce(ctx context.Context, method, path string, body []byte) (*ht
 
 	client := db.client
 
-	if strings.HasSuffix(path, "/_watch") {
+	// A watch and a group read (block_ms) hold the connection while they
+	// wait: they do not count against WithMaxConns.
+	if strings.HasSuffix(path, "/_watch") || isGroupRead(path) {
 		client = db.watches
 	}
 
@@ -347,4 +349,9 @@ func discard(resp *http.Response) {
 
 func collPath(coll string) string {
 	return "/" + url.PathEscape(coll)
+}
+
+// isGroupRead reports whether path is a stream group read.
+func isGroupRead(path string) bool {
+	return strings.Contains(path, "/_streams/groups/") && strings.HasSuffix(path, "/read")
 }

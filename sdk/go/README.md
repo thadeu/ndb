@@ -330,6 +330,65 @@ for ev, err := range calls.Watch(ctx, "relay", ndb.WatchQuery(ndb.Eq("status", "
 - `ErrWatchLagged` means the consumer was too slow. `ErrHistoryTruncated` means the WAL files for its position were deleted (`wal_retention`).
 - The stream ends when `ctx` is cancelled.
 
+## Streams
+
+A stream is an append-only log with consumer groups, with the behavior of
+Redis Streams (see [Streams](../../docs/dev/streams.md)). `T` is a struct with
+`ndb` tags or `map[string]any`.
+
+```go
+orders, err := ndb.StreamOf[Order](db, "orders")
+
+id, err := orders.Append(ctx, Order{Order: 42, Total: 99.9})       // "1731164400000-0"
+ids, err := orders.AppendMany(ctx, []Order{{Order: 43}, {Order: 44}}) // one fsync
+_, err = orders.Append(ctx, o, ndb.WithTrim(ndb.MaxLen(10_000, true)))
+
+entries, err := orders.Range(ctx, "-", "+", 100) // XRANGE; entries[0].ID, .Time, .Doc
+info, err := orders.Info(ctx)                    // length, first and last ID, groups
+```
+
+A worker in a group. `Work` reads its own pending entries first, then new
+ones (waiting up to `Block`), acks each entry the handler did without an
+error, and claims the entries other workers left idle. An entry delivered
+`MaxDeliveries` times goes to the dead-letter stream:
+
+```go
+g := orders.Group("billing")
+
+if err := g.Ensure(ctx, ndb.StartNew); err != nil { // or ndb.StartAll
+	return err
+}
+
+err = g.Work(ctx, "worker-1", func(ctx context.Context, e ndb.Entry[Order]) error {
+	return charge(ctx, e.Doc) // nil acks; an error leaves it pending
+}, ndb.Work{
+	Count:         100,
+	ClaimIdle:     time.Minute,
+	MaxDeliveries: 5,
+	DeadLetter:    "orders_dead",
+	OnError:       func(err error) { log.Println(err) },
+})
+```
+
+`Work` returns when `ctx` ends. Delivery is at least once: make the work safe
+to repeat. Run many workers with different consumer names to share the work.
+
+The calls one by one, when you need your own loop:
+
+| Redis | Go |
+|---|---|
+| `XGROUP CREATE` | `g.Create(ctx, ndb.StartNew)` / `g.Ensure` |
+| `XREADGROUP ... >` | `g.Read(ctx, "w1", ndb.Read{Count: 100, Block: 5 * time.Second})` |
+| `XREADGROUP ... 0` | `g.Read(ctx, "w1", ndb.Read{Pending: true})` |
+| `XACK` | `g.Ack(ctx, ids...)` |
+| `XPENDING` | `g.Pending(ctx)` / `g.PendingList(ctx, ndb.PendingQuery{Idle: time.Minute})` |
+| `XCLAIM` / `XAUTOCLAIM` | `g.Claim(ctx, "w2", time.Minute, ids...)` / `g.AutoClaim(ctx, "w2", time.Minute, "0-0", 100)` |
+| `XTRIM` | `orders.Trim(ctx, ndb.MaxLen(1000, false))` |
+| `XDEL` | `orders.Delete(ctx, id)` |
+| `XINFO GROUPS` / `CONSUMERS` | `orders.Groups(ctx)` / `g.Consumers(ctx)` |
+
+A blocked `Read` does not count against `WithMaxConns`.
+
 ## Blobs
 
 Large values live in the blob store. The document keeps only a reference. The same content always gives the same reference.

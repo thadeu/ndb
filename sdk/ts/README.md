@@ -297,6 +297,64 @@ try {
 - `ack(ev)` stores the position (`POST /{coll}/_ack`). The next `watch` with the same consumer name starts after it.
 - `HistoryTruncatedError` means the WAL files for the position were deleted (`wal_retention`).
 
+## Streams
+
+A stream is an append-only log with consumer groups, with the behavior of Redis Streams (see [Streams](../../docs/dev/streams.md)). `T` is the type of the entry. The entry ID and time are in `Entry`, not in `T`.
+
+```ts
+const orders = db.stream<{ order: number; total: number }>('orders')
+
+const id = await orders.append({ order: 42, total: 99.9 })            // "1731164400000-0"
+const ids = await orders.appendMany([{ order: 43, total: 1 }, { order: 44, total: 2 }]) // one fsync
+await orders.append(o, { trim: { maxLen: 10_000, approx: true } })
+
+const entries = await orders.range('-', '+', 100) // XRANGE; entries[0].id, .time, .doc
+const info = await orders.info()                  // length, first and last ID, groups
+```
+
+A worker in a group. `work` reads its own pending entries first, then new ones (waiting up to `blockMs`), acks the entries the handler did without an error, and claims the entries other workers left idle. An entry delivered `maxDeliveries` times goes to the dead-letter stream:
+
+```ts
+import { PoisonError, startNew } from '@thadeu/ndb'
+
+const g = orders.group('billing')
+
+await g.ensure(startNew) // or startAll
+
+const controller = new AbortController()
+
+await g.work('worker-1', async (e, signal) => {
+  await charge(e.doc, signal) // resolves: ack; throws: stays pending
+}, {
+  count: 100,
+  claimIdleMs: 60_000,
+  maxDeliveries: 5,
+  deadLetter: 'orders_dead',
+  onError: (err) => console.error(err), // a PoisonError comes after its ack
+  signal: controller.signal,
+})
+```
+
+`work` resolves when the signal aborts; the abort also ends a blocked read. Delivery is at least once: make the work safe to repeat. Run many workers with different consumer names to share the work. A deleted entry is acked without the handler. Defaults: `count` 10, `blockMs` 5000, `claimIdleMs` 60000 (negative turns the claim off), `claimEveryMs` `claimIdleMs / 2` (at least 1000).
+
+The calls one by one, when you need your own loop:
+
+| Redis | TypeScript |
+|---|---|
+| `XGROUP CREATE` | `g.create(startNew)` / `g.ensure(startNew)` |
+| `XREADGROUP ... >` | `g.read('w1', { count: 100, blockMs: 5000, signal })` |
+| `XREADGROUP ... 0` | `g.read('w1', { pending: true })` |
+| `XACK` | `g.ack(...ids)` |
+| `XPENDING` | `g.pending()` / `g.pendingList({ idleMs: 60_000 })` |
+| `XCLAIM` / `XAUTOCLAIM` | `g.claim('w2', 60_000, ids)` / `g.autoClaim('w2', 60_000, '0-0', 100)` |
+| `XGROUP SETID` / `DESTROY` | `g.setId(id)` / `g.destroy()` |
+| `XGROUP CREATECONSUMER` / `DELCONSUMER` | `g.createConsumer('w1')` / `g.deleteConsumer('w1')` |
+| `XTRIM` | `orders.trim({ maxLen: 1000 })` or `{ minId, approx, limit }` |
+| `XDEL` | `orders.delete(id)` |
+| `XINFO GROUPS` / `CONSUMERS` | `orders.groups()` / `g.consumers()` |
+
+A blocked read has no request timeout: it waits as long as `blockMs`. Stream errors have their own classes: `StreamIdError` (`invalid_stream_id`, `stream_id_too_small`), `UnknownGroupError`, `GroupExistsError` and `NotAStreamError`. `db.stream(name)` with one argument is a stream; with a method and a path it is a raw request.
+
 ## Blobs
 
 Large values live in the blob store. A document keeps only a reference. The same content always gives the same reference.

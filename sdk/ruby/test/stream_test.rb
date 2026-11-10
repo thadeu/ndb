@@ -1,0 +1,270 @@
+# frozen_string_literal: true
+
+require "test_helper"
+
+class StreamTest < Minitest::Test
+  def setup
+    @stream = client.stream(NdbTestHelpers.next_name)
+  end
+
+  def test_append_info_range
+    id = @stream.append({ order: 1, total: 9.9 })
+
+    refute_nil Ndb::Stream.id_time(id)
+
+    ids = append_orders(2, 4)
+
+    assert_equal 3, ids.size
+
+    info = @stream.info
+
+    assert_equal 4, info["length"]
+    assert_equal id, info["first_id"]
+    assert_equal ids.last, info["last_id"]
+    assert_equal 4, info["entries_added"]
+
+    all = @stream.range
+
+    assert_equal 4, all.size
+    assert_equal({ "order" => 1, "total" => 9.9 }, all.first.doc)
+    assert_instance_of Time, all.first.time
+    refute_predicate all.first, :deleted?
+
+    last = @stream.rev_range("+", "-", count: 1)
+
+    assert_equal [ids.last], last.map(&:id)
+
+    assert_raises(Ndb::StreamIDTooSmall) { @stream.append({}, id: "1-1") }
+    assert_raises(Ndb::InvalidStreamID) { @stream.append({}, id: "0-0") }
+
+    assert_equal 1, @stream.delete(id)
+    assert_equal 2, @stream.trim(max_len: 1)
+  end
+
+  def test_append_with_trim_and_no_create
+    assert_raises(Ndb::UnknownCollection) { @stream.append({ order: 1 }, no_create: true) }
+
+    append_orders(1, 5)
+
+    @stream.append({ order: 6 }, trim: { max_len: 2 })
+
+    assert_equal 2, @stream.info["length"]
+  end
+
+  def test_not_a_stream
+    name = NdbTestHelpers.next_name
+
+    client.ensure_collection(name)
+
+    assert_raises(Ndb::NotAStream) { client.stream(name).info }
+  end
+
+  def test_group_read_ack_pending_claim
+    group = @stream.group("workers")
+
+    group.create(Ndb::Stream::START_ALL)
+
+    assert_raises(Ndb::GroupExists) { group.create(Ndb::Stream::START_ALL) }
+
+    group.ensure(Ndb::Stream::START_ALL)
+
+    ids = append_orders(1, 3)
+    got = group.read("w1", count: 2)
+
+    assert_equal ids[0], got[0].id
+    assert_equal 2, got[1].doc["order"]
+
+    assert_equal 1, group.ack(ids[0])
+
+    summary = group.pending
+
+    assert_equal 1, summary["count"]
+    assert_equal ids[1], summary["lowest"]
+    assert_equal ["w1"], summary["consumers"].map { |c| c["name"] }
+
+    mine = group.read("w1", pending: true)
+
+    assert_equal [ids[1]], mine.map(&:id)
+
+    list = group.pending_list(consumer: "w1")
+
+    assert_equal [ids[1]], list.map { |p| p["_id"] }
+    assert_equal 1, list.first["deliveries"]
+
+    claimed = group.claim("w2", ids[1])
+
+    assert_equal [2], claimed.entries.map { |e| e.doc["order"] }
+
+    auto = group.auto_claim("w3", count: 10)
+
+    assert_equal "0-0", auto.cursor
+    assert_equal 1, auto.entries.size
+
+    assert_equal 3, group.consumers.size
+
+    groups = @stream.groups
+
+    assert_equal 1, groups.size
+    assert_equal 1, groups.first["pending"]
+    assert_equal ids[1], groups.first["last_delivered_id"]
+
+    assert_equal 1, group.delete_consumer("w3")
+
+    group.destroy
+
+    assert_raises(Ndb::UnknownGroup) { group.read("w1") }
+  end
+
+  def test_read_blocks_until_an_append
+    group = @stream.group("workers")
+
+    group.create
+
+    writer = Thread.new do
+      sleep 0.2
+
+      @stream.append({ order: 7 })
+    end
+
+    started = now
+    got = group.read("w1", block: 5)
+
+    writer.join
+
+    assert_equal [7], got.map { |e| e.doc["order"] }
+    assert_operator now - started, :<, 4
+
+    assert_empty group.read("w1", block: 0.05)
+  end
+
+  def test_blocking_read_outlives_the_client_timeout
+    short = Ndb::Client.new(socket: TestDaemon.socket, timeout: 0.3)
+    group = short.stream(@stream.name).group("workers")
+
+    group.create
+
+    started = now
+
+    assert_empty group.read("w1", block: 0.8)
+    assert_operator now - started, :>=, 0.7
+  end
+
+  def test_worker_does_every_entry_once
+    group = @stream.group("workers")
+
+    group.create(Ndb::Stream::START_ALL)
+    append_orders(1, 50)
+
+    lock = Mutex.new
+    seen = Hash.new(0)
+
+    workers = %w[w1 w2 w3].map do |name|
+      group.worker(name, block: 0.1) { |e| lock.synchronize { seen[e.doc["order"]] += 1 } }
+    end
+
+    threads = workers.map(&:start)
+
+    append_orders(51, 60)
+    wait_for { lock.synchronize { seen.size == 60 } }
+
+    workers.each(&:stop)
+    threads.each(&:join)
+
+    assert(seen.values.all? { |n| n == 1 }, "an entry was done twice: #{seen}")
+    assert_equal 0, group.pending["count"]
+  end
+
+  def test_worker_retries_and_buries_poison
+    group = @stream.group("workers")
+
+    group.create(Ndb::Stream::START_ALL)
+
+    ids = append_orders(1, 2)
+    dead_name = "#{@stream.name}_dead"
+
+    lock = Mutex.new
+    tries = Hash.new(0)
+    poisoned = 0
+
+    on_error = lambda do |error|
+      lock.synchronize { poisoned += 1 } if error.is_a?(Ndb::PoisonMessage)
+    end
+
+    worker = group.worker(
+      "w1",
+      block: 0.05,
+      claim_idle: 0.1,
+      claim_every: 0.1,
+      max_deliveries: 3,
+      dead_letter: dead_name,
+      on_error: on_error
+    ) do |e|
+      order = e.doc["order"]
+      tries_now = lock.synchronize { tries[order] += 1 }
+
+      raise "boom" if order == 2 || (order == 1 && tries_now == 1)
+    end
+
+    thread = worker.start
+
+    wait_for { lock.synchronize { poisoned == 1 } }
+
+    worker.stop
+    thread.join
+
+    assert_equal({ 1 => 2, 2 => 3 }, tries)
+    assert_equal 0, group.pending["count"]
+
+    dead = client.stream(dead_name).range
+
+    assert_equal 1, dead.size
+    assert_equal ids[1], dead.first.doc["id"]
+    assert_equal 3, dead.first.doc["deliveries"]
+    assert_equal "workers", dead.first.doc["group"]
+    assert_equal({ "order" => 2, "total" => 20.0 }, dead.first.doc["doc"])
+  end
+
+  def test_worker_starts_with_its_own_pending
+    group = @stream.group("workers")
+
+    group.create(Ndb::Stream::START_ALL)
+    append_orders(1, 3)
+
+    group.read("w1")
+
+    lock = Mutex.new
+    got = []
+    done = false
+
+    thread = Thread.new do
+      group.work("w1", block: 0.05, claim_idle: nil, stop: -> { done }) do |e|
+        lock.synchronize { got << e.doc["order"] }
+      end
+    end
+
+    wait_for { lock.synchronize { got.size == 3 } }
+
+    done = true
+    thread.join
+
+    assert_equal [1, 2, 3], got
+  end
+
+  private
+
+  def append_orders(from, to)
+    @stream.append_many((from..to).map { |i| { order: i, total: i * 10.0 } })
+  end
+
+  def now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+  def wait_for
+    deadline = now + 15
+
+    until yield
+      flunk "timed out" if now > deadline
+
+      sleep 0.02
+    end
+  end
+end

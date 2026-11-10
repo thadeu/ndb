@@ -48,6 +48,7 @@ Ndb.connect(
 ```
 
 - The address is, in order: the argument, env `NDB_URL`, then the default socket `/run/ndb/ndb.sock`.
+- `/run/ndb/ndb.sock` is the socket of a server install (root, or `/var/lib/ndb` exists). A local daemon that you start as a user with no flags (`ndb serve`) listens on `~/.ndb/ndb.sock` and on TCP `127.0.0.1:7070`. Connect to it with `Ndb.connect("unix://#{Dir.home}/.ndb/ndb.sock")` or `Ndb.connect("tcp://127.0.0.1:7070")`, or set `NDB_URL`.
 - The token is `token:`, or env `NDB_TOKEN`. It goes only in the `Authorization` header. A unix socket does not need it.
 - A bad address raises `ArgumentError` at once.
 - `ready_timeout` is how long a call retries while the daemon is not ready (`not_ready`, or the socket is missing or refuses). It uses exponential backoff (50 ms up to 1 s) with jitter. A write is retried only when the daemon certainly did not process it. A read is also retried after a dropped connection. A timeout is never retried. When the deadline passes, the last error is raised.
@@ -108,7 +109,21 @@ calls.drop       # the collection, its definition and its watch consumers go
 ```
 
 - Both take the same time for 10 or 10 million documents. Watch consumers get one event with `"op" => "truncate"` (no `_id`), then the new changes.
+- Both send the collection name as the `confirm` value for you.
 - A direct-mode collection raises `Ndb::ReadOnlyCollection`. A collection declared in `ndb.yml` comes back, empty, when the daemon restarts after a drop. After `drop`, the next call on the handle declares it again.
+
+### Rename and restore
+
+```ruby
+calls.rename("calls_old")                    # => {"collection", "renamed_from", "replaced"}
+calls.rename("calls_live", replace: true)    # an existing calls_live goes aside first
+
+calls.pitr                                   # => {"collection", "window", "oldest", "newest", "snapshots", "bytes"}
+calls.restore(at: Time.now - 600, to: "calls_10min_ago")   # => {"collection", "restored", "at", "duration_ms"}
+```
+
+- `rename` without `replace:` raises `Ndb::CollectionExists` when the new name exists. The handle keeps the old name.
+- `restore` makes the collection `to:` hold this collection as it was at `at:` (a `Time` or an RFC 3339 string), from the PITR window (1 day by default). It raises `Ndb::OutOfWindow`, `Ndb::PitrOff` or `Ndb::CollectionExists`.
 
 ## Expiry (TTL like Redis)
 
@@ -202,7 +217,7 @@ The daemon validates the JSON (`invalid_query`), but it takes any field: for a p
 
 ### Collection patterns
 
-A collection name with `*` at the end reads every collection whose name starts with the prefix (see [Collection patterns](../http/queries.md#collection-patterns)). Each row has `"_coll"`, the name of its collection. Writes raise `Ndb::Error` with code `pattern_read_only`.
+A collection name with `*` at the end reads every collection whose name starts with the prefix (see [Collection patterns](../http/queries.md#collection-patterns)). Each row has `"_coll"`, the name of its collection. Writes raise `Ndb::InvalidPattern` with code `pattern_read_only`.
 
 ```ruby
 logs = db.collection("logs-2026-*")
@@ -338,6 +353,345 @@ end
 - `HistoryTruncated` means the WAL files for the position were deleted (`wal_retention`).
 - A watch holds one connection until it ends. It is retried only for the initial open, never in the middle of a stream.
 
+## Streams
+
+A stream is an append-only log with consumer groups, with the behavior of Redis Streams. Apps append entries. The workers of a group each take a part of the entries, do the work and ack them. See [Streams](../streams.md) for the model and [Stream routes](../http/streams.md) for the wire contract.
+
+A stream is also a collection: `db.collection("orders").query(...)` searches it with every filter.
+
+### `stream`
+
+```ruby
+orders = db.stream("orders")   # sends nothing
+orders.name                    # => "orders"
+```
+
+- `db.stream(name)` returns an `Ndb::Stream`. It sends nothing until the first call.
+- The first `append` or `group.create` makes the stream.
+
+### `create`
+
+```ruby
+orders.create                                  # makes the stream, or checks that it is one
+orders.create(indexes: ["customer"], retention: "7d")
+```
+
+- Use it for a stream with options. It sends `PUT /{s}` with `"stream": true`.
+- The definition takes the keys of a collection, except `time` (it is `_ts`) and `unique`.
+- A collection that is not a stream raises `Ndb::NotAStream`.
+
+### `append`
+
+```ruby
+id = orders.append({ order: 42, total: 99.9 })            # => "1731164400000-0"
+orders.append({ order: 43 }, id: "1731164400500-*")       # this ms, the daemon makes seq
+orders.append({ order: 44 }, trim: { max_len: 10_000, approx: true })
+orders.append({ order: 45 }, no_create: true)             # NOMKSTREAM
+```
+
+- Adds one entry (`XADD`) and returns its ID, `"<ms>-<seq>"`.
+- `id:` is `"<ms>-<seq>"` or `"<ms>-*"`. The default is `"*"`: the daemon makes the ID.
+- `trim:` is a Hash with the keywords of [`trim`](#trim). The trim runs after the append.
+- `no_create: true` raises `Ndb::UnknownCollection` when the stream does not exist.
+- An `id:` that is not greater than the last ID raises `Ndb::StreamIDTooSmall`. A bad ID raises `Ndb::InvalidStreamID`.
+
+### `append_many`
+
+```ruby
+ids = orders.append_many([{ order: 46 }, { order: 47 }])   # => ["...-0", "...-1"]
+```
+
+- Adds the entries in order, with one fsync for all, and returns their IDs.
+- It takes the same `id:`, `trim:` and `no_create:` as `append`. `id:` applies to the first entry.
+
+### `trim`
+
+```ruby
+orders.trim(max_len: 1000)                    # keep the newest 1000 entries
+orders.trim(min_id: "1731160000000-0")        # delete the entries with a lower ID
+orders.trim(max_len: 1000, approx: true, limit: 5000)
+```
+
+- Deletes old entries (`XTRIM`) and returns how many.
+- `approx: true` deletes only whole blocks of 1 024 entries. `limit:` caps the count with `approx`.
+
+### `info`
+
+```ruby
+orders.info
+# => {"length" => 3, "first_id" => "...", "last_id" => "...", "entries_added" => 3,
+#     "max_deleted_id" => "0-0", "groups" => 1}
+```
+
+- The state of the stream (`XINFO STREAM`).
+
+### `range` and `rev_range`
+
+```ruby
+entries = orders.range("-", "+", count: 100)     # XRANGE
+entries.first.id; entries.first.time; entries.first.doc
+
+orders.rev_range("+", "-", count: 10)            # XREVRANGE: newest first
+```
+
+- `range(start = "-", stop = "+", count: nil)` gives the entries with an ID from `start` to `stop`, both included, in ID order. `rev_range(stop = "+", start = "-", count: nil)` gives them in the reverse order.
+- `"-"` and `"+"` are the lowest and the highest ID. An ID without `-seq` is `<ms>-0` as a start and the last ID of that ms as an end.
+- Each item is an `Ndb::Entry`: `id`, `time` (a UTC `Time`, from the ms of the ID), `doc` (the Hash without `_id` and `_ts`), `deleted?` and `raw` (the row as the daemon sent it).
+
+### `delete`
+
+```ruby
+orders.delete("1731164400000-0")   # => 1, or 0 when it is not there
+```
+
+- Removes one entry by ID (`XDEL`). It stays in the pending list of a group until it is acked: a read of the pending entries gives it with `deleted?` true and `doc` nil.
+
+### `groups`
+
+```ruby
+orders.groups
+# => [{"name" => "billing", "consumers" => 2, "pending" => 5,
+#      "last_delivered_id" => "...", "entries_read" => 40, "lag" => 0}]
+```
+
+- The groups of the stream (`XINFO GROUPS`). `lag` is nil when it cannot be known.
+
+### `group`
+
+```ruby
+billing = orders.group("billing")   # sends nothing
+billing.name; billing.stream
+```
+
+- Returns an `Ndb::Group`. Each entry goes to one consumer of the group, and stays pending until it is acked.
+
+### `group.create` and `group.ensure`
+
+```ruby
+billing.create(Ndb::Stream::START_NEW)   # "$": only the entries appended after now
+billing.create(Ndb::Stream::START_ALL)   # "0": every entry of the stream
+billing.create("1731160000000-0")        # the entries after this ID
+
+billing.ensure                           # makes it, or does nothing when it exists
+```
+
+- `create(start = Ndb::Stream::START_NEW)` makes the group (`XGROUP CREATE ... MKSTREAM`). It makes the stream too.
+- `create` raises `Ndb::GroupExists` when the group exists. `ensure(start = START_NEW)` does not: use it at boot.
+
+### `group.set_id`
+
+```ruby
+billing.set_id("$")                  # skip every entry that is there now
+billing.set_id("1731160000000-0")
+```
+
+- Moves the last delivered ID of the group (`XGROUP SETID`).
+
+### `group.destroy`
+
+```ruby
+billing.destroy
+```
+
+- Deletes the group and its pending entries (`XGROUP DESTROY`). The entries stay in the stream.
+
+### `group.create_consumer`, `delete_consumer` and `consumers`
+
+```ruby
+billing.create_consumer("w1")   # => true when it is new (XGROUP CREATECONSUMER)
+billing.consumers               # => [{"name" => "w1", "pending" => 0, "idle_ms" => 12, "inactive_ms" => 12}]
+billing.delete_consumer("w1")   # => how many pending entries it held (XGROUP DELCONSUMER)
+```
+
+- A read makes the consumer too, so `create_consumer` is optional.
+- `delete_consumer` drops the pending entries of that consumer. Claim them first if they must be done.
+
+### `group.read`
+
+```ruby
+entries = billing.read("w1", count: 100, block: 5)    # new entries, wait up to 5 s
+mine = billing.read("w1", pending: true)              # its own pending entries
+more = billing.read("w1", pending: true, after: mine.last.id)
+billing.read("w1", no_ack: true, fields: %w[order])
+```
+
+- Gives entries to the consumer (`XREADGROUP`) and returns an Array of `Ndb::Entry`. An empty Array means no entry.
+- By default it gives new entries (`>` in Redis). Each one becomes pending for this consumer.
+- `count:` is the most entries (the daemon default is 10, at most 10 000).
+- `block:` is in seconds (a Float is fine). With no new entry, the read waits up to this long. The read timeout of that request is `block` + 5 seconds, or the client `timeout` when it is longer.
+- `pending: true` gives its own pending entries with an ID greater than `after:` (default `"0"`). Their delivery count does not change. A deleted entry comes with `deleted?` true. `block:` does not apply.
+- `no_ack: true` does not add the entries to the pending list (`NOACK`): at most once.
+- `fields:` gives only these fields (and `_id`).
+- A group that does not exist raises `Ndb::UnknownGroup`.
+
+### `group.ack`
+
+```ruby
+billing.ack(entries.first.id)        # => 1
+billing.ack(*entries.map(&:id))
+billing.ack(entries.map(&:id))       # an Array is fine too
+```
+
+- Ends the work on the entries (`XACK`). It returns how many were pending. An ID that is not pending counts 0. No ID sends nothing and returns 0.
+
+### `group.pending`
+
+```ruby
+billing.pending
+# => {"count" => 5, "lowest" => "...", "highest" => "...",
+#     "consumers" => [{"name" => "w1", "count" => 5}]}
+```
+
+- The pending list in short (`XPENDING`).
+
+### `group.pending_list`
+
+```ruby
+billing.pending_list(idle: 60, count: 100)
+# => [{"_id" => "...", "consumer" => "w1", "idle_ms" => 61000, "deliveries" => 2}]
+
+billing.pending_list(start: "-", stop: "+", consumer: "w1")
+```
+
+- The pending entries in ID order (`XPENDING` with a range).
+- Keywords: `start:` (`"-"`), `stop:` (`"+"`), `count:` (100), `consumer:` (all), `idle:` (seconds: only the entries idle for at least this long).
+
+### `group.claim`
+
+```ruby
+out = billing.claim("w2", "1731164400000-0", "1731164400000-1", min_idle: 60)
+out.entries   # Ndb::Entry list, now pending for w2
+out.deleted   # pending IDs whose entry is no longer in the stream
+```
+
+- Moves the entries idle for at least `min_idle` seconds (default 0) to the consumer (`XCLAIM`). Each one gets one more delivery.
+- It returns an `Ndb::Claimed` with `entries`, `deleted` and `cursor` (nil for `claim`).
+
+### `group.auto_claim`
+
+```ruby
+cursor = "0-0"
+
+loop do
+  out = billing.auto_claim("w2", min_idle: 60, cursor: cursor, count: 100)
+  out.entries.each { |e| handle(e) }
+
+  cursor = out.cursor
+
+  break if cursor == "0-0"
+end
+```
+
+- Scans the pending list from `cursor:` (default `"0-0"`) and moves up to `count:` entries idle for at least `min_idle` seconds to the consumer (`XAUTOCLAIM`).
+- `out.cursor` is where the next call starts. It is `"0-0"` when the scan is complete.
+
+### `group.worker`
+
+```ruby
+worker = billing.worker(
+  "w1",
+  count: 100,
+  block: 5,
+  claim_idle: 60,
+  max_deliveries: 5,
+  dead_letter: "orders_dead",
+  on_error: ->(error) { warn error.message }
+) { |entry| charge(entry.doc) }
+
+trap("TERM") { worker.stop }
+
+worker.run
+```
+
+- `group.worker(consumer, **options) { |entry| ... }` returns an `Ndb::Worker`. The block is required (`ArgumentError` without it).
+- A block that returns acks the entry. A block that raises leaves it pending; `on_error` gets the error, and a worker of the group claims the entry again after `claim_idle`.
+- A deleted entry is acked without the block.
+- The acks of one read go in one call.
+- Delivery is at least once: make the work safe to repeat. Run many workers with different consumer names to share the work.
+
+The options and their defaults:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `count:` | `10` | the most entries per read |
+| `block:` | `5` | seconds a read waits for new entries |
+| `claim_idle:` | `60` | seconds; entries of any consumer pending this long are claimed and tried again. `nil` or a value that is not positive turns the claim off |
+| `claim_every:` | `claim_idle / 2`, at least `1` | seconds between two claim scans |
+| `max_deliveries:` | `nil` (no limit) | an entry delivered this many times is poison |
+| `dead_letter:` | `nil` | the stream name that gets the poison entries |
+| `on_error:` | `nil` | a callable that gets the errors that do not stop the worker |
+
+### `Worker#run`
+
+```ruby
+worker.run   # blocks until worker.stop
+```
+
+The loop:
+
+1. It reads its own pending entries first (the ones it took before a restart and did not ack), and does the work on them.
+2. It reads new entries, and waits up to `block` for them.
+3. It acks the entries that the block did without a raise.
+4. Every `claim_every`, it claims the entries idle for `claim_idle`, and sends the poison ones to `dead_letter`.
+
+- A failed read goes to `on_error`. The loop waits (backoff from 0.1 s up to 5 s) and reads again.
+- `run` returns nil after `stop`.
+
+### `Worker#start` and `Worker#stop`
+
+```ruby
+thread = worker.start   # runs the loop in a new Thread
+worker.stop             # ends the loop
+thread.join
+worker.stopped?         # => true
+```
+
+- `stop` ends the loop after the current read (at most `block` seconds) and the work on the entries of that read. The entries of that read that were not done stay pending.
+
+### `group.work`
+
+```ruby
+done = false
+
+billing.work("w1", stop: -> { done }, count: 100, max_deliveries: 5) { |entry| charge(entry.doc) }
+```
+
+- The same loop as `worker(...).run` in one call, in this thread. It takes the options of `worker`.
+- `stop:` is a callable. The loop ends when it returns true (it is checked about every 50 ms, and the loop ends after the current read). Without `stop:`, the loop never ends: use `worker` and `Worker#stop` instead.
+
+### Dead letter and poison
+
+```ruby
+dead = db.stream("orders_dead")
+dead.range.each do |e|
+  e.doc   # => {"stream" => "orders", "group" => "billing", "id" => "...", "deliveries" => 5, "doc" => {...}}
+end
+```
+
+- An entry delivered `max_deliveries` times is poison. When the worker claims it, it does not run the block. It appends `{stream, group, id, deliveries, doc}` to the `dead_letter` stream (when set), acks the entry, and gives an `Ndb::PoisonMessage` to `on_error`.
+- `Ndb::PoisonMessage` has `entry`, `deliveries` and the code `poison_message`. The worker does not raise it.
+- Without `dead_letter:`, a poison entry is only acked and reported.
+
+### Stream errors
+
+All are under `Ndb::StreamError`, a subclass of `Ndb::Error`:
+
+| Class | Code | When |
+|---|---|---|
+| `NotAStream` | `not_a_stream` | a stream call, or `create`, on a collection that is not a stream |
+| `InvalidStreamID` | `invalid_stream_id` | an ID that is not `<ms>-<seq>`, a special value where it is not allowed, or `0-0` in an append |
+| `StreamIDTooSmall` | `stream_id_too_small` | an append ID that is not greater than the last one |
+| `UnknownGroup` | `unknown_group` | the group does not exist |
+| `GroupExists` | `group_exists` | `group.create` with a name that exists |
+
+```ruby
+begin
+  orders.append({ order: 1 }, id: "1-0")
+rescue Ndb::StreamIDTooSmall => e
+  e.code   # "stream_id_too_small"
+end
+```
+
 ## Admin
 
 ```ruby
@@ -379,7 +733,7 @@ The same content always gives the same reference. An IO upload is never retried.
 | `aggregate(coll, body)` → `Ndb::Page` | `POST /{coll}/_aggregate` |
 | `get(coll, id)` | `GET /{coll}/_doc/{id}` |
 | `insert(coll, doc)` | `POST /{coll}/_doc` |
-| `bulk(coll, docs, expire_in:)` | `POST /{coll}/_bulk` |
+| `bulk(coll, docs, expire_in:, upsert:)` | `POST /{coll}/_bulk` |
 | `update(coll, id, ops, guard:, upsert:, expire_in:)` | `POST /{coll}/_update/{id}` |
 | `update_by(coll, query, ops, many:, upsert:, expire_in:)` | `POST /{coll}/_update_by_query` |
 | `delete(coll, id)` | `DELETE /{coll}/_doc/{id}` |
@@ -387,6 +741,8 @@ The same content always gives the same reference. An IO upload is never retried.
 | `expire(coll, id, in:/at:)`, `persist(coll, id)`, `ttl(coll, id)` | `_expire`, `_persist`, `_ttl` |
 | `watch(coll, consumer, query:, from:, limit:)`, `ack(coll, consumer, pos)` | `_watch`, `_ack` |
 | `ensure_collection(coll, definition)`, `truncate(coll)`, `drop(coll)` | `PUT /{coll}`, `_truncate`, `DELETE /{coll}` |
+| `rename(coll, to, replace:)`, `restore(coll, at:, to:)`, `pitr(coll)` | `_rename`, `_restore`, `_pitr` |
+| `stream(name)` → `Ndb::Stream`, `stream_request(method, coll, action, body)` | the [stream routes](../http/streams.md); see [Streams](#streams) |
 | `ensure_index(coll, f)`, `drop_index(coll, f)`, `collection_stats(coll)`, `compact(coll)` | `_indexes/{f}`, `_stats`, `_compact` |
 | `health`, `collections`, `stats`, `size`, `put_blob`, `get_blob` | system routes |
 
@@ -410,11 +766,27 @@ All errors inherit from `Ndb::Error`, which has `code` (the daemon code) and `st
 | `CatalogConflict` | `catalog_conflict` |
 | `CatalogInvalid` | `catalog_invalid` |
 | `ReadOnlyCollection` | `direct_collection` |
-| `InvalidQuery` | `invalid_query`, `invalid_request` |
+| `InvalidQuery` | `invalid_query`, `invalid_request`, `invalid_pipeline` |
 | `InvalidCursor` | `cursor_invalid`, `cursor_mismatch`, `cursor_expired` |
 | `WatchLagged` | `watch_lagged` |
 | `HistoryTruncated` | `history_truncated` |
 | `TtlNotEnabled`, `TtlDerived` | `ttl_not_enabled`, `ttl_derived` |
+| `ConfirmRequired` | `confirm_required` |
+| `CollectionExists` | `collection_exists` |
+| `OutOfWindow`, `PitrOff` | `out_of_window`, `pitr_off` |
+| `LookupError` | `lookup_invalid`, `lookup_unindexed`, `lookup_too_large` |
+| `Forbidden` | `forbidden` |
+| `InvalidDocument` | `invalid_doc`, `missing_id`, `invalid_id`, `immutable_id`, `invalid_batch`, `invalid_path`, `invalid_index` |
+| `InvalidPattern` | `invalid_pattern`, `pattern_read_only`, `pattern_too_wide` |
+| `NotSupported` | `not_supported` |
+| `InvalidBlobRef` | `invalid_blob_ref` |
+| `UnknownRoute` | `unknown_route`, `method_not_allowed` |
+| `GroupLimitExceeded` | `group_limit_exceeded` |
+| `RequestTooLarge` | `request_too_large`, `line_too_large` |
+| `InvalidPosition` | `invalid_position` |
+| `Closed` | `closed`, `stopping` (not retried: the daemon may have taken the request) |
+| `Internal` | `internal` |
+| `StreamError` and its subclasses | `not_a_stream`, `invalid_stream_id`, `stream_id_too_small`, `unknown_group`, `group_exists`; see [Stream errors](#stream-errors) |
 | `ConnectionError` | cannot reach the daemon. Subclasses: `ConnectError` (nothing was sent), `TimeoutError` |
 
 Any other code is a plain `Ndb::Error`. A response that is not a daemon error has the code `http_status`.
@@ -432,8 +804,10 @@ end
 
 The tests of this gem build the daemon from the repository (`go build ./cmd/ndb`), start it on a short temp unix socket (macOS allows 104 bytes), wait for `GET /_health` to return 200, and stop it at exit. To do the same by hand:
 
+`-tcp ''` turns off the default TCP listener (`127.0.0.1:7070`), so the test daemon does not take the port of your local daemon.
+
 ```sh
-ndb -config /nonexistent.yml -data-dir "$(mktemp -d)" -unix /tmp/ndb-test.sock
+ndb serve -config /nonexistent.yml -data-dir "$(mktemp -d)" -unix /tmp/ndb-test.sock -tcp ''
 ```
 
 ```ruby
