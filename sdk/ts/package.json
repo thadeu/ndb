@@ -34,6 +34,26 @@
         "types": "./dist/index.d.cts",
         "default": "./dist/index.cjs"
       }
+    },
+    "./ioredis": {
+      "import": {
+        "types": "./dist/ioredis.d.ts",
+        "default": "./dist/ioredis.js"
+      },
+      "require": {
+        "types": "./dist/ioredis.d.cts",
+        "default": "./dist/ioredis.cjs"
+      }
+    },
+    "./node-redis": {
+      "import": {
+        "types": "./dist/node-redis.d.ts",
+        "default": "./dist/node-redis.js"
+      },
+      "require": {
+        "types": "./dist/node-redis.d.cts",
+        "default": "./dist/node-redis.cjs"
+      }
     }
   },
   "files": [
@@ -55,6 +75,8 @@
     "@stylistic/eslint-plugin": "^5.10.0",
     "@types/node": "^26.6.6",
     "eslint": "^10.14.0",
+    "ioredis": "^5.11.1",
+    "redis": "^5.12.1",
     "tsup": "^9.0.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.1",

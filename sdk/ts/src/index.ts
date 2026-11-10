@@ -20,6 +20,7 @@ export type {
   PendingSummary,
   ReadOptions,
   StreamInfo,
+  StreamReadOptions,
   TrimOptions,
 } from './stream.js'
 export { PoisonError, type DeadEntry, type Handler, type WorkOptions } from './stream-worker.js'

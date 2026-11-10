@@ -181,6 +181,58 @@ describe('stream', () => {
 
     expect(Date.now() - start).toBeLessThan(5000)
   })
+
+  it('reads without a group, from an ID and from "$"', async () => {
+    const s = orders()
+    const ids = await appendOrders(s, 1, 4)
+
+    const first = await s.read({ count: 2 })
+
+    expect(first.map((e) => e.id)).toEqual([ids[0], ids[1]])
+    expect(first[0]!.doc).toEqual({ order: 1, total: 10 })
+
+    const next = await s.read({ after: ids[1] })
+
+    expect(next.map((e) => e.id)).toEqual([ids[2], ids[3]])
+
+    const picked = await s.read({ after: ids[2], fields: ['order'] })
+
+    expect(picked.map((e) => e.doc)).toEqual([{ order: 4 }])
+
+    expect(await s.read({ after: '$' })).toEqual([])
+    expect(await s.read({ after: ids[3], blockMs: 50 })).toEqual([])
+    expect((await s.info()).groups).toBe(0)
+  })
+
+  it('wakes a blocked read without a group with an append', async () => {
+    const s = orders()
+
+    await appendOrders(s, 1, 1)
+
+    setTimeout(() => void s.append({ order: 9, total: 0 }), 200)
+
+    const start = Date.now()
+    const got = await s.read({ after: '$', blockMs: 5000 })
+
+    expect(got.map((e) => e.doc.order)).toEqual([9])
+    expect(Date.now() - start).toBeLessThan(4000)
+  })
+
+  it('ends a blocked read without a group when the signal aborts', async () => {
+    const s = orders()
+
+    await s.create()
+
+    const ctl = new AbortController()
+
+    setTimeout(() => ctl.abort(), 100)
+
+    const start = Date.now()
+
+    await expect(s.read({ after: '$', blockMs: 10_000, signal: ctl.signal })).rejects.toBeDefined()
+
+    expect(Date.now() - start).toBeLessThan(5000)
+  })
 })
 
 describe('stream worker', () => {
