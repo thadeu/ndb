@@ -437,6 +437,28 @@ first[0].doc.total
 - `revRange(end = '+', start = '-', count?)`: the same, from `end` down to `start`. Note the order of the arguments: `end` comes first, as in Redis.
 - `-` and `+` are the lowest and the highest ID. Without `count`, the daemon default applies.
 
+### read without a group
+
+```ts
+let entries = await orders.read({ after: '0', count: 100 }) // XREAD, from the start
+
+entries = await orders.read({ after: entries.at(-1)?.id, count: 100, blockMs: 5000, signal })
+
+await orders.read({ after: '$', blockMs: 5000 }) // only the entries appended after this call starts
+```
+
+`orders.read(opts?)` gives the entries after an ID, in ID order, without a group (`XREAD`). It changes no group and no pending list, and nothing is acked. An empty answer is an empty array. The read of a group is [`group.read`](#read).
+
+Fields of `StreamReadOptions`:
+
+- `after`: give the entries with an ID greater than this one. Default `'0'`, the start of the stream. `'$'` is the last ID when the call starts: only later entries come.
+- `count`: the most entries to give. Default 10, at most 10 000.
+- `blockMs`: when there is no entry, wait up to this long (ms) for one.
+- `fields`: give only these fields (and `_id`).
+- `signal`: an `AbortSignal` that ends the read, also a blocked one.
+
+To read on, give the ID of the last entry as `after`. Do not give `'$'` again: an entry appended between two calls would be lost.
+
 ### delete
 
 ```ts
@@ -626,6 +648,149 @@ Notes:
 | `PoisonError` | `poison`: not from the daemon. `work` gives it to `onError` |
 
 All are `NdbError` subclasses. See the error table below and the [stream route errors](../http/streams.md#errors).
+
+## Redis Streams commands
+
+An app that uses Redis Streams can change to ndb and keep its calls. Two subpaths of the package give the stream commands of the two Redis libraries on ndb streams, with the same arguments and the same answers: `@thadeu/ndb/ioredis` and `@thadeu/ndb/node-redis`. The app picks its backend in one place, its factory. See [Move from Redis Streams](../streams.md#move-from-redis-streams) for the same change in Ruby and Go.
+
+- The adapters have no dependency. The main entry does not load them, and they do not import `ioredis` or `redis`. Their types are structural.
+- A type test of the package checks that each adapter is assignable to the stream commands of its library (`Pick<Redis, ...>` of ioredis 5, `Pick<RedisClientType, ...>` of node-redis 5). So the two sides of the `?:` in the factory have the same methods.
+- The two libraries have different shapes, so there are two adapters. Use the one of the library that the app has.
+
+### ioredis
+
+```ts
+import { connect } from '@thadeu/ndb'
+import { ioredis } from '@thadeu/ndb/ioredis'
+import { Redis } from 'ioredis'
+
+const streams = process.env.STREAMS_BACKEND === 'ndb' ? ioredis(connect()) : new Redis()
+
+await streams.xadd('orders', 'MAXLEN', '~', 1000, '*', 'order_id', '42')
+await streams.xgroup('CREATE', 'orders', 'billing', '$', 'MKSTREAM')
+
+const got = await streams.xreadgroup('GROUP', 'billing', 'w1', 'COUNT', 10, 'BLOCK', 5000, 'STREAMS', 'orders', '>')
+// [['orders', [['1731164400000-0', ['order_id', '42']]]]], or null
+
+await streams.xack('orders', 'billing', '1731164400000-0')
+```
+
+`ioredis(db)` gives an `IoredisStreams`: the methods of ioredis 5. They have lowercase names, the arguments of the Redis command in the same order (option words in any case), an optional callback as the last argument, and the raw arrays of Redis as the answer.
+
+| Method | Arguments | Answer |
+|---|---|---|
+| `xadd` | `key [NOMKSTREAM] [MAXLEN\|MINID [=\|~] n [LIMIT n]] id field value ...` | the ID; `null` with `NOMKSTREAM` and no stream |
+| `xlen` | `key` | a number |
+| `xrange` / `xrevrange` | `key start end [COUNT n]` (`(id` leaves the ID out) | `[[id, [field, value, ...]], ...]` |
+| `xread` | `[COUNT n] [BLOCK ms] STREAMS key ... id ...` | `[[key, [[id, [field, value]]]]]` or `null` |
+| `xdel` | `key id ...` | a number |
+| `xtrim` | `key MAXLEN\|MINID [=\|~] n [LIMIT n]` | a number |
+| `xgroup` | `CREATE key group id [MKSTREAM] [ENTRIESREAD n]`, `SETID key group id [ENTRIESREAD n]`, `DESTROY key group`, `CREATECONSUMER key group consumer`, `DELCONSUMER key group consumer` | `'OK'`, `'OK'`, `1`/`0`, `1`/`0`, the pending count |
+| `xreadgroup` | `GROUP group consumer [COUNT n] [BLOCK ms] [NOACK] STREAMS key ... id ...` | as `xread`; with an ID that is not `>`, `[[key, []]]` when there is no entry, and `[id, null]` for a deleted entry |
+| `xack` | `key group id ...` | a number |
+| `xpending` | `key group` | `[count, lowestId, highestId, [[consumer, '2']]]`, or `[0, null, null, null]` |
+| `xpending` | `key group [IDLE ms] start end count [consumer]` | `[[id, consumer, idleMs, deliveries], ...]` |
+| `xclaim` | `key group consumer minIdle id ... [IDLE ms] [RETRYCOUNT n] [FORCE] [JUSTID] [LASTID id]` | entries as `xrange`; IDs with `JUSTID` |
+| `xautoclaim` | `key group consumer minIdle start [COUNT n] [JUSTID]` | `[nextStart, entries or IDs, deletedIds]` |
+| `xinfo` | `STREAM key`, `GROUPS key`, `CONSUMERS key group` | flat `[name, value, ...]` arrays, with the field names of Redis |
+
+- The return types are those of ioredis: `unknown[]` for `xreadgroup`, `xpending`, `xclaim` and `xautoclaim`; `unknown` for `xgroup` and `xinfo`. The subpath exports `EntryReply`, `PendingEntryReply`, `StreamsReply` and `GroupStreamsReply` for a cast.
+- There are no `Buffer` variants (`xreadBuffer`, ...).
+
+### node-redis
+
+```ts
+import { connect } from '@thadeu/ndb'
+import { nodeRedis } from '@thadeu/ndb/node-redis'
+import { createClient } from 'redis'
+
+const streams = process.env.STREAMS_BACKEND === 'ndb' ? nodeRedis(connect()) : await createClient().connect()
+
+await streams.xAdd('orders', '*', { order_id: '42' }, { TRIM: { strategy: 'MAXLEN', strategyModifier: '~', threshold: 1000 } })
+await streams.xGroupCreate('orders', 'billing', '$', { MKSTREAM: true })
+
+const got = await streams.xReadGroup('billing', 'w1', { key: 'orders', id: '>' }, { COUNT: 10, BLOCK: 5000 })
+// [{ name: 'orders', messages: [{ id: '1731164400000-0', message: { order_id: '42' } }] }], or null
+```
+
+`nodeRedis(db)` gives a `NodeRedisStreams`: the methods of node-redis 5 (the `redis` package). They have camel case names, options as an object, and the answers that node-redis makes from the arrays.
+
+| Method | Answer |
+|---|---|
+| `xAdd(key, id, message, { TRIM }?)` | the ID |
+| `xAddNoMkStream(key, id, message, { TRIM }?)` | the ID, or `null` when there is no stream |
+| `xLen(key)` | a number |
+| `xRange(key, start, end, { COUNT }?)` / `xRevRange(key, end, start, { COUNT }?)` | `[{ id, message }]` |
+| `xRead(streams, { COUNT, BLOCK }?)` | `[{ name, messages: [{ id, message }] }]` or `null` |
+| `xDel(key, id \| ids)` | a number |
+| `xTrim(key, 'MAXLEN' \| 'MINID', threshold, { strategyModifier, LIMIT }?)` | a number |
+| `xGroupCreate(key, group, id, { MKSTREAM, ENTRIESREAD }?)` / `xGroupSetId(key, group, id, { ENTRIESREAD }?)` | `'OK'` |
+| `xGroupDestroy(key, group)` / `xGroupCreateConsumer(key, group, consumer)` | `1` or `0` |
+| `xGroupDelConsumer(key, group, consumer)` | the pending count |
+| `xReadGroup(group, consumer, streams, { COUNT, BLOCK, NOACK }?)` | as `xRead` |
+| `xAck(key, group, id \| ids)` | a number |
+| `xPending(key, group)` | `{ pending, firstId, lastId, consumers: [{ name, deliveriesCounter }] \| null }` |
+| `xPendingRange(key, group, start, end, count, { IDLE, consumer }?)` | `[{ id, consumer, millisecondsSinceLastDelivery, deliveriesCounter }]` |
+| `xClaim(key, group, consumer, minIdle, id \| ids, { IDLE, RETRYCOUNT, FORCE, LASTID }?)` | `[{ id, message }]` |
+| `xClaimJustId(...)` | IDs |
+| `xAutoClaim(key, group, consumer, minIdle, start, { COUNT }?)` | `{ nextId, messages, deletedMessages }` |
+| `xAutoClaimJustId(...)` | the same, with IDs in `messages` |
+| `xInfoStream(key)` | `{ length, 'last-generated-id', 'entries-added', 'first-entry', ... }` |
+| `xInfoGroups(key)` | `[{ name, consumers, pending, 'last-delivered-id', 'entries-read', lag }]` |
+| `xInfoConsumers(key, group)` | `[{ name, pending, idle, inactive }]` |
+
+- The answers are those of the default client (RESP 2, no type mapping).
+- A `TRIM` needs its `strategy`, as with a real Redis.
+
+### ReplyError
+
+Errors are `ReplyError`, exported by the two subpaths. It is a subclass of `NdbError`.
+
+```ts
+import { ReplyError } from '@thadeu/ndb/ioredis'
+
+try {
+  await streams.xgroup('CREATE', 'orders', 'billing', '$', 'MKSTREAM')
+} catch (err) {
+  const exists = err instanceof Error && err.message.startsWith('BUSYGROUP')
+
+  if (!exists) throw err
+
+  if (err instanceof ReplyError) console.warn(err.code) // "group_exists", on the ndb backend only
+}
+```
+
+- `message` is the text of Redis, so a check such as `err.message.startsWith('BUSYGROUP')` works on the two backends.
+- `code` and `status` are those of ndb, and `cause` is the ndb error.
+- `err instanceof ReplyError` is true only on the ndb backend. The Redis libraries have their own error classes.
+
+| Case | `message` starts with | `code` |
+|---|---|---|
+| The group exists | `BUSYGROUP` | `group_exists` |
+| No such group, or no stream in a group command | `NOGROUP` | `unknown_group`, `unknown_collection` |
+| `XGROUP` without `MKSTREAM`, and no stream | `ERR The XGROUP subcommand requires the key to exist` | `unknown_collection` |
+| `XINFO` and no stream | `ERR no such key` | `unknown_collection` |
+| An ID that is not greater than the last one | `ERR The ID specified in XADD is equal or smaller` | `stream_id_too_small` |
+| A bad ID | `ERR Invalid stream ID` | `invalid_stream_id` |
+| The name is a collection that is not a stream | `WRONGTYPE` | `not_a_stream` |
+| A bad argument list | `ERR` | `invalid_request` |
+| Something ndb does not have | `ERR ndb: ... is not supported` | `not_supported` |
+
+- An error that Redis does not have (`unauthorized`, `not_ready`, a network error) stays as it is.
+- As in Redis, these give a value and not an error when the stream does not exist: `xlen` (0), `xrange` (`[]`), `xread` (`null`), `xdel`, `xtrim` and `xack` (0).
+
+### Differences from Redis
+
+- **Values are text.** Redis keeps strings, so the adapters give every value as a string, and they store the values of `xadd` as strings. An entry that other ndb code appended with JSON types comes back as text: `42` is `'42'`, `true` is `'true'`, and `null`, an array or an object are JSON text.
+- **Field order.** The daemon gives the fields of an entry in name order, not in the order of the `xadd`. A field name that starts with `_` is reserved, and a field name given two times is kept one time.
+- **Stream names.** A stream is an ndb collection, so its name follows the rules of a collection name. `orders:eu` is not a valid name.
+- **One stream for each request.** `xread` and `xreadgroup` with many streams send one request for each stream. With `BLOCK` and more than one stream they throw (`not_supported`).
+- **No `COUNT`.** Redis gives every entry. The adapters give at most 10 000 in one read (`xrange` has no limit).
+- **`BLOCK 0`** waits with no limit, as in Redis: the adapter repeats a 30 s read. A blocked `xread` on a stream that does not exist looks for it each 500 ms.
+- **Not supported** (the call throws): `XREAD` with the ID `+`, `XREADGROUP ... CLAIM`, `XCLAIM ... TIME`, `XINFO STREAM ... FULL`, `XGROUP HELP` and `XINFO HELP`, the Redis 8.2 options `DELREF` and `ACKED`, and the idempotent `XADD` options. `LASTID` and `KEEPREF` are read and have no effect.
+- **Not there:** `XSETID`, `XACKDEL`, `XDELEX`, the `Buffer` variants of ioredis, pipelines and `MULTI`. The object has only the methods of the tables.
+- **`xinfo`:** `radix-tree-keys` and `radix-tree-nodes` are `0`.
+- **A range of `xpending`** does not take `(id`.
 
 ## Admin and blobs
 

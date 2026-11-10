@@ -33,6 +33,10 @@ module Ndb
     # after this many seconds.
     MISSING_STEP = 0.5
 
+    # A read without count: gives up to this many entries for each stream
+    # (the most of one ndb read). Redis gives every entry.
+    REDIS_READ_COUNT = 10_000
+
     # XADD. Returns the ID of the entry (a String), or nil with nomkstream:
     # when the stream does not exist. The values of entry are kept as given.
     def xadd(key, entry, approximate: nil, maxlen: nil, minid: nil, nomkstream: nil, id: "*")
@@ -100,7 +104,7 @@ module Ndb
       out = {}
 
       pairs.each do |key, id|
-        entries = redis_block(block) { |seconds| redis_read(key, id.to_s, count, seconds) }
+        entries = redis_block(block) { |seconds| redis_read(key, id.to_s, count || REDIS_READ_COUNT, seconds) }
 
         out[key.to_s] = redis_entries(entries) unless entries.empty?
       end
@@ -142,9 +146,9 @@ module Ndb
 
         entries = redis_group_errors(key, group) do
           if pending
-            target.read(consumer, count: count, pending: true, after: id.to_s)
+            target.read(consumer, count: count || REDIS_READ_COUNT, pending: true, after: id.to_s)
           else
-            redis_block(block) { |seconds| target.read(consumer, count: count, block: seconds, no_ack: noack ? true : false) }
+            redis_block(block) { |seconds| target.read(consumer, count: count || REDIS_READ_COUNT, block: seconds, no_ack: noack ? true : false) }
           end
         end
 

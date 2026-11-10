@@ -76,36 +76,36 @@ class BillingPaid           # consumer, the minimum
 end
 ```
 
-## E23.1 Core (ndb-rails)
+## E23.1 Core (ndb-rails) — done
 
 `Ndb::Streams` (`included` and `inherited`), `stream` with its options and
 defaults, the registry of classes, the errors for a missing and a repeated group.
 
-## E23.2 Write and read (ndb-rails)
+## E23.2 Write and read (ndb-rails) — done
 
 `append` with `enqueue` and `perform_async`, the wait for the commit,
 `last`, `find`, `range`, `count`, the `event` object (`[]`, `to_h`, `id`, `time`,
 `deliveries`).
 
-## E23.3 Runner (ndb-rails)
+## E23.3 Runner (ndb-rails) — done
 
 Threads for each group on `Ndb::Worker` of the client, the stable consumer
 name, the Rails executor around each `perform`, `around_perform`,
 `discard_on`, the dead letter, the stop on SIGTERM.
 
-## E23.4 Process (ndb and ndb-rails)
+## E23.4 Process (ndb and ndb-rails) — done
 
 - `ndb` gem: the `ndb` executable with `streams`, and the pass-through of
   other commands to the daemon binary.
 - `ndb-rails`: the load of the app and of `app/streams`, the Puma plugin,
   the groups made at boot, `ActiveSupport::Notifications` events.
 
-## E23.5 Tests (ndb-rails)
+## E23.5 Tests (ndb-rails) — done
 
 `Ndb::Streams.inline!` (an append calls each `perform` at once),
 `assert_streamed`, the clean between tests (Minitest and RSpec).
 
-## E23.6 Redis commands in Ruby (ndb gem)
+## E23.6 Redis commands in Ruby (ndb gem) — done
 
 First, for the three languages: check `XREAD` with `BLOCK` (a read without
 a group that waits for new entries). If the daemon has no route for it,
@@ -135,7 +135,7 @@ STREAMS.xack("orders", "billing", id)
   kept as JSON; values come back as strings, as Redis gives them.
 - Tests: the cases of `spec/streams`, through these methods.
 
-## E23.7 Redis commands in Go (sdk/go/ndbredis)
+## E23.7 Redis commands in Go (sdk/go/ndbredis) — done
 
 A module of its own, with its own `go.mod`: the methods return go-redis v9
 types (`*redis.StringCmd`, `*redis.XStreamSliceCmd`, ...), so it imports
@@ -165,7 +165,7 @@ if cfg.Backend == "ndb" {
   `NDB_REDIS_ADDR` is set), with the same assertions.
 - CI: a step for the new module; its release tag (`sdk/go/ndbredis/vX`).
 
-## E23.8 Redis commands in TypeScript (sdk/ts)
+## E23.8 Redis commands in TypeScript (sdk/ts) — done
 
 Two subpaths, because the two libraries have different shapes. No
 dependency: the types are structural.
@@ -186,7 +186,7 @@ await streams.xadd('orders', '*', 'order_id', '42')
   its library (the libraries are dev dependencies only).
 - Tests on the daemon, the same cases as E23.6.
 
-## E23.9 Docs
+## E23.9 Docs — done
 
 - A Streams section in `docs/dev/clients/rails.md`, one `###` for each
   method.

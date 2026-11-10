@@ -27,6 +27,19 @@ bundle add ndb
 require "ndb"
 ```
 
+### The ndb executable
+
+The gem installs an `ndb` command. It has one command of its own, `streams`:
+
+```sh
+bundle exec ndb streams [-r file] [-e env] [--only A,B] [-c N]
+```
+
+- `ndb streams` runs the stream consumers of an app: the classes with `include Ndb::Streams`. These classes are in the gem `ndb-rails`, so the command needs that gem (without it: a message and exit status 2). The flags and the behavior are on [Rails: Run the consumers](rails.md#run-the-consumers).
+- **Pass-through.** Every other command (`ndb serve`, `ndb bench`, `ndb -h`, ...) goes to the ndb daemon binary, with the same arguments. So the gem does not hide the daemon when the two have the name `ndb` in `PATH`.
+- The binary is `NDB_BIN` when it is set. If not, it is the first `ndb` of `PATH` that is not this command and not a Ruby stub of it (a binstub, or the stub that RubyGems makes).
+- When there is no binary, the command prints how to install it and exits with status 127.
+
 ## Connect
 
 ```ruby
@@ -438,6 +451,24 @@ orders.rev_range("+", "-", count: 10)            # XREVRANGE: newest first
 - `"-"` and `"+"` are the lowest and the highest ID. An ID without `-seq` is `<ms>-0` as a start and the last ID of that ms as an end.
 - Each item is an `Ndb::Entry`: `id`, `time` (a UTC `Time`, from the ms of the ID), `doc` (the Hash without `_id` and `_ts`), `deleted?` and `raw` (the row as the daemon sent it).
 
+### `read` without a group
+
+```ruby
+entries = orders.read(after: "0", count: 100)        # from the start of the stream
+entries = orders.read(after: entries.last.id, block: 5)   # the next ones; wait up to 5 s
+
+orders.read(after: "$", block: 5)                    # only the entries appended after this call starts
+```
+
+- `read(after: "0", count: nil, block: nil, fields: nil)` gives up to `count` entries with an ID greater than `after:`, in ID order (`XREAD`). It returns an Array of `Ndb::Entry`; an empty Array means no entry.
+- It uses no group: it changes no group and no pending list, and nothing is acked.
+- `after:` is an ID (`"0"`: the start of the stream) or `"$"`: the last ID when the request starts, so only later entries come.
+- `count:` is the most entries (the daemon default is 10, at most 10 000).
+- `block:` is in seconds (a Float is fine). With no entry, the read waits up to this long. The read timeout of that request is `block` + 5 seconds, or the client `timeout` when it is longer.
+- `fields:` gives only these fields (and `_id`).
+- To read on, give the ID of the last entry as `after:`. Do not give `"$"` again: an entry appended between two calls would be lost.
+- A stream that does not exist raises `Ndb::UnknownCollection`.
+
 ### `delete`
 
 ```ruby
@@ -473,9 +504,12 @@ billing.create(Ndb::Stream::START_ALL)   # "0": every entry of the stream
 billing.create("1731160000000-0")        # the entries after this ID
 
 billing.ensure                           # makes it, or does nothing when it exists
+
+billing.create(Ndb::Stream::START_NEW, no_create: true)   # XGROUP CREATE without MKSTREAM
 ```
 
-- `create(start = Ndb::Stream::START_NEW)` makes the group (`XGROUP CREATE ... MKSTREAM`). It makes the stream too.
+- `create(start = Ndb::Stream::START_NEW, no_create: false)` makes the group (`XGROUP CREATE ... MKSTREAM`). It makes the stream too.
+- `no_create: true` does not make the stream: it raises `Ndb::UnknownCollection` when the stream does not exist.
 - `create` raises `Ndb::GroupExists` when the group exists. `ensure(start = START_NEW)` does not: use it at boot.
 
 ### `group.set_id`
@@ -562,9 +596,15 @@ billing.pending_list(start: "-", stop: "+", consumer: "w1")
 out = billing.claim("w2", "1731164400000-0", "1731164400000-1", min_idle: 60)
 out.entries   # Ndb::Entry list, now pending for w2
 out.deleted   # pending IDs whose entry is no longer in the stream
+
+billing.claim("w2", ids, idle: 90, retry_count: 5, force: true)
+billing.claim("w2", ids, min_idle: 60, just_ids: true).entries   # => ["1731164400000-0", ...]
 ```
 
-- Moves the entries idle for at least `min_idle` seconds (default 0) to the consumer (`XCLAIM`). Each one gets one more delivery.
+- `claim(consumer, *ids, min_idle: 0, idle: nil, retry_count: nil, force: false, just_ids: false)` moves the entries idle for at least `min_idle` seconds to the consumer (`XCLAIM`). Each one gets one more delivery.
+- `idle:` (seconds) sets the idle time of the entries (`IDLE`). `retry_count:` sets their delivery count (`RETRYCOUNT`).
+- `force: true` also takes an ID that is not pending (`FORCE`).
+- `just_ids: true` gives the IDs (Strings) in `entries`, not `Ndb::Entry` values, and the delivery count does not change (`JUSTID`).
 - It returns an `Ndb::Claimed` with `entries`, `deleted` and `cursor` (nil for `claim`).
 
 ### `group.auto_claim`
@@ -584,6 +624,7 @@ end
 
 - Scans the pending list from `cursor:` (default `"0-0"`) and moves up to `count:` entries idle for at least `min_idle` seconds to the consumer (`XAUTOCLAIM`).
 - `out.cursor` is where the next call starts. It is `"0-0"` when the scan is complete.
+- `just_ids: true` gives the IDs (Strings) in `out.entries`, and the delivery count does not change, as in [`group.claim`](#group-claim).
 
 ### `group.worker`
 
@@ -603,7 +644,16 @@ trap("TERM") { worker.stop }
 worker.run
 ```
 
+```ruby
+billing.worker("w1") do |entry, deliveries|
+  logger.warn("retry #{deliveries} of #{entry.id}") if deliveries > 1
+
+  charge(entry.doc)
+end
+```
+
 - `group.worker(consumer, **options) { |entry| ... }` returns an `Ndb::Worker`. The block is required (`ArgumentError` without it).
+- A block with two parameters also gets the delivery count of the entry: 1 on the first delivery. For the worker's own pending entries (after a restart), the count costs one more request for each read; a block with one parameter does not send it.
 - A block that returns acks the entry. A block that raises leaves it pending; `on_error` gets the error, and a worker of the group claims the entry again after `claim_idle`.
 - A deleted entry is acked without the block.
 - The acks of one read go in one call.
@@ -691,6 +741,223 @@ rescue Ndb::StreamIDTooSmall => e
   e.code   # "stream_id_too_small"
 end
 ```
+
+## Redis Streams commands
+
+`Ndb::Client` has the stream commands of the [redis-rb](https://github.com/redis/redis-rb) gem (the module `Ndb::RedisCommands`), with the arguments and the answers of redis-rb 5. An app that uses Redis Streams picks its backend in one place, its factory, and keeps its calls:
+
+```ruby
+# config/initializers/streams.rb: the factory of the app
+STREAMS = ENV["STREAMS_BACKEND"] == "ndb" ? Ndb.connect : Redis.new
+
+STREAMS.xadd("orders", { order_id: 42 }, maxlen: 1000)                      # "1731164400000-0"
+STREAMS.xgroup(:create, "orders", "billing", "$", mkstream: true)           # "OK"
+STREAMS.xreadgroup("billing", "w1", "orders", ">", count: 10, block: 5000)  # { "orders" => [[id, { "order_id" => "42" }]] }
+STREAMS.xack("orders", "billing", id)                                       # 1
+```
+
+- The methods are on the client that `Ndb.connect` returns. There is no new class and no new dependency: the gem does not load `redis`.
+- Times are in milliseconds, as in redis-rb (`block:`, `min_idle_time`, `idle:`). The other stream methods of this gem use seconds.
+- An entry in an answer is `[id, { "field" => "value" }]`. Every value is a String: see [Differences from Redis](#differences-from-redis).
+- See [Move from Redis Streams](../streams.md#move-from-redis-streams) for the same change in Go and TypeScript.
+
+### `xadd`
+
+```ruby
+xadd(key, entry, approximate: nil, maxlen: nil, minid: nil, nomkstream: nil, id: "*")
+
+STREAMS.xadd("orders", { order_id: 42 })                               # => "1731164400000-0"
+STREAMS.xadd("orders", { order_id: 43 }, maxlen: 1000, approximate: true)
+STREAMS.xadd("orders", { order_id: 44 }, id: "1731164400001-0")
+```
+
+- Returns the ID of the entry (a String).
+- `maxlen:` or `minid:` trims in the same call (`approximate: true` is `~`). The two together raise `ArgumentError`.
+- `nomkstream: true` does not make the stream: the answer is `nil` when the stream does not exist.
+
+### `xlen`
+
+```ruby
+STREAMS.xlen("orders")   # => 3; 0 for a stream that does not exist
+```
+
+### `xrange`
+
+```ruby
+xrange(key, start = "-", range_end = "+", count: nil)
+
+STREAMS.xrange("orders", "-", "+", count: 100)
+# => [["1731164400000-0", { "order_id" => "42" }], ...]
+
+STREAMS.xrange("orders", "(1731164400000-0", "+")   # "(": without this ID
+```
+
+- The entries in ID order. A stream that does not exist gives `[]`.
+
+### `xrevrange`
+
+```ruby
+xrevrange(key, range_end = "+", start = "-", count: nil)
+
+STREAMS.xrevrange("orders", "+", "-", count: 1)   # the newest entry
+```
+
+- As `xrange`, from the highest ID down. The end comes first, as in Redis.
+
+### `xread`
+
+```ruby
+xread(keys, ids, count: nil, block: nil)
+
+STREAMS.xread("orders", "0", count: 100)
+# => { "orders" => [[id, { "order_id" => "42" }], ...] }
+
+STREAMS.xread("orders", "$", block: 5000)          # wait up to 5 s for a new entry
+STREAMS.xread(%w[orders refunds], %w[0 0])         # one request for each stream
+```
+
+- `keys` and `ids` are one value or an Array of each. A different number of keys and IDs raises `ArgumentError`.
+- The answer has only the streams that have entries. With none, it is `{}`.
+- `block:` is in milliseconds, for one key only. `block: 0` waits with no limit.
+- Without `block:`, the ID `"$"` always gives no entry, as in Redis.
+
+### `xdel`
+
+```ruby
+STREAMS.xdel("orders", "1731164400000-0", "1731164400000-1")   # => 2
+```
+
+- `xdel(key, *ids)` returns how many entries it deleted. It sends one request for each ID. A stream that does not exist gives 0.
+
+### `xtrim`
+
+```ruby
+xtrim(key, len_or_id, strategy: "MAXLEN", approximate: false, limit: nil)
+
+STREAMS.xtrim("orders", 1000)                                   # keep the newest 1 000
+STREAMS.xtrim("orders", "1731164400000-0", strategy: "MINID")   # delete the entries before this ID
+```
+
+- Returns how many entries it deleted; 0 for a stream that does not exist.
+- `approximate: true` deletes only whole blocks of 1 024 entries; `limit:` is the most entries to delete with it.
+
+### `xgroup`
+
+```ruby
+xgroup(subcommand, key, group, id_or_consumer = nil, mkstream: false)
+
+STREAMS.xgroup(:create, "orders", "billing", "$", mkstream: true)   # => "OK"
+STREAMS.xgroup(:setid, "orders", "billing", "0")                    # => "OK"
+STREAMS.xgroup(:createconsumer, "orders", "billing", "w1")          # => 1, or 0 when it exists
+STREAMS.xgroup(:delconsumer, "orders", "billing", "w1")             # => its pending count
+STREAMS.xgroup(:destroy, "orders", "billing")                       # => 1, or 0 when it is not there
+```
+
+- `create` without `mkstream: true` needs a stream that exists. A group that exists raises `Ndb::GroupExists` (`BUSYGROUP`).
+
+### `xreadgroup`
+
+```ruby
+xreadgroup(group, consumer, keys, ids, count: nil, block: nil, noack: nil)
+
+STREAMS.xreadgroup("billing", "w1", "orders", ">", count: 10, block: 5000)
+# => { "orders" => [[id, { "order_id" => "42" }]] }, or {} when there is no new entry
+
+STREAMS.xreadgroup("billing", "w1", "orders", "0")
+# => { "orders" => [...] }: the pending entries of w1, also when there are none ("orders" => [])
+```
+
+- The ID `">"` gives new entries. Any other ID gives the pending entries of the consumer after that ID. A pending entry that was deleted from the stream comes as `[id, nil]`.
+- `block:` is in milliseconds (0: no limit), for one key only. A pending read does not use it.
+- `noack: true` does not add the entries to the pending list.
+
+### `xack`
+
+```ruby
+STREAMS.xack("orders", "billing", id1, id2)   # => 2
+```
+
+- `xack(key, group, *ids)` returns how many entries were pending. A group or a stream that does not exist gives 0.
+
+### `xpending`
+
+```ruby
+STREAMS.xpending("orders", "billing")
+# => { "size" => 2, "min_entry_id" => "...", "max_entry_id" => "...", "consumers" => { "w1" => "2" } }
+
+STREAMS.xpending("orders", "billing", "-", "+", 10)
+STREAMS.xpending("orders", "billing", "-", "+", 10, "w1", idle: 60_000)
+# => [{ "entry_id" => "...", "consumer" => "w1", "elapsed" => 61000, "count" => 2 }]
+```
+
+- `xpending(key, group)` is the summary. With no pending entry, the two IDs are `nil` and `"consumers"` is `{}`.
+- `xpending(key, group, start, end, count, consumer = nil, idle: nil)` is one Hash for each entry. `"elapsed"` is the idle time in milliseconds and `"count"` is the delivery count. `idle:` keeps only the entries idle for at least this long.
+- Any other number of arguments raises `ArgumentError`.
+
+### `xclaim`
+
+```ruby
+xclaim(key, group, consumer, min_idle_time, *ids, **opts)
+
+STREAMS.xclaim("orders", "billing", "w2", 60_000, id1, id2)                 # => [[id, fields], ...]
+STREAMS.xclaim("orders", "billing", "w2", 60_000, id1, justid: true)        # => [id]
+STREAMS.xclaim("orders", "billing", "w2", 0, id1, idle: 0, retrycount: 1, force: true)
+```
+
+- Moves the entries idle for at least `min_idle_time` to the consumer.
+- Options: `idle:` (ms), `retrycount:`, `force:`, `justid:`. `time:` raises `Ndb::NotSupported`. Any other option raises `ArgumentError`.
+
+### `xautoclaim`
+
+```ruby
+xautoclaim(key, group, consumer, min_idle_time, start, count: nil, justid: false)
+
+STREAMS.xautoclaim("orders", "billing", "w2", 60_000, "0-0", count: 100)
+# => { "next" => "0-0", "entries" => [[id, fields], ...] }
+```
+
+- `"next"` is the start of the next call. It is `"0-0"` when the scan is complete.
+- With `justid: true`, `"entries"` are IDs.
+- The pending IDs whose entry is gone leave the pending list. They are not in the answer.
+
+### `xinfo`
+
+```ruby
+STREAMS.xinfo(:stream, "orders")
+# => { "length", "last-generated-id", "max-deleted-entry-id", "entries-added",
+#      "recorded-first-entry-id", "groups", "first-entry", "last-entry" }
+
+STREAMS.xinfo(:groups, "orders")
+# => [{ "name", "consumers", "pending", "last-delivered-id", "entries-read", "lag" }, ...]
+
+STREAMS.xinfo(:consumers, "orders", "billing")
+# => [{ "name", "pending", "idle", "inactive" }, ...]
+```
+
+- `xinfo(subcommand, key, group = nil)`. The keys have the names of Redis.
+- In `xinfo(:stream)`, `"first-entry"` and `"last-entry"` are `[id, [field, value, ...]]`, or `nil`. An ID that the stream does not have yet is `"0-0"`.
+
+### Differences from Redis
+
+- **Values.** Redis keeps strings. ndb keeps the JSON value that `xadd` got: a number stays a number and a nested Hash stays an object, so a query or an index can use it. A read gives every value as a String, as Redis does: a string as it is, a number or a boolean with `to_s` (`42` is `"42"`), `nil` as `""`, and a nested value as its JSON text (`{ city: "Recife" }` is `'{"city":"Recife"}'`). redis-rb refuses a nested value in `xadd`; ndb takes it.
+- **Field names.** They become Strings. A name that starts with `_` is reserved (`_id`, `_ts`). The fields of an entry come in name order, not in the order of the `xadd`.
+- **Stream names.** A stream is an ndb collection, so its name follows the rules of a collection name. `orders:eu` is not a valid name.
+- **Many streams.** ndb reads one stream for each request. `xread` and `xreadgroup` with many keys and no `block:` send one request for each key, in order. With `block:` and more than one key they raise `Ndb::NotSupported`.
+- **No `count:`.** Redis gives every entry. `xread` and `xreadgroup` without `count:` give at most 10 000 entries for each stream (the most of one ndb read). `xrange` and `xrevrange` without `count:` give every entry.
+- **`block: 0`** waits with no limit, as in Redis: it is a loop of reads of 30 seconds each. A blocking `xread` on a stream that does not exist looks for the stream every 0.5 seconds until the time ends.
+- **Errors** are `Ndb::Error` subclasses, not `Redis::CommandError`: rescue both in code that runs on the two backends. The message starts as in Redis, and the daemon message follows in parentheses.
+
+  | Case | Class | The message starts with |
+  |---|---|---|
+  | `xgroup(:create)` on a group that exists | `Ndb::GroupExists` | `BUSYGROUP` |
+  | A group command on a group or a stream that does not exist | `Ndb::UnknownGroup`, `Ndb::UnknownCollection` | `NOGROUP` |
+  | `xgroup(:create)` without `mkstream:` and no stream | `Ndb::UnknownCollection` | `ERR The XGROUP subcommand requires the key to exist` |
+  | `xinfo(:stream)` or `xinfo(:groups)` with no stream | `Ndb::UnknownCollection` | `ERR no such key` |
+
+- **`xclaim`** has no `time:` option (use `idle:`).
+- **`xinfo(:stream)`** has no `radix-tree-keys` and `radix-tree-nodes`, and there is no `FULL` form.
+- **A trim or a delete keeps the pending references**, as up to Redis 8.0. `xautoclaim` and `xclaim` drop the pending IDs whose entry is gone.
+- **Only these commands.** They are methods of `Ndb::Client`. There is no `multi`, no `pipelined` and no other Redis command.
 
 ## Admin
 

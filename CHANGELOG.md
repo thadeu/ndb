@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **A stream read without a group: `POST /{s}/_streams/read`** (`XREAD`). It gives the entries after an ID (`after`, or `$` for only later entries), up to `count`, and `block_ms` waits for an append. It changes no group and no PEL, so it is a read for a scoped token. One stream for each request.
+- **Streams in Rails: `Ndb::Streams`** (gem `ndb-rails`, `docs/dev/clients/rails.md`). A class in `app/streams` with `include Ndb::Streams` appends to a stream (`append`, with the aliases `enqueue` and `perform_async`; in an ActiveRecord transaction it waits for the commit), reads it (`last`, `find`, `range`, `count`) and, with `stream :name, group: :g` and a `perform(event)` method, consumes it. Options of `stream`: `concurrency`, `claim_idle`, `max_deliveries` and `dead_letter`, `discard_on`, `start`, `max_len`, `retain`. Also: `around_perform`, inheritance (an `ApplicationStream`), stable consumer names (`NDB_CONSUMER`), the groups made at boot, `ActiveSupport::Notifications` events (`append.ndb_streams`, `perform.ndb_streams`), a Puma plugin (`plugin :ndb`, `NDB_STREAMS_IN_PUMA`) and the `streams:` block of `config/ndb.yml`. For tests: `Ndb::Streams.inline!`, `assert_streamed`, `assert_no_streamed` and the RSpec matcher `have_streamed`.
+- **The `ndb` executable of the Ruby gem.** `bundle exec ndb streams` (`-r`, `-e`, `--only`, `-c`) runs the stream consumers of an app until `SIGTERM` or `SIGINT`. Every other command (`ndb serve`, ...) goes to the daemon binary of `PATH`, or of `NDB_BIN`.
+- **The Redis Streams commands in each SDK**, so an app that uses Redis Streams picks its backend in one place and keeps its calls (`docs/dev/streams.md`, "Move from Redis Streams"). Ruby: the `x*` methods of redis-rb on `Ndb::Client` (`xadd`, `xreadgroup`, `xack`, ... `xinfo`). Go: the module `sdk/go/ndbredis`, with the stream methods of go-redis v9 (`redis.StreamCmdable`). TypeScript: the subpaths `@thadeu/ndb/ioredis` and `@thadeu/ndb/node-redis`, with no dependency. The errors have the text of Redis (`BUSYGROUP`, `NOGROUP`, ...). The daemon does not speak the Redis protocol.
+- New stream methods in the SDKs. Ruby: `Stream#read` (a read without a group), `group.create(start, no_create: true)`, `claim` with `idle:`, `retry_count:`, `force:` and `just_ids:`, `auto_claim` with `just_ids:`, and a worker block with two parameters gets the delivery count. Go: `Stream.Tail`, `Group.ClaimIDs`, `Group.AutoClaimIDs`, `ndb.GroupNoCreate()`, and `"(id"` in `Range` and `RevRange`. TypeScript: `Stream.read`.
+
 ### Fixed
 
 - Streams: a pending read of a group (`"pending": true`, `XREADGROUP ... 0`) counts as a delivery, as in Redis: delivery count + 1 and a new delivery time. A deleted entry does not change. Before, the count stayed the same, and the Redis parity test failed.
