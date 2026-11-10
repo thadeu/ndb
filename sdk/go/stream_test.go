@@ -437,6 +437,63 @@ func TestStreamWorkRetriesAndBuriesPoison(t *testing.T) {
 	}
 }
 
+// An entry that fails on its last delivery goes to the dead letter at
+// once, not after one more ClaimIdle.
+func TestStreamWorkBuriesAtTheLastFailure(t *testing.T) {
+	s, ctx := testStream(t)
+	g := s.Group("workers")
+
+	if err := g.Create(ctx, StartAll); err != nil {
+		t.Fatal(err)
+	}
+
+	ids := appendOrders(t, ctx, s, 7, 7)
+
+	deadName := s.Name() + "_dead"
+	poisoned := make(chan struct{}, 1)
+
+	runCtx, stop := context.WithCancel(ctx)
+
+	defer stop()
+
+	go g.Work(runCtx, "w1", func(context.Context, Entry[SOrder]) error {
+		return errors.New("boom")
+	}, Work{
+		Block:         50 * time.Millisecond,
+		ClaimIdle:     time.Hour,
+		MaxDeliveries: 1,
+		DeadLetter:    deadName,
+		OnError: func(err error) {
+			if errors.Is(err, ErrPoison) {
+				poisoned <- struct{}{}
+			}
+		},
+	})
+
+	select {
+	case <-poisoned:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the entry did not go to the dead letter at its last failure")
+	}
+
+	dead, err := StreamOf[DeadEntry](s.db, deadName)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := dead.Range(ctx, "-", "+", 0)
+
+	if err != nil || len(got) != 1 || got[0].Doc.ID != ids[0] || got[0].Doc.Deliveries != 1 {
+		t.Fatalf("dead = %+v, %v", got, err)
+	}
+
+	sum, err := g.Pending(ctx)
+
+	if err != nil || sum.Count != 0 {
+		t.Fatalf("pending = %+v, %v", sum, err)
+	}
+}
+
 func TestStreamWorkStartsWithItsOwnPending(t *testing.T) {
 	s, ctx := testStream(t)
 	g := s.Group("workers")

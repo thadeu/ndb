@@ -31,8 +31,8 @@ type Work struct {
 	ClaimEvery time.Duration
 
 	// MaxDeliveries: an entry delivered this many times is a poison
-	// message. It goes to DeadLetter (when set) and is acked. Zero is no
-	// limit.
+	// message. When its handler fails on that delivery, it goes to
+	// DeadLetter (when set) and is acked at once. Zero is no limit.
 	MaxDeliveries int64
 
 	// DeadLetter is the stream that gets the poison messages, as a
@@ -110,7 +110,7 @@ func (g *Group[T]) Work(ctx context.Context, consumer string, h Handler[T], w Wo
 
 		backoff = 0
 
-		g.handle(ctx, h, w, entries)
+		g.handle(ctx, h, w, entries, nil)
 	}
 
 	return nil
@@ -158,7 +158,7 @@ func (g *Group[T]) workPending(ctx context.Context, consumer string, h Handler[T
 			return nil
 		}
 
-		g.handle(ctx, h, w, entries)
+		g.handle(ctx, h, w, entries, g.pendingCounts(ctx, consumer, w, entries))
 
 		after = entries[len(entries)-1].ID
 	}
@@ -198,20 +198,49 @@ func (g *Group[T]) workIdle(ctx context.Context, consumer string, h Handler[T], 
 	}
 
 	retry := make([]Entry[T], 0, len(claimed.Entries))
+	counts := make(map[string]int64, len(claimed.Entries))
 
 	for _, e := range claimed.Entries {
 		n := deliveries[e.ID]
 
+		// A process that stopped before the bury left it pending.
 		if w.MaxDeliveries > 0 && n >= w.MaxDeliveries {
 			g.bury(ctx, w, e, n)
 
 			continue
 		}
 
+		// The claim is one more delivery.
+		counts[e.ID] = n + 1
+
 		retry = append(retry, e)
 	}
 
-	g.handle(ctx, h, w, retry)
+	g.handle(ctx, h, w, retry, counts)
+}
+
+// pendingCounts gives the delivery counts of the consumer's own pending
+// entries. Only a worker with MaxDeliveries needs them.
+func (g *Group[T]) pendingCounts(ctx context.Context, consumer string, w Work, entries []Entry[T]) map[string]int64 {
+	if w.MaxDeliveries <= 0 || len(entries) == 0 {
+		return nil
+	}
+
+	rows, err := g.PendingList(ctx, PendingQuery{Start: entries[0].ID, End: entries[len(entries)-1].ID, Count: len(entries), Consumer: consumer})
+
+	if err != nil {
+		w.report(fmt.Errorf("ndb: pending %s/%s: %w", g.s.name, g.name, err))
+
+		return nil
+	}
+
+	counts := make(map[string]int64, len(rows))
+
+	for _, p := range rows {
+		counts[p.ID] = p.Deliveries
+	}
+
+	return counts
 }
 
 // bury sends a poison entry to the dead letter, acks it, then reports it.
@@ -240,8 +269,11 @@ func (g *Group[T]) bury(ctx context.Context, w Work, e Entry[T], deliveries int6
 }
 
 // handle runs h on each entry and acks the ones that worked, in one call.
-// A deleted entry is acked without h: there is nothing to do.
-func (g *Group[T]) handle(ctx context.Context, h Handler[T], w Work, entries []Entry[T]) {
+// A deleted entry is acked without h: there is nothing to do. counts has
+// the delivery count of an entry delivered before (no count is 1); an
+// entry that fails on its MaxDeliveries-th delivery goes to the dead
+// letter at once.
+func (g *Group[T]) handle(ctx context.Context, h Handler[T], w Work, entries []Entry[T], counts map[string]int64) {
 	done := make([]string, 0, len(entries))
 
 	for _, e := range entries {
@@ -257,6 +289,12 @@ func (g *Group[T]) handle(ctx context.Context, h Handler[T], w Work, entries []E
 
 		if err := h(ctx, e); err != nil {
 			w.report(fmt.Errorf("ndb: handler %s/%s %s: %w", g.s.name, g.name, e.ID, err))
+
+			n := max(counts[e.ID], 1)
+
+			if w.MaxDeliveries > 0 && n >= w.MaxDeliveries {
+				g.bury(context.WithoutCancel(ctx), w, e, n)
+			}
 
 			continue
 		}

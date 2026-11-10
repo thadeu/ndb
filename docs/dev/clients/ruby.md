@@ -718,7 +718,7 @@ dead.range.each do |e|
 end
 ```
 
-- An entry delivered `max_deliveries` times is poison. When the worker claims it, it does not run the block. It appends `{stream, group, id, deliveries, doc}` to the `dead_letter` stream (when set), acks the entry, and gives an `Ndb::PoisonMessage` to `on_error`.
+- An entry that fails on its `max_deliveries`-th delivery is poison. At that failure, the worker appends `{stream, group, id, deliveries, doc}` to the `dead_letter` stream (when set), acks the entry, and gives an `Ndb::PoisonMessage` to `on_error`.
 - `Ndb::PoisonMessage` has `entry`, `deliveries` and the code `poison_message`. The worker does not raise it.
 - Without `dead_letter:`, a poison entry is only acked and reported.
 

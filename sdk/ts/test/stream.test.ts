@@ -313,6 +313,43 @@ describe('stream worker', () => {
     expect(dead[0]!.doc.doc).toEqual({ order: 2, total: 20 })
   })
 
+  it('buries at the last failure, not after one more claimIdleMs', async () => {
+    const s = orders()
+    const g = s.group('workers')
+
+    await g.create(startAll)
+
+    const ids = await appendOrders(s, 7, 7)
+    const deadName = `${s.name}_dead`
+    const ctl = new AbortController()
+
+    let poisoned = 0
+
+    const run = g.work('w1', () => {
+      throw new Error('boom')
+    }, {
+      blockMs: 50,
+      claimIdleMs: 3_600_000,
+      maxDeliveries: 1,
+      deadLetter: deadName,
+      signal: ctl.signal,
+      onError: (err) => {
+        if (err instanceof PoisonError) poisoned++
+      },
+    })
+
+    await waitFor(() => poisoned === 1)
+
+    ctl.abort()
+    await run
+
+    const dead = await db.stream<DeadEntry>(deadName).range()
+
+    expect(dead.map((e) => e.doc.id)).toEqual([ids[0]])
+    expect(dead[0]!.doc.deliveries).toBe(1)
+    expect((await g.pending()).count).toBe(0)
+  })
+
   it('starts with its own pending entries', async () => {
     const s = orders()
     const g = s.group('workers')

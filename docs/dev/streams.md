@@ -53,9 +53,10 @@ The loop of a worker:
    none.
 3. Process each entry, then ack it.
 4. From time to time, claim the entries that other workers left idle
-   (`claim` with `min_idle_ms` and a `cursor`). An entry with many
-   deliveries (`deliveries` in `pending`) is a poison message: append it to
-   a dead-letter stream and ack it.
+   (`claim` with `min_idle_ms` and a `cursor`).
+5. When an entry fails on its last allowed delivery (`deliveries` in
+   `pending`), it is a poison message: append it to a dead-letter stream
+   and ack it at once.
 
 Delivery is **at least once**: after a crash or a claim, an entry can come
 again. Make the work safe to repeat.

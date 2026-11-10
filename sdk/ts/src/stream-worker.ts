@@ -17,8 +17,9 @@ export interface WorkOptions {
   // How often (ms) the worker looks for idle entries: default claimIdleMs / 2,
   // at least 1000.
   claimEveryMs?: number
-  // An entry delivered this many times is a poison message. It goes to
-  // deadLetter (when set) and is acked. 0 is no limit.
+  // An entry delivered this many times is a poison message. When the handler
+  // fails on that delivery, it goes to deadLetter (when set) and is acked at
+  // once. 0 is no limit.
   maxDeliveries?: number
   // The stream that gets the poison messages, as a DeadEntry.
   deadLetter?: string
@@ -155,7 +156,7 @@ async function workPending<T>(g: Group<T>, consumer: string, h: Handler<T>, w: S
       return
     }
 
-    await handle(g, h, w, entries)
+    await handle(g, h, w, entries, await pendingCounts(g, consumer, w, entries))
 
     after = entries[entries.length - 1]!.id
   }
@@ -191,20 +192,46 @@ async function workIdle<T>(g: Group<T>, consumer: string, h: Handler<T>, w: Sett
   }
 
   const retry: Entry<T>[] = []
+  const counts = new Map<string, number>()
 
   for (const e of claimed.entries) {
     const n = deliveries.get(e.id) ?? 0
 
+    // A process that stopped before the bury left it pending.
     if (w.maxDeliveries > 0 && n >= w.maxDeliveries) {
       await bury(g, w, e, n)
 
       continue
     }
 
+    // The claim is one more delivery.
+    counts.set(e.id, n + 1)
     retry.push(e)
   }
 
-  await handle(g, h, w, retry)
+  await handle(g, h, w, retry, counts)
+}
+
+// pendingCounts gives the delivery counts of the consumer's own pending
+// entries. Only a worker with maxDeliveries needs them.
+async function pendingCounts<T>(g: Group<T>, consumer: string, w: Settings, entries: Entry<T>[]): Promise<Map<string, number>> {
+  const counts = new Map<string, number>()
+
+  if (w.maxDeliveries <= 0 || entries.length === 0) {
+    return counts
+  }
+
+  try {
+    const rows = await g.pendingList({ start: entries[0]!.id, end: entries[entries.length - 1]!.id, count: entries.length, consumer })
+
+    for (const p of rows) {
+      counts.set(p.id, p.deliveries)
+    }
+  } catch (err) {
+    w.report(wrap(`pending ${g.stream.name}/${g.name}`, err))
+  }
+
+  return counts
 }
 
 // bury sends a poison entry to the dead letter, acks it, then reports it.
@@ -234,8 +261,10 @@ async function bury<T>(g: Group<T>, w: Settings, e: Entry<T>, deliveries: number
 }
 
 // handle runs h on each entry and acks the ones that worked, in one call. A
-// deleted entry is acked without h: there is nothing to do.
-async function handle<T>(g: Group<T>, h: Handler<T>, w: Settings, entries: Entry<T>[]): Promise<void> {
+// deleted entry is acked without h: there is nothing to do. counts has the
+// delivery count of an entry delivered before (no count is 1); an entry that
+// fails on its maxDeliveries-th delivery goes to the dead letter at once.
+async function handle<T>(g: Group<T>, h: Handler<T>, w: Settings, entries: Entry<T>[], counts = new Map<string, number>()): Promise<void> {
   const done: string[] = []
 
   for (const e of entries) {
@@ -255,6 +284,12 @@ async function handle<T>(g: Group<T>, h: Handler<T>, w: Settings, entries: Entry
       done.push(e.id)
     } catch (err) {
       w.report(wrap(`handler ${g.stream.name}/${g.name} ${e.id}`, err))
+
+      const n = counts.get(e.id) ?? 1
+
+      if (w.maxDeliveries > 0 && n >= w.maxDeliveries) {
+        await bury(g, w, e, n)
+      }
     }
   }
 

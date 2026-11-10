@@ -791,7 +791,7 @@ Fields of `ndb.Work`:
 
 ### DeadEntry and ErrPoison
 
-A poison message is an entry delivered `MaxDeliveries` times. `Work` appends it to `DeadLetter` (when set), acks it, then sends an error that wraps `ndb.ErrPoison` to `OnError`. If the append to `DeadLetter` fails, the entry stays pending.
+A poison message is an entry that fails on its `MaxDeliveries`-th delivery. At that failure, `Work` appends it to `DeadLetter` (when set), acks it, then sends an error that wraps `ndb.ErrPoison` to `OnError`. If the append to `DeadLetter` fails, the entry stays pending.
 
 ```go
 dead, err := ndb.StreamOf[ndb.DeadEntry](db, "orders-dead")

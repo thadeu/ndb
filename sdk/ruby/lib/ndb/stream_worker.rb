@@ -30,9 +30,9 @@ module Ndb
     # for new entries, in seconds (5). claim_idle: entries pending this
     # long, of any consumer, are claimed and tried again (60; nil or a
     # negative value turns the claim off). claim_every: how often to look
-    # for them (claim_idle / 2, at least 1). max_deliveries: an entry
-    # delivered this many times goes to dead_letter (a stream name) and is
-    # acked; nil is no limit. on_error: a callable that gets the errors that
+    # for them (claim_idle / 2, at least 1). max_deliveries: an entry that
+    # fails on its max_deliveries-th delivery goes to dead_letter (a stream
+    # name) and is acked at once; nil is no limit. on_error: a callable that gets the errors that
     # do not stop the worker (a failed read, a raise in the block, a
     # PoisonMessage).
     #
@@ -152,6 +152,7 @@ module Ndb
       deliveries = idle.to_h { |p| [p["_id"], p["deliveries"]] }
       claimed = @group.claim(@consumer, deliveries.keys, min_idle: @claim_idle)
 
+      # An entry at the limit is one that a stopped process did not bury.
       retry_entries = claimed.entries.reject do |entry|
         n = deliveries[entry.id]
 
@@ -169,9 +170,9 @@ module Ndb
     end
 
     # The delivery counts of the consumer's pending entries, by ID. Only a
-    # block that takes the count needs the request.
+    # block that takes the count, or a max_deliveries, needs the request.
     def pending_counts(entries)
-      return {} unless counts?
+      return {} unless counts? || @max_deliveries
 
       rows = @group.pending_list(start: entries.first.id, stop: entries.last.id, count: entries.size, consumer: @consumer)
 
@@ -216,12 +217,16 @@ module Ndb
           next
         end
 
+        n = counts.fetch(entry.id, 1)
+
         begin
-          counts? ? @handler.call(entry, counts.fetch(entry.id, 1)) : @handler.call(entry)
+          counts? ? @handler.call(entry, n) : @handler.call(entry)
 
           done << entry.id
         rescue StandardError => e
           report(e)
+
+          bury(entry, n) if @max_deliveries && n >= @max_deliveries
         end
       end
 

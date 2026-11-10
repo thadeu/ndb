@@ -305,6 +305,42 @@ class StreamTest < Minitest::Test
     assert_equal({ "order" => 2, "total" => 20.0 }, dead.first.doc["doc"])
   end
 
+  # An entry that fails on its last delivery goes to the dead letter at
+  # once, not after one more claim_idle.
+  def test_worker_buries_at_the_last_failure
+    group = @stream.group("workers")
+
+    group.create(Ndb::Stream::START_ALL)
+
+    ids = append_orders(7, 7)
+    dead_name = "#{@stream.name}_dead"
+    poisoned = Queue.new
+
+    worker = group.worker(
+      "w1",
+      block: 0.05,
+      claim_idle: 3600,
+      max_deliveries: 1,
+      dead_letter: dead_name,
+      on_error: ->(error) { poisoned << error if error.is_a?(Ndb::PoisonMessage) }
+    ) { raise "boom" }
+
+    thread = worker.start
+
+    error = poisoned.pop(timeout: 3)
+
+    worker.stop
+    thread.join
+
+    refute_nil error, "the entry did not go to the dead letter at its last failure"
+
+    dead = client.stream(dead_name).range
+
+    assert_equal [ids[0]], dead.map { |e| e.doc["id"] }
+    assert_equal 1, dead.first.doc["deliveries"]
+    assert_equal 0, group.pending["count"]
+  end
+
   def test_worker_starts_with_its_own_pending
     group = @stream.group("workers")
 

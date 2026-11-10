@@ -680,7 +680,7 @@ stream :order_events,
 - **An error in `perform`** leaves the entry pending. The error goes to the log (`Rails.logger`), and the thread continues with the next entry.
 - **Retry.** A thread of the group claims the entries that are pending for `claim_idle` or longer, of any consumer, and runs them again. It looks for them every `claim_idle / 2` (at least 1 second). So a retry comes between `claim_idle` and 1.5 times `claim_idle` after the failure. There is no backoff and no delayed retry.
 - **`discard_on`.** An error of one of these classes (or of a subclass) is a warning in the log, and the entry is acked. Nothing goes to the dead letter.
-- **`max_deliveries`.** An entry that has this many deliveries is poison. On the next claim cycle, the thread does not run `perform`: it appends the entry to the dead letter stream, acks it and writes a warning. With `max_deliveries: 5`, `perform` runs 5 times at most.
+- **`max_deliveries`.** An entry that fails on its `max_deliveries`-th delivery is poison. At that failure, the thread appends the entry to the dead letter stream, acks it and writes a warning. With `max_deliveries: 5`, `perform` runs 5 times at most.
 - **The dead letter** is the stream `<stream>_dead` (or the name in `dead_letter:`). Each entry of it is `{stream, group, id, deliveries, doc}`. With `dead_letter: false`, a poison entry is only acked and logged.
 - **After a restart**, each thread reads its own pending entries first. That read counts as one delivery, as in Redis.
 
@@ -692,7 +692,6 @@ end
 
 Limits:
 
-- The move to the dead letter happens only on a claim cycle. An entry is not moved at the moment of its last failure: it stays pending for `claim_idle` more.
 - Without `max_deliveries`, an entry that always fails is tried again with no end.
 - The dead letter has no consumer of its own. Read it with the low-level client, or write a class with `stream :order_events_dead`.
 
