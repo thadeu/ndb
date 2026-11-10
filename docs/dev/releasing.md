@@ -51,7 +51,9 @@ Each of the three can also run by hand (Actions, Run workflow, with the tag), fo
 
 ## If a publish fails
 
-Workflows never run two at a time. CI, docs and the images cancel the run in progress when a newer push or tag comes. Release and publish finish the run in progress (a gem or a package version can be pushed only once), and of the tags that wait, only the newest runs: push the tags of two releases close together and only the second publishes.
+**A release is never cancelled.** A push to `main` cancels the older test run of `main`, but the run of a release commit has a group of its own: no push cancels it. Two releases run in order: `release.yml`, `ghcr.yml` and `publish.yml` run one at a time, and a newer release waits for the older one to end. So each version is published in full, and `latest` (npm, images) is the newest one.
+
+GitHub keeps only **one** run waiting in a group. With release A running and release B waiting, a release C that comes then takes the place of B: B is not published. This happens only with three tags in a few minutes. To publish B, run `release`, `ghcr` and `publish` by hand (Actions, Run workflow) with its tag.
 
 A tag cannot be reused for a different build. Fix the cause and re-run the failed workflow in GitHub Actions (`publish.yml` can also run by hand: a version already on the registry is skipped).
 

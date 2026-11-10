@@ -27,11 +27,11 @@ permissions:
   contents: read
   packages: write
 
-# A newer tag cancels the build of an older one: the images of the newer
-# version replace them.
+# One release at a time, never cancelled: the images of each version are
+# pushed, and a newer release waits, so latest is the newest version.
 concurrency:
   group: ghcr
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   ndb:
