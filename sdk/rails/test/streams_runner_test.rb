@@ -173,7 +173,9 @@ class StreamsRunnerTest < Minitest::Test
 
     wait_until { consumer.stream_group.pending["count"].zero? }
 
-    assert_match(/poison message/, @log.string)
+    # The worker writes the warning after the ack: wait for it.
+    wait_until { @log.string.include?("poison message") }
+
     assert seen.empty?
   end
 
