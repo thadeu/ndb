@@ -12,16 +12,18 @@ module Ndb
     class Event
       attr_reader :id
 
-      def self.from_entry(entry, group: nil)
-        new(id: entry.id, payload: entry.doc || {}, group: group)
+      # How many times the group delivered this entry: 1 on the first
+      # delivery. nil for an entry that came from a read without a group
+      # (last, find, range).
+      attr_reader :deliveries
+
+      def self.from_entry(entry, deliveries: nil)
+        new(id: entry.id, payload: entry.doc || {}, deliveries: deliveries)
       end
 
-      # group: the Ndb::Group that delivered the entry. deliveries: the
-      # count, when it is known without a request.
-      def initialize(id:, payload:, group: nil, deliveries: nil)
+      def initialize(id:, payload:, deliveries: nil)
         @id = id
         @payload = payload
-        @group = group
         @deliveries = deliveries
       end
 
@@ -43,17 +45,6 @@ module Ndb
 
       def time
         Ndb::Stream.id_time(@id)
-      end
-
-      # How many times the group delivered this entry, from its pending
-      # list (one request, at the first call). nil for an entry that came
-      # from a read without a group (last, find, range).
-      def deliveries
-        return @deliveries if @deliveries || @group.nil?
-
-        row = @group.pending_list(start: @id, stop: @id, count: 1).first
-
-        @deliveries = row ? row["deliveries"] : 1
       end
 
       def ==(other)

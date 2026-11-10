@@ -143,8 +143,8 @@ module Ndb
           max_deliveries: options[:max_deliveries],
           dead_letter: dead_letter,
           on_error: ->(error) { report(klass, error) }
-        ) do |entry|
-          Perform.call(klass, Event.from_entry(entry, group: group))
+        ) do |entry, deliveries|
+          Perform.call(klass, Event.from_entry(entry, deliveries: deliveries))
         end
       end
 

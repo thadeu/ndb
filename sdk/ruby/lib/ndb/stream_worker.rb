@@ -35,6 +35,9 @@ module Ndb
     # acked; nil is no limit. on_error: a callable that gets the errors that
     # do not stop the worker (a failed read, a raise in the block, a
     # PoisonMessage).
+    #
+    # The block gets the entry. A block with two parameters also gets the
+    # delivery count of the entry (1 on the first delivery).
     def initialize(group, consumer, count: 10, block: 5, claim_idle: 60, claim_every: nil, max_deliveries: nil, dead_letter: nil, on_error: nil, &handler)
       raise ArgumentError, "a worker needs a block" unless handler
 
@@ -133,7 +136,7 @@ module Ndb
 
         return if entries.empty?
 
-        handle(entries)
+        handle(entries, pending_counts(entries))
 
         after = entries.last.id
       end
@@ -159,10 +162,27 @@ module Ndb
         true
       end
 
-      handle(retry_entries)
+      # The claim counted one more delivery.
+      handle(retry_entries, deliveries.transform_values { |n| n + 1 })
     rescue Ndb::Error => e
       report(e)
     end
+
+    # The delivery counts of the consumer's pending entries, by ID. Only a
+    # block that takes the count needs the request.
+    def pending_counts(entries)
+      return {} unless counts?
+
+      rows = @group.pending_list(start: entries.first.id, stop: entries.last.id, count: entries.size, consumer: @consumer)
+
+      rows.to_h { |p| [p["_id"], p["deliveries"]] }
+    rescue Ndb::Error => e
+      report(e)
+
+      {}
+    end
+
+    def counts? = @handler.arity == 2
 
     # Sends a poison entry to the dead letter, acks it, then reports it.
     def bury(entry, deliveries)
@@ -182,8 +202,9 @@ module Ndb
     end
 
     # Runs the block on each entry and acks the ones that worked, in one
-    # call. A deleted entry is acked without the block.
-    def handle(entries)
+    # call. A deleted entry is acked without the block. counts has the
+    # delivery count of the entries that were delivered before.
+    def handle(entries, counts = {})
       done = []
 
       entries.each do |entry|
@@ -196,7 +217,7 @@ module Ndb
         end
 
         begin
-          @handler.call(entry)
+          counts? ? @handler.call(entry, counts.fetch(entry.id, 1)) : @handler.call(entry)
 
           done << entry.id
         rescue StandardError => e
