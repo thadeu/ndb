@@ -507,12 +507,33 @@ class StreamTest < Minitest::Test
   end
 
   # A group that does not exist is not fixed by a retry: run raises.
-  def test_worker_raises_on_a_missing_group
+  # A worker that starts before its stream and group waits for them: each
+  # failed read goes to on_error, and the worker tries again.
+  def test_worker_waits_for_a_missing_group
+    group = @stream.group("late")
+    errors = []
+    seen = []
+
+    worker = group.worker("w1", block: 0.05, claim_idle: nil, on_error: ->(error) { errors << error }) do |entry|
+      seen << entry.doc["order"]
+    end
+
+    thread = worker.start
+
+    wait_for { errors.size >= 2 }
+
+    assert thread.alive?
+    assert(errors.all? { |e| e.is_a?(Ndb::UnknownGroup) || e.is_a?(Ndb::UnknownCollection) })
+
+    group.create(Ndb::Stream::START_ALL)
     @stream.append({ order: 1 })
 
-    worker = @stream.group("nope").worker("w1", block: 0.05) { |_e| nil }
+    wait_for { seen == [1] && group.pending["count"].zero? }
 
-    assert_raises(Ndb::UnknownGroup) { worker.run }
+    worker.stop
+    thread.join(10)
+
+    refute thread.alive?
   end
 
   private

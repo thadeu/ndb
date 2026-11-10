@@ -365,7 +365,11 @@ worker.run # blocks until worker.stop; worker.start runs it in a Thread
 seconds). `group.work("worker-1", stop: -> { done }, **options) { |entry| ... }`
 is the same loop in one call: it ends when the `stop` callable returns true.
 Delivery is at least once: make the work safe to repeat. Run many workers
-with different consumer names to share the work.
+with different consumer names to share the work. A failed read goes to
+`on_error` and is tried again after a backoff (0.1 s, doubled up to 5 s),
+also when the group or the stream does not exist yet (`Ndb::UnknownGroup`,
+`Ndb::UnknownCollection`): a worker that starts before its group waits for
+it. Only `stop` ends the worker.
 
 The calls one by one, when you need your own loop:
 

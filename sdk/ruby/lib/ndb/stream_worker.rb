@@ -34,9 +34,12 @@ module Ndb
     # negative value turns the claim off). claim_every: how often to look
     # for them (claim_idle / 2, at least 1). max_deliveries: an entry that
     # fails on its max_deliveries-th delivery goes to dead_letter (a stream
-    # name) and is acked at once; nil is no limit. on_error: a callable that gets the errors that
-    # do not stop the worker (a failed read, a raise in the block, a
-    # PoisonMessage).
+    # name) and is acked at once; nil is no limit. on_error: a callable that
+    # gets the errors that do not stop the worker (a failed read, a raise in
+    # the block, a PoisonMessage). A failed read, also of a group or stream
+    # that does not exist yet, is reported and tried again with a backoff
+    # (0.1 s, doubled up to 5 s): a worker that starts before its group
+    # waits for it.
     #
     # The block gets the entry. A block with two parameters also gets the
     # delivery count of the entry (1 on the first delivery).
@@ -130,8 +133,8 @@ module Ndb
 
     # The consumer's own pending entries, in ID order. An entry that fails
     # stays pending; the loop moves past it. A failed read goes to on_error
-    # and is tried again after a backoff. A group (or stream) that does not
-    # exist raises: a retry does not make it.
+    # and is tried again after a backoff, also a group (or stream) that
+    # does not exist yet: the worker waits for it.
     #
     # The pending read counts one more delivery. With max_deliveries, an
     # entry above the limit had max_deliveries deliveries without an ack:
@@ -144,8 +147,6 @@ module Ndb
       until stopped?
         begin
           entries = @group.read(@consumer, count: @count, pending: true, after: after)
-        rescue UnknownGroup, UnknownCollection
-          raise
         rescue Ndb::Error => e
           report(e)
 

@@ -1,4 +1,4 @@
-import { NdbError, UnknownGroupError } from './errors.js'
+import { NdbError } from './errors.js'
 import type { Entry, Group } from './stream.js'
 
 // Does the work on one entry. It resolves to ack the entry. A throw leaves it
@@ -103,8 +103,10 @@ function wrap(what: string, err: unknown): Error {
 //     the ones delivered maxDeliveries times to deadLetter.
 //
 // Delivery is at least once: the work on an entry must be safe to repeat.
-// The group must exist (Group.ensure): when it does not exist at the start,
-// the promise rejects with UnknownGroupError.
+// The group must exist (Group.ensure). A read that fails, also of a group or
+// stream that does not exist yet, goes to onError and is tried again after a
+// backoff (100 ms, doubled up to 5 s): a worker that starts before its group
+// waits for it. Only the signal ends the worker.
 export async function workGroup<T>(g: Group<T>, consumer: string, h: Handler<T>, opts: WorkOptions): Promise<void> {
   const w = settingsOf(opts)
 
@@ -148,8 +150,8 @@ export async function workGroup<T>(g: Group<T>, consumer: string, h: Handler<T>,
 
 // workPending does the work on the consumer's own pending entries, in ID
 // order. An entry that fails stays pending; the loop moves past it. A read
-// that fails is reported and tried again after a wait, as in the main loop.
-// Only a group that does not exist rejects: a retry does not fix it.
+// that fails is reported and tried again after a wait, as in the main loop,
+// also of a group or stream that does not exist yet.
 async function workPending<T>(g: Group<T>, consumer: string, h: Handler<T>, w: Settings): Promise<void> {
   let after = '0'
   let backoff = 0
@@ -162,10 +164,6 @@ async function workPending<T>(g: Group<T>, consumer: string, h: Handler<T>, w: S
     } catch (err) {
       if (w.signal.aborted) {
         return
-      }
-
-      if (err instanceof UnknownGroupError || (err instanceof NdbError && err.code === 'unknown_collection')) {
-        throw err
       }
 
       w.report(wrap(`pending read ${g.stream.name}/${g.name}`, err))

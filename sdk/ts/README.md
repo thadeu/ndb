@@ -335,7 +335,7 @@ await g.work('worker-1', async (e, signal) => {
 })
 ```
 
-`work` resolves when the signal aborts; the abort also ends a blocked read. Delivery is at least once: make the work safe to repeat. Run many workers with different consumer names to share the work. A deleted entry is acked without the handler. Defaults: `count` 10, `blockMs` 5000, `claimIdleMs` 60000 (negative turns the claim off), `claimEveryMs` `claimIdleMs / 2` (at least 1000). A handler that throws after the abort leaves its entry pending: it is not reported and not buried. When the group does not exist, `work` rejects with `UnknownGroupError`; other failed reads go to `onError` and are tried again. An error that `onError` throws is ignored.
+`work` resolves when the signal aborts; the abort also ends a blocked read. Delivery is at least once: make the work safe to repeat. Run many workers with different consumer names to share the work. A deleted entry is acked without the handler. Defaults: `count` 10, `blockMs` 5000, `claimIdleMs` 60000 (negative turns the claim off), `claimEveryMs` `claimIdleMs / 2` (at least 1000). A handler that throws after the abort leaves its entry pending: it is not reported and not buried. A failed read goes to `onError` and is tried again after a backoff (100 ms, doubled up to 5 s), also when the group or the stream does not exist yet: a worker that starts before its group waits for it. Only the abort ends `work`. An error that `onError` throws is ignored.
 
 The calls one by one, when you need your own loop:
 

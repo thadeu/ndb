@@ -461,12 +461,49 @@ describe('stream worker', () => {
     }
   })
 
-  it('rejects when the group does not exist', async () => {
+  // A worker that starts before its stream and group waits for them: each
+  // failed read goes to onError, and the worker tries again.
+  it('waits for a group that does not exist yet', async () => {
     const s = orders()
+    const g = s.group('late')
+    const ctl = new AbortController()
+    const errors: unknown[] = []
+    const got: number[] = []
 
+    const run = g.work('w1', (e) => void got.push(e.doc.order), {
+      blockMs: 50,
+      claimIdleMs: -1,
+      signal: ctl.signal,
+      onError: (err) => void errors.push(err),
+    })
+
+    await waitFor(() => errors.length >= 2)
+
+    const missing = (err: unknown) => {
+      const cause = err instanceof Error ? err.cause : undefined
+
+      return cause instanceof UnknownGroupError || cause instanceof NotFoundError
+    }
+
+    expect(errors.every(missing)).toBe(true)
+
+    await g.create(startAll)
     await appendOrders(s, 1, 1)
 
-    await expect(s.group('nope').work('w1', () => {}, { blockMs: 50 })).rejects.toBeInstanceOf(UnknownGroupError)
+    await waitFor(() => got.length === 1)
+
+    let pending = 1
+
+    while (pending > 0) {
+      pending = (await g.pending()).count
+
+      await new Promise((r) => setTimeout(r, 20))
+    }
+
+    ctl.abort()
+    await run
+
+    expect(got).toEqual([1])
   })
 
   it('reports a failed pending read at the start and tries again', async () => {

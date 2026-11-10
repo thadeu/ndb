@@ -688,7 +688,7 @@ The loop:
 4. Every `claim_every`, it claims the entries idle for `claim_idle`, and sends the poison ones to `dead_letter`.
 
 - A failed read goes to `on_error`. The loop waits (backoff from 0.1 s up to 5 s) and reads again. This is also true for the first read of the own pending entries (the daemon is down at the start).
-- A group or a stream that does not exist at the read of the own pending entries raises `Ndb::UnknownGroup` (or `Ndb::UnknownCollection`) from `run`: a retry does not make it. Make the group first (`group.ensure`).
+- A group or a stream that does not exist is a failed read too: `on_error` gets `Ndb::UnknownGroup` (or `Ndb::UnknownCollection`), and the worker reads again after the backoff. So a worker that starts before its group (deploy order) waits for it, and starts the work when the group is made. Only `stop` ends the worker.
 - `run` returns nil after `stop`.
 
 ### `Worker#start` and `Worker#stop`

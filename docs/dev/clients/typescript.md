@@ -621,7 +621,7 @@ Notes:
 
 - The handler is `(entry, signal) => unknown`. When it resolves, the entry is acked. When it throws, the entry stays pending, and `onError` gets the error.
 - A throw after the signal aborted is a stop, not a failure: the entry stays pending for the next start. `onError` does not get it, and the entry does not go to the dead letter.
-- The group must exist. Call `ensure()` first. When it does not exist, `work` rejects with `UnknownGroupError`. Other errors of the first read (of the pending entries) go to `onError`, and the worker tries again, as for a read of new entries.
+- Make the group with `ensure()`. A read that fails goes to `onError`, and the worker reads again after a backoff (100 ms, doubled up to 5 s). This is also true for a group or a stream that does not exist (`UnknownGroupError`, `NotFoundError`, as the `cause` of the reported error): a worker that starts before its group (deploy order) waits for it. Only the abort of the signal ends the worker.
 - Options and defaults:
   - `count`: the most entries per read. Default 10.
   - `blockMs`: how long a read waits for new entries. Default 5000.
