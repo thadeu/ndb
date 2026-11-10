@@ -68,7 +68,7 @@ pnpm docs:dev      # live reload
 pnpm docs:build    # static site in docs-site/.vitepress/dist
 ```
 
-A push to `main` that changes `docs/`, `docs-site/` or `brand/` deploys it to Cloudflare Pages with wrangler (`.github/workflows/docs.yml`, project `ndb-docs`). Links in the docs that point outside `docs/dev/` become GitHub links in the site.
+A push to `main` that changes `docs/`, `docs-site/`, `examples/`, `deploy/` or `brand/` (the pages import code from `examples/` and `deploy/`) deploys it to Cloudflare Pages with wrangler (`.github/workflows/docs.yml`, project `ndb-docs`). Links in the docs that point outside `docs/dev/` become GitHub links in the site.
 
 ## Rules
 

@@ -11,7 +11,7 @@ One tag `vX.Y.Z` releases everything. Version 0.1.0 is used in all packages.
 | Images | `ghcr.io/thadeu/ndb`, `ghcr.io/thadeu/ndb-ui` (two jobs at the same time) | `ghcr.yml` |
 | Gems | `ndb` (pushed first), then `ndb-rails` (depends on it) | `publish.yml` (job `gems`) |
 | npm | `@thadeu/ndb` | `publish.yml` (job `npm`, at the same time as `gems`) |
-| Docs site | Cloudflare Pages (project `ndb-docs`, via wrangler) | `docs.yml` (also after each Release) |
+| Docs site | Cloudflare Pages (project `ndb-docs`, via wrangler) | `docs.yml` (only when the site changes; run it by hand to show a new version at once) |
 
 **The tests run once, in CI** (`ci.yml`, on every push to `main` and every pull request). `make tag` pushes `main`, waits on this machine for the CI run of the release commit (`gh run watch`, no Actions minutes), and pushes the tag only when it passed. So `release.yml`, `ghcr.yml` and `publish.yml` do not test again; only the console is tested in `release.yml`, as CI does not test it. `NO_WAIT=1 make tag patch` pushes the tag without waiting.
 

@@ -3,17 +3,19 @@ name: docs
 on:
   push:
     branches: [main]
+    # Only a change of the site: the pages (docs), the site itself, and the
+    # files the pages import (the example programs and the deploy files).
+    # A release does not rebuild the site: run it by hand
+    # (workflow_dispatch) to show a new version at once.
     paths:
       - 'docs/**'
       - 'docs-site/**'
+      - 'examples/**'
+      - 'deploy/**'
       - 'brand/**'
       - 'install.sh'
       - 'uninstall.sh'
       - '.github/workflows/docs.yml'
-  # Build again after a release, so the version pill shows the new tag.
-  workflow_run:
-    workflows: [Release]
-    types: [completed]
 
   workflow_dispatch:
 
