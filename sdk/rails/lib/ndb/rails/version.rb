@@ -2,6 +2,6 @@
 
 module Ndb
   module Rails
-    VERSION = "1.18.1"
+    VERSION = "1.18.2"
   end
 end
