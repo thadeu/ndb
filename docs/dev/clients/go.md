@@ -14,7 +14,7 @@ go get github.com/thadeu/ndb/sdk/go@latest
 import ndb "github.com/thadeu/ndb/sdk/go"
 ```
 
-The module needs a running ndb daemon. See the repository for how to run one. Releases of this module are tagged `sdk/go/vX.Y.Z`.
+The module needs a running ndb daemon. See the repository for how to run one. On a dev machine, `ndb serve` with no flags (not as root) listens on `~/.ndb/ndb.sock` and on TCP `127.0.0.1:7070`: connect with `"unix://" + filepath.Join(home, ".ndb/ndb.sock")` (the SDK does not expand `~`) or `tcp://127.0.0.1:7070`. On a server (root, or `/var/lib/ndb` exists) the socket is `/run/ndb/ndb.sock` and TCP is off. Releases of this module are tagged `sdk/go/vX.Y.Z`.
 
 ## Connect
 
@@ -34,7 +34,7 @@ db, err := ndb.Connect("unix:///run/ndb/ndb.sock", ndb.WithReadyTimeout(5*time.S
 defer db.Close()
 ```
 
-- `Open` does not connect. The first call does.
+- `Connect` does not dial. The first call does.
 - The address must be `unix:///path`, `tcp://host:port`, or `https://host[:port]` (ndb behind a TLS proxy; `http://` works too). Anything else returns an error.
 - The token goes only in the `Authorization` header. A unix socket does not need it.
 - `WithReadyTimeout` sets how long a call retries when the daemon is not ready (HTTP 503 `not_ready`, or the socket is missing or refuses). The default is `ndb.DefaultReadyTimeout` (10 s). Zero turns the retry off. Writes are retried only when the daemon certainly did not process them. Reads are also retried after a dropped connection.
@@ -135,6 +135,18 @@ err = calls.Drop(ctx)     // the collection, its definition and its watch consum
 
 - Both take the same time for 10 or 10 million documents. Watch consumers get one event with `ndb.OpTruncate` (no ID), then the new changes.
 - A direct-mode collection is `ErrDirectCollection`. A collection declared in `ndb.yml` comes back, empty, when the daemon restarts after a drop.
+
+### Rename, restore and PITR
+
+```go
+err = calls.Rename(ctx, "calls_old", false) // false: an existing calls_old is ErrCollectionExists
+err = calls.Restore(ctx, time.Now().Add(-time.Hour), "calls_1h_ago")
+info, err := calls.PITR(ctx)                // GET /calls/_pitr
+```
+
+- `Rename` moves the documents, indexes and watch positions. With `replace` true, an existing target goes aside first (with PITR on, it stays restorable for the window). The handle keeps the old name: call `Collection` again with the new name.
+- `Restore` makes the collection `to` with this collection as it was at that time, from the PITR window of the daemon (1 day by default). The source does not change. A dropped collection can be restored while it is in the window. Errors: `ErrOutOfWindow`, `ErrPITROff`, `ErrCollectionExists`.
+- `PITRInfo` has `Collection`, `Window`, `Oldest`, `Newest`, `Snapshots`, `Bytes` and `Dropped`.
 
 ### Expiry (TTL like Redis)
 
@@ -248,7 +260,7 @@ next, err := calls.Query(ndb.Eq("status", "answered")).Sort(ndb.Asc("_id")).Limi
 
 A token works only with the same `Query` and `Sort`. Another query shape returns `ErrCursorMismatch`.
 
-To walk every row, use `Iter`. It follows the cursor, with `Limit` as the batch size:
+To walk every row, use `Each`. It follows the cursor, with `Limit` as the batch size:
 
 ```go
 for call, err := range calls.Query(ndb.Eq("status", "answered")).Sort(ndb.Asc("_id")).Limit(500).Each(ctx) {
@@ -414,6 +426,348 @@ for ev, err := range calls.Watch(ctx, "relay", ndb.WatchQuery(ndb.Eq("status", "
 - `ErrWatchLagged` means the consumer was too slow. `ErrHistoryTruncated` means the WAL files for its position were deleted (`wal_retention`).
 - The stream ends when `ctx` is cancelled.
 
+## Streams
+
+A stream is an append-only log with consumer groups, with the behavior of Redis Streams. Read [Streams](../streams.md) for the model and [Stream routes](../http/streams.md) for the wire contract. This section shows only the Go calls.
+
+### StreamOf
+
+```go
+type Order struct {
+	Order int    `ndb:"order"`
+	Note  string `ndb:"note"`
+}
+
+orders, err := ndb.StreamOf[Order](db, "orders")
+```
+
+- `StreamOf` sends nothing. The first append, or the first group create, makes the stream.
+- `T` is a struct (fields map with the `ndb` tags) or `map[string]any`. The entry ID and time are in `Entry`, not in `T`.
+- `WithPrefix` on `Connect` applies to the stream name too. `orders.Name()` gives the full name.
+
+### Entry
+
+```go
+e.ID        // "<ms>-<seq>"
+e.Time      // the ms of the ID, as time.Time
+e.Doc       // the T
+e.Deleted   // pending, but no longer in the stream (a trim or a delete)
+e.Raw()     // the JSON from the daemon, with _id and _ts
+
+t := ndb.IDTime("1731160000000-0") // the zero time for a bad ID
+```
+
+- When `Deleted` is true, `Doc` is the zero value.
+
+### Create
+
+```go
+err = orders.Create(ctx) // PUT /orders with "stream": true
+```
+
+- `Create` makes the stream, or checks that the name is one. A collection that is not a stream returns `ErrNotAStream`.
+- You do not need it: `Append` and `Group.Create` make the stream too.
+
+### Append
+
+```go
+id, err := orders.Append(ctx, Order{Order: 42}) // XADD
+
+id, err = orders.Append(ctx, Order{Order: 43},
+	ndb.WithEntryID("1731160000000-*"),
+	ndb.WithTrim(ndb.MaxLen(10_000, true)),
+	ndb.NoCreate(),
+)
+```
+
+- `Append` returns the ID of the entry. With the default durability, the entry is on disk before `Append` returns.
+- `WithEntryID(id)`: `"<ms>-<seq>"` or `"<ms>-*"`. The default is `"*"`: the daemon makes the ID from its clock. An ID that is not higher than the last one returns `ErrStreamIDTooSmall`. A bad ID returns `ErrInvalidStreamID`.
+- `WithTrim(t)` trims the stream after the append, as [Trim](#trim) does.
+- `NoCreate()` makes the append fail with `ErrUnknownCollection` when the stream does not exist (`NOMKSTREAM`).
+
+### AppendMany
+
+```go
+ids, err := orders.AppendMany(ctx, []Order{{Order: 1}, {Order: 2}})
+```
+
+- The entries go in order, with one fsync for all. The IDs come back in the same order.
+- It takes the same options. `WithEntryID` applies to the first entry.
+
+### Trim
+
+```go
+n, err := orders.Trim(ctx, ndb.MaxLen(1000, false)) // XTRIM MAXLEN
+n, err = orders.Trim(ctx, ndb.MinID("1731160000000-0", true))
+n, err = orders.Trim(ctx, ndb.Trim{MinID: id, Approx: true, Limit: 5000})
+```
+
+- `Trim` returns how many entries it deleted.
+- `ndb.MaxLen(n, approx)` keeps the newest `n` entries. `ndb.MinID(id, approx)` deletes the entries with an ID lower than `id`.
+- With `approx` true, it deletes only whole blocks of 1 024 entries (`~` in Redis). `Limit` (with `Approx`) is the most entries to delete.
+- `retention` on the stream also deletes old entries. See [Trim and retention](../streams.md#trim-and-retention).
+
+### Info
+
+```go
+info, err := orders.Info(ctx) // XINFO STREAM, XLEN
+// info.Length, info.FirstID, info.LastID, info.EntriesAdded, info.MaxDeletedID, info.Groups
+```
+
+### Range and RevRange
+
+```go
+first, err := orders.Range(ctx, "-", "+", 100)   // XRANGE, oldest first
+last, err := orders.RevRange(ctx, "+", "-", 10)  // XREVRANGE, newest first
+```
+
+- `Range(ctx, start, end, count)`: entries with an ID from `start` to `end`, both included. `"-"` and `"+"` are the lowest and the highest ID.
+- `RevRange` takes `end` first, then `start`, as `XREVRANGE` does.
+- `count` 0 uses the default limit of `_search`.
+
+### Delete
+
+```go
+n, err := orders.Delete(ctx, id) // XDEL: 1, or 0 when the entry is not there
+```
+
+### Groups
+
+```go
+groups, err := orders.Groups(ctx) // XINFO GROUPS
+// each: Name, Consumers, Pending, LastDeliveredID, EntriesRead, Lag
+```
+
+- `EntriesRead` and `Lag` are `*int64`. `Lag` is nil when the daemon cannot know it.
+
+### Group
+
+```go
+g := orders.Group("workers") // sends nothing
+```
+
+- A group gives each entry to one consumer of the group. The entry stays pending until it is acked.
+
+### Create and Ensure
+
+```go
+err = g.Create(ctx, ndb.StartNew) // XGROUP CREATE ... MKSTREAM
+err = g.Ensure(ctx, ndb.StartAll) // the same, but no error when the group exists
+```
+
+- `start` is `ndb.StartNew` (`$`: only entries appended after now), `ndb.StartAll` (`0`: every entry), or an entry ID.
+- `Create` on a group that exists returns `ErrGroupExists`. `Ensure` returns nil.
+- Both make the stream when it does not exist.
+
+### SetID
+
+```go
+err = g.SetID(ctx, ndb.StartAll) // XGROUP SETID: read the stream again
+```
+
+- `SetID` moves the last delivered ID of the group.
+
+### Destroy
+
+```go
+err = g.Destroy(ctx) // XGROUP DESTROY
+```
+
+- The group and its pending entries go. The entries stay in the stream.
+
+### CreateConsumer and DeleteConsumer
+
+```go
+created, err := g.CreateConsumer(ctx, "worker-1") // false when it exists
+pending, err := g.DeleteConsumer(ctx, "worker-1") // XGROUP DELCONSUMER
+```
+
+- A `Read` makes the consumer too.
+- `DeleteConsumer` also deletes the pending entries of the consumer, and returns how many it had.
+
+### Consumers
+
+```go
+cs, err := g.Consumers(ctx) // XINFO CONSUMERS
+// each: Name, Pending, IdleMs, InactiveMs
+```
+
+### Read
+
+```go
+entries, err := g.Read(ctx, "worker-1", ndb.Read{Count: 50, Block: 5 * time.Second}) // XREADGROUP
+
+for _, e := range entries {
+	handle(e.Doc)
+}
+```
+
+Fields of `ndb.Read`:
+
+| Field | Meaning |
+|---|---|
+| `Count` | The most entries to give. Default 10, at most 10 000. |
+| `Block` | Wait up to this long for a new entry when there is none. Zero does not wait. |
+| `Pending` | Give the consumer's own pending entries, not new ones. |
+| `After` | With `Pending`: only IDs higher than this one. |
+| `NoAck` | Do not add the entries to the pending list (at most once). |
+| `Fields` | Give only these fields (and `_id`). |
+
+- New entries become pending for this consumer. Call [Ack](#ack) when the work is done.
+- An empty answer is an empty slice, not an error.
+- A group that does not exist returns `ErrUnknownGroup`.
+- After a restart, read with `Pending: true` first to get the entries the consumer took and did not ack. `Deleted` is true on an entry that was trimmed or deleted.
+
+### Ack
+
+```go
+n, err := g.Ack(ctx, e.ID, e2.ID) // XACK
+```
+
+- `Ack` returns how many IDs were pending. An ID that is not pending counts 0. No IDs sends nothing.
+
+### Pending
+
+```go
+sum, err := g.Pending(ctx) // XPENDING, the summary
+// sum.Count, sum.Lowest, sum.Highest (*string, nil when empty), sum.Consumers ([]{Name, Count})
+```
+
+### PendingList
+
+```go
+list, err := g.PendingList(ctx, ndb.PendingQuery{
+	Consumer: "worker-1",
+	Idle:     time.Minute,
+	Count:    50,
+})
+// each: ID, Consumer, IdleMs, Deliveries
+```
+
+Fields of `ndb.PendingQuery`:
+
+| Field | Meaning |
+|---|---|
+| `Start`, `End` | The ID range. Default `"-"` and `"+"`. |
+| `Count` | The most entries to give. Default 100. |
+| `Consumer` | Only the entries of this consumer. |
+| `Idle` | Only the entries idle for at least this long. |
+
+- The entries come in ID order.
+
+### Claim
+
+```go
+c, err := g.Claim(ctx, "worker-2", time.Minute, id1, id2) // XCLAIM
+// c.Entries ([]Entry[T]), c.Deleted ([]string)
+```
+
+- `Claim` moves the given entries to the consumer when they are idle for at least `minIdle`. Each one gets one more delivery.
+- `Deleted` has the pending IDs whose entry is no longer in the stream. They leave the pending list.
+
+### AutoClaim
+
+```go
+cursor := "0-0"
+
+for {
+	c, err := g.AutoClaim(ctx, "worker-2", time.Minute, cursor, 100) // XAUTOCLAIM
+
+	if err != nil {
+		return err
+	}
+
+	handleAll(c.Entries)
+
+	if c.Cursor == "0-0" {
+		break
+	}
+
+	cursor = c.Cursor
+}
+```
+
+- `AutoClaim(ctx, consumer, minIdle, cursor, count)` scans the pending list from `cursor` and moves up to `count` idle entries to the consumer. An empty cursor is `"0-0"`.
+- `c.Cursor` is where the next call starts. It is `"0-0"` when the scan is complete.
+
+### Work
+
+`Work` is the worker loop of the group. Use it in place of `Read`, `Ack` and `Claim` calls of your own.
+
+```go
+g := orders.Group("workers")
+
+if err := g.Ensure(ctx, ndb.StartNew); err != nil {
+	return err
+}
+
+ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+defer stop()
+
+err = g.Work(ctx, "worker-1", func(ctx context.Context, e ndb.Entry[Order]) error {
+	return process(ctx, e.Doc) // nil acks; an error leaves the entry pending
+}, ndb.Work{
+	MaxDeliveries: 5,
+	DeadLetter:    "orders-dead",
+	OnError:       func(err error) { log.Println(err) },
+})
+```
+
+`Work` does these steps:
+
+1. It reads the consumer's own pending entries first (the ones it took before a restart and did not ack), and runs the handler on them.
+2. It reads new entries, and waits up to `Block` for them.
+3. It acks, in one call, each entry the handler did without an error. It acks a `Deleted` entry without the handler.
+4. Every `ClaimEvery`, it claims the entries of any consumer of the group that are idle for `ClaimIdle`, and runs the handler on them again.
+
+Fields of `ndb.Work`:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `Count` | 10 | The most entries per read. |
+| `Block` | 5 s | How long a read waits for new entries. |
+| `ClaimIdle` | 1 min | Claim the entries pending for this long. A negative value turns the claim off. |
+| `ClaimEvery` | `ClaimIdle / 2` (at least 1 s) | How often `Work` looks for idle entries. |
+| `MaxDeliveries` | 0 (no limit) | An entry delivered this many times is a poison message. |
+| `DeadLetter` | none | The stream that gets the poison messages, as `ndb.DeadEntry`. |
+| `OnError` | none | Gets the errors that do not stop `Work`. |
+
+- **Stop:** `Work` runs until `ctx` ends, then returns nil. The acks of the work that is done still go after `ctx` ends.
+- The `Handler[T]` is `func(ctx context.Context, e ndb.Entry[T]) error`.
+- Delivery is at least once. Make the work safe to repeat.
+- Run many workers with different consumer names to share the work. The group must exist (`Ensure`).
+- A failed read does not stop `Work`. It goes to `OnError`, and `Work` tries again with a backoff from 100 ms to 5 s.
+- `OnError` gets the read errors, the handler errors, the claim and ack errors, and the poison messages.
+
+### DeadEntry and ErrPoison
+
+A poison message is an entry delivered `MaxDeliveries` times. `Work` appends it to `DeadLetter` (when set), acks it, then sends an error that wraps `ndb.ErrPoison` to `OnError`. If the append to `DeadLetter` fails, the entry stays pending.
+
+```go
+dead, err := ndb.StreamOf[ndb.DeadEntry](db, "orders-dead")
+rows, err := dead.Range(ctx, "-", "+", 100)
+// each Doc: Stream, Group, ID, Deliveries, Doc (json.RawMessage, the entry without _id and _ts)
+
+ndb.Work{OnError: func(err error) {
+	if errors.Is(err, ndb.ErrPoison) {
+		alert(err)
+	}
+}}
+```
+
+### Stream errors
+
+| Sentinel | Code | When |
+|---|---|---|
+| `ErrNotAStream` | `not_a_stream` | The name is a collection that is not a stream. |
+| `ErrInvalidStreamID` | `invalid_stream_id` | A bad entry ID. |
+| `ErrStreamIDTooSmall` | `stream_id_too_small` | `WithEntryID` is not higher than the last ID. |
+| `ErrUnknownGroup` | `unknown_group` | The group does not exist. |
+| `ErrGroupExists` | `group_exists` | `Group.Create` on a group that exists. |
+| `ErrUnknownCollection` | `unknown_collection` | `NoCreate` and the stream does not exist. |
+
+See [Errors](../http/streams.md#errors) of the stream routes.
+
 ## Admin
 
 ```go
@@ -488,6 +842,7 @@ func TestMain(m *testing.M) {
 t.Cleanup(func() { ndb.Testing.Clean(ctx, db) })
 ```
 
+- `Clean` and `CleanAll` return the names of the collections they truncated.
 - `ndb.CleanOnly(names...)` truncates these, not the ones used; `ndb.CleanExcept(names...)` leaves some out.
 - `ndb.Testing.CleanAll(ctx, db)` truncates every engine collection with the prefix of the DB, for the start of a run. Direct collections and partitions are left out.
 - `ndb.WithPrefix("test1_")` on `Connect` puts a prefix before the name of every `Collection`: each parallel package or worker gets collections of its own.

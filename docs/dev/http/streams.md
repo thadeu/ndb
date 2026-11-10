@@ -56,7 +56,9 @@ The definition takes the keys of every collection (`indexes`,
 A collection that exists and is not a stream: `400 not_a_stream`. A stream
 cannot become a normal collection.
 
-### `POST /{s}/_streams/append` — `XADD`
+### `POST /{s}/_streams/append`
+
+Redis: `XADD`.
 
 ```json
 { "doc": { "order": 42, "total": 99.9 }, "id": "*", "trim": { "max_len": 10000, "approx": true } }
@@ -75,7 +77,9 @@ cannot become a normal collection.
 - `no_create: true`: do not make the stream (`NOMKSTREAM`); a stream that
   does not exist is `404 unknown_collection`.
 
-### `POST /{s}/_streams/trim` — `XTRIM`
+### `POST /{s}/_streams/trim`
+
+Redis: `XTRIM`.
 
 ```json
 { "max_len": 10000, "approx": true }
@@ -95,7 +99,9 @@ cannot become a normal collection.
 - A trim does not change the groups: a pending entry that the trim deleted
   stays in the PEL, and `claim` gives its ID in `deleted`.
 
-### `GET /{s}/_streams` — `XINFO STREAM`, `XLEN`
+### `GET /{s}/_streams`
+
+Redis: `XINFO STREAM`, `XLEN`.
 
 ```json
 {
@@ -134,7 +140,9 @@ for each pending entry, its consumer, the time of its last delivery and its
 delivery count. All of it is on disk before the answer (`durability` of the
 stream; `strict` by default).
 
-### `PUT /{s}/_streams/groups/{g}` — `XGROUP CREATE`
+### `PUT /{s}/_streams/groups/{g}`
+
+Redis: `XGROUP CREATE`.
 
 ```json
 { "start": "$" }
@@ -150,27 +158,37 @@ stream; `strict` by default).
   `no_create: true` turns it off.
 - A group that exists: `409 group_exists`.
 
-### `POST /{s}/_streams/groups/{g}/setid` — `XGROUP SETID`
+### `POST /{s}/_streams/groups/{g}/setid`
+
+Redis: `XGROUP SETID`.
 
 ```json
 { "id": "0", "entries_read": 0 }
 ```
 
-### `DELETE /{s}/_streams/groups/{g}` — `XGROUP DESTROY`
+### `DELETE /{s}/_streams/groups/{g}`
+
+Redis: `XGROUP DESTROY`.
 
 Deletes the group and its PEL. Answers `{ "deleted": true }`.
 
-### `PUT /{s}/_streams/groups/{g}/consumers/{c}` — `XGROUP CREATECONSUMER`
+### `PUT /{s}/_streams/groups/{g}/consumers/{c}`
+
+Redis: `XGROUP CREATECONSUMER`.
 
 Answers `{ "created": true }`, or `false` if it exists. A read makes the
 consumer too.
 
-### `DELETE /{s}/_streams/groups/{g}/consumers/{c}` — `XGROUP DELCONSUMER`
+### `DELETE /{s}/_streams/groups/{g}/consumers/{c}`
+
+Redis: `XGROUP DELCONSUMER`.
 
 Deletes the consumer and its pending entries. Answers `{ "pending": 3 }`,
 the number of entries it held.
 
-### `GET /{s}/_streams/groups` — `XINFO GROUPS`
+### `GET /{s}/_streams/groups`
+
+Redis: `XINFO GROUPS`.
 
 ```json
 [{ "name": "workers", "consumers": 3, "pending": 12, "last_delivered_id": "1731163600000-4", "entries_read": 129988, "lag": 12 }]
@@ -179,7 +197,9 @@ the number of entries it held.
 `lag` is `null` when it cannot be known (after a trim or a delete in the
 part the group did not read, as in Redis).
 
-### `GET /{s}/_streams/groups/{g}/consumers` — `XINFO CONSUMERS`
+### `GET /{s}/_streams/groups/{g}/consumers`
+
+Redis: `XINFO CONSUMERS`.
 
 ```json
 [{ "name": "w1", "pending": 4, "idle_ms": 1200, "inactive_ms": 1100 }]
@@ -188,7 +208,9 @@ part the group did not read, as in Redis).
 `idle_ms` is the time since the last read or claim of the consumer;
 `inactive_ms` since the last read that gave entries.
 
-### `POST /{s}/_streams/groups/{g}/read` — `XREADGROUP`
+### `POST /{s}/_streams/groups/{g}/read`
+
+Redis: `XREADGROUP`.
 
 ```json
 { "consumer": "w1", "count": 100, "block_ms": 5000 }
@@ -216,7 +238,9 @@ part the group did not read, as in Redis).
   application/x-ndjson`, like `_search`.
 - The consumer is made on its first read.
 
-### `POST /{s}/_streams/groups/{g}/ack` — `XACK`
+### `POST /{s}/_streams/groups/{g}/ack`
+
+Redis: `XACK`.
 
 ```json
 { "ids": ["1731163600000-5", "1731163600000-6"] }
@@ -228,7 +252,9 @@ part the group did not read, as in Redis).
 
 An ID that is not pending in the group counts 0; it is not an error.
 
-### `POST /{s}/_streams/groups/{g}/pending` — `XPENDING`
+### `POST /{s}/_streams/groups/{g}/pending`
+
+Redis: `XPENDING`.
 
 Summary (an empty body):
 
@@ -248,7 +274,9 @@ List (with `count`):
 
 `consumer` and `idle_ms` are optional filters.
 
-### `POST /{s}/_streams/groups/{g}/claim` — `XCLAIM`, `XAUTOCLAIM`
+### `POST /{s}/_streams/groups/{g}/claim`
+
+Redis: `XCLAIM`, `XAUTOCLAIM`.
 
 By IDs (`XCLAIM`):
 

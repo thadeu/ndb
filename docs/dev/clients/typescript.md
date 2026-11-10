@@ -1,6 +1,6 @@
 # TypeScript
 
-The package `@thadeu/ndb` (the name `ndb` is taken on npm). Typed collections, a chainable query builder, aggregate, watch, blobs and admin.
+The package `@thadeu/ndb` (the name `ndb` is taken on npm). Typed collections, a chainable query builder, aggregate, watch, streams, blobs and admin.
 
 The source and the same guide are in [`sdk/ts`](https://github.com/thadeu/ndb/tree/main/sdk/ts).
 
@@ -37,7 +37,8 @@ await ndb.close()
 ```
 
 - `connect` does not connect. The first call does.
-- The address is `unix:///path` or `tcp://host:port`.
+- The address is `unix:///path`, `tcp://host:port`, or `https://host` (ndb behind a TLS proxy; `http://` works too). Without an address, `connect` reads `NDB_URL`. With no address and no `NDB_URL`, it throws a `TypeError`: there is no default address.
+- A local daemon that you start with no flags and not as root listens on the unix socket `~/.ndb/ndb.sock` and on TCP `127.0.0.1:7070`. As root (or with `/var/lib/ndb`), it listens only on `/run/ndb/ndb.sock`. Give the full path: ``connect(`unix://${os.homedir()}/.ndb/ndb.sock`)`` or `connect('tcp://127.0.0.1:7070')`. See [Configuration](../configuration.md).
 - The token goes only in the `Authorization` header. A unix socket does not need it.
 - `readyTimeout` is in milliseconds. It sets how long a call retries when the daemon is not ready (`not_ready`, or the socket is missing or refuses). Default 10000. Zero turns the retry off. Writes are retried only when the daemon certainly did not process them. Reads are also retried after a dropped connection.
 - The pool has up to 16 connections. There is no setting for it.
@@ -118,6 +119,21 @@ await calls.drop()     // the collection, its definition and its watch consumers
 
 - Both take the same time for 10 or 10 million documents. Watch consumers get one event with `op: 'truncate'` (`_id` is `''`), then the new changes.
 - After `drop()`, the next call on the collection declares the collection again. A collection declared in `ndb.yml` comes back, empty, when the daemon restarts.
+
+### Rename, restore and PITR
+
+```ts
+const restored = db.collection('calls_restored', schema)
+
+await calls.restore({ at: new Date(Date.now() - 3_600_000), to: 'calls_restored' })
+await restored.rename('calls', { replace: true })
+
+const win = await calls.pitr() // { collection, window, oldest, newest, snapshots, bytes, dropped }
+```
+
+- `rename(to, { replace })`: documents, indexes and watch positions move to `to`. Without `replace`, an existing `to` throws `CollectionExistsError`. With `replace`, the existing `to` goes aside first. The object keeps the old name: open the collection again under `to`.
+- `restore({ at, to })`: makes the collection `to` hold this collection as it was at `at`. The source does not change. Out of the PITR window (or with `pitr: off`) it throws `PitrError`. An existing `to` throws `CollectionExistsError`.
+- `pitr()`: the PITR window of the collection, and the disk it holds. See [Collections](../http/collections.md).
 
 ### Expiry (TTL like Redis)
 
@@ -335,6 +351,282 @@ try {
 - `ack` stores the position. The next `watch` with the same consumer name starts after it.
 - `HistoryTruncatedError` means the WAL files for the position were deleted (`wal_retention`).
 
+## Streams
+
+A stream is an append-only log with consumer groups. It has the behavior of Redis Streams. See [Streams](../streams.md) for the model and [Stream routes](../http/streams.md) for the HTTP API.
+
+`db.stream<T>(name)` gives a `Stream<T>`. `T` is the type of the entry. The entry ID and the time are in `Entry`, not in `T`.
+
+```ts
+import { connect } from '@thadeu/ndb'
+
+const db = connect()
+const orders = db.stream<{ order: number; total: number }>('orders')
+```
+
+- `db.stream(name)` sends nothing. The first append, or the first group create, makes the stream. `await orders.create()` makes it at once, or checks that the name is a stream.
+- The `prefix` of `connect` goes before the stream name, as for a collection.
+- `db.stream` has two forms. With **one** argument (a name), it gives a `Stream<T>`. With a **method and a path** (`db.stream('POST', path, body)`), it is a raw request: it returns a `Streamed` answer that you read as bytes or NDJSON rows (see [Explain](#explain)). The two forms are not related.
+- An entry is `Entry<T>`: `{ id, time, doc, deleted }`. `id` is `"<ms>-<seq>"`. `time` is the ms part of the ID as a `Date`. `doc` is the entry without `_id` and `_ts`. `deleted` is `true` for a pending entry that a trim or a delete removed; then `doc` is `{}`.
+- `idTime(id)` gives the `Date` of an ID. A bad ID gives an invalid `Date`.
+
+### append
+
+```ts
+const id = await orders.append({ order: 42, total: 99.9 }) // "1731164400000-0"
+
+await orders.append({ order: 43, total: 1 }, { trim: { maxLen: 10_000, approx: true } })
+await orders.append({ order: 44, total: 2 }, { id: '1731164400500-*' })
+await orders.append({ order: 45, total: 3 }, { noCreate: true })
+```
+
+Adds one entry and returns its ID (`XADD`).
+
+- `id`: `"<ms>-<seq>"` or `"<ms>-*"`. Default `"*"`: the daemon makes the ID. An ID that is not greater than the last one throws `StreamIdError` (`stream_id_too_small`).
+- `trim`: trims the stream after the append. It takes the [trim](#trim) options.
+- `noCreate`: when the stream does not exist, throw `NotFoundError` (`unknown_collection`) and do not make it (`NOMKSTREAM`).
+
+### appendMany
+
+```ts
+const ids = await orders.appendMany([
+  { order: 46, total: 1 },
+  { order: 47, total: 2 },
+])
+```
+
+- Adds the entries in order, with one fsync for all. Returns their IDs.
+- It takes the same options as `append`. `id` applies to the first entry.
+
+### trim
+
+```ts
+await orders.trim({ maxLen: 1000 })                          // keep the newest 1000
+await orders.trim({ minId: '1731160000000-0' })              // delete the IDs lower than this
+await orders.trim({ maxLen: 1000, approx: true, limit: 5000 })
+```
+
+Deletes old entries and returns how many it deleted (`XTRIM`).
+
+- Give `maxLen` or `minId`.
+- `approx`: delete only whole blocks of 1 024 entries (`~` in Redis). It is faster.
+- `limit`: with `approx`, delete at most this many entries.
+- A trimmed entry that is still pending comes to a group read with `deleted: true`. See [Trim and retention](../streams.md#trim-and-retention).
+
+### info
+
+```ts
+const info = await orders.info()
+// { length, first_id, last_id, entries_added, max_deleted_id, groups }
+```
+
+- The state of the stream (`XINFO STREAM`, `XLEN`).
+
+### range and revRange
+
+```ts
+const first = await orders.range('-', '+', 100)  // XRANGE, lowest ID first
+const last = await orders.revRange('+', '-', 10) // XREVRANGE, highest ID first
+
+first[0].id
+first[0].time
+first[0].doc.total
+```
+
+- `range(start = '-', end = '+', count?)`: up to `count` entries with an ID from `start` to `end`, both included, in ID order.
+- `revRange(end = '+', start = '-', count?)`: the same, from `end` down to `start`. Note the order of the arguments: `end` comes first, as in Redis.
+- `-` and `+` are the lowest and the highest ID. Without `count`, the daemon default applies.
+
+### delete
+
+```ts
+const n = await orders.delete('1731164400000-0') // 1, or 0 when it is not there
+```
+
+- Removes one entry by ID (`XDEL`).
+
+### groups
+
+```ts
+const list = await orders.groups()
+// [{ name, consumers, pending, last_delivered_id, entries_read, lag }]
+```
+
+- The groups of the stream (`XINFO GROUPS`). `entries_read` and `lag` are `null` when they cannot be known.
+
+### group
+
+```ts
+import { startAll, startNew } from '@thadeu/ndb'
+
+const g = orders.group('billing') // sends nothing
+
+await g.create(startNew)  // XGROUP CREATE ... MKSTREAM
+await g.ensure(startAll)  // create, or do nothing when it exists
+await g.setId('0')        // XGROUP SETID
+await g.destroy()         // XGROUP DESTROY
+```
+
+`stream.group(name)` gives a `Group<T>`. Each entry goes to one consumer of the group. It stays pending until it is acked.
+
+- `create(start = startNew)`: makes the group, and the stream when it does not exist. A group that exists throws `GroupExistsError`.
+- `ensure(start = startNew)`: like `create`, but a group that exists is not an error. Use it at the start of a worker.
+- `start` is `startNew` (`'$'`: only the entries appended after the create), `startAll` (`'0'`: every entry) or an entry ID.
+- `setId(id)`: moves the last delivered ID of the group.
+- `destroy()`: deletes the group and its pending entries.
+- A call on a group that does not exist throws `UnknownGroupError`.
+
+### consumers
+
+```ts
+const created = await g.createConsumer('w1') // true when it is new
+const list = await g.consumers()             // [{ name, pending, idle_ms, inactive_ms }]
+const held = await g.deleteConsumer('w1')    // how many pending entries it held
+```
+
+- `createConsumer(name)`: makes a consumer (`XGROUP CREATECONSUMER`). A read makes it too.
+- `consumers()`: the consumers of the group (`XINFO CONSUMERS`).
+- `deleteConsumer(name)`: deletes the consumer and its pending entries (`XGROUP DELCONSUMER`).
+
+### read
+
+```ts
+const controller = new AbortController()
+
+const entries = await g.read('w1', { count: 100, blockMs: 5000, signal: controller.signal })
+const mine = await g.read('w1', { pending: true, after: '0' })
+```
+
+Gives entries to the consumer (`XREADGROUP`). By default it gives new entries, and they become pending for that consumer. An empty answer is an empty array.
+
+- `count`: the most entries to give. Default 10, at most 10 000.
+- `blockMs`: when there is no new entry, wait up to this long (ms) for one. A blocked read has no request timeout.
+- `pending`: give the consumer's own pending entries (`XREADGROUP ... 0`), with an ID greater than `after`, not new ones.
+- `noAck`: do not add the entries to the pending list (at most once).
+- `fields`: give only these fields (and `_id`).
+- `signal`: an `AbortSignal` that ends the read, also a blocked one.
+
+### ack
+
+```ts
+const n = await g.ack(...entries.map((e) => e.id))
+```
+
+- Ends the work on the entries (`XACK`). Returns how many were pending. An ID that is not pending counts 0.
+- With no ID, it sends nothing and returns 0.
+
+### pending
+
+```ts
+const sum = await g.pending()
+// { count, lowest, highest, consumers: [{ name, count }] }
+```
+
+- The pending list in short (`XPENDING`). `lowest` and `highest` are `null` when the list is empty.
+
+### pendingList
+
+```ts
+const idle = await g.pendingList({ idleMs: 60_000, count: 100 })
+// [{ id, consumer, idleMs, deliveries }]
+```
+
+- Pending entries, in ID order (`XPENDING` with a range).
+- Options: `start` and `end` (default `'-'` and `'+'`), `count` (default 100), `consumer` (only its entries), `idleMs` (only the entries idle for at least this long).
+
+### claim
+
+```ts
+const res = await g.claim('w2', 60_000, ['1731164400000-0'])
+// { cursor: '', entries, deleted }
+```
+
+- `claim(consumer, minIdleMs, ids)`: moves the entries idle for at least `minIdleMs` to `consumer` (`XCLAIM`). Each one gets one more delivery.
+- `entries` are the claimed entries. `deleted` are the pending IDs whose entry is no longer in the stream. They left the pending list.
+
+### autoClaim
+
+```ts
+let cursor = '0-0'
+
+do {
+  const res = await g.autoClaim('w2', 60_000, cursor, 100)
+
+  await work(res.entries)
+
+  cursor = res.cursor
+} while (cursor !== '0-0')
+```
+
+- `autoClaim(consumer, minIdleMs, cursor = '0-0', count?)`: scans the pending list from `cursor` and moves up to `count` idle entries to `consumer` (`XAUTOCLAIM`).
+- `cursor` in the answer is where the next call starts. It is `'0-0'` when the scan is complete.
+
+### work
+
+```ts
+import { PoisonError } from '@thadeu/ndb'
+
+const g = orders.group('billing')
+
+await g.ensure()
+
+const controller = new AbortController()
+process.on('SIGTERM', () => controller.abort())
+
+await g.work('worker-1', async (entry, signal) => {
+  await charge(entry.doc, signal) // resolves: ack; throws: stays pending
+}, {
+  count: 100,
+  claimIdleMs: 60_000,
+  maxDeliveries: 5,
+  deadLetter: 'orders_dead',
+  onError: (err) => {
+    if (err instanceof PoisonError) console.warn('dead', err.id, err.deliveries)
+    else console.error(err)
+  },
+  signal: controller.signal,
+})
+```
+
+`group.work(consumer, handler, opts)` runs a worker of the group until the signal aborts. Then it resolves. The worker:
+
+1. Reads its own pending entries first (the ones it took before a restart and did not ack), and does the work on them.
+2. Reads new entries, and waits up to `blockMs` for them.
+3. Acks each entry that the handler did without an error, in one call.
+4. Every `claimEveryMs`, claims the entries of any consumer of the group that are idle for `claimIdleMs`, and tries them again.
+
+Notes:
+
+- The handler is `(entry, signal) => unknown`. When it resolves, the entry is acked. When it throws, the entry stays pending, and `onError` gets the error.
+- The group must exist. Call `ensure()` first.
+- Options and defaults:
+  - `count`: the most entries per read. Default 10.
+  - `blockMs`: how long a read waits for new entries. Default 5000.
+  - `claimIdleMs`: default 60000. A negative value turns the claim off.
+  - `claimEveryMs`: default `claimIdleMs / 2`, at least 1000.
+  - `maxDeliveries`: default 0 (no limit).
+  - `deadLetter`: the stream name for poison messages. Default none.
+  - `onError`: gets the errors that do not stop the worker: a failed read (the worker then waits, from 100 ms up to 5 s), a handler error, a failed ack or claim, and a `PoisonError`.
+  - `signal`: an `AbortSignal` that stops the worker. Without it, the worker runs forever.
+- Stop: abort the signal. The abort also ends a blocked read. The acks of the work that is done are still sent.
+- Poison message: a claimed entry with `maxDeliveries` deliveries or more is not given to the handler. When `deadLetter` is set, the worker appends a `DeadEntry` to that stream: `{ stream, group, id, deliveries, doc }`. Then it acks the entry, and `onError` gets a `PoisonError` (with `id` and `deliveries`). Without `deadLetter`, the entry is only acked and reported.
+- A `deleted` entry (trimmed or deleted while pending) is acked without the handler.
+- Delivery is at least once. Make the work safe to repeat.
+- To share the work, run many workers with different consumer names in the same group.
+- See [The worker in the SDKs](../streams.md#the-worker-in-the-sdks).
+
+### Stream errors
+
+| Class | Codes |
+|---|---|
+| `NotAStreamError` | `not_a_stream`: a stream call on a collection that is not a stream |
+| `StreamIdError` | `invalid_stream_id`, `stream_id_too_small` |
+| `UnknownGroupError` | `unknown_group` |
+| `GroupExistsError` | `group_exists` (`create` only; `ensure` ignores it) |
+| `PoisonError` | `poison`: not from the daemon. `work` gives it to `onError` |
+
+All are `NdbError` subclasses. See the error table below and the [stream route errors](../http/streams.md#errors).
+
 ## Admin and blobs
 
 ```ts
@@ -369,6 +661,13 @@ Daemon errors are `NdbError` or a subclass. They have `code` (the daemon code) a
 | `HistoryTruncatedError` | `history_truncated` |
 | `TtlError` | `ttl_not_enabled`, `ttl_derived` |
 | `InvalidUpdateError` | `unknown_operator`, `no_update`, `conflicting_update`, `invalid_field`, `unindexed_many`, `empty_filter`, `invalid_update` |
+| `CollectionExistsError` | `collection_exists` |
+| `PitrError` | `out_of_window`, `pitr_off` |
+| `LookupError` | `lookup_invalid`, `lookup_unindexed`, `lookup_too_large` |
+| `NotAStreamError` | `not_a_stream` |
+| `StreamIdError` | `invalid_stream_id`, `stream_id_too_small` |
+| `UnknownGroupError` | `unknown_group` |
+| `GroupExistsError` | `group_exists` |
 | `NdbError` | every other code: `not_ready`, `catalog_conflict`, `catalog_invalid`, `direct_collection`, `invalid_request`, `group_limit_exceeded`, `request_too_large`, `line_too_large`, `closed`, `invalid_position`, `http_status`, ... |
 
 ```ts

@@ -55,6 +55,7 @@ end
 ```
 
 - The address is, in order: `url`, `socket`, env `NDB_URL`, then the default socket `/run/ndb/ndb.sock`.
+- `/run/ndb/ndb.sock` is the socket of a server install (root, or `/var/lib/ndb` exists). A local daemon that you start as a user with no flags (`ndb serve`) listens on `~/.ndb/ndb.sock` and on TCP `127.0.0.1:7070`. In development, set `socket: <%= Dir.home %>/.ndb/ndb.sock` or `url: tcp://127.0.0.1:7070`.
 - The address is `unix:///path`, `tcp://host:port`, `https://host[:port]` (ndb behind a TLS proxy), or a bare path that starts with `/`.
 - The token is `token`, or env `NDB_TOKEN`. It goes only in the `Authorization` header. A unix socket does not need it.
 - `ready_timeout` is how long a call retries while the daemon is not ready (`not_ready`, or the socket is missing or refuses). It uses backoff with jitter. A write is retried only when the daemon certainly did not process it. A read is also retried after a dropped connection. A timeout is never retried.
@@ -611,7 +612,7 @@ Every public method of the gem, grouped. The names and return values follow Acti
 
 ## Errors
 
-The transport and daemon errors are defined by the gem `ndb`. They all live in the `Ndb` module (`Ndb::Error`, `Ndb::NotFound`, ...). For an ActiveRecord-like `rescue`, this gem adds one alias: `Ndb::RecordNotUnique` is `Ndb::UniqueViolation` (the same class). `Ndb::StaleObjectError`, `Ndb::RecordInvalid` and `Ndb::RecordNotSaved` exist only here, and they inherit from `Ndb::Error`. Every error has `code` (the daemon code) and `status` (the HTTP status).
+The transport and daemon errors are defined by the gem `ndb`. They all live in the `Ndb` module (`Ndb::Error`, `Ndb::NotFound`, ...). For an ActiveRecord-like `rescue`, this gem adds one alias: `Ndb::RecordNotUnique` is `Ndb::UniqueViolation` (the same class). `Ndb::StaleObjectError`, `Ndb::RecordInvalid`, `Ndb::RecordNotSaved` and `Ndb::RecordNotDestroyed` exist only here, and they inherit from `Ndb::Error`. Every error has `code` (the daemon code) and `status` (the HTTP status).
 
 | Class | Code |
 |---|---|
@@ -625,16 +626,17 @@ The transport and daemon errors are defined by the gem `ndb`. They all live in t
 | `CatalogConflict` | `catalog_conflict` |
 | `CatalogInvalid` | `catalog_invalid` |
 | `ReadOnlyCollection` | `direct_collection` |
-| `InvalidQuery` | `invalid_query`, `invalid_request` |
+| `InvalidQuery` | `invalid_query`, `invalid_request`, `invalid_pipeline` |
 | `InvalidCursor` | `cursor_invalid`, `cursor_mismatch`, `cursor_expired` |
 | `WatchLagged` | `watch_lagged` |
 | `HistoryTruncated` | `history_truncated` |
 | `TtlNotEnabled`, `TtlDerived` | `ttl_not_enabled`, `ttl_derived` |
 | `RecordInvalid` | ActiveModel validation failed (has `record`) |
-| `RecordNotSaved` | `save!` returned false without errors |
+| `RecordNotSaved` | `save!` returned false without errors, or `reload`/`update` of a record that is not saved |
+| `RecordNotDestroyed` | `destroy!` when a `before_destroy` callback aborts (has `record`) |
 | `ConnectionError` | cannot reach the daemon. Subclasses: `ConnectError` (nothing was sent), `TimeoutError` |
 
-Any other code is a plain `Ndb::Error`. A response that is not a daemon error has the code `http_status`.
+The gem `ndb` maps more codes to classes (`Forbidden`, `InvalidDocument`, `Closed`, ...); the full list is on [Ruby errors](ruby.md#errors). Any other code is a plain `Ndb::Error`. A response that is not a daemon error has the code `http_status`.
 
 ```ruby
 rescue Ndb::RecordNotUnique => e
@@ -723,10 +725,10 @@ The prefix covers the models (and their associations). A collection written with
 
 - **Safeguard:** a clean refuses to run outside the test environment (`Ndb::Testing::UnsafeClean`), so a test helper loaded by mistake against the development daemon deletes nothing. `NDB_ALLOW_CLEAN=1` forces it.
 - Direct collections (`source`) and patterns are never cleaned: their data is the app files.
-- **The test daemon:** run it with `pitr: off`. A truncate with PITR on keeps the old data in the trash for the window, so a long suite would fill the disk. A data dir in a temp dir (`-data-dir "$(mktemp -d)"`) starts each run empty.
+- **The test daemon:** run it with `pitr: off`. A truncate with PITR on keeps the old data in the trash for the window, so a long suite would fill the disk. A data dir in a temp dir (`-data-dir "$(mktemp -d)"`) starts each run empty. `-tcp ''` turns off the default TCP listener (`127.0.0.1:7070`), so the test daemon does not take the port of your local daemon.
 
 ```sh
-ndb -config test/ndb.yml -data-dir "$(mktemp -d)" -unix /tmp/ndb-test.sock   # test/ndb.yml: pitr: off
+ndb serve -config test/ndb.yml -data-dir "$(mktemp -d)" -unix /tmp/ndb-test.sock -tcp ''   # test/ndb.yml: pitr: off
 ```
 
 ### The tests of this gem
