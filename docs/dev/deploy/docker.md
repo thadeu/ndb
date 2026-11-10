@@ -4,7 +4,7 @@ Run ndb as one container from the published image. For several apps that share i
 
 ## Image
 
-Each `v*` tag publishes `ghcr.io/thadeu/ndb` for `linux/amd64` and `linux/arm64`. Tags are `latest`, the full version, `major.minor`, and `major`. The image is built `FROM gcr.io/distroless/static-debian12:nonroot` from a static, CGO-free binary. It has no shell.
+Each `v*` tag publishes `ghcr.io/thadeu/ndb` for `linux/amd64` and `linux/arm64`. Tags are `latest`, the full version, `major.minor`, and `major`. The image is built `FROM gcr.io/distroless/static-debian12:nonroot` from a static, CGO-free binary. It has no shell. For development, the same tag publishes `ghcr.io/thadeu/ndb-stack`: the daemon and the console in one image (see [ndb-stack](#ndb-stack-development)).
 
 ## Run
 
@@ -138,8 +138,68 @@ ndb stats -data-dir /var/lib/docker/volumes/ndb-data/_data
 - `ndb restore` needs the daemon stopped: `docker stop ndb`, then `ndb restore <backup> -data-dir <volume path>` (or `docker run --rm -v ndb-data:/var/lib/ndb -v /backups:/backups:ro ghcr.io/thadeu/ndb restore /backups/daily.ndb.gz -data-dir /var/lib/ndb`), then `docker start ndb`. The files must stay owned by UID 65532.
 - `ndb backup` runs the same way, in a second container with both volumes, or with the host binary.
 
+## ndb-stack (development)
+
+`ghcr.io/thadeu/ndb-stack` has the daemon and the console in one image, like `redis-stack`. Use it on a laptop or in a dev Compose file. It needs no parameters:
+
+```bash
+docker run -p 7070:7070 -p 4321:4321 ghcr.io/thadeu/ndb-stack
+```
+
+- `7070`: the API over TCP, on `0.0.0.0:7070` inside the container. Apps on the host use `NDB_URL=tcp://127.0.0.1:7070`.
+- `4321`: the console. Open `http://127.0.0.1:4321`. Its connection `local` opens the daemon on the unix socket `/run/ndb/ndb.sock`, in the same container.
+- `/var/lib/ndb`: the data. Add `-v ndb-data:/var/lib/ndb` to keep the data across `docker rm` and new image versions.
+- The defaults have **no token**: any client that reaches port 7070 can read and write all data, and the console has no login. Use the stack for development only, never on a public server. For a server, use `ghcr.io/thadeu/ndb` (and `ghcr.io/thadeu/ndb-ui` on `127.0.0.1`).
+- `-e NDB_TOKEN=<token>` makes TCP require `Authorization: Bearer <token>`. The console uses the socket, so it needs no token.
+- `-e NDB_TCP=<addr>` changes the TCP address (default `0.0.0.0:7070`).
+- Arguments go to `ndb serve`, for example `docker run ... ghcr.io/thadeu/ndb-stack -log-level debug`.
+- The image has a health check (`ndb health`). `docker stop` stops the two processes. When one process ends, the container ends too, so a restart policy starts it again.
+- Base: `gcr.io/distroless/cc-debian12:debug-nonroot` (busybox for the small entrypoint script), UID 65532. The `ndb` and `ndb-ui` binaries come from the published images of the same version.
+
+In Compose, the apps use TCP in the network:
+
+```yaml
+services:
+  ndb:
+    image: ghcr.io/thadeu/ndb-stack:latest
+    ports:
+      - 127.0.0.1:7070:7070
+      - 127.0.0.1:4321:4321
+    volumes:
+      - ndb-data:/var/lib/ndb
+
+  app:
+    build: .
+    environment:
+      NDB_URL: tcp://ndb:7070
+    depends_on:
+      ndb:
+        condition: service_healthy
+
+volumes:
+  ndb-data:
+```
+
+### Which image
+
+| Image | Has | Use it for |
+|---|---|---|
+| `ghcr.io/thadeu/ndb` | the daemon (no shell, socket only by default) | production, and a dev setup like production |
+| `ghcr.io/thadeu/ndb-ui` | the console | a console for daemons that run elsewhere |
+| `ghcr.io/thadeu/ndb-stack` | the daemon on socket and TCP with no token, and the console | development only |
+
 ## Build it yourself
 
 ```bash
 docker build -t ndb:dev --build-arg VERSION=dev .
+```
+
+The stack is built FROM the two images. `NDB_TAG` (default `latest`) selects their version. To build it from local images:
+
+```bash
+docker build -t ndb-local .
+docker build -t ndb-ui-local console
+docker build -t ndb-stack-local \
+  --build-arg NDB_IMAGE=ndb-local --build-arg NDB_UI_IMAGE=ndb-ui-local \
+  deploy/docker/stack
 ```

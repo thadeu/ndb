@@ -36,7 +36,7 @@ export const llmsSummaries: Record<string, string> = {
   'http/streams': 'The wire contract of streams: entry IDs, append, trim, read without a group, groups, read, ack, nack, pending, claim and errors.',
   deployment: 'How to choose a setup: one VM, Docker, systemd, Voodu, two VMs over WireGuard.',
   'deploy/linux': 'Install on Linux with systemd.',
-  'deploy/docker': 'Run the daemon in Docker.',
+  'deploy/docker': 'Run the daemon in Docker, and ndb-stack: the daemon and the console in one image, for development.',
   'deploy/voodu': 'Run ndb with Voodu.',
   'deploy/single-vm': 'One VM with the app and ndb.',
   'deploy/cross-vm': 'The app on one VM and ndb on another, over WireGuard.',
@@ -44,7 +44,7 @@ export const llmsSummaries: Record<string, string> = {
   releasing: 'How a release is made: versions, tags, artifacts.',
   ui: 'ndb-ui, the web console: connections, browser, JSON editor, dev tools, live watch and backups.',
   'ui/install': 'Install the console binary.',
-  'ui/docker': 'Run the console in Docker.',
+  'ui/docker': 'Run the console in Docker, alone or in ndb-stack.',
   'ui/guide': 'One section for each screen of the console.',
 }
 
