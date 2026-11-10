@@ -35,7 +35,7 @@ docs in `docs/dev/` describe what they built.
 | M10 | Ruby client | gem `ndb-rails`, `Ndb::Record` | done |
 | M11 | TS client | package `ndb`, `ndb.model` | done |
 | M12 | Compaction, retention, TTL, blobs, metrics | long-running operation; document expiry | done |
-| [M13](m13-packaging-adoption.md) | Packaging + adoption | release, Docker, docs, use in fsw-esl and 1billion | in progress |
+| M13 | Packaging + adoption | release, Docker, docs, use in fsw-esl and 1billion | in progress |
 | M14 | Ndb Console | self-hosted web UI: connections, browser, dev tools | done |
 | M15 | API 1.0 | ES-style routes, `query` body key, one SDK vocabulary (1.0.0) | done |
 | M16 | Disk first | bounded memory at any data size (1.1.0; direct mode 1.2.0) | done |
@@ -45,7 +45,7 @@ docs in `docs/dev/` describe what they built.
 | M20 | Streams | Redis Streams parity under `/{s}/_streams/...`: append, consumer groups, per message ack, pending, claim; durable | done |
 | M21 | Streams SDK | stream API and the group worker in the Go, Ruby and TS clients | done |
 | M23 | Streams in Rails and the Redis commands | `include Ndb::Streams`, `ndb streams`, the Redis Streams commands in Ruby, Go (`ndbredis`) and TS (ioredis, node-redis) | done |
-| [M24](m24-streams-delayed-retry.md) | Streams: delayed retry | `nack` with `delay_ms`, `RetryAt` in the PEL, `Work.Retry` tiers + `MaxAge` in the SDKs (fsw-esl outbox off RabbitMQ) | done (PR #4) |
+| M24 | Streams: delayed retry | `nack` with `delay_ms`, `RetryAt` in the PEL, `Work.Retry` tiers + `MaxAge` in the SDKs (fsw-esl outbox off RabbitMQ) | done |
 | M17 | PITR and rename | restore a collection to an instant of the last day; rename to put it in place (1.2.3; at/to 1.2.4) | done |
 
 ## Next (after 0.1.2)
