@@ -3,6 +3,7 @@
 require "json"
 require "logger"
 require "socket"
+require "active_support/core_ext/string/inflections"
 require "ndb"
 
 require "ndb/streams/errors"
@@ -37,6 +38,7 @@ module Ndb
     @registry = []
     @lock = Mutex.new
     @inline = false
+    @classes_loaded = false
 
     class << self
       attr_writer :client, :logger
@@ -79,7 +81,10 @@ module Ndb
 
       # Forgets every class (for tests).
       def reset!
-        @lock.synchronize { @registry.clear }
+        @lock.synchronize do
+          @registry.clear
+          @classes_loaded = false
+        end
       end
 
       # The client of the app: the one of Ndb::Rails, or a client from
@@ -171,6 +176,34 @@ module Ndb
         ::Rails.autoloaders.main.eager_load_dir(dir.to_s)
 
         true
+      end
+
+      # Loads app/streams in this thread, in the reloader of the app (or
+      # its executor). The runner and inline mode call it before they read
+      # the classes, so they do not wait for the boot thread.
+      def load_classes!(app = rails_app)
+        return false unless app
+
+        loaded = nil
+
+        if app.respond_to?(:reloader)
+          app.reloader.wrap { loaded = load_app!(app) }
+        elsif app.respond_to?(:executor)
+          app.executor.wrap { loaded = load_app!(app) }
+        else
+          loaded = load_app!(app)
+        end
+
+        @lock.synchronize { @classes_loaded = true }
+
+        loaded
+      end
+
+      # load_classes! one time for each process (inline mode).
+      def load_classes_once!(app = rails_app)
+        return if @lock.synchronize { @classes_loaded }
+
+        load_classes!(app)
       end
 
       def rails_app

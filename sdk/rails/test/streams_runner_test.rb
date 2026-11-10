@@ -331,6 +331,138 @@ class StreamsRunnerTest < Minitest::Test
     assert_equal 0, consumer.stream_group.pending["count"]
   end
 
+  # A perform that raises NotImplementedError (not a StandardError) is a
+  # failed entry: it stays pending, and the thread goes on.
+  def test_a_perform_that_raises_an_exception_that_is_not_a_standard_error_is_a_failure
+    seen = Queue.new
+    writer = stream_class
+    consumer = stream_class(writer.stream_name, group: :billing) do
+      define_method(:perform) do |event|
+        raise NotImplementedError, "todo" if event[:n] == 1
+
+        seen << event[:n]
+      end
+    end
+
+    start_runner
+
+    writer.append(n: 1)
+    writer.append(n: 2)
+
+    assert_equal [2], take(seen)
+
+    wait_until { consumer.stream_group.pending["count"] == 1 }
+
+    assert_match(/NotImplementedError: todo/, @log.string)
+  end
+
+  # #run starts again a thread that ended (a Thread#kill).
+  def test_run_starts_again_a_thread_that_ended
+    seen = Queue.new
+    writer = stream_class
+    stream_class(writer.stream_name, group: :billing) do
+      define_method(:perform) { |event| seen << event[:n] }
+    end
+
+    runner = Ndb::Streams.runner(block: 0.2, claim_every: 0.2, consumer: "test")
+    thread = Thread.new { runner.run }
+
+    @runners << runner
+
+    wait_until { runner.workers.size == 1 && group_names(writer) == ["billing"] }
+
+    first = runner.instance_variable_get(:@threads).first
+
+    first.kill
+    first.join
+
+    writer.append(n: 1)
+
+    assert_equal [1], take(seen)
+    assert_match(/a thread of .* ended \(killed\); it starts again/, @log.string)
+
+    runner.stop
+
+    assert thread.join(10)
+  end
+
+  # ndb is down at the start: start does not raise. Each thread reports the
+  # error and tries again.
+  def test_start_does_not_raise_when_ndb_is_down
+    stream_class(group: :billing) { def perform(_event) = nil }
+
+    Ndb::Streams.client = Ndb::Client.new(socket: "/tmp/ndb-not-here-#{Process.pid}.sock", ready_timeout: 0)
+
+    runner = start_runner
+
+    wait_until { @log.string.scan(/cannot reach ndb/).size >= 2 }
+
+    assert runner.instance_variable_get(:@threads).all?(&:alive?)
+
+    stop_runner(runner)
+  ensure
+    Ndb::Streams.client = nil
+  end
+
+  # A stop during start (a SIGTERM) starts no more classes and stops the
+  # workers that started.
+  def test_a_stop_during_start_stops_the_started_workers
+    writer = stream_class
+    first = stream_class(writer.stream_name, group: :one) { def perform(_event) = nil }
+
+    stream_class(writer.stream_name, group: :two) { def perform(_event) = nil }
+
+    runner = Ndb::Streams.runner(block: 0.2, claim_every: 0.2, consumer: "test")
+
+    @runners << runner
+
+    runner.define_singleton_method(:worker) do |klass, index|
+      made = super(klass, index)
+
+      stop if klass == first
+
+      made
+    end
+
+    runner.start
+
+    assert_equal 1, runner.workers.size
+    assert runner.workers.all?(&:stopped?)
+    assert runner.join(10), "a worker that started before the stop still runs"
+  end
+
+  # Puma and the terminal can send two signals: the second one in the
+  # grace time does not end the process, and the current entry is acked.
+  def test_a_second_signal_in_the_grace_time_does_not_end_the_process
+    seen = Queue.new
+    writer = stream_class
+    consumer = stream_class(writer.stream_name, group: :billing) do
+      define_method(:perform) do |event|
+        seen << :started
+
+        sleep 0.5
+
+        seen << event[:n]
+      end
+    end
+
+    thread = Thread.new { Ndb::Streams.run }
+
+    wait_until { group_names(writer) == ["billing"] }
+
+    writer.append(n: 1)
+
+    assert_equal [:started], take(seen)
+
+    Process.kill("INT", Process.pid)
+    sleep 0.05
+    Process.kill("TERM", Process.pid)
+
+    assert thread.join(10), "run did not return after the signals"
+    assert_equal [1], take(seen)
+    assert_equal 0, consumer.stream_group.pending["count"]
+  end
+
   private
 
   def group_names(klass)

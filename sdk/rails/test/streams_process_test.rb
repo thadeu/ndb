@@ -9,6 +9,17 @@ class StreamsProcessTest < Minitest::Test
   include StreamsTestHelpers
 
   EXE = File.expand_path("../../ruby/exe/ndb", __dir__)
+
+  # The boot thread of the app waits before it loads app/streams.
+  SLOW_BOOT = <<~RUBY
+    Ndb::Streams::Boot.singleton_class.prepend(Module.new do
+      def run(...)
+        sleep 3
+
+        super
+      end
+    end)
+  RUBY
   LIBS = [File.expand_path("../../ruby/lib", __dir__), File.expand_path("../lib", __dir__)].freeze
 
   # The boot of an app
@@ -93,22 +104,79 @@ class StreamsProcessTest < Minitest::Test
     end
   end
 
-  def test_another_command_goes_to_the_daemon_of_path_and_not_to_a_ruby_stub
+  # Only a native executable (ELF or Mach-O) of PATH is the daemon: not
+  # this script, a Ruby or bash stub, or a file in a shims directory.
+  def test_another_command_goes_to_the_native_daemon_of_path_and_not_to_a_stub
     Dir.mktmpdir do |dir|
       stubs = File.join(dir, "stubs")
+      shell = File.join(dir, "shell")
+      shims = File.join(dir, "shims")
       real = File.join(dir, "real")
 
-      FileUtils.mkdir_p([stubs, real])
+      FileUtils.mkdir_p([stubs, shell, shims, real])
       File.write(File.join(stubs, "ndb"), "#!/usr/bin/env ruby\nputs 'the stub'\n")
       File.symlink(EXE, File.join(dir, "ndb"))
       FileUtils.chmod(0o755, File.join(stubs, "ndb"))
-      fake_daemon(real, "ndb")
+      fake_daemon(shell, "ndb")
+      File.symlink(native("false"), File.join(shims, "ndb"))
+      File.symlink(native("echo"), File.join(real, "ndb"))
 
-      path = [dir, stubs, real, File.dirname(Gem.ruby), "/usr/bin", "/bin"].join(File::PATH_SEPARATOR)
+      path = [dir, stubs, shell, shims, real, File.dirname(Gem.ruby), "/usr/bin", "/bin"].join(File::PATH_SEPARATOR)
       out, _, status = ndb(%w[-h], dir, "PATH" => path, "NDB_BIN" => nil)
 
       assert status.success?
-      assert_equal "daemon -h\n", out
+      assert_equal "-h\n", out
+    end
+  end
+
+  # A bash shim (rbenv) that runs this script again is not native, so it is
+  # never the daemon: no exec loop. The shim stops itself after 3 runs
+  # (exit 99), so a loop fails the test and does not run forever.
+  def test_a_bash_shim_that_runs_the_script_again_is_not_the_daemon
+    Dir.mktmpdir do |dir|
+      bin = File.join(dir, "bin")
+      again = File.join(dir, "again")
+      count = File.join(dir, "count")
+      libs = LIBS.flat_map { |lib| ["-I", lib] }.join(" ")
+
+      FileUtils.mkdir_p(bin)
+
+      File.write(File.join(bin, "ndb"), <<~SH)
+        #!/bin/sh
+        echo x >> #{count}
+        [ "$(wc -l < #{count})" -gt 3 ] && exit 99
+        exec #{again} "$@"
+      SH
+
+      File.write(again, "#!/bin/sh\nexec #{Gem.ruby} #{libs} #{EXE} \"$@\"\n")
+      FileUtils.chmod(0o755, [File.join(bin, "ndb"), again])
+
+      path = [bin, "/usr/bin", "/bin"].join(File::PATH_SEPARATOR)
+      _, err, status = ndb(%w[serve], dir, "PATH" => path, "NDB_BIN" => nil)
+
+      assert_equal 127, status.exitstatus
+      assert_match(/daemon binary is not installed/, err)
+      refute File.exist?(count), "the shim ran"
+    end
+  end
+
+  # The exec sets NDB_GEM_EXEC. When the script runs again with it, it
+  # stops: the binary it found came back to it.
+  def test_the_exec_marker_stops_a_second_exec
+    Dir.mktmpdir do |dir|
+      _, err, status = ndb(%w[serve], dir, "NDB_BIN" => fake_daemon(dir, "daemon"), "NDB_GEM_EXEC" => "1")
+
+      assert_equal 127, status.exitstatus
+      assert_match(/runs this script again/, err)
+
+      marker = File.join(dir, "marker")
+
+      File.write(marker, "#!/bin/sh\necho \"marker=$NDB_GEM_EXEC\"\n")
+      FileUtils.chmod(0o755, marker)
+
+      out, = ndb(%w[x], dir, "NDB_BIN" => marker, "NDB_GEM_EXEC" => nil)
+
+      assert_equal "marker=1\n", out
     end
   end
 
@@ -197,7 +265,139 @@ class StreamsProcessTest < Minitest::Test
     end
   end
 
+  # A child in its own process group gets no SIGINT of a Ctrl-C: only the
+  # one TERM of the plugin.
+  def test_the_puma_plugin_starts_the_child_in_its_own_process_group
+    assert_equal({ pgroup: true }, Ndb::Streams::PumaPlugin.spawn_options)
+  end
+
+  # Only the errors of the arguments are a message and exit 2. An
+  # ArgumentError of the app keeps its backtrace.
+  def test_an_argument_error_of_the_app_keeps_its_backtrace
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "boot.rb"), "def boot = raise(ArgumentError, \"bad config\")\nboot\n")
+
+      _, err, status = ndb(%w[streams -r boot.rb], dir)
+
+      assert_equal 1, status.exitstatus
+      assert_match(/boot\.rb:1:in .*bad config \(ArgumentError\)/, err)
+    end
+  end
+
+  # A Rails app that does not eager load: `ndb streams` loads app/streams
+  # before it reads the classes, so it does not race the boot thread.
+  def test_streams_runs_the_consumers_of_a_rails_app_that_does_not_eager_load
+    name = NdbTestHelpers.next_name
+    writer = stream_class(name)
+
+    writer.append(n: 1)
+
+    Dir.mktmpdir do |dir|
+      out = File.join(dir, "out.txt")
+
+      rails_app(dir, name, out, slow_boot: true)
+
+      pid = Process.spawn(Gem.ruby, *LIBS.flat_map { |lib| ["-I", lib] }, EXE, "streams", chdir: dir, out: File.join(dir, "log"), err: File.join(dir, "log"))
+
+      begin
+        wait_until(30) { File.exist?(out) }
+
+        assert_equal "v1 1\n", File.read(out)
+      ensure
+        Process.kill("TERM", pid)
+
+        _, status = Process.wait2(pid)
+      end
+
+      assert status.success?, File.read(File.join(dir, "log"))
+      refute_match(/no consumer class to run/, File.read(File.join(dir, "log")))
+    end
+  end
+
+  # Inline mode right after the boot gives the entry to the consumers of
+  # app/streams, and a perform runs in the reloader: a changed consumer is
+  # loaded again (development).
+  def test_inline_in_a_rails_app_loads_the_consumers_and_reloads_them
+    name = NdbTestHelpers.next_name
+
+    Dir.mktmpdir do |dir|
+      out = File.join(dir, "out.txt")
+      consumer = rails_app(dir, name, out)
+
+      File.write(File.join(dir, "check.rb"), <<~RUBY)
+        require "./config/environment"
+
+        Ndb::Streams.inline!
+        FixWriter.append(n: 1)
+
+        sleep 1.1
+        File.write("#{consumer}", File.read("#{consumer}").sub("v1", "v2"))
+
+        FixWriter.append(n: 2)
+      RUBY
+
+      _, err, status = Open3.capture3(Gem.ruby, *LIBS.flat_map { |lib| ["-I", lib] }, "check.rb", chdir: dir)
+
+      assert status.success?, err
+      assert_equal "v1 1\nv2 2\n", File.read(out)
+    end
+  end
+
   private
+
+  # A Rails app in dir (no eager load, with reloading) with a writer and a
+  # consumer of the stream name in app/streams. Returns the consumer file.
+  # slow_boot: the boot thread waits 3 s before it loads app/streams.
+  def rails_app(dir, name, out, slow_boot: false)
+    FileUtils.mkdir_p([File.join(dir, "config"), File.join(dir, "app", "streams")])
+
+    File.write(File.join(dir, "config", "ndb.yml"), "test:\n  socket: #{TestDaemon.socket}\ndevelopment:\n  socket: #{TestDaemon.socket}\n")
+
+    File.write(File.join(dir, "config", "environment.rb"), <<~RUBY)
+      require "rails"
+      require "ndb/rails"
+
+      #{slow_boot ? SLOW_BOOT : ''}
+
+      class FixApp < Rails::Application
+        config.root = File.expand_path("..", __dir__)
+        config.eager_load = false
+        config.enable_reloading = true
+        config.file_watcher = ActiveSupport::FileUpdateChecker
+        config.logger = Logger.new($stderr, level: :warn)
+        config.secret_key_base = "x" * 64
+      end
+
+      FixApp.initialize!
+    RUBY
+
+    File.write(File.join(dir, "app", "streams", "fix_writer.rb"), <<~RUBY)
+      class FixWriter
+        include Ndb::Streams
+
+        stream "#{name}"
+      end
+    RUBY
+
+    consumer = File.join(dir, "app", "streams", "fix_consumer.rb")
+
+    File.write(consumer, <<~RUBY)
+      class FixConsumer
+        include Ndb::Streams
+
+        stream "#{name}", group: :fix, start: :all
+
+        def perform(event) = File.write("#{out}", "v1 \#{event[:n]}\n", mode: "a")
+      end
+    RUBY
+
+    consumer
+  end
+
+  # A native program of the system (echo, false).
+  def native(name)
+    ["/bin/#{name}", "/usr/bin/#{name}"].find { |path| File.exist?(path) }
+  end
 
   # Runs the command of the gem in dir. Returns [stdout, stderr, status].
   def ndb(args, dir, env = {})

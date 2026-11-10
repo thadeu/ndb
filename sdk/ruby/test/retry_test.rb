@@ -140,4 +140,64 @@ class RetryTest < Minitest::Test
 
     assert_equal 2, requests.size
   end
+  # A read timeout is Ndb::TimeoutError, and the request is not sent again
+  # (also a read on a reused connection).
+  def test_a_read_timeout_is_a_timeout_error_and_is_not_sent_again
+    requests = Queue.new
+    url, = fake_server do |sock, _|
+      Thread.new do
+        loop do
+          while (line = sock.gets("\r\n")) && line != "\r\n"; end
+
+          break if line.nil?
+
+          requests << 1
+
+          next unless requests.size == 1
+
+          body = '{"collections":[]}'
+
+          sock.write("HTTP/1.1 200 OK\r\nContent-Length: #{body.bytesize}\r\n\r\n#{body}")
+        end
+      rescue IOError, SystemCallError
+        nil
+      end
+    end
+
+    client = Ndb::Client.new(url: url, timeout: 0.5, ready_timeout: 1)
+    client.collections
+
+    assert_raises(Ndb::TimeoutError) { client.collections }
+
+    sleep 0.2
+
+    assert_equal 2, requests.size
+  end
+
+  # A raise that is not a StandardError (Timeout, Thread#kill) between the
+  # send and the read must not put the connection back with an answer that
+  # was not read: the next call would get the answer of this one.
+  def test_a_connection_left_by_a_non_standard_error_is_not_used_again
+    fresh = Ndb::Client.new(socket: TestDaemon.socket)
+    stop = Class.new(Exception)
+    name = NdbTestHelpers.next_name
+
+    fresh.ensure_collection(name)
+
+    used = nil
+
+    assert_raises(stop) do
+      fresh.pool.with do |conn|
+        used = conn
+
+        conn.request("GET", "/_health", "")
+        conn.send(:send_request, "GET", "/_health", "", {})
+
+        raise stop
+      end
+    end
+
+    assert_nil used.socket
+    assert(fresh.collections.any? { |c| c["name"] == name })
+  end
 end

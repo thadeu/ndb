@@ -507,7 +507,8 @@ OrderEvent.append(order_id: 42)   # => "1731164400000-0"
 ```
 
 - A class without a `perform` method is a writer.
-- The stream name comes from the class name: `OrderEvent` is `order_events`, and `Billing::OrderEvent` is `billing_order_events`. [`stream`](#stream-and-its-options) sets another name.
+- The stream name comes from the class name: `OrderEvent` is `order_events`, `Billing::OrderEvent` is `billing_order_events`, and `Category` is `categories`. [`stream`](#stream-and-its-options) sets another name.
+- The name uses the ActiveSupport inflections (`underscore` and `pluralize`). `ndb/streams` loads them, so the name is the same with and without Rails. An inflection of the app (`config/initializers/inflections.rb`) changes the name: set the name with `stream` when it must not change. The class keeps its name after the first call.
 - A class name needs no suffix.
 
 ### A consumer
@@ -641,7 +642,7 @@ end
 
 - The runner makes a new instance of the class for each entry and calls `perform(event)`. `perform` can be private.
 - `perform` that returns acks the entry. `perform` that raises leaves it pending: see [Failure and retry](#failure-and-retry).
-- In a Rails app, each `perform` runs in the Rails executor, so the code reloads in development and the ActiveRecord connections go back to the pool.
+- In a Rails app, each `perform` runs in the Rails reloader (`Rails.application.reloader.wrap`), so a changed class loads again in development and the ActiveRecord connections go back to the pool. The options (`discard_on` and the others) come from the class after the reload.
 - `event.to_h` is a copy. With ActiveSupport, it reads a Symbol and a String as the same key.
 - There are no typed fields. The payload comes as JSON gives it: a number is a number, a date is a String.
 - Delivery is at least once: after a crash or a retry, an entry can come again. Make `perform` safe to repeat.
@@ -677,12 +678,13 @@ stream :order_events,
   discard_on: [ActiveRecord::RecordNotFound]
 ```
 
-- **An error in `perform`** leaves the entry pending. The error goes to the log (`Rails.logger`), and the thread continues with the next entry.
+- **An error in `perform`** leaves the entry pending. The error goes to the log (`Rails.logger`), and the thread continues with the next entry. Any exception is an error here, also one that is not a `StandardError` (`NotImplementedError`, `SystemStackError`). Only `SignalException` (with `Interrupt`) and `SystemExit` go on and stop the thread.
 - **Retry.** A thread of the group claims the entries that are pending for `claim_idle` or longer, of any consumer, and runs them again. It looks for them every `claim_idle / 2` (at least 1 second). So a retry comes between `claim_idle` and 1.5 times `claim_idle` after the failure. There is no backoff and no delayed retry.
 - **`discard_on`.** An error of one of these classes (or of a subclass) is a warning in the log, and the entry is acked. Nothing goes to the dead letter.
 - **`max_deliveries`.** An entry that fails on its `max_deliveries`-th delivery is poison. At that failure, the thread appends the entry to the dead letter stream, acks it and writes a warning. With `max_deliveries: 5`, `perform` runs 5 times at most.
 - **The dead letter** is the stream `<stream>_dead` (or the name in `dead_letter:`). Each entry of it is `{stream, group, id, deliveries, doc}`. With `dead_letter: false`, a poison entry is only acked and logged.
 - **After a restart**, each thread reads its own pending entries first. That read counts as one delivery, as in Redis.
+- **A crash in `perform`.** When `perform` stops the process (an out-of-memory kill, a segfault), the entry is not acked and gets no failure. With `max_deliveries`, the read of the pending entries after the restart sends an entry with more than `max_deliveries` deliveries to the dead letter, without `perform`. So a poison entry that crashes the process stops after `max_deliveries` runs.
 
 ```ruby
 Ndb::Rails.client.stream("order_events_dead").range.each do |entry|
@@ -727,7 +729,7 @@ bundle exec ndb streams -e production
 bundle exec ndb streams -r ./consumers.rb         # without Rails
 ```
 
-The `ndb` command comes with the gem `ndb`; `streams` needs the gem `ndb-rails`. In a Rails app (a directory with `config/environment.rb`), it loads the app and the classes of `app/streams`. It makes the missing groups, starts the threads and runs until a signal.
+The `ndb` command comes with the gem `ndb`; `streams` needs the gem `ndb-rails`. In a Rails app (a directory with `config/environment.rb`), it loads the app, then loads the classes of `app/streams` in its own thread (in the reloader of the app) before it reads them, also when the app does not eager load. It starts the threads; each thread makes its group, and the command runs until a signal.
 
 | Flag | Meaning |
 |---|---|
@@ -737,9 +739,11 @@ The `ndb` command comes with the gem `ndb`; `streams` needs the gem `ndb-rails`.
 | `-c`, `--concurrency N` | The threads of each class. It replaces `concurrency:` of every class. |
 | `-h`, `--help` | Print the help. |
 
-- A wrong flag, or a wrong config of a class, prints `ndb streams: <message>` and exits with status 2.
-- **Stop.** `SIGTERM` and `SIGINT` stop the process: each thread ends its current entries, acks them and stops. A read waits 2 seconds at most, so an idle process stops in about 2 seconds. A second signal ends the process at once, with status 1.
-- **The daemon is down.** A thread that cannot read writes the error to the log and tries again, with a wait of up to 5 seconds. The process does not exit.
+- A wrong flag, or a wrong config of a class, prints `ndb streams: <message>` and exits with status 2. Any other error at the boot of the app (also an `ArgumentError`) is raised with its backtrace (status 1).
+- **Stop.** `SIGTERM` and `SIGINT` stop the process: each thread ends its current entries, acks them and stops. A read waits 2 seconds at most, so an idle process stops in about 2 seconds. A signal during the start starts no more threads.
+- **A second signal.** In the first 2 seconds after the first signal, a second signal does nothing (a terminal and Puma can send two). After that, a second signal interrupts the current `perform` calls: the entries done before them are acked, and the interrupted entries stay pending. A third signal ends the process at once, with status 1.
+- **The daemon is down.** Each thread makes its group, then reads. When the daemon is down, the thread writes the error to the log and tries again, with a wait of up to 5 seconds. The process does not exit, also when the daemon is down at the start.
+- **A thread that ends.** When a thread ends before the stop (an exception outside `perform`, a `Thread#kill`), the process writes an error and starts the thread again.
 - **Consumer names.** Each thread is a consumer with a stable name: `NDB_CONSUMER` (default: the hostname), then `:` and the thread index (`web-1:0`). After a restart with the same name, a thread reads its own pending entries first. **Two processes on one host must have different `NDB_CONSUMER` values.** With the same name they are one consumer for the daemon, and each one also reads the pending entries of the other at its start.
 - Any other command (`bundle exec ndb serve`, ...) goes to the daemon binary: see [The ndb executable](ruby.md#the-ndb-executable).
 
@@ -763,7 +767,7 @@ plugin :ndb
 ```
 
 - After Puma boots, the plugin starts `bin/ndb streams` when the app has a `bin/ndb` file, or `bundle exec ndb streams`. It is a child process, not threads in Puma.
-- When Puma stops or restarts, the plugin sends `SIGTERM` to the process, waits up to 30 seconds, then kills it.
+- The process has its own process group, so a Ctrl-C in the terminal goes to Puma only. When Puma stops or restarts, the plugin sends one `SIGTERM` to the process, waits up to 30 seconds, then kills it.
 - When the consumers stop by themselves, Puma stops too. So a broken consumer is not hidden.
 - Without `NDB_STREAMS_IN_PUMA`, the plugin runs only in development (`RAILS_ENV`, `RACK_ENV` or `APP_ENV`; none of them is development). `NDB_STREAMS_IN_PUMA=true` (or `1`, `yes`, `on`) turns it on, and `false` (or `0`, `no`, `off`) turns it off. Any other value is an error at the start of Puma.
 - In production, a process of its own (`bundle exec ndb streams`) is the usual choice: it scales and restarts apart from the web process.
@@ -772,7 +776,7 @@ plugin :ndb
 
 - Any process of the Rails app (web, console, a job worker) loads `app/streams` at boot and makes the missing groups, in a background thread. The boot does not wait for ndb.
 - So a group exists before the first `ndb streams` process runs, and a group with `start: :new` gets the entries that the web process appends from then on.
-- When the daemon is down, the thread tries 5 times (it waits 1, 2, 4 and 8 seconds), then writes a warning. `ndb streams` makes the groups again at its start.
+- When the daemon is down, the thread tries 5 times (it waits 1, 2, 4 and 8 seconds), then writes a warning. `ndb streams` makes the groups again at its start, and does not wait for this thread: it loads `app/streams` itself.
 - A stream with `retain:` is made here too, with its retention. A stream without `retain:` is made by the first append or by its first group.
 - Limit: with `start: :new`, the entries appended before the group is made are not delivered to it. For a new consumer of an old stream, use `start: :all`.
 - Without Rails, `Ndb::Streams.ensure_groups!` makes them.
@@ -805,6 +809,7 @@ Ndb::Streams.inline!
 
 - **`Ndb::Streams.inline!`**: an append writes the entry, then calls `perform` of each consumer class of that stream, in the same thread. No `ndb streams` process is necessary. `Ndb::Streams.inline = false` turns it off.
 - In inline mode, an error in `perform` goes to the caller of `append` (an error of `discard_on` is only logged). `event.deliveries` is 1. There is no retry and no dead letter, and the groups are not used.
+- The first inline `append` loads `app/streams` (in the reloader of the app), so the consumers are there also right after the boot, when the app does not eager load.
 - In a transaction, the `perform` calls run after the commit, with the append.
 - `ndb/rails/minitest` and `ndb/rails/rspec` truncate the streams that a test appended to, with the collections (see [Testing](#testing)). The stream names get the prefix of the parallel worker.
 

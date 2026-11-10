@@ -335,10 +335,13 @@ orders.info                                  # length, first and last ID, groups
 
 A worker in a group. It reads its own pending entries first, then new ones
 (waiting up to `block` seconds). A block that returns acks the entry; a
-block that raises leaves it pending. The worker also claims the entries
+block that raises any exception (also `NotImplementedError`) leaves it
+pending, but a signal or `exit` goes on. The worker also claims the entries
 other workers left idle. An entry delivered `max_deliveries` times goes to
 the dead-letter stream as `{stream, group, id, deliveries, doc}`, is acked,
-and `on_error` gets an `Ndb::PoisonMessage`:
+and `on_error` gets an `Ndb::PoisonMessage`. An own pending entry that
+crashed the process `max_deliveries` times goes there at the next start,
+without the block:
 
 ```ruby
 group = orders.group("billing")

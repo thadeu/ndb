@@ -367,6 +367,154 @@ class StreamTest < Minitest::Test
     assert_equal [1, 2, 3], got
   end
 
+  # A poison entry that stops the process in the block (a crash) is never
+  # acked. Each restart reads it again (one more delivery). Above
+  # max_deliveries it goes to the dead letter, and the block does not run.
+  def test_worker_buries_an_own_pending_entry_that_crashed_the_process
+    group = @stream.group("workers")
+
+    group.create(Ndb::Stream::START_ALL)
+
+    ids = append_orders(1, 1)
+    dead_name = "#{@stream.name}_dead"
+
+    group.read("w1")
+    group.read("w1", pending: true)
+
+    runs = []
+    poisoned = []
+
+    worker = group.worker(
+      "w1",
+      block: 0.05,
+      claim_idle: nil,
+      max_deliveries: 2,
+      dead_letter: dead_name,
+      on_error: ->(error) { poisoned << error if error.is_a?(Ndb::PoisonMessage) }
+    ) { |entry, n| runs << [entry.id, n] }
+
+    thread = worker.start
+
+    wait_for { poisoned.any? }
+
+    worker.stop
+    thread.join
+
+    assert_empty runs, "the block ran on an entry above max_deliveries"
+    assert_equal 0, group.pending["count"]
+
+    dead = client.stream(dead_name).range
+
+    assert_equal [ids[0]], dead.map { |e| e.doc["id"] }
+    assert_equal 2, dead.first.doc["deliveries"]
+  end
+
+  # An own pending entry at the limit (not above it) runs one more time.
+  def test_worker_runs_an_own_pending_entry_at_the_limit
+    group = @stream.group("workers")
+
+    group.create(Ndb::Stream::START_ALL)
+    append_orders(1, 1)
+
+    group.read("w1")
+
+    runs = Queue.new
+    worker = group.worker("w1", block: 0.05, claim_idle: nil, max_deliveries: 2) { |_entry, n| runs << n }
+    thread = worker.start
+
+    assert_equal 2, runs.pop(timeout: 5)
+
+    worker.stop
+    thread.join
+
+    assert_equal 0, group.pending["count"]
+  end
+
+  # NotImplementedError and SystemStackError are not StandardError. They
+  # are a failed entry: the entry stays pending and the worker goes on.
+  def test_worker_takes_an_exception_that_is_not_a_standard_error_as_a_failure
+    group = @stream.group("workers")
+
+    group.create(Ndb::Stream::START_ALL)
+    append_orders(1, 3)
+
+    errors = Queue.new
+    done = Queue.new
+
+    worker = group.worker("w1", block: 0.05, claim_idle: nil, on_error: ->(error) { errors << error }) do |entry|
+      raise NotImplementedError, "todo" if entry.doc["order"] == 1
+      raise SystemStackError, "deep" if entry.doc["order"] == 2
+
+      done << entry.doc["order"]
+    end
+
+    thread = worker.start
+
+    assert_equal 3, done.pop(timeout: 5)
+    assert thread.alive?
+
+    worker.stop
+    thread.join
+
+    assert_equal [NotImplementedError, SystemStackError], [errors.pop, errors.pop].map(&:class)
+    assert_equal 2, group.pending["count"]
+  end
+
+  # A signal (or Thread#raise) in the block goes on to the caller, but the
+  # entries done before it in the same read are acked.
+  def test_worker_acks_the_done_entries_when_the_block_is_interrupted
+    group = @stream.group("workers")
+
+    group.create(Ndb::Stream::START_ALL)
+    append_orders(1, 2)
+
+    started = Queue.new
+
+    worker = group.worker("w1", block: 0.05, claim_idle: nil) do |entry|
+      next if entry.doc["order"] == 1
+
+      started << true
+
+      sleep 30
+    end
+
+    thread = worker.start
+    thread.report_on_exception = false
+
+    started.pop(timeout: 5)
+    thread.raise(Interrupt)
+
+    assert_raises(Interrupt) { thread.join }
+    assert_equal 1, group.pending["count"]
+  end
+
+  # A failed first read of the own pending entries (ndb is down) goes to
+  # on_error, and the worker tries again: start does not end the thread.
+  def test_worker_retries_a_failed_first_pending_read
+    down = Ndb::Client.new(socket: "/tmp/ndb-not-here-#{Process.pid}.sock", ready_timeout: 0)
+    errors = Queue.new
+    worker = down.stream("x").group("g").worker("w1", block: 0.05, on_error: ->(error) { errors << error }) { |_e| nil }
+
+    thread = worker.start
+
+    2.times { assert_kind_of Ndb::ConnectionError, errors.pop(timeout: 5) }
+    assert thread.alive?
+
+    worker.stop
+
+    assert thread.join(5)
+    assert_nil thread.value
+  end
+
+  # A group that does not exist is not fixed by a retry: run raises.
+  def test_worker_raises_on_a_missing_group
+    @stream.append({ order: 1 })
+
+    worker = @stream.group("nope").worker("w1", block: 0.05) { |_e| nil }
+
+    assert_raises(Ndb::UnknownGroup) { worker.run }
+  end
+
   private
 
   def append_orders(from, to)

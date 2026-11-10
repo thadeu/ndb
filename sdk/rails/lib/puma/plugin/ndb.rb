@@ -28,9 +28,11 @@ Puma::Plugin.create do
 
   private
 
+  # The child has its own process group: a Ctrl-C in the terminal goes to
+  # Puma only, and Puma sends one TERM to the child.
   def start_streams
     @stopping = false
-    @pid = Process.spawn(*Ndb::Streams::PumaPlugin.command)
+    @pid = Process.spawn(*Ndb::Streams::PumaPlugin.command, **Ndb::Streams::PumaPlugin.spawn_options)
 
     @monitor = Thread.new(@pid) do |pid|
       _, status = Process.wait2(pid)

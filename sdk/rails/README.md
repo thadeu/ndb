@@ -398,12 +398,12 @@ bundle exec ndb streams --only BillingPaid -c 4
 bundle exec ndb streams -r ./consumers.rb    # without Rails
 ```
 
-- **Name.** The stream name comes from the class name (`OrderEvent` is `order_events`). `stream :orders` sets it. `stream OrderEvent, group: :billing` takes the stream of another class.
+- **Name.** The stream name comes from the class name, with the ActiveSupport inflections (`OrderEvent` is `order_events`, `Category` is `categories`). `stream :orders` sets it. `stream OrderEvent, group: :billing` takes the stream of another class.
 - **Role.** A class without `perform` is a writer. A class with `perform` is a consumer and needs `group:`. Each group gets every entry one time, so each service has its own group. Two classes with the same group on one stream are an error.
 - **Write.** `append`, with the aliases `enqueue` and `perform_async`. In an ActiveRecord transaction the append waits for the commit (Rails 7.2 or later) and returns `nil`. A rollback drops it.
 - **Read.** `OrderEvent.last`, `last(10)`, `find(id)`, `range(1.hour.ago, Time.now, count: 100)`, `count`.
 - **The event.** `event[:order_id]` (a symbol or a string), `event.to_h`, `event.id`, `event.time`, `event.deliveries`. The payload is JSON: a date comes as a String.
-- **Failure.** An error in `perform` leaves the entry pending. It comes again after `claim_idle`. Delivery is at least once, so `perform` must be safe to repeat.
+- **Failure.** An error in `perform` (any exception but a signal or `exit`) leaves the entry pending. It comes again after `claim_idle`. Delivery is at least once, so `perform` must be safe to repeat.
 
 The options of `stream`, with their defaults:
 
@@ -445,7 +445,9 @@ With Puma, `plugin :ndb` in `config/puma.rb` runs `bundle exec ndb streams` (or 
 
 `ActiveSupport::Notifications` gets `append.ndb_streams` (`stream`, `class`, `count`) and `perform.ndb_streams` (`stream`, `group`, `class`, `event`).
 
-The `ndb` command of the gem only has `streams`. It gives every other command (`ndb serve`, ...) to the daemon binary of `PATH`, or of `NDB_BIN`.
+The `ndb` command of the gem only has `streams`. It gives every other command (`ndb serve`, ...) to the daemon binary of `NDB_BIN`, or to the first native `ndb` executable of `PATH` (not a shim of rbenv, mise or asdf).
+
+`ndb streams` loads `app/streams` itself before it starts, also when the app does not eager load. It does not exit when ndb is down: each thread makes its group and tries again. A second signal in the first 2 seconds of a stop does nothing.
 
 In tests, `Ndb::Streams.inline!` makes an append write the entry and then call `perform` of each consumer of the stream, in the same thread. `ndb/rails/minitest` adds `assert_streamed` and `assert_no_streamed`, `ndb/rails/rspec` adds `have_streamed`, and both truncate the streams a test used.
 

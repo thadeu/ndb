@@ -26,5 +26,8 @@ Gem::Specification.new do |spec|
 
   spec.add_dependency "activemodel", ">= 7.1"
   spec.add_dependency "activesupport", ">= 7.1"
-  spec.add_dependency "ndb", "~> 1.0"
+  # The two gems have one version and release together (scripts/release.sh).
+  # ndb-rails X.Y.Z needs ndb X.Y.Z or newer in the same major: the worker,
+  # the client and exe/ndb change with it.
+  spec.add_dependency "ndb", ">= #{Ndb::Rails::VERSION}", "< #{Ndb::Rails::VERSION.split('.').first.to_i + 1}"
 end

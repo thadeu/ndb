@@ -49,9 +49,10 @@ module Ndb
       end
 
       # The name from `stream`, or from the class name (OrderEvent is
-      # "order_events").
+      # "order_events"). The name from the class is kept after the first
+      # call.
       def stream_name
-        @ndb_stream_name || Options.default_name(self)
+        @ndb_stream_name || (@ndb_default_stream_name ||= Options.default_name(self))
       end
 
       # Every option with its value. dead_letter is "<stream>_dead" when

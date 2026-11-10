@@ -34,6 +34,13 @@ module Ndb
           "development"
         end
 
+        # The options of Process.spawn: a new process group, so the signal
+        # of a Ctrl-C in the terminal does not also go to the child. The
+        # child gets only the TERM of the plugin (one signal: a clean stop).
+        def spawn_options
+          { pgroup: true }
+        end
+
         # The binstub of the app when it has one, or the command of the gem
         # with Bundler.
         def command(root = Dir.pwd)

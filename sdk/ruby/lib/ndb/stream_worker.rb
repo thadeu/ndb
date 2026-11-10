@@ -16,7 +16,9 @@ module Ndb
 
   # A worker of a group: it runs the block on each entry. A block that
   # returns acks the entry; a block that raises leaves it pending, and a
-  # worker of the group claims it again after claim_idle.
+  # worker of the group claims it again after claim_idle. Any Exception is
+  # a failed entry (also NotImplementedError or SystemStackError), but a
+  # SignalException or SystemExit goes on to the caller.
   #
   #   worker = orders.group("billing").worker("w1", max_deliveries: 5) { |e| charge(e.doc) }
   #   thread = worker.start   # or worker.run, which blocks
@@ -127,18 +129,58 @@ module Ndb
     end
 
     # The consumer's own pending entries, in ID order. An entry that fails
-    # stays pending; the loop moves past it.
+    # stays pending; the loop moves past it. A failed read goes to on_error
+    # and is tried again after a backoff. A group (or stream) that does not
+    # exist raises: a retry does not make it.
+    #
+    # The pending read counts one more delivery. With max_deliveries, an
+    # entry above the limit had max_deliveries deliveries without an ack:
+    # the process stopped in the block (a crash). It goes to the dead letter
+    # without the block.
     def work_pending
       after = "0"
+      backoff = 0
 
       until stopped?
-        entries = @group.read(@consumer, count: @count, pending: true, after: after)
+        begin
+          entries = @group.read(@consumer, count: @count, pending: true, after: after)
+        rescue UnknownGroup, UnknownCollection
+          raise
+        rescue Ndb::Error => e
+          report(e)
+
+          backoff = [[backoff * 2, 0.1].max, 5].min
+
+          pause(backoff)
+
+          next
+        end
+
+        backoff = 0
 
         return if entries.empty?
 
-        handle(entries, pending_counts(entries))
+        counts = pending_counts(entries)
+
+        handle(without_crashed(entries, counts), counts)
 
         after = entries.last.id
+      end
+    end
+
+    # The entries to run: the ones above max_deliveries go to the dead
+    # letter. Their count has the pending read, so they ran count - 1 times.
+    def without_crashed(entries, counts)
+      return entries unless @max_deliveries
+
+      entries.reject do |entry|
+        n = counts.fetch(entry.id, 1)
+
+        next false if entry.deleted? || n <= @max_deliveries
+
+        bury(entry, n - 1)
+
+        true
       end
     end
 
@@ -223,20 +265,26 @@ module Ndb
           counts? ? @handler.call(entry, n) : @handler.call(entry)
 
           done << entry.id
-        rescue StandardError => e
+        rescue SignalException, SystemExit
+          raise
+        rescue Exception => e
           report(e)
 
           bury(entry, n) if @max_deliveries && n >= @max_deliveries
         end
       end
+    ensure
+      # Also after a signal or Thread#raise in the block: the entries done
+      # before it are acked.
+      ack_done(done)
+    end
 
-      return if done.empty?
+    def ack_done(ids)
+      return if ids.nil? || ids.empty?
 
-      begin
-        @group.ack(done)
-      rescue Ndb::Error => e
-        report(e)
-      end
+      @group.ack(ids)
+    rescue Ndb::Error => e
+      report(e)
     end
   end
 

@@ -35,13 +35,15 @@ module Ndb
         end
 
         # "order_events" for OrderEvent, "billing_order_events" for
-        # Billing::OrderEvent.
+        # Billing::OrderEvent, "categories" for Category. The words come from
+        # the ActiveSupport inflections (the gem requires them), so an
+        # inflection of the app (config/initializers/inflections.rb) applies.
         def default_name(klass)
           name = klass.name
 
           raise ConfigurationError, "a class without a name needs `stream :name`" if name.nil?
 
-          plural(underscore(name.gsub("::", "_")))
+          name.gsub("::", "_").underscore.pluralize
         end
 
         # Hash: one entry. Array of Hash: many entries. String: JSON of one
@@ -83,18 +85,6 @@ module Ndb
           raise ArgumentError, "the JSON of a stream payload is an object or an array"
         rescue JSON::ParserError => e
           raise ArgumentError, "the stream payload is not JSON: #{e.message}"
-        end
-
-        def underscore(name)
-          return name.underscore if name.respond_to?(:underscore)
-
-          name.gsub(/([A-Z]+)([A-Z][a-z])/, '\1_\2').gsub(/([a-z\d])([A-Z])/, '\1_\2').downcase
-        end
-
-        def plural(name)
-          return name.pluralize if name.respond_to?(:pluralize)
-
-          name.end_with?("s") ? name : "#{name}s"
         end
 
         def group(value)

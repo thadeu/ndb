@@ -104,7 +104,13 @@ module Ndb
       out = {}
 
       pairs.each do |key, id|
-        entries = redis_block(block) { |seconds| redis_read(key, id.to_s, count || REDIS_READ_COUNT, seconds) }
+        after = id.to_s
+
+        # A wait with no limit reads in steps: "$" is the last ID before the
+        # first step, so an entry added between two steps is not lost.
+        after = redis_last_id(key) if after == "$" && !block.nil? && block.to_i <= 0
+
+        entries = redis_block(block) { |seconds| redis_read(key, after, count || REDIS_READ_COUNT, seconds) }
 
         out[key.to_s] = redis_entries(entries) unless entries.empty?
       end
@@ -340,6 +346,13 @@ module Ndb
           sleep [left, MISSING_STEP].min
         end
       end
+    end
+
+    # The last ID of the stream, or START_ALL when it does not exist.
+    def redis_last_id(key)
+      stream(key).info.fetch("last_id")
+    rescue UnknownCollection
+      Stream::START_ALL
     end
 
     def redis_missing_empty

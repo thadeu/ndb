@@ -107,13 +107,16 @@ module Ndb
     # (a read): a write may already have been processed.
     #
     # timeout replaces the read timeout for this one request (a blocking
-    # stream read waits longer than the default).
+    # stream read waits longer than the default). A read timeout
+    # (IO::TimeoutError) raises Ndb::TimeoutError and is never sent again.
     def request(method, target, body, headers: {}, idempotent: false, timeout: nil)
       reused = !@socket.nil?
 
       begin
         send_request(method, target, body, headers)
         read_within(timeout)
+      rescue IO::TimeoutError
+        raise
       rescue EOFError, Errno::EPIPE, Errno::ECONNRESET, IOError
         close
 
@@ -123,14 +126,14 @@ module Ndb
 
         retry
       end
+    rescue IO::TimeoutError
+      close
+
+      raise TimeoutError, "ndb did not answer within #{timeout || @timeout}s"
     rescue SystemCallError, EOFError, IOError => e
       close
 
       raise ConnectionError, "cannot reach ndb at #{@endpoint}: #{e.message}"
-    rescue IO::TimeoutError
-      close
-
-      raise TimeoutError, "ndb did not answer within #{@timeout}s"
     end
 
     # Sends the request and yields the body of a 2xx response chunk by chunk,
@@ -150,10 +153,10 @@ module Ndb
       each_body_chunk(response_headers, &)
 
       Response.new(code, response_headers, nil)
-    rescue SystemCallError, EOFError, IOError => e
-      raise ConnectionError, "cannot reach ndb at #{@endpoint}: #{e.message}"
     rescue IO::TimeoutError
       raise TimeoutError, "ndb did not answer within #{@timeout}s"
+    rescue SystemCallError, EOFError, IOError => e
+      raise ConnectionError, "cannot reach ndb at #{@endpoint}: #{e.message}"
     ensure
       close
     end
@@ -290,16 +293,21 @@ module Ndb
       @pid = Process.pid
     end
 
+    # A connection goes back to the pool open only when the block ended
+    # with no raise. Any other end (an error, Timeout, Thread#kill) can
+    # leave an answer not read on it, so it is closed first.
     def with
       conn = checkout
+      ok = false
 
       begin
-        yield conn
-      rescue StandardError
-        conn.close
+        result = yield conn
+        ok = true
 
-        raise
+        result
       ensure
+        conn.close unless ok
+
         checkin(conn)
       end
     end

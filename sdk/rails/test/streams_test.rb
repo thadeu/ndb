@@ -12,6 +12,10 @@ module StreamsTestApp
   end
 end
 
+class StreamsCategory
+  include Ndb::Streams
+end
+
 class StreamsTest < Minitest::Test
   include StreamsTestHelpers
   include Ndb::Streams::Assertions
@@ -21,6 +25,13 @@ class StreamsTest < Minitest::Test
   def test_the_default_name_comes_from_the_class_name
     assert_equal "streams_order_events", StreamsOrderEvent.stream_name
     assert_equal "streams_test_app_http_calls", StreamsTestApp::HTTPCall.stream_name
+  end
+
+  # The words come from the ActiveSupport inflections, which ndb/streams
+  # requires, and the name is kept after the first call.
+  def test_the_default_name_uses_the_inflections_and_is_kept
+    assert_equal "streams_categories", StreamsCategory.stream_name
+    assert_same StreamsCategory.stream_name, StreamsCategory.stream_name
   end
 
   def test_a_class_without_a_name_needs_a_stream_name
@@ -351,6 +362,37 @@ class StreamsTest < Minitest::Test
 
     assert_raises(IOError) { writer.append(error: "io") }
     assert_match(/discarded/, @log.string)
+  end
+
+  # Perform takes the options of the class of now: after a reload (a new
+  # class with the same name) its discard_on applies.
+  def test_perform_takes_discard_on_from_the_class_of_now
+    old = Class.new do
+      include Ndb::Streams
+
+      stream :reloaded, group: :g
+
+      def perform(_event) = raise(KeyError, "gone")
+    end
+
+    Object.const_set(:StreamsReloaded, old)
+    Object.send(:remove_const, :StreamsReloaded)
+
+    fresh = Class.new do
+      include Ndb::Streams
+
+      stream :reloaded, group: :g, discard_on: [KeyError]
+
+      def perform(_event) = raise(KeyError, "gone")
+    end
+
+    Object.const_set(:StreamsReloaded, fresh)
+
+    event = Ndb::Streams::Event.new(id: "1-0", payload: {}, deliveries: 1)
+
+    assert_equal :discarded, Ndb::Streams::Perform.call(old, event)
+  ensure
+    Object.send(:remove_const, :StreamsReloaded) if Object.const_defined?(:StreamsReloaded)
   end
 
   def test_assert_streamed

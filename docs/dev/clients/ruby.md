@@ -37,7 +37,8 @@ bundle exec ndb streams [-r file] [-e env] [--only A,B] [-c N]
 
 - `ndb streams` runs the stream consumers of an app: the classes with `include Ndb::Streams`. These classes are in the gem `ndb-rails`, so the command needs that gem (without it: a message and exit status 2). The flags and the behavior are on [Rails: Run the consumers](rails.md#run-the-consumers).
 - **Pass-through.** Every other command (`ndb serve`, `ndb bench`, `ndb -h`, ...) goes to the ndb daemon binary, with the same arguments. So the gem does not hide the daemon when the two have the name `ndb` in `PATH`.
-- The binary is `NDB_BIN` when it is set. If not, it is the first `ndb` of `PATH` that is not this command and not a Ruby stub of it (a binstub, or the stub that RubyGems makes).
+- The binary is `NDB_BIN` when it is set. If not, it is the first `ndb` of `PATH` that is a native executable (ELF or Mach-O). So a binstub, the stub that RubyGems makes and the shell shim of a version manager (rbenv) are skipped, and so is any file in a `shims` directory (mise, asdf).
+- Before the exec, the command sets `NDB_GEM_EXEC=1`. When it starts again with that variable (the binary came back to it), it prints a message and exits with status 127: it never runs itself in a loop. Set `NDB_BIN` to the daemon binary then.
 - When there is no binary, the command prints how to install it and exits with status 127.
 
 ## Connect
@@ -65,8 +66,9 @@ Ndb.connect(
 - The token is `token:`, or env `NDB_TOKEN`. It goes only in the `Authorization` header. A unix socket does not need it.
 - A bad address raises `ArgumentError` at once.
 - `ready_timeout` is how long a call retries while the daemon is not ready (`not_ready`, or the socket is missing or refuses). It uses exponential backoff (50 ms up to 1 s) with jitter. A write is retried only when the daemon certainly did not process it. A read is also retried after a dropped connection. A timeout is never retried. When the deadline passes, the last error is raised.
+- A read that gets no answer in `timeout` raises `Ndb::TimeoutError`, also on a reused connection. It is not sent again.
 - A reused keep-alive connection that the server closed is sent again only for a read. A write is never sent twice.
-- The pool is thread-safe and drops its connections after a `fork`.
+- The pool is thread-safe and drops its connections after a `fork`. A connection goes back to the pool only after a request that ended with no raise. After any other end (an error, `Timeout.timeout`, `Thread#kill`, `rack-timeout`), it is closed, so the next call never reads the answer of another call.
 
 ## Collections
 
@@ -654,7 +656,8 @@ end
 
 - `group.worker(consumer, **options) { |entry| ... }` returns an `Ndb::Worker`. The block is required (`ArgumentError` without it).
 - A block with two parameters also gets the delivery count of the entry: 1 on the first delivery. For the worker's own pending entries (after a restart), the count costs one more request for each read; a block with one parameter does not send it.
-- A block that returns acks the entry. A block that raises leaves it pending; `on_error` gets the error, and a worker of the group claims the entry again after `claim_idle`.
+- A block that returns acks the entry. A block that raises leaves it pending; `on_error` gets the error, and a worker of the group claims the entry again after `claim_idle`. Any exception is a failure, also one that is not a `StandardError` (`NotImplementedError`, `SystemStackError`).
+- A `SignalException` (with `Interrupt`) or `SystemExit` in the block goes on to the caller of `run`. The entries of that read that the block did before it are acked first.
 - A deleted entry is acked without the block.
 - The acks of one read go in one call.
 - Delivery is at least once: make the work safe to repeat. Run many workers with different consumer names to share the work.
@@ -679,12 +682,13 @@ worker.run   # blocks until worker.stop
 
 The loop:
 
-1. It reads its own pending entries first (the ones it took before a restart and did not ack), and does the work on them.
+1. It reads its own pending entries first (the ones it took before a restart and did not ack), and does the work on them. With `max_deliveries`, an entry whose delivery count (with this read) is above `max_deliveries` goes to `dead_letter` without the block: the process stopped in the block that many times (a crash). Its dead letter entry has `deliveries` = the count - 1.
 2. It reads new entries, and waits up to `block` for them.
 3. It acks the entries that the block did without a raise.
 4. Every `claim_every`, it claims the entries idle for `claim_idle`, and sends the poison ones to `dead_letter`.
 
-- A failed read goes to `on_error`. The loop waits (backoff from 0.1 s up to 5 s) and reads again.
+- A failed read goes to `on_error`. The loop waits (backoff from 0.1 s up to 5 s) and reads again. This is also true for the first read of the own pending entries (the daemon is down at the start).
+- A group or a stream that does not exist at the read of the own pending entries raises `Ndb::UnknownGroup` (or `Ndb::UnknownCollection`) from `run`: a retry does not make it. Make the group first (`group.ensure`).
 - `run` returns nil after `stop`.
 
 ### `Worker#start` and `Worker#stop`
@@ -944,7 +948,7 @@ STREAMS.xinfo(:consumers, "orders", "billing")
 - **Stream names.** A stream is an ndb collection, so its name follows the rules of a collection name. `orders:eu` is not a valid name.
 - **Many streams.** ndb reads one stream for each request. `xread` and `xreadgroup` with many keys and no `block:` send one request for each key, in order. With `block:` and more than one key they raise `Ndb::NotSupported`.
 - **No `count:`.** Redis gives every entry. `xread` and `xreadgroup` without `count:` give at most 10 000 entries for each stream (the most of one ndb read). `xrange` and `xrevrange` without `count:` give every entry.
-- **`block: 0`** waits with no limit, as in Redis: it is a loop of reads of 30 seconds each. A blocking `xread` on a stream that does not exist looks for the stream every 0.5 seconds until the time ends.
+- **`block: 0`** waits with no limit, as in Redis: it is a loop of reads of 30 seconds each. For `xread`, the ID `"$"` becomes the last ID of the stream before the first read, so an entry appended between two reads of the loop is not lost. A blocking `xread` on a stream that does not exist looks for the stream every 0.5 seconds until the time ends.
 - **Errors** are `Ndb::Error` subclasses, not `Redis::CommandError`: rescue both in code that runs on the two backends. The message starts as in Redis, and the daemon message follows in parentheses.
 
   | Case | Class | The message starts with |

@@ -489,6 +489,44 @@ class RedisCommandsTest < Minitest::Test
     assert_equal({ key => [[writer.value, { "n" => "1" }]] }, got)
   end
 
+  # A wait with no limit reads in FOREVER_STEP steps. "$" is the last ID
+  # before the first step, so an entry added between two steps is given.
+  def test_xread_dollar_with_block_zero_keeps_an_entry_added_between_steps
+    key = new_key
+    other = client
+    steps = 0
+    reader = Ndb::Client.new(socket: TestDaemon.socket, timeout: 10)
+
+    client.xadd(key, { seed: 1 })
+
+    reader.define_singleton_method(:stream) do |name|
+      stream = super(name)
+
+      stream.define_singleton_method(:read) do |**options|
+        out = super(**options)
+        steps += 1
+
+        other.xadd(name, { in_gap: 1 }) if steps == 1 && out.empty?
+
+        out
+      end
+
+      stream
+    end
+
+    later = Thread.new do
+      sleep 1
+
+      other.xadd(key, { later: 1 })
+    end
+
+    got = with_forever_step(0.2) { reader.xread(key, "$", block: 0) }
+
+    later.join
+
+    assert_equal [{ "in_gap" => "1" }], got[key].map(&:last)
+  end
+
   def test_block_zero_waits_with_no_limit
     key = new_key
 
@@ -503,6 +541,21 @@ class RedisCommandsTest < Minitest::Test
     got = client.xreadgroup("g", "w1", key, ">", block: 0)
 
     assert_equal [writer.value], got[key].map(&:first)
+  end
+
+  private
+
+  # Runs the block with a shorter FOREVER_STEP, then sets the old one back.
+  def with_forever_step(seconds)
+    old = Ndb::RedisCommands::FOREVER_STEP
+
+    Ndb::RedisCommands.send(:remove_const, :FOREVER_STEP)
+    Ndb::RedisCommands.const_set(:FOREVER_STEP, seconds)
+
+    yield
+  ensure
+    Ndb::RedisCommands.send(:remove_const, :FOREVER_STEP)
+    Ndb::RedisCommands.const_set(:FOREVER_STEP, old)
   end
 end
 
