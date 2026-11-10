@@ -818,6 +818,21 @@ end
 - `reason` is `"max_deliveries"`, or `"max_age"` for an entry older than `max_age:`.
 - `Ndb::PoisonMessage` has `entry`, `deliveries`, `reason` and the code `poison_message`. The worker does not raise it.
 - Without `dead_letter:`, a poison entry is only acked and reported.
+- Nothing delivers a dead entry again. To send it back, append its `doc` to the source stream: it is a new entry (new ID, delivery count 0, new max age).
+
+```ruby
+dead = db.stream("orders_dead")
+source = db.stream("orders")
+
+dead.range.each do |entry|
+  next unless entry.doc["reason"] == "max_age"
+
+  source.append(entry.doc["doc"])
+  dead.delete(entry.id)
+end
+```
+
+See [The dead letter](../streams.md#the-dead-letter).
 
 ### Stream errors
 

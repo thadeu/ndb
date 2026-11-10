@@ -744,6 +744,20 @@ end
 - With `max_deliveries:` too, an entry that fails on its last delivery goes to the dead letter, not to a retry.
 - `discard_on:` still acks without a retry.
 - `bundle exec ndb streams` writes the schedule of each consumer to the log at the start: `PostCallJob retry: 15s x1, 1m x4, 10m x6, 1h x12, then 6h; max age 15d`. A consumer without `retry:` writes `retry: after claim_idle (1m)`.
+- **The dead letter** is a normal stream, and nothing delivers its entries again. Send one back with `append` (a new entry: new ID, delivery count 0, new max age):
+
+```ruby
+dead = Ndb::Rails.client.stream("postcall_jobs_dead")
+
+dead.range.each do |entry|
+  next unless entry.doc["reason"] == "max_age"
+
+  PostCallJob.append(entry.doc["doc"])
+  dead.delete(entry.id)
+end
+```
+
+  For a rule of the app, a class can consume the dead letter: `stream :postcall_jobs_dead, group: :replay` with a `perform` that appends `event[:doc]` to the source. See [The dead letter](../streams.md#the-dead-letter).
 - **Inline mode** (`Ndb::Streams.inline!`) runs `perform` one time, in the caller's thread. A failure raises to the caller, as without `retry:`: the schedule and `max_age` do not apply inline.
 
 ### ApplicationStream

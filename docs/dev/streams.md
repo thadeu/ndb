@@ -242,6 +242,66 @@ The rules are the same in the three SDKs:
   a retry schedule). The claim of idle entries skips the nacked entries
   that still wait.
 
+### The dead letter
+
+The dead letter (`<stream>_dead`, or the name you give) is a normal stream.
+When an entry goes there, the worker:
+
+1. appends `{stream, group, id, deliveries, reason, doc}` to the dead letter
+   (`reason` is `max_deliveries` or `max_age`, `doc` is the payload);
+2. acks the entry in its group, so it leaves the PEL there.
+
+Nothing delivers it again: an entry that failed for 15 days needs a person
+or a rule of the app before one more try. To send it back, append its `doc`
+to the source stream. It comes in as a **new** entry: a new ID, delivery
+count 0 and a new max age. If the work is not safe to repeat, keep the old
+`id` in the payload to see a replay.
+
+```ruby
+# Rails: one time, from a console or a rake task
+dead = Ndb::Rails.client.stream("postcall_jobs_dead")
+
+dead.range.each do |entry|
+  next unless entry.doc["reason"] == "max_age"
+
+  PostCallJob.append(entry.doc["doc"])   # a new entry of postcall_jobs
+  dead.delete(entry.id)                  # it is not in the dead letter any more
+end
+
+# Rails: a consumer of the dead letter, for a rule of the app
+class PostCallDeadJob
+  include Ndb::Streams
+
+  stream :postcall_jobs_dead, group: :replay
+
+  def perform(event)
+    return unless event[:reason] == "max_age" && Call.exists?(event[:doc]["call_id"])
+
+    PostCallJob.append(event[:doc].merge("replay_of" => event[:id]))
+  end
+end
+```
+
+```ruby
+# Ruby client
+db = Ndb.connect(ENV["NDB_URL"])
+dead = db.stream("postcall_jobs_dead")
+source = db.stream("postcall_jobs")
+
+dead.range.each do |entry|
+  source.append(entry.doc["doc"])
+  dead.delete(entry.id)
+end
+```
+
+- A consumer of the dead letter is a normal consumer: its own group, its
+  own retry and max age. Keep it simple, so a replay does not fail into a
+  second dead letter.
+- `event[:id]` in the dead letter is the ID of the source entry; the dead
+  entry has its own ID (`event.id`).
+- The dead letter grows until you trim or delete it (`max_len:` or
+  `retain:` on its stream, or `_streams/trim`).
+
 ### ndb only
 
 These are not in Redis. An app that never uses them sees the behavior of
