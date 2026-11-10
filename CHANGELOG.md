@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-11-09
+
 ### Added
 
 - **Streams: the Redis Streams model on disk** (`docs/dev/streams.md`). A collection with `"stream": true` is an append-only log with consumer groups, under `/{s}/_streams/...`: `append` (`XADD`, with `trim`, one ID `<ms>-<seq>` per entry, many entries in one fsync), `trim` (`XTRIM`, exact or in blocks of 1 024), groups (`XGROUP`), `read` (`XREADGROUP`, new or pending entries, `block_ms`, `no_ack`), `ack`, `pending`, `claim` (`XCLAIM` and `XAUTOCLAIM`) and info (`XINFO`). Every acked append and every group change is on disk before the answer; a stream is a collection, so `_search`, `_count` and `_aggregate` read it, and `_id` sorts as an ID. The group state is in backups (not in PITR). The cases of `spec/streams` give the same results on ndb and on a real Redis 7.4 (a CI test). `ndb bench -streams` measures it, with checks that a `kill -9` loses no acked append, delivered entry or ack.
@@ -578,7 +580,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.14.0...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.15.0...HEAD
+[1.15.0]: https://github.com/thadeu/ndb/compare/v1.14.0...v1.15.0
 [1.14.0]: https://github.com/thadeu/ndb/compare/v1.13.2...v1.14.0
 [1.13.2]: https://github.com/thadeu/ndb/compare/v1.13.1...v1.13.2
 [1.13.1]: https://github.com/thadeu/ndb/compare/v1.13.0...v1.13.1
