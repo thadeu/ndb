@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-11-10
+
 ### Security
 
 - **CSRF and DNS rebinding on the TCP listener with no token.** A user install (`ndb serve` on a laptop) listens on `127.0.0.1:7070` with no token. Before this release, any web page open in a browser on the same machine could write, change and delete data there: a `POST` with `Content-Type: text/plain` needs no preflight, and ndb did not look at `Origin` (`_doc`, `_bulk`, `_update`, `_delete_by_query`, `_truncate?confirm=`, stream appends...). With DNS rebinding (a name that points to `127.0.0.1`), a page could also read all data, because ndb did not look at `Host`. Now a request with an `Origin` header, or with `Sec-Fetch-Site: cross-site` or `same-site`, is `403 forbidden` on every listener unless the origin is in `cors_origins`. On TCP with no token configured, the `Host` must be an IP, `localhost`, a name with no dot (a Compose service such as `ndb`) or a name in `allowed_hosts`, else `403 forbidden`. curl, the SDKs, the CLI and the console server send no `Origin` and work as before. A daemon with a token was not open to these attacks: a page cannot send the token. Upgrade every user install. See `docs/dev/security.md`.
@@ -640,7 +642,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.17.2...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.18.0...HEAD
+[1.18.0]: https://github.com/thadeu/ndb/compare/v1.17.2...v1.18.0
 [1.17.2]: https://github.com/thadeu/ndb/compare/v1.17.1...v1.17.2
 [1.17.1]: https://github.com/thadeu/ndb/compare/v1.17.0...v1.17.1
 [1.17.0]: https://github.com/thadeu/ndb/compare/v1.16.0...v1.17.0

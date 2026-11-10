@@ -1,5 +1,5 @@
 # frozen_string_literal: true
 
 module Ndb
-  VERSION = "1.17.2"
+  VERSION = "1.18.0"
 end
