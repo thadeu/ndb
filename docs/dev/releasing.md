@@ -6,6 +6,7 @@ One tag `vX.Y.Z` releases everything. Version 0.1.0 is used in all packages.
 |---|---|---|
 | Daemon binaries + checksums | GitHub Release | `release.yml` |
 | Go SDK | tag `sdk/go/vX.Y.Z`, module `github.com/thadeu/ndb/sdk/go` | `release.yml` (last step) |
+| Go Redis adapter | tag `sdk/go/ndbredis/vX.Y.Z`, module `github.com/thadeu/ndb/sdk/go/ndbredis` (needs the Go SDK of the same release) | `release.yml` (last step) |
 | Image | `ghcr.io/thadeu/ndb` | `image.yml` |
 | npm | `@thadeu/ndb` | `publish-npm.yml` |
 | Gem (plain client) | `ndb` | `publish-gem.yml` (pushed first) |
@@ -26,7 +27,7 @@ One tag `vX.Y.Z` releases everything. Version 0.1.0 is used in all packages.
 - **patch** (1.6.0 → 1.6.1): a bug fix only, with no new behavior.
 - **major**: routes or keys change; the CHANGELOG has a migration table.
 
-`make tag minor` or `make tag patch` bumps the SDK versions and the CHANGELOG.
+`make tag minor` or `make tag patch` bumps the SDK versions, the Go SDK version that `sdk/go/ndbredis/go.mod` needs, and the CHANGELOG.
 
 ## Per release
 
@@ -43,7 +44,7 @@ git push origin v0.1.0
 ## Verify
 
 - Release: `gh release view v0.1.0`. Download one archive, check it with `sha256sum -c checksums.txt`, run `ndb -version` (prints `ndb 0.1.0`).
-- Go tag: `git ls-remote --tags origin 'sdk/go/*'`, then in a temp module `go get github.com/thadeu/ndb/sdk/go@vX.Y.Z`.
+- Go tags: `git ls-remote --tags origin 'sdk/go/*'` lists `sdk/go/vX.Y.Z` and `sdk/go/ndbredis/vX.Y.Z`; then in a temp module `go get github.com/thadeu/ndb/sdk/go@vX.Y.Z` and `go get github.com/thadeu/ndb/sdk/go/ndbredis@vX.Y.Z`.
 - Image: `docker run --rm ghcr.io/thadeu/ndb:0.1.0 -version`.
 - npm: `npm view @thadeu/ndb version`; the package page shows the provenance badge.
 - Gems: `gem search -r '^ndb$'`, `gem search -r ndb-rails`, or `gem install ndb-rails -v 0.1.0` (it installs `ndb` too).
