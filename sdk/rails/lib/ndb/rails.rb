@@ -13,6 +13,7 @@ require "ndb/rails/blob"
 require "ndb/rails/persistence"
 require "ndb/rails/associations"
 require "ndb/rails/record"
+require "ndb/streams"
 
 module Ndb
   module Rails

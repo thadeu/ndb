@@ -1,0 +1,138 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# The `ndb` command of the gem.
+#
+#   bundle exec ndb streams [-r file] [-e env] [--only A,B] [-c N]
+#
+# runs the stream consumers of the app (the classes with
+# `include Ndb::Streams`, from the ndb-rails gem). Every other command
+# (serve, bench, -h, ...) goes to the ndb daemon binary, so the gem does not
+# hide it when the two have the same name in PATH.
+
+require "optparse"
+
+module NdbCommand
+  RAILS_ENTRY = "config/environment.rb"
+  INSTALL_URL = "https://ndb.clowk.in"
+
+  EXIT_USAGE = 2
+  EXIT_NO_DAEMON = 127
+
+  module_function
+
+  def run(argv)
+    return streams(argv.drop(1)) if argv.first == "streams"
+
+    daemon(argv)
+  end
+
+  # ndb streams: loads the app, then runs the consumers until a signal.
+  def streams(argv)
+    options = parse(argv)
+
+    return 0 if options[:done]
+
+    ENV["RAILS_ENV"] = options[:environment] if options[:environment]
+
+    $stdout.sync = true
+
+    load_app(options[:require])
+    load_streams
+
+    Ndb::Streams.run(only: options[:only], concurrency: options[:concurrency])
+
+    0
+  rescue OptionParser::ParseError, ArgumentError => e
+    warn("ndb streams: #{e.message}")
+
+    EXIT_USAGE
+  end
+
+  def parse(argv)
+    options = {}
+
+    parser = OptionParser.new do |opts|
+      opts.banner = "Usage: ndb streams [options]"
+
+      opts.on("-r", "--require PATH", "File that loads the stream classes (without Rails)") { |path| options[:require] = path }
+      opts.on("-e", "--environment NAME", "Environment name (RAILS_ENV)") { |name| options[:environment] = name }
+      opts.on("--only A,B", Array, "Run only these consumer classes") { |names| options[:only] = names }
+      opts.on("-c", "--concurrency N", Integer, "Threads of each consumer class") { |n| options[:concurrency] = n }
+
+      opts.on("-h", "--help", "Print this help") do
+        puts opts
+
+        options[:done] = true
+      end
+    end
+
+    rest = parser.parse(argv)
+
+    raise ArgumentError, "unexpected argument: #{rest.first}" unless rest.empty?
+    raise ArgumentError, "concurrency must be greater than 0" if options[:concurrency] && options[:concurrency] < 1
+
+    options
+  end
+
+  # The Rails app loads first, so its own config is there. -r loads a file
+  # more (or the classes, without Rails).
+  def load_app(path)
+    rails = File.exist?(RAILS_ENTRY)
+
+    raise ArgumentError, "no #{RAILS_ENTRY} here: use -r to load the stream classes" unless rails || path
+
+    require File.expand_path(RAILS_ENTRY) if rails
+    require File.expand_path(path) if path
+  end
+
+  def load_streams
+    require "ndb/streams"
+  rescue LoadError
+    raise ArgumentError, "ndb streams needs the ndb-rails gem: add `gem \"ndb-rails\"` to the Gemfile"
+  end
+
+  # Replaces this process with the daemon binary and the same arguments.
+  def daemon(argv)
+    binary = daemon_binary
+
+    exec(binary, *argv) if binary
+
+    warn("ndb: the ndb daemon binary is not installed (the gem only has `ndb streams`).")
+    warn("Install it:  curl -fsSL #{INSTALL_URL}/install | sh")
+    warn("Or set NDB_BIN to the path of the binary.")
+
+    EXIT_NO_DAEMON
+  end
+
+  # NDB_BIN, or the first `ndb` of PATH that is not this script and not a
+  # Ruby stub of it (a binstub, or the stub RubyGems makes).
+  def daemon_binary(env = ENV)
+    given = env["NDB_BIN"].to_s
+
+    return given unless given.empty?
+
+    env["PATH"].to_s.split(File::PATH_SEPARATOR).each do |dir|
+      next if dir.empty?
+
+      candidate = File.join(dir, "ndb")
+
+      return candidate if daemon?(candidate)
+    end
+
+    nil
+  end
+
+  def daemon?(path)
+    return false unless File.file?(path) && File.executable?(path)
+    return false if File.realpath(path) == File.realpath(__FILE__)
+
+    head = File.binread(path, 512).to_s
+
+    !(head.start_with?("#!") && head.include?("ruby"))
+  rescue SystemCallError
+    false
+  end
+end
+
+exit(NdbCommand.run(ARGV))
