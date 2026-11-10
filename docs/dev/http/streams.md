@@ -118,6 +118,31 @@ Redis: `XINFO STREAM`, `XLEN`.
 - `max_deleted_id` is the highest ID deleted one by one (`DELETE
   /{s}/_doc/{id}`, `XDEL`). A trim does not change it, as in Redis.
 
+### `POST /{s}/_streams/read`
+
+Redis: `XREAD`.
+
+A read without a group: the entries after an ID, in ID order. It changes
+no group and no PEL, so it is a read for a scoped token.
+
+```json
+{ "after": "1731163600000-4", "count": 100, "block_ms": 5000 }
+```
+
+```json
+[{ "_id": "1731163600000-5", "_ts": "2026-11-09T15:00:00Z", "order": 43 }]
+```
+
+- `after`: an ID (default `0`, the start of the stream), or `$`: the last
+  ID when the request starts, so only later entries come.
+- `count`: the most entries to give (default 10, at most 10 000).
+- `block_ms`: with no entry, wait up to this long for an append (`BLOCK`).
+  `0` answers at once (the default). An empty answer is `[]`.
+- `fields`: give only these fields (and `_id`).
+- To read on, send the last `_id` of the answer as `after`. Do not send `$`
+  again: an entry appended between two requests would be lost.
+- One stream for each request. Redis reads many streams in one `XREAD`.
+
 ### Read, count and delete entries
 
 These are the routes of every collection, on the stream:
@@ -128,7 +153,7 @@ These are the routes of every collection, on the stream:
 | `XREVRANGE s b a COUNT n` | the same with `"sort":{"_id":-1}` |
 | `XLEN s` | `POST /{s}/_count` (or `length` above) |
 | `XDEL s id` | `DELETE /{s}/_doc/{id}` |
-| `XREAD STREAMS s id` | `_search` with `{"_id":{"$gt":"id"}}` and `sort` on `_id` |
+| `XREAD STREAMS s id` | `POST /{s}/_streams/read` (above), or `_search` with `{"_id":{"$gt":"id"}}` and `sort` on `_id` |
 
 ## Groups
 
@@ -317,4 +342,4 @@ With a scan (`XAUTOCLAIM`), instead of `ids`:
 
 `append`, `trim`, every group change, `read` (it moves the PEL), `ack` and
 `claim` are writes. `GET /{s}/_streams`, the `GET` of groups and consumers,
-and `pending` are reads.
+`pending` and `POST /{s}/_streams/read` are reads.

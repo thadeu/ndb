@@ -361,3 +361,45 @@ func TestStreamApproxTrimDeletesWholeBlocks(t *testing.T) {
 		t.Fatalf("exact trim deleted %d, want 352", res.Deleted)
 	}
 }
+
+// A read without a group, from "$" with block_ms, waits for the next
+// append and gives it; with no append it ends at the deadline.
+func TestStreamTailBlocksUntilAnAppend(t *testing.T) {
+	_, h := newHandler(t)
+
+	expectStatus(t, call(h, "POST", "/jobs/_streams/append", `{"doc":{"n":1}}`), http.StatusCreated)
+
+	began := time.Now()
+	rec := call(h, "POST", "/jobs/_streams/read", `{"after":"$","block_ms":200}`)
+
+	expectStatus(t, rec, http.StatusOK)
+
+	if rec.Body.Len() != 0 || time.Since(began) < 200*time.Millisecond {
+		t.Fatalf("body %q after %s", rec.Body.String(), time.Since(began))
+	}
+
+	got := make(chan string, 1)
+	started := time.Now()
+
+	go func() {
+		rec := call(h, "POST", "/jobs/_streams/read", `{"after":"$","block_ms":5000}`)
+		got <- rec.Body.String()
+	}()
+
+	time.Sleep(150 * time.Millisecond)
+
+	expectStatus(t, call(h, "POST", "/jobs/_streams/append", `{"doc":{"n":2}}`), http.StatusCreated)
+
+	select {
+	case body := <-got:
+		if !strings.Contains(body, `"n":2`) || strings.Contains(body, `"n":1`) {
+			t.Fatalf("the blocked read gave %q", body)
+		}
+
+		if waited := time.Since(started); waited > 2*time.Second {
+			t.Fatalf("the read waited %s: the append did not wake it", waited)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("the blocked read did not end after the append")
+	}
+}

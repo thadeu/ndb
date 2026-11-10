@@ -154,7 +154,7 @@ await group.work('worker-1', async (entry) => {
 | `XRANGE s a b COUNT n` | `POST /s/_search {"query":{"_id":{"$gte":"a","$lte":"b"}},"sort":{"_id":1},"limit":n}` |
 | `XREVRANGE s b a` | the same with `"sort":{"_id":-1}` |
 | `XDEL s id` | `DELETE /s/_doc/id` |
-| `XREAD STREAMS s id` | `_search` with `{"_id":{"$gt":"id"}}` |
+| `XREAD COUNT n BLOCK ms STREAMS s id` | `POST /s/_streams/read {"after":"id","count":n,"block_ms":ms}` |
 | `XGROUP CREATE s g $ MKSTREAM` | `PUT /s/_streams/groups/g {"start":"$"}` |
 | `XGROUP SETID s g id` | `POST /s/_streams/groups/g/setid {"id":"id"}` |
 | `XGROUP DESTROY s g` | `DELETE /s/_streams/groups/g` |

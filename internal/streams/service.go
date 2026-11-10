@@ -1200,6 +1200,110 @@ func (s *Service) Read(ctx context.Context, name, g string, o ReadOptions) ([]js
 	}
 }
 
+// TailOptions are the keys of a read without a group.
+type TailOptions struct {
+	After   string   `json:"after"`
+	Count   int      `json:"count"`
+	BlockMs int64    `json:"block_ms"`
+	Fields  []string `json:"fields"`
+}
+
+func (o *TailOptions) check() error {
+	switch {
+	case o.Count < 0 || o.Count > MaxCount:
+		return badRequest("count is 1 to %d", MaxCount)
+	case o.BlockMs < 0:
+		return badRequest("block_ms must be >= 0")
+	}
+
+	if o.Count == 0 {
+		o.Count = 10
+	}
+
+	return nil
+}
+
+// Tail is XREAD: the entries after an ID, with no group and no PEL. After
+// is an ID ("0" by default) or "$", the last ID when the call starts. With
+// BlockMs and no entry, it waits for an append.
+func (s *Service) Tail(ctx context.Context, name string, o TailOptions) ([]json.RawMessage, error) {
+	if err := o.check(); err != nil {
+		return nil, err
+	}
+
+	deadline := s.now().Add(time.Duration(o.BlockMs) * time.Millisecond)
+
+	var (
+		after ID
+		known bool
+	)
+
+	for {
+		st, err := s.open(ctx, name, false)
+		if err != nil {
+			return nil, err
+		}
+
+		if !known {
+			after, _, err = st.start(tailStart(o.After), nil)
+			known = err == nil
+		}
+
+		var rows []json.RawMessage
+
+		if err == nil {
+			body := map[string]any{
+				"query": map[string]any{"_id": map[string]any{"$gt": after.Key()}},
+				"sort":  map[string]any{"_id": 1},
+				"limit": o.Count,
+			}
+
+			if len(o.Fields) > 0 {
+				body["fields"] = withID(o.Fields)
+			}
+
+			rows, err = st.find(ctx, body)
+		}
+
+		wake := st.wake
+
+		st.mu.Unlock()
+
+		if err != nil || len(rows) > 0 || o.BlockMs == 0 {
+			return rows, err
+		}
+
+		wait := time.Until(deadline)
+
+		if wait <= 0 {
+			return rows, nil
+		}
+
+		timer := time.NewTimer(wait)
+
+		select {
+		case <-wake:
+			timer.Stop()
+		case <-timer.C:
+			return rows, nil
+		case <-ctx.Done():
+			timer.Stop()
+
+			return nil, ctx.Err()
+		}
+	}
+}
+
+// tailStart is the start of a tail: no value is the start of the stream,
+// not "$" as for a group.
+func tailStart(after string) string {
+	if after == "" {
+		return "0"
+	}
+
+	return after
+}
+
 func (s *Service) readNew(ctx context.Context, st *stream, g string, o ReadOptions) ([]json.RawMessage, error) {
 	var head group
 

@@ -21,6 +21,7 @@ func streamRoutes(s *Server) map[string][]route {
 		"_streams":                        {{"GET", s.ready(s.streamInfo)}},
 		"_streams/append":                 {{"POST", s.ready(s.streamAppend)}},
 		"_streams/trim":                   {{"POST", s.ready(s.streamTrim)}},
+		"_streams/read":                   {{"POST", s.ready(s.streamRead)}},
 		"_streams/groups":                 {{"GET", s.ready(s.streamGroups)}},
 		"_streams/groups/{}":              {{"PUT", s.ready(s.groupCreate)}, {"DELETE", s.ready(s.groupDestroy)}},
 		"_streams/groups/{}/setid":        {{"POST", s.ready(s.groupSetID)}},
@@ -211,6 +212,38 @@ func (s *Server) groupRead(w http.ResponseWriter, r *http.Request, _ *engine.DB)
 	}()
 
 	rows, err := s.streams.Read(ctx, r.PathValue("coll"), r.PathValue("group"), req)
+	if err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	writePage(w, r, collection.Page{Rows: unpadRows(rows), Plan: "stream"})
+}
+
+// streamRead is a read without a group (XREAD): it changes nothing.
+func (s *Server) streamRead(w http.ResponseWriter, r *http.Request, _ *engine.DB) {
+	var req streams.TailOptions
+
+	if err := streamBody(w, r, &req); err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	ctx, stop := context.WithCancel(r.Context())
+
+	defer stop()
+
+	go func() {
+		select {
+		case <-s.stopCtx.Done():
+			stop()
+		case <-ctx.Done():
+		}
+	}()
+
+	rows, err := s.streams.Tail(ctx, r.PathValue("coll"), req)
 	if err != nil {
 		writeError(w, err)
 

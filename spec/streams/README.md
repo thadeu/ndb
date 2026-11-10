@@ -24,6 +24,7 @@ Each step runs in order on a new daemon. `op` names a route:
 |---|---|
 | `create` | `PUT /{s}` with `body` |
 | `append`, `trim` | `POST /{s}/_streams/append`, `/trim` |
+| `tail` | `POST /{s}/_streams/read` (a read without a group) |
 | `info` | `GET /{s}/_streams` |
 | `group_create`, `group_destroy` | `PUT`, `DELETE /{s}/_streams/groups/{group}` |
 | `setid` | `POST /{s}/_streams/groups/{group}/setid` |

@@ -145,7 +145,9 @@ func required(method string, segs []string) (string, access) {
 // read; every other route changes the stream or its groups (a group read
 // moves the PEL), so it is a write.
 func streamAccess(method string, segs []string) access {
-	if method == "GET" || segs[len(segs)-1] == "pending" {
+	last := segs[len(segs)-1]
+
+	if method == "GET" || last == "pending" || (last == "read" && len(segs) == 3) {
 		return accessRead
 	}
 

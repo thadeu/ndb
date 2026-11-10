@@ -122,6 +122,8 @@ func streamRoute(s string, step streamStep) (string, string) {
 		return "PUT", "/" + s
 	case "append", "trim":
 		return "POST", "/" + s + "/_streams/" + step.Op
+	case "tail":
+		return "POST", "/" + s + "/_streams/read"
 	case "info":
 		return "GET", "/" + s + "/_streams"
 	case "group_create":

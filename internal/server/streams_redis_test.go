@@ -197,6 +197,8 @@ func redisStep(r *redis, s string, step streamStep) (any, error) {
 		return r.consumers(s, g)
 	case "read":
 		return r.read(s, g, b)
+	case "tail":
+		return r.tail(s, b)
 	case "ack":
 		args := []string{"XACK", s, g}
 
@@ -414,6 +416,18 @@ func (r *redis) read(s, g string, b map[string]any) (any, error) {
 	}
 
 	v, err := r.do(append(cmd, "STREAMS", s, from)...)
+	if err != nil || v == nil {
+		return []any{}, err
+	}
+
+	stream := v.([]any)[0].([]any)
+
+	return entries(stream[1]), nil
+}
+
+// tail is XREAD: a read without a group.
+func (r *redis) tail(s string, b map[string]any) (any, error) {
+	v, err := r.do("XREAD", "COUNT", text(b["count"], "10"), "STREAMS", s, text(b["after"], "0"))
 	if err != nil || v == nil {
 		return []any{}, err
 	}

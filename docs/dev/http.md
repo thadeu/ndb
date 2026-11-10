@@ -70,6 +70,7 @@ The query language (operators, date math, `$elemMatch`) is on [Query](query.md),
 | GET | `/{s}/_streams` | [Streams](http/streams.md#get-s-streams) |
 | POST | `/{s}/_streams/append` | [Streams](http/streams.md#post-s-streams-append) |
 | POST | `/{s}/_streams/trim` | [Streams](http/streams.md#post-s-streams-trim) |
+| POST | `/{s}/_streams/read` | [Streams](http/streams.md#post-s-streams-read) |
 | GET | `/{s}/_streams/groups` | [Streams](http/streams.md#get-s-streams-groups) |
 | PUT | `/{s}/_streams/groups/{g}` | [Streams](http/streams.md#put-s-streams-groups-g) |
 | DELETE | `/{s}/_streams/groups/{g}` | [Streams](http/streams.md#delete-s-streams-groups-g) |
@@ -176,7 +177,7 @@ Two routes keep the request open. They are not the same feature.
 - An error after the response started is a line `{"error":{"code","message"}}`.
 - See [Watch routes](http/watch.md).
 
-**A stream group read with `block_ms`** (`POST /{s}/_streams/groups/{g}/read`) is a normal JSON request that waits up to `block_ms` for new entries. With none, the answer is `[]`. It sends no heartbeat.
+**A stream read with `block_ms`** (`POST /{s}/_streams/groups/{g}/read`, or `POST /{s}/_streams/read` without a group) is a normal JSON request that waits up to `block_ms` for new entries. With none, the answer is `[]`. It sends no heartbeat.
 
 - Set the client read timeout above `block_ms`. The SDKs do this for you.
 - See [Stream routes](http/streams.md#post-s-streams-groups-g-read).
