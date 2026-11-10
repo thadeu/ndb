@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.17.1] - 2026-11-10
+
 ### Fixed
 
 - Streams: a nacked entry could come back up to 1 ms before its `delay_ms`, because the retry time was the millisecond of now plus the delay. It is now rounded up to the next millisecond, so no entry comes before its wait (`TestNackConcurrentWorkers` caught it on the CI runner).
@@ -622,7 +624,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.17.0...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.17.1...HEAD
+[1.17.1]: https://github.com/thadeu/ndb/compare/v1.17.0...v1.17.1
 [1.17.0]: https://github.com/thadeu/ndb/compare/v1.16.0...v1.17.0
 [1.16.0]: https://github.com/thadeu/ndb/compare/v1.15.0...v1.16.0
 [1.15.0]: https://github.com/thadeu/ndb/compare/v1.14.0...v1.15.0
