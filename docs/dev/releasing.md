@@ -38,7 +38,7 @@ Each of the three can also run by hand (Actions, Run workflow, with the tag), fo
 1. Update the version: `sdk/ts/package.json`, `sdk/ruby/lib/ndb/version.rb`, `sdk/rails/lib/ndb/rails/version.rb`. The publish workflows fail when a version differs from the tag. When the `ndb` minor version changes, update the `ndb` requirement in `sdk/rails/ndb-rails.gemspec`.
 2. Move the `[Unreleased]` entries in `CHANGELOG.md` to the new version with the date.
 3. Run the heavy checks on your machine (CI runs `-short`): `make race` or `make test`, and `make bench` (see [development.md](development.md)).
-4. `make tag patch|minor|major`: it does steps 1 and 2, commits "Release X.Y.Z" and pushes `main` and the tag. CI then tests and publishes. By hand: `git tag vX.Y.Z` on a commit, then `git push origin main vX.Y.Z` (the CI run of a commit with a tag publishes it).
+4. `make tag patch|minor|major`: it does steps 1 and 2, commits "release: X.Y.Z" and pushes `main` and the tag. CI then tests and publishes. By hand: `git tag vX.Y.Z` on a commit, then `git push origin main vX.Y.Z` (the CI run of a commit with a tag publishes it).
 
 ## Verify
 

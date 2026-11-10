@@ -1,6 +1,6 @@
 #!/bin/sh
 # release.sh bumps the version of ndb and its SDKs, closes the Unreleased
-# section of CHANGELOG.md, makes the commit "Release X.Y.Z" and the tag
+# section of CHANGELOG.md, makes the commit "release: X.Y.Z" and the tag
 # vX.Y.Z, then asks before it pushes. A tag push starts the full release
 # (binaries, console, gem, npm, images), so everything has one version.
 #
@@ -149,7 +149,7 @@ done
 git --no-pager diff --stat
 
 git add CHANGELOG.md $VERSION_FILES $GO_MODULES
-git commit --quiet -m "Release $next"
+git commit --quiet -m "release: $next"
 git tag "v$next"
 
 echo "release: made the commit and the tag v$next."

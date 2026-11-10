@@ -2,7 +2,7 @@ name: ci
 
 # The one place with tests: every push to main and every pull request.
 # When the tests pass on a commit of main that has a tag v* (the commit
-# "Release X.Y.Z" of make tag), the last jobs run the release: release.yml
+# "release: X.Y.Z" of make tag), the last jobs run the release: release.yml
 # (binaries, console, Go tags), ghcr.yml (images) and publish.yml (gems,
 # npm), at the same time. So a release is tested once, and make tag does
 # not wait.
@@ -18,14 +18,14 @@ permissions:
 # One run per branch or pull request: a newer push cancels the run in
 # progress.
 # A push or pull request cancels the older run of its branch: only the
-# newest commit needs its tests. A release commit ("Release X.Y.Z") has a
+# newest commit needs its tests. A release commit ("release: X.Y.Z") has a
 # group of its own, so no push cancels it: its run publishes, and a release
 # cut in the middle cannot be fixed (a gem or a package version is pushed
 # only once). Two releases do not mix: release.yml, ghcr.yml and
 # publish.yml run one at a time, in order.
 concurrency:
-  group: ${{ startsWith(github.event.head_commit.message, 'Release ') && format('ci-release-{0}', github.sha) || format('ci-{0}', github.ref) }}
-  cancel-in-progress: ${{ !startsWith(github.event.head_commit.message, 'Release ') }}
+  group: ${{ startsWith(github.event.head_commit.message, 'release: ') && format('ci-release-{0}', github.sha) || format('ci-{0}', github.ref) }}
+  cancel-in-progress: ${{ !startsWith(github.event.head_commit.message, 'release: ') }}
 
 jobs:
   go:

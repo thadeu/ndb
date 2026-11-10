@@ -84,7 +84,7 @@ docs-build:
 	cd docs-site && pnpm install --frozen-lockfile && pnpm docs:build
 
 # Release: make tag patch|minor|major (or make tg patch). Bumps the SDKs and
-# CHANGELOG.md, commits "Release X.Y.Z", tags vX.Y.Z, and asks before the
+# CHANGELOG.md, commits "release: X.Y.Z", tags vX.Y.Z, and asks before the
 # push. With make's --dry-run (-n) or DRY=1, it only shows the next version.
 # YES=1 pushes without asking.
 # The + runs the script even under --dry-run. See scripts/release.sh.

@@ -107,6 +107,17 @@ test/smoke.sh
 
 ## Git, CI and releases
 
+- **Conventional Commits** for every commit and PR title: `type(scope): summary`, lower case
+  type, scope optional, summary in the imperative, no period at the end.
+  - Types: `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `release`.
+  - Scopes: the part you changed, for example `server`, `query`, `streams`, `wal`, `cli`,
+    `sdk-go`, `sdk-ruby`, `rails`, `sdk-ts`, `console`, `docs-site`, `deploy`.
+  - Examples: `feat(streams): add claim due`, `fix(server): refuse a cross-site write`,
+    `docs: link the docs site in the README`, `ci: run the tests once`.
+  - A breaking change of the HTTP API adds `!` (`feat(server)!: ...`) and a `BREAKING CHANGE:`
+    line in the body.
+  - `release: X.Y.Z` is made only by `make tag`. CI matches the prefix `release: ` to keep a
+    release run from being cancelled, so do not use it for anything else.
 - Fixes and small changes go directly on `main`. Larger features use a branch and a PR; the
   maintainer merges with squash.
 - **Do not watch CI** (no `gh run watch`, no polling): the maintainer follows it.

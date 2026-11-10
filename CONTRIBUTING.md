@@ -33,7 +33,7 @@ More commands are in [docs/dev/development.md](docs/dev/development.md).
 ## Pull requests
 
 1. Fork, and make a branch from `main`.
-2. Make small commits with clear messages (for example `fix(server): ...`, `feat(query): ...`).
+2. Make small commits. Use [Conventional Commits](https://www.conventionalcommits.org) for each message and the pull request title: `type(scope): summary`, with the types `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `build`, `ci` and `chore` (for example `fix(server): ...`, `feat(query): ...`). `release: X.Y.Z` is only for `make tag`.
 3. Run the tests of everything you touched (daemon and SDKs).
 4. Open the pull request and fill in the template.
 
