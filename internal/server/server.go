@@ -6,12 +6,15 @@ package server
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"sync/atomic"
 	"time"
 
 	"github.com/thadeu/ndb/internal/engine"
+	"github.com/thadeu/ndb/internal/logging"
 	"github.com/thadeu/ndb/internal/streams"
 )
 
@@ -42,13 +45,17 @@ type Server struct {
 
 	// streams runs the /{s}/_streams routes.
 	streams *streams.Service
+
+	// log is the logger of the request lines (logs.go).
+	log *logging.Logger
 }
 
 func New() *Server {
 	stopCtx, stop := context.WithCancel(context.Background())
 	s := &Server{heartbeat: defaultHeartbeat, stopCtx: stopCtx, started: time.Now()}
+	s.log = logging.New(os.Stderr, logging.Options{Level: slog.LevelInfo, Format: logging.DefaultFormat, BodyMax: logging.DefaultBodyMax, SlowMs: logging.DefaultSlowMs})
 	s.streams = streams.New(func() *engine.DB { return s.db.Load() })
-	s.handler = s.authenticate(s.routes())
+	s.handler = s.observe(s.authenticate(s.routes()))
 	s.http = &http.Server{
 		Handler:           s.handler,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -125,6 +132,7 @@ func (s *Server) routes() http.Handler {
 			"_pitr":        {{"GET", s.ready(s.pitrAll)}},
 			"_blobs":       {{"POST", s.ready(s.putBlob)}},
 			"_blobs/{}":    {{"GET", s.ready(s.getBlob)}},
+			"_log":         {{"GET", s.getLog}, {"PUT", s.putLog}},
 		},
 		coll: map[string][]route{
 			"": {

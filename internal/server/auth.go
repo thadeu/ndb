@@ -30,6 +30,8 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			return
 		}
 
+		noteToken(w, t.Name)
+
 		segs, _ := segments(r.URL.EscapedPath())
 		coll, need := required(r.Method, segs)
 

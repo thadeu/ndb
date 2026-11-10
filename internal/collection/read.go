@@ -7,7 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"slices"
 	"sort"
 	"strconv"
@@ -323,6 +323,18 @@ func (c *Collection) EnsureIndex(field string) error {
 func (c *Collection) build(s *secondary, items []cand, segs []*segRef) {
 	defer c.rd.wg.Done()
 
+	began := time.Now()
+
+	// A small build (each open of a collection makes one) is debug; a
+	// large one is info.
+	level := slog.LevelDebug
+
+	if s.total >= indexBuildInfoRows {
+		level = slog.LevelInfo
+	}
+
+	slog.Log(context.Background(), level, "index build started", "collection", c.def.Name, "field", s.field, "total", s.total)
+
 	for start := 0; start < len(items); start += buildChunk {
 		if c.buildStopped() {
 			return
@@ -361,7 +373,7 @@ func (c *Collection) build(s *secondary, items []cand, segs []*segRef) {
 		}
 
 		if err := c.buildIndexFile(r, f); err != nil {
-			log.Printf("ndb: index %s: segment %s: %v", s.field, r.path, err)
+			slog.Error("index build failed", "collection", c.def.Name, "field", s.field, "segment", r.path, "err", err)
 
 			return
 		}
@@ -374,7 +386,12 @@ func (c *Collection) build(s *secondary, items []cand, segs []*segRef) {
 	c.mu.Lock()
 	s.ready = true
 	c.mu.Unlock()
+
+	slog.Log(context.Background(), level, "index build done", "collection", c.def.Name, "field", s.field, "total", s.total, "ms", time.Since(began).Milliseconds())
 }
+
+// indexBuildInfoRows is the size from which an index build is an info line.
+const indexBuildInfoRows = 10_000
 
 // buildStopped runs the test gate and tells if the collection is closing.
 func (c *Collection) buildStopped() bool {

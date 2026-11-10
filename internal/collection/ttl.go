@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/thadeu/ndb/internal/catalog"
@@ -255,7 +255,7 @@ func (c *Collection) startSweeper(every time.Duration) {
 
 	c.sweep = newJob(func() time.Time {
 		if _, err := c.Sweep(); err != nil && !errors.Is(err, writer.ErrClosed) {
-			log.Printf("ndb: ttl sweep failed, retrying on the next tick: %v", err)
+			slog.Error("ttl sweep failed, retrying on the next tick", "collection", c.def.Name, "err", err)
 		}
 
 		return time.Now().Add(every)

@@ -34,6 +34,38 @@ curl --unix-socket /run/ndb/ndb.sock http://ndb/_health
 
 Alert on: `ndb_ready == 0`, a growing `ndb_tailer_lag_bytes`, an increase of `ndb_quarantined_total`, and `ndb_fsync_seconds` high percentiles.
 
+### Logs
+
+The daemon writes one log line per event to stderr, as `text` (key=value) or `json` (one object per line). Set the level with `-log-level`, `NDB_LOG_LEVEL` or `log_level` (in this order; default `info`) and the format with `-log-format`, `NDB_LOG_FORMAT` or `log_format` (default `text`). See [Configuration, Logs](configuration.md#logs).
+
+| Level | What it writes |
+|---|---|
+| `error` | each 5xx answer (method, path, collection, status, code, the real error message, request id, the request body; `GET /_health` during recovery is not an error); a recovered panic, with its stack; failed background work: seal, WAL truncation, compaction, TTL sweep, index build, tailer, PITR snapshot, trash delete, a failed start (recovery); a failed backup; a WAL write or segment read that stops the daemon. |
+| `warn` | a slow request (over `log_slow_ms`, with its body: the slow query; not `_watch`, a blocking stream read, `_compact`, `_restore` or `_backup`); a `_watch` consumer that lagged (`watch_lagged`); a quarantined line (direct mode); a direct tail that waits for a full memtable; a shutdown that timed out; an operation that a crash stopped and the start finished. |
+| `info` | start (version, pid, data dir, log settings), the listeners, recovery done (collections, ms), ready, stopping, stopped; a collection created (also an implicit one), ensured, truncated, dropped, renamed or restored; an index added or dropped, and the start and end of a large index build (10 000 rows or more); a compaction (background or `_compact`); a backup started and done; a stream group created or destroyed; a change of the log settings. |
+| `debug` | one `request` line per HTTP request: request id, method, path, collection, status, ms, bytes in and out, rows of a read, the token name, and the request body (the query of `_search`, `_count`, `_aggregate`). One `write` line for each request that persists, after the write: the op (`insert`, `bulk`, `update`, `update_by_query`, `delete`, `delete_by_query`, `expire`, `persist`, `ack`, `ensure`, `blob_put`, `stream_append`, `stream_trim`, `stream_ack`, `stream_claim`, `stream_group_setid`, `stream_consumer_create`, `stream_consumer_delete`), the ids and `_v`, and the document or body. A `watch started` line with the consumer and the query. Small index builds. |
+| `quiet` | nothing, errors too. A fatal error still stops the daemon with exit code 1. |
+
+Each level also writes the levels above it (`warn` writes `warn` and `error`).
+
+**Request id.** Each request has an id: the `X-Request-Id` of the client when it has 1 to 128 of `A-Z a-z 0-9 - _ . :`, else a new one. The answer sends it back in `X-Request-Id`, and every line of the request has it as `request_id`. Send your own id from the app to find its lines.
+
+**Sizes.** A body or document in a line is cut to `log_body_max` bytes (default 2048) and ends with `...[cut, N bytes]`, N the full size. `0` logs no bodies (ids and counts only). A `_bulk` or a stream append is one line for the batch: the count, the first 100 ids and `_v`, and the first 3 documents.
+
+**Secrets.** No line has the `Authorization` header or a token value. A request with a scoped token has the token name (`token=app`).
+
+**Cost.** A line is only made when its level is on: at `info`, a request costs a request id and two clock reads; the body is not copied.
+
+**At run time.** `PUT /_log` changes the level, `body_max` and `slow_ms` without a restart; `GET /_log` gives them. Over TCP it needs a token with admin of `*`. The change is lost at the next start: put it in `ndb.yml` to keep it.
+
+```bash
+curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/_log -d '{"level":"debug"}'
+# ... reproduce the problem ...
+curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/_log -d '{"level":"info"}'
+```
+
+**Rotation.** ndb does not rotate or keep log files: stderr goes to the service manager. With systemd, journald keeps and rotates them (`journalctl -u ndb`; limits in `journald.conf`, `SystemMaxUse=`). With Docker, set the log driver limits (`--log-opt max-size=50m --log-opt max-file=5`, or `logging:` in compose). Under another supervisor, pipe stderr to a rotating tool (`logrotate` with `copytruncate`, `svlogd`). `debug` writes a line for each request: turn it on for a short time, or keep `log_body_max` small.
+
 ## Protect the data
 
 ### Backup and restore

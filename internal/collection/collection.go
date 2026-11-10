@@ -13,8 +13,9 @@ import (
 	"encoding/json"
 	"errors"
 	"iter"
-	"log"
+	"log/slog"
 	"maps"
+	"os"
 	"runtime"
 	"sort"
 	"strings"
@@ -366,7 +367,8 @@ func (c *Collection) fail(err error) {
 		return
 	}
 
-	log.Fatalf("ndb: segment read failed, exiting to recover: %v", err)
+	slog.Error("segment read failed, exiting to recover", "collection", c.def.Name, "err", err)
+	os.Exit(1)
 }
 
 // Find returns the durable document with this id.

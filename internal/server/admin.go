@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -187,6 +188,8 @@ func (s *Server) compact(w http.ResponseWriter, r *http.Request, db *engine.DB) 
 		return
 	}
 
+	longPoll(w)
+
 	began := time.Now()
 
 	res, err := col.Compact()
@@ -195,6 +198,8 @@ func (s *Server) compact(w http.ResponseWriter, r *http.Request, db *engine.DB) 
 
 		return
 	}
+
+	s.logInfo(w, r, "compaction done", slog.Any("before", res.Before), slog.Any("after", res.After), slog.Int64("ms", time.Since(began).Milliseconds()))
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"collection":  name,
@@ -305,6 +310,8 @@ func (s *Server) truncate(w http.ResponseWriter, r *http.Request, db *engine.DB)
 		return
 	}
 
+	s.logInfo(w, r, "collection truncated")
+
 	writeJSON(w, http.StatusOK, map[string]any{"collection": name, "truncated": true})
 }
 
@@ -324,6 +331,8 @@ func (s *Server) drop(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 
 		return
 	}
+
+	s.logInfo(w, r, "collection dropped")
 
 	writeJSON(w, http.StatusOK, map[string]any{"collection": name, "dropped": true})
 }
@@ -364,6 +373,8 @@ func (s *Server) rename(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 
 		return
 	}
+
+	s.logInfo(w, r, "collection renamed", slog.String("to", req.To), slog.Bool("replace", req.Replace))
 
 	writeJSON(w, http.StatusOK, map[string]any{"collection": req.To, "renamed_from": name, "replaced": req.Replace})
 }

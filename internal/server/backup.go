@@ -1,8 +1,10 @@
 package server
 
 import (
+	"log/slog"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/thadeu/ndb/internal/backup"
 	"github.com/thadeu/ndb/internal/engine"
@@ -39,12 +41,22 @@ func (s *Server) backup(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		}
 	}
 
+	longPoll(w)
+
+	s.logInfo(w, r, "backup started", slog.Bool("no_blobs", req.NoBlobs))
+
+	began := time.Now()
 	out := &firstWrite{w: w}
 
 	err = db.Backup(r.Context(), out, backup.Options{Version: s.version, NoBlobs: req.NoBlobs, Streams: s.streams.Snapshot})
+
 	if err == nil {
+		s.logInfo(w, r, "backup done", slog.Int64("ms", time.Since(began).Milliseconds()))
+
 		return
 	}
+
+	s.log.LogAttrs(r.Context(), slog.LevelError, "backup failed", slog.String("request_id", logOf(w).idOrEmpty()), slog.String("err", err.Error()))
 
 	if !out.started {
 		writeError(w, badRequest("%v", err))

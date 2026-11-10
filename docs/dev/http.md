@@ -6,7 +6,7 @@ The routes have pages by group:
 
 | Page | Routes |
 |---|---|
-| [System](http/system.md) | `/_health`, `/_metrics`, `/_collections`, `/_stats`, `/_size`, `/_backup`, `/_restore`, `/_pitr`, `/_blobs` |
+| [System](http/system.md) | `/_health`, `/_metrics`, `/_collections`, `/_stats`, `/_size`, `/_backup`, `/_restore`, `/_pitr`, `/_blobs`, `/_log` |
 | [Collections](http/collections.md) | `PUT`, `GET`, `DELETE /{coll}`, `_truncate`, `_rename`, `_restore`, `_pitr`, `_indexes`, `_stats`, `_compact`, `_quarantine` |
 | [Documents](http/documents.md) | `_doc`, `_bulk`, `_update/{id}`, `_expire`, `_persist`, `_ttl` |
 | [Queries](http/queries.md) | `_search`, `_count`, `_aggregate`, `_update_by_query`, `_delete_by_query`, patterns |
@@ -40,6 +40,8 @@ The query language (operators, date math, `$elemMatch`) is on [Query](query.md),
 | GET | `/_pitr` | [System](http/system.md#get-pitr) |
 | POST | `/_blobs` | [System](http/system.md#post-blobs) |
 | GET | `/_blobs/{ref}` | [System](http/system.md#get-blobs-ref) |
+| GET | `/_log` | [System](http/system.md#get-log) |
+| PUT | `/_log` | [System](http/system.md#put-log) |
 | PUT | `/{coll}` | [Collections](http/collections.md#put-coll) |
 | GET | `/{coll}` | [Collections](http/collections.md#get-coll) |
 | DELETE | `/{coll}?confirm={coll}` | [Collections](http/collections.md#delete-coll) |
@@ -136,6 +138,8 @@ A row is the document. `_v` is added with `"versions": true`, and `_coll` on a r
 | `X-Ndb-Examined` | always | candidate rows whose query was evaluated |
 | `X-Ndb-Took-Ms` | always | time spent by the daemon, in ms |
 | `X-Ndb-Explain` | `"explain": true` | JSON of the plan counters, see [Search](query.md#search) |
+
+**Request id:** every answer has `X-Request-Id`: the one of the request when it is 1 to 128 of `A-Z a-z 0-9 - _ . :`, else a new one. The log lines of the request have it as `request_id` (see [Logs](operations.md#logs)).
 
 **Status codes:** `200` for every success, the codes of [Errors](http/errors.md) otherwise. A write that matches nothing is `200` with `"matched": 0`, not an error.
 

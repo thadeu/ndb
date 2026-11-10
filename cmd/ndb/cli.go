@@ -180,6 +180,9 @@ Daemon flags (ndb serve):
   -unix-mode MODE   permission of the socket, octal (default 0660)
   -tcp ADDR         TCP listener, e.g. 127.0.0.1:7070 ('' turns it off)
   -token-file FILE  bearer token the TCP listener requires
+  -log-level LEVEL  debug, info, warn, error or quiet (default NDB_LOG_LEVEL,
+                    then log_level of ndb.yml, then info); PUT /_log changes it
+  -log-format FMT   text or json (default NDB_LOG_FORMAT, then log_format, then text)
   -version          print the version
 
   Defaults: ~/.ndb/data, ~/.ndb/ndb.sock and 127.0.0.1:7070; on a server

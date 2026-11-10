@@ -27,19 +27,33 @@ type metrics struct {
 // count wraps every route: it counts requests, errors and canceled queries.
 func (s *Server) count(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
-
-		next.ServeHTTP(sw, r)
+		status := s.serveCounted(next, w, r)
 
 		s.metrics.requests.Add(1)
 
 		switch {
-		case sw.status == StatusClientClosed:
+		case status == StatusClientClosed:
 			s.metrics.canceled.Add(1)
-		case sw.status >= 400:
+		case status >= 400:
 			s.metrics.errors.Add(1)
 		}
 	})
+}
+
+// serveCounted runs next and gives the status. Under observe the reqLog
+// has it, so no second wrapper is made.
+func (s *Server) serveCounted(next http.Handler, w http.ResponseWriter, r *http.Request) int {
+	if rl, ok := w.(*reqLog); ok {
+		next.ServeHTTP(rl, r)
+
+		return rl.status
+	}
+
+	sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+
+	next.ServeHTTP(sw, r)
+
+	return sw.status
 }
 
 type statusWriter struct {

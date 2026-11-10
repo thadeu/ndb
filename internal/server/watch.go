@@ -95,6 +95,19 @@ func (s *Server) watch(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 
 	defer events.Close()
 
+	longPoll(w)
+
+	if s.debugOn(r) {
+		s.log.LogAttrs(r.Context(), slog.LevelDebug, "watch started",
+			slog.String("request_id", logOf(w).idOrEmpty()),
+			slog.String("coll", name),
+			slog.String("consumer", req.Consumer),
+			slog.String("from", req.From),
+			slog.Int("limit", req.Limit),
+			s.body("query", req.Query),
+		)
+	}
+
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
@@ -103,7 +116,7 @@ func (s *Server) watch(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.WriteHeader(http.StatusOK)
 
-	s.pump(ctx, w, events, req.Limit, stream)
+	s.pump(ctx, w, events, req.Limit, stream, req.Consumer)
 }
 
 func validateWatch(req watchReq) error {
@@ -125,8 +138,8 @@ func validateWatch(req watchReq) error {
 // ends. After heartbeat of silence it writes a heartbeat line. On a stream
 // collection (unpad), the _id of an event is <ms>-<seq>, not the padded
 // _id on disk.
-func (s *Server) pump(ctx context.Context, w http.ResponseWriter, stream feed.Stream, limit int, unpad bool) {
-	line := lineWriter{w: w, rc: http.NewResponseController(w), enc: json.NewEncoder(w)}
+func (s *Server) pump(ctx context.Context, w http.ResponseWriter, stream feed.Stream, limit int, unpad bool, consumer string) {
+	line := lineWriter{w: w, rc: http.NewResponseController(w), enc: json.NewEncoder(w), s: s, consumer: consumer}
 
 	if !line.flush() {
 		return
@@ -181,6 +194,10 @@ type lineWriter struct {
 	w   http.ResponseWriter
 	rc  *http.ResponseController
 	enc *json.Encoder
+
+	// s and consumer are for the log lines of a failed stream.
+	s        *Server
+	consumer string
 }
 
 func (l lineWriter) write(v any) bool {
@@ -206,10 +223,17 @@ func (l lineWriter) fail(ctx context.Context, err error) {
 	code := codeOf(err)
 	msg := messageOf(err, code)
 
-	if code == "internal" {
-		slog.Error("watch failed", "err", err)
+	switch code {
+	case "internal":
+		l.s.log.LogAttrs(ctx, slog.LevelError, "watch failed",
+			slog.String("request_id", logOf(l.w).idOrEmpty()),
+			slog.String("consumer", l.consumer),
+			slog.String("err", err.Error()),
+		)
 
 		msg = "internal error"
+	case "watch_lagged":
+		l.s.logLagged(ctx, l.w, l.consumer, err)
 	}
 
 	l.write(map[string]any{"error": map[string]string{"code": code, "message": msg}})
@@ -244,6 +268,10 @@ func (s *Server) ack(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		writeError(w, err)
 
 		return
+	}
+
+	if s.debugOn(r) {
+		s.logWrite(w, r, "ack", slog.String("consumer", req.Consumer), slog.String("pos", req.Pos))
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})

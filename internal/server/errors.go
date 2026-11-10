@@ -40,9 +40,14 @@ func writeError(w http.ResponseWriter, err error) {
 	status := statusOf(code)
 	msg := messageOf(err, code)
 
-	if code == "internal" {
+	// The request line (logs.go) logs the error; without it, log here.
+	if rl := logOf(w); rl != nil {
+		rl.err = err
+	} else if code == "internal" {
 		slog.Error("request failed", "err", err)
+	}
 
+	if code == "internal" {
 		msg = "internal error"
 	}
 
@@ -141,6 +146,8 @@ func readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, erro
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
 
 	if err == nil {
+		keepBody(w, body)
+
 		return body, nil
 	}
 

@@ -67,13 +67,14 @@ type QuarantineRow struct {
 }
 
 // add writes one row. line is cut to its first 4 KiB. A line already held
-// (same file and offset) is not written again and does not count again. A
-// failure to write the row is returned, but the line still counts.
-func (q *quarantine) add(file string, off int64, reason string, line []byte, whole bool) error {
+// (same file and offset) is not written again and does not count again
+// (added is false). A failure to write the row is returned, but the line
+// still counts.
+func (q *quarantine) add(file string, off int64, reason string, line []byte, whole bool) (added bool, err error) {
 	key := quarantineKey{file, off}
 
 	if _, dup := q.seen[key]; dup {
-		return nil
+		return false, nil
 	}
 
 	q.seen[key] = struct{}{}
@@ -96,22 +97,22 @@ func (q *quarantine) add(file string, off int64, reason string, line []byte, who
 
 	data, err := json.Marshal(row)
 	if err != nil {
-		return err
+		return true, err
 	}
 
 	if q.f == nil {
 		if err := q.fs.MkdirAll(q.dir); err != nil {
-			return err
+			return true, err
 		}
 
 		if q.f, err = q.fs.OpenAppend(q.path); err != nil {
-			return err
+			return true, err
 		}
 	}
 
 	_, err = q.f.Write(append(data, '\n'))
 
-	return err
+	return true, err
 }
 
 // rows reads the quarantine file. A line that was quarantined twice (a direct

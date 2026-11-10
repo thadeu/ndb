@@ -315,3 +315,31 @@ func TestDefaultsOfAUserInstall(t *testing.T) {
 		t.Fatalf("got %+v", cfg)
 	}
 }
+
+func TestLogKeys(t *testing.T) {
+	cfg, err := config.Load(write(t, "log_level: debug\nlog_format: json\nlog_body_max: 0\nlog_slow_ms: 250\n"))
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.LogLevel != "debug" || cfg.LogFormat != "json" || cfg.LogBodyMax != 0 || cfg.LogSlowMs != 250 {
+		t.Fatalf("log keys = %q %q %d %d", cfg.LogLevel, cfg.LogFormat, cfg.LogBodyMax, cfg.LogSlowMs)
+	}
+
+	def, err := config.Load(write(t, "{}"))
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if def.LogLevel != "info" || def.LogFormat != "text" || def.LogBodyMax != 2048 || def.LogSlowMs != 1000 {
+		t.Fatalf("log defaults = %q %q %d %d", def.LogLevel, def.LogFormat, def.LogBodyMax, def.LogSlowMs)
+	}
+
+	for _, bad := range []string{"log_level: loud\n", "log_format: xml\n", "log_body_max: -1\n", "log_slow_ms: -5\n"} {
+		if _, err := config.Load(write(t, bad)); !errors.Is(err, config.ErrInvalid) {
+			t.Fatalf("%q: err = %v, want ErrInvalid", bad, err)
+		}
+	}
+}

@@ -6,7 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
+	"os"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -184,7 +185,10 @@ func setDefaults(cfg *Config) {
 	}
 
 	if cfg.OnFatal == nil {
-		cfg.OnFatal = func(err error) { log.Fatalf("ndb: wal write failed, exiting to recover: %v", err) }
+		cfg.OnFatal = func(err error) {
+			slog.Error("wal write failed, exiting to recover", "err", err)
+			os.Exit(1)
+		}
 	}
 }
 

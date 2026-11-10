@@ -90,6 +90,12 @@ type DB struct {
 // Open takes the lock on cfg.DataDir, opens the catalog, declares the
 // collections of ndb.yml and opens every collection in the catalog.
 func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
+	began := time.Now()
+
+	if log == nil {
+		log = slog.Default()
+	}
+
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -173,6 +179,8 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		}
 	}
 
+	db.log.Info("recovery done", "data_dir", cfg.DataDir, "collections", len(db.cols), "ms", time.Since(began).Milliseconds())
+
 	db.gcWait.Add(3)
 
 	go db.sweepPartitionsLoop()
@@ -244,6 +252,8 @@ func (db *DB) GetOrCreate(name string) (*Collection, error) {
 		return col, nil
 	}
 
+	_, known := db.cat.Get(name)
+
 	def, err := db.cat.EnsureImplicit(name)
 	if err != nil {
 		return nil, err
@@ -251,6 +261,10 @@ func (db *DB) GetOrCreate(name string) (*Collection, error) {
 
 	if err := db.attach(def); err != nil {
 		return nil, err
+	}
+
+	if !known {
+		db.log.Info("collection created", "collection", name, "implicit", true)
 	}
 
 	return db.cols[name], nil

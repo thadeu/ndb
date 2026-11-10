@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"log"
+	"log/slog"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -930,12 +930,12 @@ func (c *Collection) sealTick() time.Time {
 
 	if c.sealDue(now) {
 		if err := c.Seal(); err != nil && !errors.Is(err, errStopped) {
-			log.Printf("ndb: seal failed, retrying on the next tick: %v", err)
+			slog.Error("seal failed, retrying on the next tick", "collection", c.def.Name, "err", err)
 		}
 	}
 
 	if _, err := c.TruncateWAL(); err != nil {
-		log.Printf("ndb: wal truncation failed, retrying on the next tick: %v", err)
+		slog.Error("wal truncation failed, retrying on the next tick", "collection", c.def.Name, "err", err)
 	}
 
 	var next time.Time
@@ -972,8 +972,13 @@ func (c *Collection) compactTick() time.Time {
 	now := time.Now()
 
 	if lo, hi, ok := c.pickRun(); ok {
-		if err := c.compactRange(lo, hi); err != nil && !errors.Is(err, errStopped) {
-			log.Printf("ndb: compaction failed, retrying on the next tick: %v", err)
+		err := c.compactRange(lo, hi)
+
+		switch {
+		case err == nil:
+			slog.Info("compaction done", "collection", c.def.Name, "segments", hi-lo, "ms", time.Since(now).Milliseconds())
+		case !errors.Is(err, errStopped):
+			slog.Error("compaction failed, retrying on the next tick", "collection", c.def.Name, "err", err)
 		}
 
 		return now.Add(s.tick)

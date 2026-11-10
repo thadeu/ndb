@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -41,6 +42,10 @@ func (s *Server) putBlob(w http.ResponseWriter, r *http.Request, db *engine.DB) 
 	}
 
 	s.metrics.writes.Add(1)
+
+	if s.debugOn(r) {
+		s.logWrite(w, r, "blob_put", slog.Any("blob", ref))
+	}
 
 	writeJSON(w, http.StatusOK, ref)
 }

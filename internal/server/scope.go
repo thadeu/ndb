@@ -98,7 +98,7 @@ func required(method string, segs []string) (string, access) {
 
 	if strings.HasPrefix(segs[0], "_") {
 		switch segs[0] {
-		case "_backup":
+		case "_backup", "_log":
 			return "*", accessAdmin
 		case "_restore":
 			return "", accessAdmin
