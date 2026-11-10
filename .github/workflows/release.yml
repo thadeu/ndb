@@ -55,10 +55,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --verify-tag
 
-      - name: Tag the Go SDK
+      # Each Go module of the repo gets a tag of its folder on the release
+      # commit (sdk/go/vX.Y.Z, sdk/go/ndbredis/vX.Y.Z), so go get finds it.
+      # release.sh already set the Go SDK version that ndbredis needs.
+      - name: Tag the Go modules
         run: |
-          git tag "sdk/go/${GITHUB_REF_NAME}" "$GITHUB_SHA"
-          git push origin "sdk/go/${GITHUB_REF_NAME}"
+          for module in sdk/go sdk/go/ndbredis; do
+            git tag "${module}/${GITHUB_REF_NAME}" "$GITHUB_SHA"
+            git push origin "${module}/${GITHUB_REF_NAME}"
+          done
 
   console:
     needs: release

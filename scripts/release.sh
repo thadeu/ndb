@@ -43,7 +43,11 @@ fail() {
 
 VERSION_FILES="sdk/ts/package.json sdk/ruby/lib/ndb/version.rb sdk/rails/lib/ndb/rails/version.rb"
 
-trap 'rm -f CHANGELOG.md.tmp sdk/ts/package.json.tmp sdk/ruby/lib/ndb/version.rb.tmp sdk/rails/lib/ndb/rails/version.rb.tmp' EXIT
+# The Go modules that need the Go SDK of this release. Each one has its own
+# tag, sdk/go/<module>/vX.Y.Z, made by .github/workflows/release.yml.
+GO_MODULES="sdk/go/ndbredis/go.mod"
+
+trap 'rm -f CHANGELOG.md.tmp sdk/ts/package.json.tmp sdk/ruby/lib/ndb/version.rb.tmp sdk/rails/lib/ndb/rails/version.rb.tmp sdk/go/ndbredis/go.mod.tmp' EXIT
 
 # Checks: on main, clean tree, up to date with origin.
 branch="$(git rev-parse --abbrev-ref HEAD)"
@@ -132,9 +136,15 @@ for file in $VERSION_FILES; do
   mv "$file.tmp" "$file"
 done
 
+# Each Go module needs the Go SDK of the same release.
+for file in $GO_MODULES; do
+  sed -E "s#(github\.com/thadeu/ndb/sdk/go )v[0-9]+\.[0-9]+\.[0-9]+#\1v$next#" "$file" > "$file.tmp"
+  mv "$file.tmp" "$file"
+done
+
 git --no-pager diff --stat
 
-git add CHANGELOG.md $VERSION_FILES
+git add CHANGELOG.md $VERSION_FILES $GO_MODULES
 git commit --quiet -m "Release $next"
 git tag "v$next"
 
