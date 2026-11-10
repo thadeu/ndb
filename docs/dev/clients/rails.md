@@ -103,9 +103,13 @@ call = Call.new(_id: "c4", status: "answered", caller: "d")
 call.save          # false when invalid
 call.save!         # raises Ndb::RecordInvalid
 
-call = Call.find("c1")        # raises Ndb::NotFound
-Call.find_by(status: "failed") # nil when missing
-Call.find_by!(status: "x")     # raises NotFound
+Call.where(status: "failed")   # a list (lazy relation)
+Call.find_by(status: "failed") # one record or nil: the daemon gives 1 row (limit 1)
+Call.find_by!(status: "x")     # the same, raises Ndb::NotFound when missing
+call = Call.find("c1")         # by id, raises Ndb::NotFound
+
+Call.first                     # the lowest _id; Call.last: the highest (limit 1, not the whole list)
+Call.order(:created_at).last(3) # the last 3 in that order, oldest first
 
 call.update!(status: "done")  # $set of the changed fields only, filtered by id and version
 call.version                   # the document version
@@ -901,7 +905,7 @@ Every public method of the gem, grouped. The names and return values follow Acti
 | `group(*fields)` | a relation for `count`/`sum`/... by group |
 | `find(id)`, `find(id1, id2)` | a record, or an Array; `Ndb::NotFound` when missing |
 | `find_by(hash)`, `find_by!(hash)`, `find_by_<attr>[_and_<attr>](values)` | a record or `nil` (`!`: `Ndb::NotFound`) |
-| `first`, `first(n)`, `last`, `last(n)` | a record or `nil`, or an Array |
+| `first`, `first(n)`, `last`, `last(n)` | a record or `nil`, or an Array. The daemon gives only `n` rows. With no `order`, the order is `_id` (first and last are its two ends). On a relation with `limit`, `offset` or `page`, or a loaded one, `last` uses the loaded rows. |
 | `to_a`, `each`, `map`... (Enumerable), `load`, `loaded?`, `records` | the records (one call, then memory) |
 | `size`, `length`, `empty?` | from the loaded records, else a count |
 | `count`, `exists?`, `pluck(:a, :b)` | a number, a boolean, an Array of values |

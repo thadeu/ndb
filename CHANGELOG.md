@@ -20,6 +20,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Rails: `last` and `last(n)` loaded the whole relation to take its last rows. They now turn the order around and ask the daemon for `n` rows. With no `order`, `first` and `last` use the `_id` order (the two ends of one order), as ActiveRecord does with the primary key.
 - Streams, access: a read-scoped token could create, delete or read a group named `pending`, or delete a consumer named `pending`. The read right now follows the shape of the route.
 - Streams: the write routes of every collection (`POST _doc`, `_bulk`, `_update`, `_update_by_query`, `_delete_by_query`, `_expire`, `_persist`) worked on a stream and could break the position of its groups. They now give `400 stream_append_only` (a new code, with a constant in each SDK).
 - Streams: a truncate, drop or rename during other stream requests could keep the old groups or give 500. `entries_read` and `lag` follow Redis after a delete, a trim and a group made at an ID (a group made without `entries_read` now shows `null`, as in Redis). A `min_id` trim keeps to `limit`, and `limit` without `approx` is an error. `_aggregate` and `_watch` on a stream give `<ms>-<seq>` IDs; a pattern read or a `$lookup` into a stream is refused. An append after the highest ID is an error, not `0-0`. A blocked read without a group waits for a stream that does not exist yet. Groups and consumers may have any name.

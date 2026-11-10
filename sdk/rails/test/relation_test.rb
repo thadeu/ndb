@@ -49,6 +49,49 @@ class RelationTest < Minitest::Test
     assert_raises(Ndb::NotFound) { @post.find_by!(n: 99) }
   end
 
+  def test_last_asks_the_daemon_for_one_row
+    bodies = spy_finds
+
+    assert_equal "p10", @post.order(:n).last._id
+    assert_equal %w[p9 p10], @post.order(:n).last(2).map(&:_id)
+    assert_equal "p9", @post.where(status: "odd").order(:n).last._id
+    assert_equal "p1", @post.order(n: :desc).last._id
+    assert_nil @post.where(n: 99).last
+
+    assert(bodies.all? { |body| body["limit"] == 1 || body["limit"] == 2 }, "last loaded the relation: #{bodies}")
+    assert_equal({ "n" => -1 }, bodies.first["sort"])
+  end
+
+  def test_first_and_last_with_no_order_use_the_primary_key
+    bodies = spy_finds
+
+    # The ids sort as text: p1, p10, p2, ... p9.
+    assert_equal "p1", @post.first._id
+    assert_equal "p9", @post.last._id
+    assert_equal %w[p8 p9], @post.last(2).map(&:_id)
+
+    assert_equal [{ "_id" => 1 }, { "_id" => -1 }, { "_id" => -1 }], bodies.map { |body| body["sort"] }
+  end
+
+  def test_last_of_a_window_or_a_loaded_relation_uses_the_rows
+    assert_equal "p3", @post.order(:n).limit(3).last._id
+    assert_equal "p5", @post.order(:n).offset(2).limit(3).last._id
+
+    loaded = @post.order(:n).load
+
+    assert_equal "p10", loaded.last._id
+  end
+
+  def test_find_by_asks_the_daemon_for_one_row
+    bodies = spy_finds
+
+    assert_equal "p4", @post.find_by(n: 4)._id
+    assert_equal "p4", @post.find_by!(n: 4)._id
+    assert_equal "p3", @post.find("p3")._id
+
+    assert_equal [1, 1], bodies.first(2).map { |body| body["limit"] }
+  end
+
   def test_exists_pluck_count
     assert @post.where(n: 1).exists?
     refute @post.where(n: 99).exists?
@@ -113,5 +156,22 @@ class RelationTest < Minitest::Test
 
     assert_equal 10, klass.count
     assert_equal 10, klass.to_a.size
+  end
+
+  private
+
+  # Records the find bodies the model sends to the daemon.
+  def spy_finds
+    bodies = []
+    klass = @post
+    original = klass.method(:ndb_find)
+
+    klass.define_singleton_method(:ndb_find) do |body|
+      bodies << body
+
+      original.call(body)
+    end
+
+    bodies
   end
 end
