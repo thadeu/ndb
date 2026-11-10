@@ -2,14 +2,28 @@ name: release
 
 # The GitHub release of a tag: the daemon binaries, the console binaries
 # and the tags of the Go modules. The images are in ghcr.yml and the SDK
-# packages in publish.yml. There are no Go tests here: CI tested the
-# release commit, and scripts/release.sh pushes the tag only when that CI
-# run passed. The console is tested here, as CI does not test it.
+# packages in publish.yml. There are no Go tests here: CI calls this
+# workflow only after its tests passed on the release commit. The console
+# is tested here, as CI does not test it.
 
 on:
-  push:
-    tags:
-      - "v*"
+  # Called by CI (ci.yml) when the tests passed on a commit with a tag v*.
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+
+  # Run by hand: the tag must exist.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release tag (vX.Y.Z)
+        type: string
+        required: true
+
+env:
+  TAG: ${{ inputs.tag }}
 
 permissions:
   contents: write
@@ -29,6 +43,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - uses: actions/setup-go@v5
         with:
@@ -41,10 +57,10 @@ jobs:
           for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
             os="${target%/*}"
             arch="${target#*/}"
-            name="ndb-${GITHUB_REF_NAME}-${os}-${arch}"
+            name="ndb-${TAG}-${os}-${arch}"
 
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build -trimpath \
-              -ldflags "-s -w -X main.version=${GITHUB_REF_NAME#v}" \
+              -ldflags "-s -w -X main.version=${TAG#v}" \
               -o "dist/$name/ndb" ./cmd/ndb
 
             cp LICENSE README.md "dist/$name/"
@@ -57,16 +73,18 @@ jobs:
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --verify-tag
+        run: gh release create "$TAG" dist/* --generate-notes --verify-tag
 
       # Each Go module of the repo gets a tag of its folder on the release
       # commit (sdk/go/vX.Y.Z, sdk/go/ndbredis/vX.Y.Z), so go get finds it.
       # release.sh already set the Go SDK version that ndbredis needs.
       - name: Tag the Go modules
         run: |
+          sha="$(git rev-parse "${TAG}^{commit}")"
+
           for module in sdk/go sdk/go/ndbredis; do
-            git tag "${module}/${GITHUB_REF_NAME}" "$GITHUB_SHA"
-            git push origin "${module}/${GITHUB_REF_NAME}"
+            git tag "${module}/${TAG}" "$sha"
+            git push origin "${module}/${TAG}"
           done
 
   console:
@@ -75,6 +93,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - uses: actions/setup-go@v5
         with:
@@ -104,7 +124,7 @@ jobs:
           for target in linux-x64:linux-amd64 linux-arm64:linux-arm64 darwin-x64:darwin-amd64 darwin-arm64:darwin-arm64; do
             bun_target="${target%%:*}"
             suffix="${target#*:}"
-            name="ndb-ui-${GITHUB_REF_NAME}-${suffix}"
+            name="ndb-ui-${TAG}-${suffix}"
 
             mkdir "release/$name"
 
@@ -121,4 +141,4 @@ jobs:
         working-directory: console
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" release/* --clobber
+        run: gh release upload "$TAG" release/* --clobber

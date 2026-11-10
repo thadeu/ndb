@@ -9,10 +9,9 @@
 # The Makefile calls it: make tag patch, make tag minor, make tag major.
 # --yes (make tag patch YES=1) pushes without asking, for scripts and agents.
 #
-# The tag goes out only when CI passed on the release commit: the script
-# pushes main, waits for that CI run with gh (on this machine, no Actions
-# minutes), then pushes the tag. release.yml and publish.yml do not run the
-# tests again. --no-wait (NO_WAIT=1) pushes the tag at once.
+# The script pushes main and the tag, and ends. CI tests the release
+# commit, and when the tests pass it runs the release (release.yml,
+# ghcr.yml, publish.yml) for that tag. A failed CI publishes nothing.
 
 set -eu
 
@@ -21,7 +20,6 @@ cd "$(dirname "$0")/.."
 bump="${1:-patch}"
 dry=""
 yes=""
-nowait=""
 
 [ $# -gt 0 ] && shift
 
@@ -29,7 +27,6 @@ for arg in "$@"; do
   case "$arg" in
     --dry-run) dry=1 ;;
     --yes | -y) yes=1 ;;
-    --no-wait) nowait=1 ;;
   esac
 done
 
@@ -40,43 +37,6 @@ case "$bump" in
     exit 2
     ;;
 esac
-
-# wait_ci waits for the CI run of the commit sha and stops the release when
-# it fails. The tag is then not pushed; main is.
-wait_ci() {
-  sha="$1"
-
-  if ! command -v gh >/dev/null 2>&1; then
-    echo "release: gh is not installed: cannot wait for CI. Push the tag when CI passes: git push origin v$next" >&2
-    exit 1
-  fi
-
-  echo "release: waiting for CI on ${sha%"${sha#???????}"} (the tag goes out when it passes)..."
-
-  run=""
-  tries=0
-
-  while [ -z "$run" ] && [ "$tries" -lt 30 ]; do
-    run="$(gh run list --workflow CI --commit "$sha" --limit 1 --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null || true)"
-
-    [ -n "$run" ] || sleep 5
-
-    tries=$((tries + 1))
-  done
-
-  if [ -z "$run" ]; then
-    echo "release: no CI run for $sha after 150 s. Push the tag when CI passes: git push origin v$next" >&2
-    exit 1
-  fi
-
-  if ! gh run watch "$run" --exit-status --interval 30 >/dev/null; then
-    echo "release: CI failed on the release commit: the tag v$next is not pushed." >&2
-    echo "release: fix main, then: git tag -f v$next <commit> && git push origin v$next (or make a new patch release)." >&2
-    exit 1
-  fi
-
-  echo "release: CI passed."
-}
 
 # fail stops the release. A dry run only warns and goes on.
 fail() {
@@ -203,12 +163,9 @@ fi
 
 if [ "$answer" = "y" ] || [ "$answer" = "Y" ]; then
   git push origin main
-
-  if [ -z "$nowait" ]; then
-    wait_ci "$(git rev-parse HEAD)"
-  fi
-
   git push origin "v$next"
+
+  echo "release: pushed. CI tests the commit, then publishes v$next: gh run watch \$(gh run list --workflow CI --limit 1 --json databaseId --jq '.[0].databaseId')"
 
   exit 0
 fi

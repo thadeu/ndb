@@ -2,15 +2,27 @@ name: publish
 
 # The SDK packages of a release, on their registries: the gems ndb and
 # ndb-rails on rubygems.org, and @thadeu/ndb on npm. The jobs run at the
-# same time. There are no tests here: CI tested the release commit, and
-# scripts/release.sh pushes the tag only when that CI run passed.
+# same time. There are no tests here: CI calls this workflow only after its
+# tests passed on the release commit.
 
 on:
-  push:
-    tags: ['v*']
-  # Run by hand to finish a release whose push stopped halfway (a version
-  # that is already on the registry is skipped).
+  # Called by CI (ci.yml) when the tests passed on a commit with a tag v*.
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+
+  # Run by hand: the tag must exist.
   workflow_dispatch:
+    inputs:
+      tag:
+        description: The release tag (vX.Y.Z)
+        type: string
+        required: true
+
+env:
+  TAG: ${{ inputs.tag }}
 
 permissions:
   contents: read
@@ -33,16 +45,17 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.4"
 
       - name: Check the versions match the tag
-        if: github.event_name == 'push'
         run: |
-          test "v$(ruby -Isdk/ruby/lib -rndb/version -e 'puts Ndb::VERSION')" = "$GITHUB_REF_NAME"
-          test "v$(ruby -Isdk/rails/lib -rndb/rails/version -e 'puts Ndb::Rails::VERSION')" = "$GITHUB_REF_NAME"
+          test "v$(ruby -Isdk/ruby/lib -rndb/version -e 'puts Ndb::VERSION')" = "$TAG"
+          test "v$(ruby -Isdk/rails/lib -rndb/rails/version -e 'puts Ndb::Rails::VERSION')" = "$TAG"
 
       - name: Build
         run: |
@@ -73,6 +86,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - uses: pnpm/action-setup@v4
         with:
@@ -87,9 +102,8 @@ jobs:
           cache-dependency-path: sdk/ts/pnpm-lock.yaml
 
       - name: Check the version matches the tag
-        if: github.event_name == 'push'
         working-directory: sdk/ts
-        run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+        run: test "v$(node -p "require('./package.json').version")" = "$TAG"
 
       - name: Install
         working-directory: sdk/ts

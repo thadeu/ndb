@@ -13,7 +13,9 @@ One tag `vX.Y.Z` releases everything. Version 0.1.0 is used in all packages.
 | npm | `@thadeu/ndb` | `publish.yml` (job `npm`, at the same time as `gems`) |
 | Docs site | Cloudflare Pages (project `ndb-docs`, via wrangler) | `docs.yml` (only when the site changes; run it by hand to show a new version at once) |
 
-**The tests run once, in CI** (`ci.yml`, on every push to `main` and every pull request). `make tag` pushes `main`, waits on this machine for the CI run of the release commit (`gh run watch`, no Actions minutes), and pushes the tag only when it passed. So `release.yml`, `ghcr.yml` and `publish.yml` do not test again; only the console is tested in `release.yml`, as CI does not test it. `NO_WAIT=1 make tag patch` pushes the tag without waiting.
+**One run does it all.** `make tag` pushes `main` and the tag, and ends at once. CI (`ci.yml`) tests the release commit; when the tests pass and the commit has a tag `v*`, its last jobs call `release.yml`, `ghcr.yml` and `publish.yml` for that tag, at the same time, in the same run. A failed test publishes nothing. So the tests run once, a push to `main` with no tag runs only the tests, and only the console is tested in `release.yml` (CI does not test it). The run of a release commit is never cancelled by a newer push.
+
+Each of the three can also run by hand (Actions, Run workflow, with the tag), for example to finish a publish that stopped halfway.
 
 ## One-time setup
 
@@ -36,7 +38,7 @@ One tag `vX.Y.Z` releases everything. Version 0.1.0 is used in all packages.
 1. Update the version: `sdk/ts/package.json`, `sdk/ruby/lib/ndb/version.rb`, `sdk/rails/lib/ndb/rails/version.rb`. The publish workflows fail when a version differs from the tag. When the `ndb` minor version changes, update the `ndb` requirement in `sdk/rails/ndb-rails.gemspec`.
 2. Move the `[Unreleased]` entries in `CHANGELOG.md` to the new version with the date.
 3. Run the heavy checks on your machine (CI runs `-short`): `make race` or `make test`, and `make bench` (see [development.md](development.md)).
-4. `make tag patch|minor|major`: it does steps 1 and 2, commits "Release X.Y.Z", pushes `main`, waits for CI and pushes the tag. By hand: `git tag vX.Y.Z && git push origin vX.Y.Z`, after CI passed on that commit.
+4. `make tag patch|minor|major`: it does steps 1 and 2, commits "Release X.Y.Z" and pushes `main` and the tag. CI then tests and publishes. By hand: `git tag vX.Y.Z` on a commit, then `git push origin main vX.Y.Z` (the CI run of a commit with a tag publishes it).
 
 ## Verify
 
@@ -53,4 +55,4 @@ Workflows never run two at a time. CI, docs and the images cancel the run in pro
 
 A tag cannot be reused for a different build. Fix the cause and re-run the failed workflow in GitHub Actions (`publish.yml` can also run by hand: a version already on the registry is skipped).
 
-When `make tag` stops because CI failed on the release commit, `main` has the release commit but the tag is not on origin. Fix the cause on `main`, then make a new patch release, or move the tag to the fixed commit before you push it. If the code must change, use a new patch version. A published npm or gem version cannot be replaced.
+When CI fails on the release commit, nothing is published, but the tag is on origin. Fix the cause on `main` and make a new patch release. If the code must change, use a new patch version. A published npm or gem version cannot be replaced.

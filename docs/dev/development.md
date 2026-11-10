@@ -81,7 +81,7 @@ A push to `main` that changes `docs/`, `docs-site/`, `examples/`, `deploy/` or `
 
 ## Release
 
-`make tag patch|minor|major` pushes the release commit, waits for its CI run and then pushes the tag `vX.Y.Z`. The full checklist is in [releasing.md](releasing.md). The tests run only in CI.
+`make tag patch|minor|major` pushes the release commit and the tag `vX.Y.Z`. CI tests the commit and, when the tests pass, runs `release.yml`, `ghcr.yml` and `publish.yml` for the tag. The full checklist is in [releasing.md](releasing.md).
 
 - `release.yml` builds the static binaries with the version in `-ldflags "-X main.version=..."`, makes tar.gz files and `checksums.txt`, and creates the GitHub release with generated notes.
 - `release.yml` also builds the console binaries and pushes the tags of the Go modules, `sdk/go/vX.Y.Z` and `sdk/go/ndbredis/vX.Y.Z`.

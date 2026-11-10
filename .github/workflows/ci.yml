@@ -1,8 +1,11 @@
 name: ci
 
 # The one place with tests: every push to main and every pull request.
-# scripts/release.sh waits for this run on the release commit before it
-# pushes the tag, so release.yml and publish.yml do not test again.
+# When the tests pass on a commit of main that has a tag v* (the commit
+# "Release X.Y.Z" of make tag), the last jobs run the release: release.yml
+# (binaries, console, Go tags), ghcr.yml (images) and publish.yml (gems,
+# npm), at the same time. So a release is tested once, and make tag does
+# not wait.
 
 on:
   push:
@@ -14,9 +17,10 @@ permissions:
 
 # One run per branch or pull request: a newer push cancels the run in
 # progress.
+# A release commit is never cancelled: its run publishes.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ !startsWith(github.event.head_commit.message, 'Release ') }}
 
 jobs:
   go:
@@ -139,3 +143,57 @@ jobs:
 
       - name: shellcheck
         run: shellcheck install.sh uninstall.sh
+
+  # The release tag of this commit, when it has one. make tag pushes main
+  # and the tag together, so the tag is there when the tests end.
+  tag:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [go, ruby, ts, shellcheck]
+    runs-on: ubuntu-latest
+
+    outputs:
+      tag: ${{ steps.find.outputs.tag }}
+
+    steps:
+      - name: Find the tag v* of the commit
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # make tag makes a light tag: its ref points at the commit.
+          tag="$(gh api "repos/${{ github.repository }}/git/matching-refs/tags/v" --paginate --jq '.[] | select(.object.sha == "${{ github.sha }}") | .ref' | sed 's#^refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
+
+          echo "tag: ${tag:-none}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: [tag]
+    if: needs.tag.outputs.tag != ''
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    permissions:
+      contents: write
+    secrets: inherit
+
+  ghcr:
+    needs: [tag]
+    if: needs.tag.outputs.tag != ''
+    uses: ./.github/workflows/ghcr.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    permissions:
+      contents: read
+      packages: write
+    secrets: inherit
+
+  publish:
+    needs: [tag]
+    if: needs.tag.outputs.tag != ''
+    uses: ./.github/workflows/publish.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    permissions:
+      contents: read
+      id-token: write
+    secrets: inherit
