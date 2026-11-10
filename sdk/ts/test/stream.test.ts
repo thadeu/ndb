@@ -352,6 +352,47 @@ describe('stream worker', () => {
     expect((await g.pending()).count).toBe(0)
   })
 
+  it('buries an own pending entry that a crash left at the limit, without the handler', async () => {
+    const s = orders()
+    const g = s.group('workers')
+
+    await g.create(startAll)
+
+    const ids = await appendOrders(s, 9, 9)
+
+    await g.read('w1')
+
+    const deadName = `${s.name}_dead`
+    const ctl = new AbortController()
+    const ran: string[] = []
+
+    let poisoned = 0
+
+    const run = g.work('w1', (e) => void ran.push(e.id), {
+      blockMs: 50,
+      claimIdleMs: -1,
+      maxDeliveries: 1,
+      deadLetter: deadName,
+      signal: ctl.signal,
+      onError: (err) => {
+        if (err instanceof PoisonError) poisoned++
+      },
+    })
+
+    await waitFor(() => poisoned === 1)
+
+    ctl.abort()
+    await run
+
+    expect(ran).toEqual([])
+
+    const dead = await db.stream<DeadEntry>(deadName).range()
+
+    expect(dead.map((e) => e.doc.id)).toEqual([ids[0]])
+    expect(dead[0]!.doc.deliveries).toBe(1)
+    expect((await g.pending()).count).toBe(0)
+  })
+
   it('starts with its own pending entries', async () => {
     const s = orders()
     const g = s.group('workers')

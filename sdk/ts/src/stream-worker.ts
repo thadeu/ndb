@@ -183,7 +183,24 @@ async function workPending<T>(g: Group<T>, consumer: string, h: Handler<T>, w: S
       return
     }
 
-    await handle(g, h, w, entries, await pendingCounts(g, consumer, w, entries))
+    const counts = await pendingCounts(g, consumer, w, entries)
+    const todo: Entry<T>[] = []
+
+    for (const e of entries) {
+      const n = counts.get(e.id) ?? 1
+
+      // Delivered maxDeliveries times with no ack: the process stopped in
+      // the handler (a crash, a kill). Do not run it again.
+      if (w.maxDeliveries > 0 && n > w.maxDeliveries && !e.deleted) {
+        await bury(g, w, e, n - 1)
+
+        continue
+      }
+
+      todo.push(e)
+    }
+
+    await handle(g, h, w, todo, counts)
 
     after = entries[entries.length - 1]!.id
   }

@@ -633,6 +633,7 @@ Notes:
   - `signal`: an `AbortSignal` that stops the worker. Without it, the worker runs forever.
 - Stop: abort the signal. The abort also ends a blocked read. The acks of the work that is done are still sent.
 - Poison message: an entry that fails on its `maxDeliveries`-th delivery. At that failure, when `deadLetter` is set, the worker appends a `DeadEntry` to that stream: `{ stream, group, id, deliveries, doc }`. Then it acks the entry, and `onError` gets a `PoisonError` (with `id` and `deliveries`). Without `deadLetter`, the entry is only acked and reported.
+- An own pending entry at start with more than `maxDeliveries` deliveries was left by a process that stopped in the handler (a crash, a kill). The worker sends it to the dead letter without the handler, so a poison entry that kills the process does not run forever.
 - A `deleted` entry (trimmed or deleted while pending) is acked without the handler.
 - Delivery is at least once. Make the work safe to repeat.
 - To share the work, run many workers with different consumer names in the same group.
