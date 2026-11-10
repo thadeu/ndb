@@ -1,0 +1,107 @@
+{
+  "name": "no number: $sum is 0, $avg, $min and $max are null",
+  "collection": "calls",
+  "setup": {
+    "catalog": {
+      "time": "ts",
+      "write": "engine",
+      "indexes": [
+        "status"
+      ]
+    },
+    "writes": [
+      {
+        "op": "bulk",
+        "body": {
+          "docs": [
+            {
+              "_id": "c1",
+              "status": "answered",
+              "dur": 10,
+              "queue": "sales",
+              "ts": "2026-11-01T10:15:00Z",
+              "tags": [
+                "a"
+              ]
+            },
+            {
+              "_id": "c2",
+              "status": "answered",
+              "dur": 20,
+              "queue": "sales",
+              "ts": "2026-11-01T10:45:00Z"
+            },
+            {
+              "_id": "c3",
+              "status": "missed",
+              "dur": null,
+              "queue": "sales",
+              "ts": "2026-11-01T11:05:00Z"
+            },
+            {
+              "_id": "c4",
+              "status": "answered",
+              "dur": 30,
+              "queue": "support",
+              "ts": "2026-11-02T09:00:00Z"
+            },
+            {
+              "_id": "c5",
+              "status": "missed",
+              "queue": "support",
+              "ts": "2026-11-02T09:30:00Z"
+            },
+            {
+              "_id": "c6",
+              "status": "abandoned",
+              "dur": "n/a",
+              "queue": "support",
+              "ts": "2026-11-03T23:30:00Z"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "request": {
+    "op": "aggregate",
+    "body": {
+      "pipeline": [
+        {
+          "$match": {
+            "status": "missed"
+          }
+        },
+        {
+          "$group": {
+            "_id": null,
+            "sum": {
+              "$sum": "$dur"
+            },
+            "avg": {
+              "$avg": "$dur"
+            },
+            "lo": {
+              "$min": "$nope"
+            },
+            "hi": {
+              "$max": "$nope"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "expect": {
+    "ordered": false,
+    "rows": [
+      {
+        "_id": null,
+        "sum": 0,
+        "avg": null,
+        "lo": null,
+        "hi": null
+      }
+    ]
+  }
+}

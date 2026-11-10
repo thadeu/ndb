@@ -1,0 +1,53 @@
+{
+  "name": "on another field a now string is a plain string",
+  "collection": "events",
+  "setup": {
+    "catalog": {
+      "write": "engine",
+      "time": "at"
+    },
+    "writes": [
+      {
+        "op": "bulk",
+        "body": {
+          "docs": [
+            {
+              "_id": "e1",
+              "at": "2020-01-01T00:00:00Z",
+              "note": "now-1h"
+            },
+            {
+              "_id": "e2",
+              "at": "2099-01-01T00:00:00Z",
+              "note": "x"
+            },
+            {
+              "_id": "e3",
+              "at": "2020-06-01T12:00:00+02:00",
+              "note": "y"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "request": {
+    "op": "search",
+    "body": {
+      "query": {
+        "note": "now-1h"
+      },
+      "fields": [
+        "_id"
+      ]
+    }
+  },
+  "expect": {
+    "ordered": false,
+    "rows": [
+      {
+        "_id": "e1"
+      }
+    ]
+  }
+}
