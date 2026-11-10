@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-11-10
+
 ### Added
 
 - **Rails: `perform_now`** on a consumer class (`PostCallJob.perform_now(call_id: 42)`) runs `perform` on one payload now, with no request, through the reloader, `around_perform` and `discard_on`, and returns the value of `perform`. `_id:` and `_deliveries:` set `event.id` and `event.deliveries`.
@@ -614,7 +616,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.15.0...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.16.0...HEAD
+[1.16.0]: https://github.com/thadeu/ndb/compare/v1.15.0...v1.16.0
 [1.15.0]: https://github.com/thadeu/ndb/compare/v1.14.0...v1.15.0
 [1.14.0]: https://github.com/thadeu/ndb/compare/v1.13.2...v1.14.0
 [1.13.2]: https://github.com/thadeu/ndb/compare/v1.13.1...v1.13.2
