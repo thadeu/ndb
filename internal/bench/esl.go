@@ -347,8 +347,9 @@ type daemon struct {
 	// that reads big direct files answers only when it has read them.
 	ready time.Duration
 
-	cmd  *exec.Cmd
-	http *http.Client
+	cmd    *exec.Cmd
+	http   *http.Client
+	stderr *tail
 
 	mu   sync.Mutex
 	peak int64
@@ -374,8 +375,15 @@ func (d *daemon) start() {
 
 	os.Remove(d.sock())
 
-	d.cmd = exec.Command(*bin, "-config", filepath.Join(d.dir, "ndb.yml"), "-data-dir", filepath.Join(d.dir, "data"), "-unix", d.sock())
-	d.cmd.Stderr = io.Discard
+	// -tcp "": no TCP listener. A daemon of a user install listens on
+	// 127.0.0.1:7070 by default, so two daemons (two phases, or one of the
+	// user) would fight for the port, and the second one would not start.
+	d.cmd = exec.Command(*bin, "-config", filepath.Join(d.dir, "ndb.yml"), "-data-dir", filepath.Join(d.dir, "data"), "-unix", d.sock(), "-tcp", "")
+
+	// The last lines of stderr say why a daemon did not start.
+	d.stderr = &tail{max: 4096}
+	d.cmd.Stderr = d.stderr
+
 	check(d.cmd.Start())
 
 	d.http = &http.Client{Transport: &http.Transport{
@@ -393,6 +401,11 @@ func (d *daemon) start() {
 
 	// A daemon that did not answer in time is not left running.
 	d.kill()
+
+	if why := strings.TrimSpace(d.stderr.String()); why != "" {
+		check(fmt.Errorf("the daemon did not start:\n%s", why))
+	}
+
 	check(errors.New("the daemon did not start"))
 }
 
@@ -1204,4 +1217,31 @@ func check(err error) {
 	if err != nil {
 		panic(failure{err})
 	}
+}
+
+// tail keeps the last max bytes written to it (the stderr of a daemon).
+type tail struct {
+	mu  sync.Mutex
+	max int
+	buf []byte
+}
+
+func (t *tail) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.buf = append(t.buf, p...)
+
+	if over := len(t.buf) - t.max; over > 0 {
+		t.buf = t.buf[over:]
+	}
+
+	return len(p), nil
+}
+
+func (t *tail) String() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	return string(t.buf)
 }
