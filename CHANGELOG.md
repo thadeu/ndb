@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Streams: a nacked entry could come back up to 1 ms before its `delay_ms`, because the retry time was the millisecond of now plus the delay. It is now rounded up to the next millisecond, so no entry comes before its wait (`TestNackConcurrentWorkers` caught it on the CI runner).
+
 ## [1.17.0] - 2026-11-10
 
 ## [1.16.0] - 2026-11-10

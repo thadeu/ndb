@@ -1967,8 +1967,11 @@ func (s *Service) Nack(ctx context.Context, name, g string, o NackOptions) (int,
 
 		st.mu.Unlock()
 
-		// max: 0 is "no retry", so a nack at unix 0 still marks the entry.
-		retryAt := max(s.now().UnixMilli()+o.DelayMs, 1)
+		// The retry time is rounded up to the next millisecond: the checks
+		// use the millisecond of now, so a rounded-down time could give the
+		// entry up to 1 ms before the wait. max: 0 is "no retry", so a nack
+		// at unix 0 still marks the entry.
+		retryAt := max((s.now().UnixNano()+o.DelayMs*int64(time.Millisecond)+int64(time.Millisecond)-1)/int64(time.Millisecond), 1)
 		n, err := nackIn(store, g, o.Consumer, keys, retryAt)
 
 		if errors.Is(err, bolt.ErrDatabaseNotOpen) {
