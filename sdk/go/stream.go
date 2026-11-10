@@ -261,7 +261,8 @@ func (s *Stream[T]) Groups(ctx context.Context) ([]GroupInfo, error) {
 
 // Range returns up to count entries with an ID from start to end, both
 // included, in ID order (XRANGE). "-" and "+" are the lowest and the
-// highest ID. count 0 means the default of _search.
+// highest ID; "(id" leaves that ID out. count 0 means the default of
+// _search.
 func (s *Stream[T]) Range(ctx context.Context, start, end string, count int) ([]Entry[T], error) {
 	return s.rangeOf(ctx, start, end, count, 1)
 }
@@ -272,8 +273,11 @@ func (s *Stream[T]) RevRange(ctx context.Context, end, start string, count int) 
 }
 
 func (s *Stream[T]) rangeOf(ctx context.Context, start, end string, count, order int) ([]Entry[T], error) {
+	lowOp, low := rangeBound(start, "$gte", "$gt")
+	highOp, high := rangeBound(end, "$lte", "$lt")
+
 	body := map[string]any{
-		"query": map[string]any{"_id": map[string]any{"$gte": start, "$lte": end}},
+		"query": map[string]any{"_id": map[string]any{lowOp: low, highOp: high}},
 		"sort":  map[string]any{"_id": order},
 	}
 
@@ -282,6 +286,48 @@ func (s *Stream[T]) rangeOf(ctx context.Context, start, end string, count, order
 	}
 
 	return s.rows(ctx, "_search", body)
+}
+
+// rangeBound gives the operator and the ID of one end of a range: "(id"
+// leaves the ID out, as in Redis.
+func rangeBound(id, included, excluded string) (string, string) {
+	if rest, ok := strings.CutPrefix(id, "("); ok {
+		return excluded, rest
+	}
+
+	return included, id
+}
+
+// Tail says what Stream.Tail gives.
+type Tail struct {
+	// After gives the entries with an ID greater than this one. The default
+	// is "0", the start of the stream. StartNew ("$") is the last ID when
+	// the call starts: only later entries come.
+	After string `json:"after,omitempty"`
+
+	// Count is the most entries to give: default 10, at most 10 000.
+	Count int `json:"count,omitempty"`
+
+	// Block waits up to this long for a new entry when there is none.
+	Block time.Duration `json:"-"`
+
+	// Fields gives only these fields (and _id).
+	Fields []string `json:"fields,omitempty"`
+}
+
+type tailBody struct {
+	Tail
+	BlockMs int64 `json:"block_ms,omitempty"`
+}
+
+// Tail gives the entries after t.After, in ID order, without a group
+// (XREAD). It changes no group and no pending list. An empty answer is an
+// empty slice. To read on, send the ID of the last entry as After; do not
+// send StartNew again, or an entry appended between two calls is lost.
+func (s *Stream[T]) Tail(ctx context.Context, t Tail) ([]Entry[T], error) {
+	body := tailBody{Tail: t, BlockMs: t.Block.Milliseconds()}
+
+	return s.rows(ctx, "_streams/read", body)
 }
 
 // Delete removes one entry by ID (XDEL) and returns 1, or 0 when it is not
@@ -425,10 +471,30 @@ func (g *Group[T]) path(parts ...string) string {
 	return p
 }
 
+// GroupOption changes a Group.Create.
+type GroupOption func(*groupBody)
+
+// GroupNoCreate makes Group.Create fail with ErrUnknownCollection when the
+// stream does not exist (XGROUP CREATE without MKSTREAM).
+func GroupNoCreate() GroupOption {
+	return func(b *groupBody) { b.NoCreate = true }
+}
+
+type groupBody struct {
+	Start    string `json:"start"`
+	NoCreate bool   `json:"no_create,omitempty"`
+}
+
 // Create makes the group (XGROUP CREATE ... MKSTREAM). start is StartNew,
 // StartAll or an ID. A group that exists: ErrGroupExists.
-func (g *Group[T]) Create(ctx context.Context, start string) error {
-	return g.s.call(ctx, http.MethodPut, g.path(), map[string]any{"start": start}, nil)
+func (g *Group[T]) Create(ctx context.Context, start string, opts ...GroupOption) error {
+	body := groupBody{Start: start}
+
+	for _, opt := range opts {
+		opt(&body)
+	}
+
+	return g.s.call(ctx, http.MethodPut, g.path(), body, nil)
 }
 
 // Ensure makes the group, or does nothing when it exists.
@@ -633,6 +699,7 @@ type claimBody struct {
 	IDs       []string `json:"ids,omitempty"`
 	Cursor    string   `json:"cursor,omitempty"`
 	Count     int      `json:"count,omitempty"`
+	JustIDs   bool     `json:"just_ids,omitempty"`
 }
 
 // Claim moves the entries idle for at least minIdle to consumer (XCLAIM).
@@ -677,6 +744,55 @@ func (g *Group[T]) claim(ctx context.Context, body claimBody) (Claimed[T], error
 		}
 
 		c.Entries = append(c.Entries, e)
+	}
+
+	return c, nil
+}
+
+// ClaimedIDs is the answer of ClaimIDs and AutoClaimIDs.
+type ClaimedIDs struct {
+	// Cursor is where the next AutoClaimIDs starts; "0-0" when the scan is
+	// complete. Empty for ClaimIDs.
+	Cursor string
+
+	IDs []string
+
+	// Deleted: pending IDs whose entry is no longer in the stream. They
+	// left the pending list.
+	Deleted []string
+}
+
+// ClaimIDs is Claim that gives only the IDs (XCLAIM ... JUSTID). The
+// delivery count of the entries does not change.
+func (g *Group[T]) ClaimIDs(ctx context.Context, consumer string, minIdle time.Duration, ids ...string) (ClaimedIDs, error) {
+	return g.claimIDs(ctx, claimBody{Consumer: consumer, MinIdleMs: minIdle.Milliseconds(), IDs: ids, JustIDs: true})
+}
+
+// AutoClaimIDs is AutoClaim that gives only the IDs (XAUTOCLAIM ...
+// JUSTID). The delivery count of the entries does not change.
+func (g *Group[T]) AutoClaimIDs(ctx context.Context, consumer string, minIdle time.Duration, cursor string, count int) (ClaimedIDs, error) {
+	if cursor == "" {
+		cursor = "0-0"
+	}
+
+	return g.claimIDs(ctx, claimBody{Consumer: consumer, MinIdleMs: minIdle.Milliseconds(), Cursor: cursor, Count: count, JustIDs: true})
+}
+
+func (g *Group[T]) claimIDs(ctx context.Context, body claimBody) (ClaimedIDs, error) {
+	var out struct {
+		Cursor  *string  `json:"cursor"`
+		Entries []string `json:"entries"`
+		Deleted []string `json:"deleted"`
+	}
+
+	if err := g.s.call(ctx, http.MethodPost, g.path("claim"), body, &out); err != nil {
+		return ClaimedIDs{}, err
+	}
+
+	c := ClaimedIDs{IDs: out.Entries, Deleted: out.Deleted}
+
+	if out.Cursor != nil {
+		c.Cursor = *out.Cursor
 	}
 
 	return c, nil

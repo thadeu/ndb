@@ -500,3 +500,158 @@ func waitFor(t *testing.T, ok func() bool) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+func TestStreamTail(t *testing.T) {
+	s, ctx := testStream(t)
+	ids := appendOrders(t, ctx, s, 1, 5)
+
+	all, err := s.Tail(ctx, Tail{})
+
+	if err != nil || len(all) != 5 || all[0].ID != ids[0] || all[4].Doc.Order != 5 {
+		t.Fatalf("tail = %+v, %v", all, err)
+	}
+
+	page, err := s.Tail(ctx, Tail{After: ids[1], Count: 2})
+
+	if err != nil || len(page) != 2 || page[0].ID != ids[2] || page[1].ID != ids[3] {
+		t.Fatalf("tail after = %+v, %v", page, err)
+	}
+
+	only, err := s.Tail(ctx, Tail{After: ids[3], Fields: []string{"order"}})
+
+	if err != nil || len(only) != 1 || only[0].Doc.Order != 5 || only[0].Doc.Total != 0 {
+		t.Fatalf("tail fields = %+v, %v", only, err)
+	}
+
+	none, err := s.Tail(ctx, Tail{After: StartNew})
+
+	if err != nil || len(none) != 0 {
+		t.Fatalf("tail $ = %+v, %v", none, err)
+	}
+
+	// A tail changes no group: the pending list stays empty.
+	g := s.Group("workers")
+
+	if err := g.Create(ctx, StartAll); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.Tail(ctx, Tail{}); err != nil {
+		t.Fatal(err)
+	}
+
+	sum, err := g.Pending(ctx)
+
+	if err != nil || sum.Count != 0 {
+		t.Fatalf("pending = %+v, %v", sum, err)
+	}
+}
+
+func TestStreamTailBlocksUntilAnAppend(t *testing.T) {
+	s, ctx := testStream(t)
+
+	appendOrders(t, ctx, s, 1, 1)
+
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+
+		s.Append(ctx, SOrder{Order: 7})
+	}()
+
+	start := time.Now()
+
+	got, err := s.Tail(ctx, Tail{After: StartNew, Block: 5 * time.Second})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(got) != 1 || got[0].Doc.Order != 7 || time.Since(start) > 4*time.Second {
+		t.Fatalf("tail = %+v after %v", got, time.Since(start))
+	}
+
+	empty, err := s.Tail(ctx, Tail{After: got[0].ID, Block: 50 * time.Millisecond})
+
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("empty tail = %+v, %v", empty, err)
+	}
+}
+
+func TestStreamReadsThatWaitUseTheWatchClient(t *testing.T) {
+	for path, want := range map[string]bool{
+		"/orders/_streams/read":               true,
+		"/orders/_streams/groups/g/read":      true,
+		"/orders/_streams/groups/read/ack":    false,
+		"/orders/_streams/groups/g/consumers": false,
+		"/orders/_search":                     false,
+	} {
+		if got := isStreamRead(path); got != want {
+			t.Errorf("isStreamRead(%q) = %v, want %v", path, got, want)
+		}
+	}
+}
+
+func TestStreamRangeWithoutAnEnd(t *testing.T) {
+	s, ctx := testStream(t)
+	ids := appendOrders(t, ctx, s, 1, 4)
+
+	up, err := s.Range(ctx, "("+ids[0], "("+ids[3], 0)
+
+	if err != nil || len(up) != 2 || up[0].ID != ids[1] || up[1].ID != ids[2] {
+		t.Fatalf("range = %+v, %v", up, err)
+	}
+
+	down, err := s.RevRange(ctx, "("+ids[3], "-", 1)
+
+	if err != nil || len(down) != 1 || down[0].ID != ids[2] {
+		t.Fatalf("revrange = %+v, %v", down, err)
+	}
+}
+
+func TestStreamGroupNoCreate(t *testing.T) {
+	s, ctx := testStream(t)
+	g := s.Group("workers")
+
+	if err := g.Create(ctx, StartNew, GroupNoCreate()); !errors.Is(err, ErrUnknownCollection) {
+		t.Fatalf("create = %v, want unknown_collection", err)
+	}
+
+	appendOrders(t, ctx, s, 1, 1)
+
+	if err := g.Create(ctx, StartNew, GroupNoCreate()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStreamClaimIDs(t *testing.T) {
+	s, ctx := testStream(t)
+	ids := appendOrders(t, ctx, s, 1, 3)
+	g := s.Group("workers")
+
+	if err := g.Create(ctx, StartAll); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := g.Read(ctx, "w1", Read{}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := g.ClaimIDs(ctx, "w2", 0, ids[0], ids[1])
+
+	if err != nil || len(got.IDs) != 2 || got.IDs[0] != ids[0] || got.Cursor != "" {
+		t.Fatalf("claim ids = %+v, %v", got, err)
+	}
+
+	scan, err := g.AutoClaimIDs(ctx, "w3", 0, "", 10)
+
+	if err != nil || len(scan.IDs) != 3 || scan.Cursor != "0-0" {
+		t.Fatalf("autoclaim ids = %+v, %v", scan, err)
+	}
+
+	// JUSTID does not count as a delivery.
+	list, err := g.PendingList(ctx, PendingQuery{})
+
+	if err != nil || len(list) != 3 || list[0].Consumer != "w3" || list[0].Deliveries != 1 {
+		t.Fatalf("pending = %+v, %v", list, err)
+	}
+}

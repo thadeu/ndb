@@ -383,11 +383,30 @@ The calls one by one, when you need your own loop:
 | `XACK` | `g.Ack(ctx, ids...)` |
 | `XPENDING` | `g.Pending(ctx)` / `g.PendingList(ctx, ndb.PendingQuery{Idle: time.Minute})` |
 | `XCLAIM` / `XAUTOCLAIM` | `g.Claim(ctx, "w2", time.Minute, ids...)` / `g.AutoClaim(ctx, "w2", time.Minute, "0-0", 100)` |
+| `XCLAIM` / `XAUTOCLAIM ... JUSTID` | `g.ClaimIDs(ctx, "w2", time.Minute, ids...)` / `g.AutoClaimIDs(ctx, "w2", time.Minute, "0-0", 100)` |
+| `XREAD` | `orders.Tail(ctx, ndb.Tail{After: lastID, Count: 100, Block: 5 * time.Second})` |
+| `XGROUP CREATE` without `MKSTREAM` | `g.Create(ctx, ndb.StartNew, ndb.GroupNoCreate())` |
 | `XTRIM` | `orders.Trim(ctx, ndb.MaxLen(1000, false))` |
 | `XDEL` | `orders.Delete(ctx, id)` |
 | `XINFO GROUPS` / `CONSUMERS` | `orders.Groups(ctx)` / `g.Consumers(ctx)` |
 
-A blocked `Read` does not count against `WithMaxConns`.
+A blocked `Read` or `Tail` does not count against `WithMaxConns`.
+
+`Tail` reads without a group: it changes no group and no pending list. `After`
+is an ID (default `"0"`, the start) or `ndb.StartNew` (`$`): only the entries
+appended after the call starts. To read on, send the ID of the last entry as
+`After`. In `Range` and `RevRange`, `"(id"` leaves that ID out, as in Redis.
+
+### The commands of go-redis
+
+An app that uses Redis Streams with go-redis can keep its calls: the module
+[`ndbredis`](ndbredis/README.md) has the stream methods of go-redis v9
+(`XAdd`, `XReadGroup`, `XAck`, ...) on ndb streams. It is a module of its own,
+so this SDK stays without dependencies.
+
+```go
+streams := ndbredis.New(db) // a redis.StreamCmdable
+```
 
 ## Blobs
 
