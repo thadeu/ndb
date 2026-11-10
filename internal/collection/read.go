@@ -1133,9 +1133,69 @@ func copyPath(dst, src map[string]any, parts []string) {
 	copyPath(child, sub, parts[1:])
 }
 
-// withVersion adds "_v" as the first field of the doc object.
+// withVersion adds "_v" as the first field of the doc object. A "_v" that
+// the stored doc holds (written before it was refused) is dropped, so the
+// answer never has two.
 func withVersion(doc json.RawMessage, v uint64) json.RawMessage {
-	return prependField(doc, "_v", strconv.AppendUint(nil, v, 10))
+	return prependField(dropTopField(doc, versionField), versionField, strconv.AppendUint(nil, v, 10))
+}
+
+// dropTopField removes the top-level key of the doc object and keeps the
+// order and the bytes of the other fields. A doc without the key, or one
+// that does not decode, comes back as it is.
+func dropTopField(doc json.RawMessage, key string) json.RawMessage {
+	if !bytes.Contains(doc, []byte(strconv.Quote(key))) {
+		return doc
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(doc))
+
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return doc
+	}
+
+	first := true
+
+	for dec.More() {
+		start := dec.InputOffset()
+
+		tok, err := dec.Token()
+
+		if err != nil {
+			return doc
+		}
+
+		var val json.RawMessage
+
+		if err := dec.Decode(&val); err != nil {
+			return doc
+		}
+
+		end := dec.InputOffset()
+
+		if tok != key {
+			first = false
+
+			continue
+		}
+
+		// The cut of the first field takes the comma after it; the cut of
+		// another field starts at the comma before it.
+		if first {
+			rest := bytes.TrimLeft(doc[end:], " \t\r\n")
+
+			if len(rest) > 0 && rest[0] == ',' {
+				end = int64(len(doc) - len(rest) + 1)
+			}
+		}
+
+		out := make(json.RawMessage, 0, len(doc))
+		out = append(out, doc[:start]...)
+
+		return append(out, doc[end:]...)
+	}
+
+	return doc
 }
 
 // prependField adds key with the JSON value val as the first field of the

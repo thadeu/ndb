@@ -336,6 +336,7 @@ func TestContractEveryRouteMethodNotAllowed(t *testing.T) {
 		{"/_backup", []string{"POST"}},
 		{"/_restore", []string{"POST"}},
 		{"/_pitr", []string{"GET"}},
+		{"/_log", []string{"GET", "PUT"}},
 		{"/_blobs", []string{"POST"}},
 		{"/_blobs/sha256:00", []string{"GET"}},
 		{"/c", []string{"PUT", "GET", "DELETE"}},
@@ -499,8 +500,6 @@ func TestContractNotReadyDuringRecovery(t *testing.T) {
 // "On shutdown, new calls get 503 closed": once the engine is closed, a
 // write must not be applied.
 func TestContractWriteAfterCloseIsClosed(t *testing.T) {
-	t.Skip("BUG: after engine.Close a write recreates the collection (GetOrCreate) and answers 200, not 503 closed")
-
 	db, err := engine.Open(config.Config{DataDir: t.TempDir(), AllowImplicit: true}, slog.Default())
 
 	if err != nil {
@@ -674,8 +673,6 @@ func TestContractBlobGet(t *testing.T) {
 // A Range out of the blob is an error, and "every error has the same
 // body" (errors.md).
 func TestContractBlobBadRangeHasErrorBody(t *testing.T) {
-	t.Skip("BUG: GET /_blobs/{ref} with an unsatisfiable Range answers 416 with a text/plain body, not the JSON error body")
-
 	c := unixServer(t)
 
 	_, body := do(t, c, "POST", "/_blobs", "0123456789", nil)
@@ -780,8 +777,6 @@ func TestContractTokenOnEverySystemRoute(t *testing.T) {
 // The scheme of an Authorization header is case-insensitive (RFC 9110
 // 11.1), so "bearer <token>" is the same as "Bearer <token>".
 func TestContractBearerSchemeIsCaseInsensitive(t *testing.T) {
-	t.Skip("BUG: the auth accepts only the exact prefix \"Bearer \"; \"bearer <token>\" is 401")
-
 	_, tcp, addr := tokenServer(t, "s3cret")
 
 	for _, scheme := range []string{"bearer", "BEARER"} {

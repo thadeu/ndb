@@ -1,12 +1,14 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/thadeu/ndb/internal/catalog"
+	"github.com/thadeu/ndb/internal/collection"
 	"github.com/thadeu/ndb/internal/query"
 )
 
@@ -51,43 +53,115 @@ func (db *DB) Partitions(def catalog.Def, live bool, now time.Time) []string {
 // PartitionFor returns the partition that holds a document by its time
 // field, and creates it when it is new.
 func (db *DB) PartitionFor(def catalog.Def, doc []byte) (*Collection, error) {
-	at, err := docTime(def.Time, doc)
+	name, err := PartitionName(def, doc)
+
 	if err != nil {
 		return nil, err
 	}
 
-	return db.PartitionAt(def, at)
+	return db.Partition(def, name)
+}
+
+// PartitionName is the name of the partition of a document, from its time
+// field. It creates nothing.
+func PartitionName(def catalog.Def, doc []byte) (string, error) {
+	at, err := docTime(def.Time, doc)
+
+	if err != nil {
+		return "", err
+	}
+
+	return def.Name + "-" + PeriodOf(def.PartitionBy, at), nil
 }
 
 // PartitionAt returns the partition of the period of at, created when new.
 func (db *DB) PartitionAt(def catalog.Def, at time.Time) (*Collection, error) {
-	name := def.Name + "-" + PeriodOf(def.PartitionBy, at)
+	return db.Partition(def, def.Name+"-"+PeriodOf(def.PartitionBy, at))
+}
+
+// Partition returns the partition name of def, created when new. A
+// collection with that name that is not a partition of def is
+// catalog_conflict: its documents are not in the reads of def.
+func (db *DB) Partition(def catalog.Def, name string) (*Collection, error) {
+	if err := db.checkPartition(def, name); err != nil {
+		return nil, err
+	}
 
 	if col, err := db.Get(name); err == nil {
 		return col, nil
 	}
 
-	part := def
-	part.Name, part.PartitionBy, part.PartitionOf = name, "", def.Name
-	part.OpsFromYAML = false
-
-	if _, err := db.Ensure(part); err != nil {
+	if _, err := db.ensure(catalog.PartitionDef(def, name)); err != nil {
 		return nil, err
 	}
 
 	return db.Get(name)
 }
 
-// EnsurePartitioned declares a logical collection and gives its indexes to
-// the partitions it already has.
+// checkPartition fails when name exists and is not a partition of def.
+func (db *DB) checkPartition(def catalog.Def, name string) error {
+	pdef, ok := db.cat.Get(name)
+
+	if ok && pdef.PartitionOf != def.Name {
+		return fmt.Errorf("%w: %s is a collection, not a partition of %s: rename or drop it to write this period", catalog.ErrConflict, name, def.Name)
+	}
+
+	return nil
+}
+
+// CheckPartitionInsert tells whether an insert (or an upsert) of docs into
+// the partition name of def would pass now, and writes nothing. A
+// partition that does not exist yet is checked as an empty one, and is not
+// created.
+func (db *DB) CheckPartitionInsert(ctx context.Context, def catalog.Def, name string, expireIn time.Duration, upsert bool, docs [][]byte) error {
+	if err := db.checkPartition(def, name); err != nil {
+		return err
+	}
+
+	col, err := db.Get(name)
+
+	if err != nil {
+		return collection.CheckNew(catalog.PartitionDef(def, name), expireIn, upsert, docs...)
+	}
+
+	return col.CheckInsert(ctx, expireIn, upsert, docs)
+}
+
+// EnsurePartitioned declares a logical collection and gives its whole
+// definition (indexes, unique, ttl, durability and the other keys) to the
+// partitions it already has. A new unique field is checked on every
+// partition before any change (409 unique_violation).
 func (db *DB) EnsurePartitioned(decl catalog.Def) (catalog.Def, error) {
-	def, err := db.Ensure(decl)
+	if err := checkDecl(decl); err != nil {
+		return catalog.Def{}, err
+	}
+
+	next, err := db.cat.Merged(decl, catalog.FromCode)
+
 	if err != nil {
 		return catalog.Def{}, err
 	}
 
-	for _, name := range db.Partitions(def, false, time.Now()) {
-		if _, err := db.Ensure(catalog.Def{Name: name, Indexes: def.Indexes, Unique: def.Unique}); err != nil {
+	cur, _ := db.cat.Get(decl.Name)
+	added := newUnique(cur, next)
+	names := db.Partitions(next, false, time.Now())
+
+	if len(added) > 0 {
+		for _, name := range names {
+			if err := db.checkUniqueData(name, added); err != nil {
+				return catalog.Def{}, err
+			}
+		}
+	}
+
+	def, err := db.ensure(decl)
+
+	if err != nil {
+		return catalog.Def{}, err
+	}
+
+	for _, name := range names {
+		if _, err := db.ensure(catalog.PartitionDef(def, name)); err != nil {
 			return catalog.Def{}, err
 		}
 	}
@@ -306,4 +380,20 @@ func TimeOfUpsert(def catalog.Def, update map[string]any) time.Time {
 	}
 
 	return time.Now()
+}
+
+// CheckInsert tells whether Insert (Upsert with upsert) of docs would pass
+// now, and writes nothing.
+func (c *Collection) CheckInsert(ctx context.Context, expireIn time.Duration, upsert bool, docs [][]byte) error {
+	if !c.engine() {
+		return ErrDirect
+	}
+
+	if err := c.enter(); err != nil {
+		return err
+	}
+
+	defer c.leave()
+
+	return c.eng.CheckInsert(ctx, expireIn, upsert, docs...)
 }

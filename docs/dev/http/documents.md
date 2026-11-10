@@ -8,9 +8,14 @@ Writes by query (`_update_by_query`, `_delete_by_query`) are on [Queries](querie
 
 Inserts one document. The body is the document. Without `_id`, the daemon makes a UUIDv7 (time ordered). An unknown collection is created with the default definition, unless `allow_implicit: false`.
 
+Field names follow the rules of `$set`, on every write (`_doc`, `_bulk`, `_bulk` with `upsert`):
+
+- `_v` at the top level is the version, which the daemon sets and adds to every answer. A `_v` that you send (for example a document you read and send back in an upsert) is dropped: it is never stored and never changes the version. To write only on a given version, use the `_v` guard of `_update`.
+- A field name that starts with `$`, at any depth (also in the objects of an array), is `400 invalid_field`. The one exception is `$blob`, the key of a [blob reference](system.md#post-blobs).
+
 **Answer:** `{"_id":"c1","_v":1}`.
 
-**Errors:** `409 duplicate_id`, `409 unique_violation`, `400 invalid_doc`, `invalid_id`, `413 request_too_large`.
+**Errors:** `409 duplicate_id`, `409 unique_violation`, `400 invalid_doc`, `invalid_id`, `invalid_field`, `413 request_too_large`.
 
 ::: code-group
 
@@ -37,7 +42,7 @@ const res = await calls.insert({ _id: 'c1', status: 'answered', ts: new Date() }
 
 ## `POST /{coll}/_bulk`
 
-Inserts many documents in one transaction: all or nothing.
+Inserts many documents in one transaction: all or nothing. On a partitioned collection the call is all or nothing too, except in two narrow cases (a disk error, or another call that takes the same id or unique value at the same time): see [Partitioned collections](collections.md#partitioned-collections).
 
 | Body key | Type | Default | Meaning |
 |---|---|---|---|
@@ -115,7 +120,7 @@ In Go, a struct sends every field of `T`, so every field of `T` is set; fields o
 
 ## `GET /{coll}/_doc/{id}`
 
-The document with its `_v`.
+The document with its `_v`. The answer has one `_v`, the version: a document stored with its own `_v` (before the write refused it) answers without that one, and the next update of the document removes it.
 
 **Errors:** `404 not_found`. In direct mode, a document without `_id` is never found by id.
 
@@ -177,7 +182,7 @@ Applies write operators to the document with this `_id`, in one atomic step agai
 
 **Answer:** `{"matched":1,"modified":1,"doc":{...with "_v"}}`. When a condition fails or the document is missing: `{"matched":0,"modified":0}`, not an error. `modified` is 0 when the operators left the document as it was.
 
-**Errors:** `no_update`, `unknown_operator`, `conflicting_update`, `invalid_field`, `immutable_id` (see [Contract errors](../query.md#contract-errors)), `invalid_request` for `_id` in `query` or `many`.
+**Errors:** `no_update`, `unknown_operator`, `conflicting_update`, `invalid_field`, `invalid_path`, `immutable_id` (see [Contract errors](../query.md#contract-errors)), `invalid_request` for `_id` in `query` or `many`, `409 unique_violation`, `ttl_not_enabled` and `ttl_derived` with `expire_in`, `413 request_too_large`, `404 unknown_collection` (`_update` never creates the collection, also with `upsert`).
 
 ::: code-group
 
@@ -216,7 +221,7 @@ Exactly one of `in` and `at`.
 
 **Answer:** `{"_id","_v","expires_at"}`.
 
-**Errors:** `404 not_found` (missing or already expired), `400 ttl_not_enabled` (no `expires_field`), `400 ttl_derived` (the expiry comes from `ttl` + `time`), `400 invalid_request` (not exactly one of `in` and `at`).
+**Errors:** `404 not_found` (missing or already expired), `400 ttl_not_enabled` (no `expires_field`), `400 ttl_derived` (the expiry comes from `ttl` + `time`), `400 invalid_request` (not exactly one of `in` and `at`), `404 unknown_collection`, `409 direct_collection` (a direct collection is written by its apps).
 
 ::: code-group
 
@@ -240,7 +245,7 @@ await sessions.expire('s1', '30m')
 
 ## `POST /{coll}/_persist/{id}`
 
-Removes the expiry of a document, like `PERSIST` in Redis. No body. **Answer:** `{"_id","_v"}`. **Errors:** as for `_expire`.
+Removes the expiry of a document, like `PERSIST` in Redis. No body: ndb ignores a body if you send one. **Answer:** `{"_id","_v"}`. **Errors:** as for `_expire`, without `invalid_request`.
 
 ::: code-group
 
@@ -264,9 +269,11 @@ await sessions.persist('s1')
 
 ## `GET /{coll}/_ttl/{id}`
 
-The time left of a document. **Answer:** `{"_id","ttl","expires_at"}`: `ttl` is the whole seconds left, rounded up; a document that never expires has `"ttl": -1` and `"expires_at": null`. With `ttl` + `time` in the definition the expiry comes from the time field; with both `ttl` and `expires_field`, the earlier time counts.
+The time left of a document. **Answer:** `{"_id","ttl","expires_at"}`: `ttl` is the whole seconds left, rounded up, also for an expiry centuries away; a document that never expires has `"ttl": -1` and `"expires_at": null`. With `ttl` + `time` in the definition the expiry comes from the time field. A definition cannot have both `ttl` and `expires_field` (`400 catalog_invalid`).
 
 **Errors:** `404 not_found` (missing or expired), `400 not_supported` for a direct collection.
+
+The value of `expires_field` is an RFC 3339 string (`"2026-11-07T10:30:00Z"`) or a number of unix seconds. ndb does not check the value at write: a document whose `expires_field` holds another value (`"tomorrow"`, `true`, an object) is stored, and it never expires (`"ttl": -1`). To set an expiry that ndb checks, use `expire_in` or `_expire`.
 
 ::: code-group
 

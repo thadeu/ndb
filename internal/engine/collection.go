@@ -63,6 +63,9 @@ type Collection struct {
 	live    sync.RWMutex
 	dropped bool
 
+	// closed is set by DB.Close (shut). A closed collection never wakes.
+	closed bool
+
 	// asleep is an engine collection closed for idle_close (idle.go): eng
 	// and rd are closed, and rest is what Stats tells meanwhile. Guarded by
 	// live; used is when a call last entered (unix ns).
@@ -78,6 +81,12 @@ type Collection struct {
 func (c *Collection) enter() error {
 	for {
 		c.live.RLock()
+
+		if c.closed {
+			c.live.RUnlock()
+
+			return ErrClosed
+		}
 
 		if c.dropped {
 			c.live.RUnlock()
@@ -470,6 +479,17 @@ func (c *Collection) Stats() Stats {
 	}
 
 	return s
+}
+
+// shut is close for DB.Close: it waits for the calls in flight, and the
+// calls after it give ErrClosed.
+func (c *Collection) shut() error {
+	c.live.Lock()
+	defer c.live.Unlock()
+
+	c.closed = true
+
+	return c.close()
 }
 
 // close stops the tailer (if any) and closes the collection.

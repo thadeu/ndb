@@ -165,6 +165,7 @@ module Ndb
     "pattern_too_wide" => InvalidPattern,
     "not_supported" => NotSupported,
     "invalid_blob_ref" => InvalidBlobRef,
+    "invalid_range" => InvalidBlobRef,
     "unknown_route" => UnknownRoute,
     "method_not_allowed" => UnknownRoute,
     "group_limit_exceeded" => GroupLimitExceeded,

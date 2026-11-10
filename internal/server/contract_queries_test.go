@@ -690,8 +690,6 @@ func TestQueriesUpdateByQueryAnswers(t *testing.T) {
 // "Integers stay exact" (query.md, write operators). An integer above 2^53
 // fits int64, so $inc can add 1 exactly.
 func TestQueriesIncKeepsBigIntegersExact(t *testing.T) {
-	t.Skip("BUG: $inc on an integer above 2^53 (or one that overflows int64) answers modified:0 and writes nothing")
-
 	_, h := newHandler(t)
 
 	expectStatus(t, call(h, "POST", "/c/_bulk", `{"docs":[{"_id":"a","n":1152921504606846976},{"_id":"b","n":9223372036854775807}]}`), http.StatusOK)
@@ -761,8 +759,6 @@ func TestQueriesDeleteByQuery(t *testing.T) {
 // "An empty query is empty_filter" (queries.md): a body with no query at all
 // is the same empty filter.
 func TestQueriesDeleteWithoutQueryIsEmptyFilter(t *testing.T) {
-	t.Skip("BUG: _delete_by_query with {} answers invalid_request \"the body must be a JSON object\", not empty_filter")
-
 	_, h := newHandler(t)
 
 	expectStatus(t, call(h, "POST", "/calls/_bulk", `{"docs":[{"_id":"c1"}]}`), http.StatusOK)

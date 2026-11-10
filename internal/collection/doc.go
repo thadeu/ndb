@@ -13,8 +13,21 @@ const idField = "_id"
 // their original bytes (compacted).
 func (c *Collection) withID(raw []byte) (string, json.RawMessage, error) {
 	m, err := decodeObject(raw)
+
 	if err != nil {
 		return "", nil, err
+	}
+
+	if err := checkDocFields(m); err != nil {
+		return "", nil, err
+	}
+
+	// The version belongs to the daemon: a _v that the client sends (a
+	// document it read and sends back) is dropped, not stored.
+	if _, ok := m[versionField]; ok {
+		delete(m, versionField)
+
+		raw = dropTopField(raw, versionField)
 	}
 
 	val, present := m[idField]
@@ -40,6 +53,50 @@ func (c *Collection) withID(raw []byte) (string, json.RawMessage, error) {
 	}
 
 	return id, buf.Bytes(), nil
+}
+
+// versionField is the document version. The daemon adds it to the answers;
+// a written document never stores it (a sent _v is dropped).
+const versionField = "_v"
+
+// blobField is the key of a blob reference ({"$blob": "sha256:..."}), the
+// one field name that can start with $.
+const blobField = "$blob"
+
+// checkDocFields refuses a field name that starts with $ at any depth (an
+// operator), as $set does. A top-level _v is dropped by withID.
+func checkDocFields(m map[string]any) error {
+	return checkDollarKeys(m, "")
+}
+
+// checkDollarKeys walks the objects and arrays of v. prefix is the path of v.
+func checkDollarKeys(v any, prefix string) error {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, child := range x {
+			path := k
+
+			if prefix != "" {
+				path = prefix + "." + k
+			}
+
+			if strings.HasPrefix(k, "$") && k != blobField {
+				return errf("invalid_field", "field %q starts with $", path)
+			}
+
+			if err := checkDollarKeys(child, path); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, child := range x {
+			if err := checkDollarKeys(child, prefix); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 func decodeObject(raw []byte) (map[string]any, error) {

@@ -46,7 +46,7 @@ allow_implicit: true
 log_level: info            # debug, info, warn, error, quiet
 log_format: text           # text or json
 log_body_max: 2048         # bytes of a body in a log line; 0 = no bodies
-log_slow_ms: 1000          # a request over this is a warn line; 0 = off
+slow_ms: 1000          # a request over this is a warn line; 0 = off
 
 collections:
   calls:
@@ -88,7 +88,7 @@ An unknown key is an error at start (the file is read in strict mode). Sizes are
 | `log_level` | `debug`, `info`, `warn`, `error` or `quiet` (nothing at all, errors too). Default `info`. See [Logs](#logs). |
 | `log_format` | `text` (key=value) or `json` (one object per line). Default `text`. |
 | `log_body_max` | the largest body or document in a log line, in bytes. A longer one is cut and ends with `...[cut, N bytes]`. `0` logs no bodies. Default `2048`. |
-| `log_slow_ms` | a request that takes longer is a `warn` line. `0` turns it off. Default `1000`. |
+| `slow_ms` | a request that takes longer is a `warn` line. `0` turns it off. Default `1000`. |
 
 ### Document id
 
@@ -200,7 +200,7 @@ ndb serve -log-level debug -log-format json
 NDB_LOG_LEVEL=warn ndb serve
 ```
 
-`PUT /_log` changes the level, `log_body_max` and `log_slow_ms` at run time, without a restart. What each level writes, the size guard and rotation: [Operations, Logs](operations.md#logs).
+`PUT /_log` changes the level, `log_body_max` and `slow_ms` at run time, without a restart. What each level writes, the size guard and rotation: [Operations, Logs](operations.md#logs).
 
 ## Authentication
 
@@ -235,14 +235,15 @@ tokens:
 
 | Level | Routes |
 |---|---|
-| `read` | `GET /{coll}`, `_search`, `_count`, `_aggregate`, `_watch`, `GET _doc/{id}`, `_ttl`, `_stats`, `_quarantine`; the system reads (`/_health`, `/_stats`, `/_collections`, `/_size`, `GET /_blobs/{ref}`) with any read right |
+| `read` | `GET /{coll}`, `_search`, `_count`, `_aggregate`, `_watch`, `GET _doc/{id}`, `_ttl`, `_stats`, `_quarantine`; the system reads (`/_health`, `/_metrics`, `/_stats`, `/_collections`, `/_size`, `/_pitr`, `GET /_blobs/{ref}`) with any read right |
 | `write` | `POST _doc`, `_bulk`, `_update`, `_update_by_query`, `_delete_by_query`, `DELETE _doc/{id}`, `_expire`, `_persist`, `_ack`; `POST /_blobs` with any write right; and all of `read` |
 | `admin` | `PUT /{coll}` (declare), `DELETE /{coll}` (drop), `_truncate`, `_compact`, `_indexes`; and all of `write`. `GET` and `PUT /_log` need admin of `*` |
 
 - Each list holds collection names or globs: `calls*` covers `calls` and its partitions (`calls-2026-11`), `*` covers every collection. A pattern read (`/logs-2026-*/_search`) needs a glob that covers the whole pattern (`logs*` or `*`).
+- The system reads do not filter by scope: a token with any read right sees every collection name in `/_collections`, `/_stats`, `/_size` and `/_pitr`.
 - An unknown token is `401 unauthorized`; a token without the right is `403 forbidden`, with the token name in the message.
 - `name` and `file` are required, names are unique, and a token needs at least one list. A missing or empty file stops the start.
-- A write to a collection that does not exist creates it (with `allow_implicit`): the write right is enough.
+- An insert (`_doc`, `_bulk`) to a collection that does not exist creates it (with `allow_implicit`): the write right is enough. The other writes (`_update/{id}` with `upsert` too, `_expire`, `_persist`) do not create it: they answer `404 unknown_collection`.
 
 ## TLS
 

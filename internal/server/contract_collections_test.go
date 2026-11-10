@@ -178,8 +178,6 @@ func TestContractEnsureMergeRules(t *testing.T) {
 // unique: a value already held by another document is 409
 // unique_violation, also when unique was added by a later PUT.
 func TestContractUniqueAddedByALaterPutIsEnforced(t *testing.T) {
-	t.Skip("BUG: unique added by PUT to an open collection is saved in the catalog but not enforced until a restart")
-
 	_, h := newHandler(t)
 
 	expectStatus(t, call(h, "PUT", "/u", `{}`), http.StatusOK)
@@ -187,6 +185,38 @@ func TestContractUniqueAddedByALaterPutIsEnforced(t *testing.T) {
 	expectStatus(t, call(h, "PUT", "/u", `{"unique":["s"]}`), http.StatusOK)
 
 	ccExpect(t, call(h, "POST", "/u/_doc", `{"_id":"2","s":"a"}`), http.StatusConflict, "unique_violation")
+}
+
+// A later PUT with unique on data that already holds a duplicate value is
+// 409 unique_violation, and the definition does not change. Sealed data
+// counts too, and the collection still opens after a restart.
+func TestContractUniqueAddedOnDuplicateData(t *testing.T) {
+	_, h := newHandler(t)
+
+	expectStatus(t, call(h, "PUT", "/u", `{}`), http.StatusOK)
+	expectStatus(t, call(h, "POST", "/u/_bulk", `{"docs":[{"_id":"1","s":"a"},{"_id":"2","s":"a"},{"_id":"3","s":"b"}]}`), http.StatusOK)
+
+	rec := call(h, "PUT", "/u", `{"unique":["s"]}`)
+
+	ccExpect(t, rec, http.StatusConflict, "unique_violation")
+
+	if !strings.Contains(rec.Body.String(), "1 and 2") {
+		t.Fatalf("the message must give the ids: %s", rec.Body.String())
+	}
+
+	if strings.Contains(call(h, "GET", "/u", "").Body.String(), `"unique"`) {
+		t.Fatal("a refused unique must not be saved")
+	}
+
+	expectStatus(t, call(h, "POST", "/u/_update/2", `{"update":{"$set":{"s":"c"}}}`), http.StatusOK)
+
+	expectStatus(t, call(h, "POST", "/u/_compact", ""), http.StatusOK)
+
+	expectStatus(t, call(h, "PUT", "/u", `{"unique":["s"]}`), http.StatusOK)
+
+	ccExpect(t, call(h, "POST", "/u/_doc", `{"_id":"4","s":"a"}`), http.StatusConflict, "unique_violation")
+	ccExpect(t, call(h, "POST", "/u/_doc", `{"_id":"5","s":"c"}`), http.StatusConflict, "unique_violation")
+	expectStatus(t, call(h, "POST", "/u/_doc", `{"_id":"6","s":"d"}`), http.StatusOK)
 }
 
 // unique given at creation is enforced on insert and on update.
@@ -223,8 +253,6 @@ func TestContractMaxLineSize(t *testing.T) {
 // max_line_size is "the largest document": a document of exactly that
 // size is accepted.
 func TestContractMaxLineSizeIsTheDocumentSize(t *testing.T) {
-	t.Skip("BUG: the limit is on the WAL record (about 110 bytes more than the document), so a document under max_line_size gets 413 line_too_large")
-
 	_, h := newHandler(t)
 
 	expectStatus(t, call(h, "PUT", "/m", `{"max_line_size":1000}`), http.StatusOK)
@@ -505,7 +533,13 @@ func TestContractRestore(t *testing.T) {
 		{"no at", "POST", "/posts/_restore", `{"to":"x"}`, bad, "invalid_request"},
 	})
 
-	rec := call(h, "POST", "/posts/_restore", `{"at":"2020-01-01T00:00:00Z","to":"x"}`)
+	rec := call(h, "POST", "/posts/_restore", `{"at":"`+at+`","to":"posts"}`)
+
+	if !strings.Contains(rec.Body.String(), "to must differ from the collection") {
+		t.Fatalf("to is the source: the message must say so: %s", rec.Body.String())
+	}
+
+	rec = call(h, "POST", "/posts/_restore", `{"at":"2020-01-01T00:00:00Z","to":"x"}`)
 
 	ccExpect(t, rec, bad, "out_of_window")
 

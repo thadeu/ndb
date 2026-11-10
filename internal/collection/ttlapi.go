@@ -27,11 +27,13 @@ type Expiry struct {
 }
 
 // TTLInfo is the remaining life of a visible document. Never is true when it
-// has no expiry.
+// has no expiry. Remaining stops at the time.Duration limit (292 years);
+// Seconds is the whole seconds left (rounded up), with no such limit.
 type TTLInfo struct {
 	Never     bool
 	At        time.Time
 	Remaining time.Duration
+	Seconds   int64
 }
 
 type setExpiryReq struct {
@@ -206,7 +208,27 @@ func (c *Collection) TTL(id string) (TTLInfo, error) {
 		return TTLInfo{Never: true}, nil
 	}
 
-	return TTLInfo{At: at, Remaining: at.Sub(c.clock())}, nil
+	now := c.clock()
+
+	return TTLInfo{At: at, Remaining: at.Sub(now), Seconds: secondsUntil(now, at)}, nil
+}
+
+// secondsUntil is the whole seconds from now to at, rounded up. It does not
+// use time.Duration, so a far time does not overflow.
+func secondsUntil(now, at time.Time) int64 {
+	secs := at.Unix() - now.Unix()
+	nanos := int64(at.Nanosecond()) - int64(now.Nanosecond())
+
+	if nanos < 0 {
+		secs--
+		nanos += int64(time.Second)
+	}
+
+	if nanos > 0 {
+		secs++
+	}
+
+	return secs
 }
 
 // timeAt reads an RFC 3339 string or unix seconds at path, plus add.

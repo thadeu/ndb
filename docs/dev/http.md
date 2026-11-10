@@ -96,7 +96,7 @@ Any other path is `404 unknown_route`. A known path with another method is `405 
 
 ## Authentication
 
-- With `-token-file` or `tokens:`, every TCP request needs `Authorization: Bearer <token>`, or the answer is `401 unauthorized`.
+- With `-token-file` or `tokens:`, every TCP request needs `Authorization: Bearer <token>`, or the answer is `401 unauthorized`. The scheme is case-insensitive (`bearer` works too, RFC 9110 11.1); the token is exact.
 - A scoped token without the right for the route and collection is `403 forbidden`. See [Scoped tokens](configuration.md#scoped-tokens).
 - The unix socket needs no token: file permissions protect it.
 - ndb serves plain HTTP; TLS comes from a proxy in front (Caddy). See [TLS](configuration.md#tls).
@@ -107,8 +107,8 @@ See [Authentication](configuration.md#authentication).
 ## Requests
 
 - **Body:** one JSON object, UTF-8, `Content-Type: application/json`. A blob upload is raw bytes.
-- **Unknown keys are errors** (`invalid_request` or `invalid_query`), so a typo never passes silently.
-- **Size:** a body is at most the `max_line_size` of the collection (default 1 MiB), else `413 request_too_large`. A blob is at most `blob_max_size` (default 1 GiB).
+- **Unknown keys are errors** (`invalid_request` or `invalid_query`; `invalid_pipeline` on `_aggregate`), so a typo never passes silently.
+- **Size:** a body is at most the `max_line_size` of the collection (default 1 MiB), else `413 request_too_large`. A system route has its own limit: `POST /_backup` takes at most 64 KiB, `POST /_restore` at most 1 MiB (the engine default), `PUT /_log` at most 4 KiB. A blob is at most `blob_max_size` (default 1 GiB).
 - **Numbers:** JSON numbers. Queries and sorts compare them as 64-bit floats; an integer in a document keeps its exact text.
 - **Times:** on the collection `time` field (and `expires_field`), RFC 3339 strings compare as instants, and a string that starts with `now` is [date math](query.md#date-math) (`now-7d/d`).
 - **Ids:** `_id` is a string. A document without one gets a UUIDv7 (time ordered). See [Document id](configuration.md#document-id).
@@ -145,7 +145,7 @@ A row is the document. `_v` is added with `"versions": true`, and `_coll` on a r
 
 ## Order and pagination
 
-- `sort` is an object, `field: 1` or `-1`, in key order. `_id` is always the last tie-break, so the order is total. With no `sort`, the order is insertion order.
+- `sort` is an object, `field: 1` or `-1`, in key order. `_id` is always the last tie-break, in the direction of the last sort key (`-1` gives `_id` descending), so the order is total. With no `sort`, the order is insertion order.
 - `skip` + `limit` give offset pages; the cost grows with `skip`.
 - `after` takes the `X-Ndb-Next` of the previous page. The cursor is opaque and bound to the `query` and `sort`: another query gets `cursor_mismatch`. Rows inserted during the walk do not move pages already read.
 - `"snapshot": true` keeps the rows of the first page for 60 s of idle time, so every page sees the same data; after that, `cursor_expired`.

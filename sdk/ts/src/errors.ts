@@ -44,6 +44,7 @@ export type ErrorCode =
   | 'invalid_path'
   | 'invalid_index'
   | 'invalid_blob_ref'
+  | 'invalid_range'
   | 'invalid_pattern'
   | 'pattern_read_only'
   | 'pattern_too_wide'

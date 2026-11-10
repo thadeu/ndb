@@ -249,15 +249,10 @@ func TestDocInsertAfterExpiryAndDelete(t *testing.T) {
 // Rule 6: _v is the version of the document. A document that carries its
 // own "_v" must not give a second, wrong "_v" in the answers.
 func TestDocVersionFieldInTheDocument(t *testing.T) {
-	t.Skip("BUG: an insert or bulk upsert with \"_v\" stores it, and GET answers two \"_v\" keys (the stored one wins in JSON parsers)")
-
 	_, h := newHandler(t)
 
-	rec := call(h, "POST", "/calls/_doc", `{"_id":"v","_v":99}`)
-
-	if rec.Code == http.StatusBadRequest {
-		return
-	}
+	// A sent _v is dropped: the insert works and stores no _v of its own.
+	expectStatus(t, call(h, "POST", "/calls/_doc", `{"_id":"v","_v":99}`), http.StatusOK)
 
 	got := bodyOf(call(h, "GET", "/calls/_doc/v", ""))
 
@@ -277,8 +272,6 @@ func TestDocVersionFieldInTheDocument(t *testing.T) {
 // query.md: a field name that starts with $ is invalid_field. A document
 // with one can never be queried by that field.
 func TestDocInsertDollarFieldName(t *testing.T) {
-	t.Skip("BUG: _doc and _bulk accept a field name that starts with $; $set refuses it with invalid_field")
-
 	_, h := newHandler(t)
 
 	rec := call(h, "POST", "/calls/_doc", `{"_id":"d","$bad":1}`)
@@ -288,6 +281,41 @@ func TestDocInsertDollarFieldName(t *testing.T) {
 	if got := errorCode(t, rec); got != "invalid_field" {
 		t.Fatalf("code = %q", got)
 	}
+}
+
+// documents.md: a written document cannot hold a field name that starts
+// with $ (at any depth), on every write path; $blob (a
+// blob reference) is the one $ name. Every refusal writes nothing.
+func TestDocWrittenFieldNamesAreChecked(t *testing.T) {
+	_, h := newHandler(t)
+
+	expectStatus(t, call(h, "POST", "/calls/_doc", `{"_id":"u","n":1}`), http.StatusOK)
+
+	refused := []struct{ path, body string }{
+		{"/calls/_doc", `{"_id":"d","a":{"$bad":1}}`},
+		{"/calls/_doc", `{"_id":"d","a":[{"ok":1},{"$bad":1}]}`},
+		{"/calls/_bulk", `{"docs":[{"_id":"d1"},{"_id":"d2","$bad":1}]}`},
+		{"/calls/_bulk", `{"docs":[{"_id":"u","$bad":1}],"upsert":true}`},
+		{"/calls/_update/u", `{"update":{"$set":{"a":{"$bad":1}}}}`},
+		{"/calls/_update/u", `{"update":{"$push":{"a":{"$each":[{"$bad":1}]}}}}`},
+		{"/calls/_update/x", `{"update":{"$setOnInsert":{"a":{"$bad":1}}},"upsert":true}`},
+	}
+
+	for _, c := range refused {
+		cqError(t, call(h, "POST", c.path, c.body), http.StatusBadRequest, "invalid_field")
+	}
+
+	if got := bodyOf(call(h, "GET", "/calls/_doc/u", "")); got != `{"_v":1,"_id":"u","n":1}` {
+		t.Fatalf("u after the refused writes = %s", got)
+	}
+
+	if got := bodyOf(call(h, "POST", "/calls/_count", ``)); got != `{"count":1}` {
+		t.Fatalf("count after the refused writes = %s", got)
+	}
+
+	blobRef := `{"$blob":"sha256:` + strings.Repeat("a", 64) + `","size":1}`
+
+	expectStatus(t, call(h, "POST", "/calls/_doc", `{"_id":"b","rec":`+blobRef+`,"m":{"_v":1}}`), http.StatusOK)
 }
 
 // --- POST /{coll}/_bulk ---
@@ -1010,11 +1038,9 @@ func TestDocTTLRouteErrors(t *testing.T) {
 	}
 }
 
-// documents.md: "ttl is the whole seconds left". A far expiry overflows
-// time.Duration (292 years), so the answer is a wrong number.
+// documents.md: "ttl is the whole seconds left". A far expiry (more than
+// the 292 years of a time.Duration) must not overflow.
 func TestDocTTLFarFuture(t *testing.T) {
-	t.Skip("BUG: _ttl of an expiry more than 292 years away answers 9223372037 (time.Duration overflow), not the seconds left")
-
 	_, h := newHandler(t)
 
 	expectStatus(t, call(h, "PUT", "/s", `{"expires_field":"exp"}`), http.StatusOK)
@@ -1105,16 +1131,17 @@ func TestDocPartitionedRoutes(t *testing.T) {
 	expectStatus(t, call(h, "GET", "/"+now+"/_doc/fresh", ""), http.StatusOK)
 }
 
-// collections.md: "A _bulk that spans partitions writes one transaction
-// per partition": the groups written before a failure stay.
-func TestDocPartitionedBulkIsOneTransactionPerPartition(t *testing.T) {
+// collections.md: a _bulk that spans partitions is all or nothing: every
+// partition is checked before any write, so a failure in a later partition
+// leaves no document in the partitions before it.
+func TestDocPartitionedBulkIsAllOrNothing(t *testing.T) {
 	h := seedCalls(t)
 
 	rec := call(h, "POST", "/calls/_bulk", `{"docs":[{"_id":"q1","ts":"2026-01-10T10:00:00Z"},{"_id":"q2","ts":"2026-02-10T10:00:00Z"},{"_id":"q2","ts":"2026-02-11T10:00:00Z"}]}`)
 
 	expectStatus(t, rec, http.StatusConflict)
-	expectStatus(t, call(h, "GET", "/calls/_doc/q1", ""), http.StatusOK)
 
+	mustMissing(t, h, "calls", "q1")
 	mustMissing(t, h, "calls", "q2")
 }
 
@@ -1122,8 +1149,6 @@ func TestDocPartitionedBulkIsOneTransactionPerPartition(t *testing.T) {
 // merges into the stored document. On a partitioned collection the _id of
 // another partition is not seen.
 func TestDocPartitionedIDIsUnique(t *testing.T) {
-	t.Skip("BUG: on a partitioned collection, _doc and _bulk upsert of an _id held by another partition make a second document instead of 409 duplicate_id or a merge")
-
 	h := seedCalls(t)
 
 	// "a" is in calls-2026-09.
@@ -1147,8 +1172,6 @@ func TestDocPartitionedIDIsUnique(t *testing.T) {
 // A request that is not valid must be an error whether or not the id is
 // in a partition.
 func TestDocPartitionedUpdateValidatesMissingID(t *testing.T) {
-	t.Skip("BUG: _update/{id} on a partitioned collection answers matched 0 for an id no partition holds, without checking the update (no_update, many)")
-
 	h := seedCalls(t)
 
 	runDocCases(t, h, []docCase{

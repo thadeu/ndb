@@ -356,6 +356,7 @@ func TestWatchAndAckErrors(t *testing.T) {
 		{"/posts/_watch", `{"consumer":"c","limit":-1}`, 400, "invalid_request"},
 		{"/nope/_watch", `{"consumer":"c"}`, 404, "unknown_collection"},
 		{"/posts/_ack", `{"consumer":"c","pos":"garbage"}`, 400, "invalid_position"},
+		{"/posts/_ack", `{"consumer":"c","pos":"e99.1"}`, 400, "invalid_position"},
 		{"/posts/_ack", `{"pos":"e1.1"}`, 400, "invalid_request"},
 	}
 

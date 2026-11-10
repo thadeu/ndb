@@ -540,7 +540,13 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
+	// A body with no query is the empty filter, as in _update_by_query.
+	if req.Query == nil {
+		req.Query = map[string]any{}
+	}
+
 	raw, err := json.Marshal(req.Query)
+
 	if err != nil {
 		writeError(w, err)
 
@@ -548,6 +554,7 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	}
 
 	col, err := db.Get(name)
+
 	if err != nil {
 		writeError(w, err)
 

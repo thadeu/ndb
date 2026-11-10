@@ -122,7 +122,8 @@ type Collection struct {
 	// durable yet. Writer goroutine only.
 	staged int
 
-	// maxLine is max_line_size: a WAL record is never longer.
+	// maxLine is max_line_size: no document is longer. A WAL line has
+	// more room (walLineOf), for the JSON of its record.
 	maxLine int
 
 	// unsynced holds applied records that are not fsync'd yet (relaxed
@@ -267,7 +268,9 @@ func Open(cfg Config) (*Collection, error) {
 		c.feed.base = pos.Tx
 	}
 
-	res, err := recovery.Replay(recovery.Config{FS: cfg.FS, Dir: cfg.Dir, MaxLine: maxLine, From: from}, func(rec wal.Record) {
+	walLine := walLineOf(maxLine)
+
+	res, err := recovery.Replay(recovery.Config{FS: cfg.FS, Dir: cfg.Dir, MaxLine: walLine, From: from}, func(rec wal.Record) {
 		if rec.IsTruncate() {
 			c.feed.trunc = rec.Tx
 
@@ -285,7 +288,7 @@ func Open(cfg Config) (*Collection, error) {
 		return nil, err
 	}
 
-	c.feed.maxLine = maxLine
+	c.feed.maxLine = walLine
 	c.feed.last = res.LastTx
 
 	durability := writer.Strict
@@ -298,7 +301,7 @@ func Open(cfg Config) (*Collection, error) {
 		Dir:         cfg.Dir,
 		FS:          cfg.FS,
 		Durability:  durability,
-		MaxLine:     maxLine,
+		MaxLine:     walLine,
 		SegmentSize: cfg.WALSegmentSize,
 		StartTx:     res.LastTx,
 		Prepare:     c.prepare,
@@ -448,6 +451,9 @@ type insertReq struct {
 	// upsert merges a document whose _id exists into the stored one,
 	// instead of failing with duplicate_id.
 	upsert bool
+
+	// dry is a check (check.go): the blobs are not written.
+	dry bool
 }
 
 // Upsert writes all docs in one transaction, all or nothing: a document whose
@@ -473,6 +479,16 @@ func (c *Collection) prepare(req any) (writer.Prepared, error) {
 	)
 
 	switch r := req.(type) {
+	case checkReq:
+		ops, err = c.prepareInsert(v, r.insertReq)
+
+		if err == nil {
+			err = c.checkSize(ops, true)
+		}
+
+		if err == nil {
+			err = errChecked
+		}
 	case insertReq:
 		ops, err = c.prepareInsert(v, r)
 	case updateReq:
@@ -485,6 +501,10 @@ func (c *Collection) prepare(req any) (writer.Prepared, error) {
 		ops, err = c.prepareSetExpiry(v, r)
 	default:
 		err = errf("internal", "unknown request %T", req)
+	}
+
+	if err == nil {
+		err = c.checkSize(ops, false)
 	}
 
 	if err != nil {
@@ -534,9 +554,12 @@ func (c *Collection) prepareInsert(v *view, r insertReq) ([]wal.Op, error) {
 			return nil, err
 		}
 
-		doc, err = c.externalize(doc)
-		if err != nil {
-			return nil, err
+		if !r.dry {
+			doc, err = c.externalize(doc)
+
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		if err := v.checkUnique(id, doc); err != nil {
@@ -577,6 +600,7 @@ func (c *Collection) mergeInto(v *view, id string, doc json.RawMessage) (uint64,
 	}
 
 	maps.Copy(stored, fields)
+	delete(stored, versionField)
 
 	merged, err := json.Marshal(stored)
 

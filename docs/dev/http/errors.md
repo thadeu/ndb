@@ -49,6 +49,7 @@ The SDKs turn each code into a typed error: Go `ndb.ErrUnknownCollection` (`erro
 | `collection_exists` | 409 | A rename to a name that exists (without `replace`), or a restore `to` a name that exists. |
 | `unknown_route` | 404 | No route has this path. |
 | `method_not_allowed` | 405 | The path exists with other methods (see `Allow`). |
+| `invalid_range` | 416 | The `Range` of a `GET /_blobs/{ref}` is out of the blob. `Content-Range: bytes */<size>` gives the size. |
 | `duplicate_id` | 409 | A document with this `_id` exists. |
 | `unique_violation` | 409 | A `unique` field value exists. |
 | `catalog_conflict` | 409 | Two declarations disagree (`write`, `path`, `time`). |

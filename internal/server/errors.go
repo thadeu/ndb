@@ -111,6 +111,8 @@ func statusOf(code string) int {
 		return http.StatusRequestEntityTooLarge
 	case "method_not_allowed":
 		return http.StatusMethodNotAllowed
+	case "invalid_range":
+		return http.StatusRequestedRangeNotSatisfiable
 	case "unauthorized":
 		return http.StatusUnauthorized
 	case "forbidden":

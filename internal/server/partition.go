@@ -161,35 +161,48 @@ func (s *Server) partAggregate(w http.ResponseWriter, r *http.Request, db *engin
 	}))
 }
 
-// partInsertOne sends the document to the partition of its time field.
+// partInsertOne sends the document to the partition of its time field. An
+// _id that another partition holds is 409 duplicate_id, as in one
+// collection. The insert is checked before a new partition is made.
 func (s *Server) partInsertOne(w http.ResponseWriter, r *http.Request, db *engine.DB, def catalog.Def) {
 	body, err := readBody(w, r, db.MaxLine(def.Name))
+
 	if err != nil {
 		writeError(w, err)
 
 		return
 	}
 
-	col, err := db.PartitionFor(def, body)
+	plan, err := s.planWrite(r.Context(), db, def, [][]byte{body}, 0, false)
+
+	if err == nil {
+		_, err = db.Partition(def, plan.order[0])
+	}
+
 	if err != nil {
 		writeError(w, err)
 
 		return
 	}
 
-	r.SetPathValue("coll", col.Name())
+	r.SetPathValue("coll", plan.order[0])
 	r.Body = io.NopCloser(bytes.NewReader(body))
 
 	s.insertOne(w, r, db)
 }
 
 // partBulk groups the documents by partition and writes each group in one
-// transaction. The results keep the order of docs. A failure stops the
-// call; the groups written before it stay.
+// transaction. The results keep the order of docs. It is all or nothing:
+// every group is checked first (time field, ids across partitions, unique
+// values, documents), and nothing is written when one check fails. Only a
+// write that fails after the checks (a disk error, or a write of another
+// call between the check and the write that takes the same id or unique
+// value) keeps the groups written before it.
 func (s *Server) partBulk(w http.ResponseWriter, r *http.Request, db *engine.DB, def catalog.Def) {
 	var req bulkReq
 
 	body, err := readBody(w, r, db.MaxLine(def.Name))
+
 	if err == nil {
 		err = decode(body, &req)
 	}
@@ -207,45 +220,43 @@ func (s *Server) partBulk(w http.ResponseWriter, r *http.Request, db *engine.DB,
 	}
 
 	expireIn, err := parseExpireIn(req.ExpireIn)
+
 	if err != nil {
 		writeError(w, err)
 
 		return
 	}
 
-	groups := map[string][]int{}
-	order := []string{}
+	docs := make([][]byte, len(req.Docs))
 
 	for i, doc := range req.Docs {
-		col, err := db.PartitionFor(def, doc)
-		if err != nil {
+		docs[i] = doc
+	}
+
+	plan, err := s.planWrite(r.Context(), db, def, docs, expireIn, req.Upsert)
+
+	if err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	out := make([]writeResult, len(docs))
+
+	for _, name := range plan.order {
+		if _, err := db.Partition(def, name); err != nil {
 			writeError(w, err)
 
 			return
 		}
 
-		if _, seen := groups[col.Name()]; !seen {
-			order = append(order, col.Name())
-		}
+		res, ok := s.insertDocs(w, r, db, name, plan.docs(name, docs), expireIn, req.Upsert)
 
-		groups[col.Name()] = append(groups[col.Name()], i)
-	}
-
-	out := make([]writeResult, len(req.Docs))
-
-	for _, name := range order {
-		docs := make([][]byte, len(groups[name]))
-
-		for j, i := range groups[name] {
-			docs[j] = req.Docs[i]
-		}
-
-		res, ok := s.insertDocs(w, r, db, name, docs, expireIn, req.Upsert)
 		if !ok {
 			return
 		}
 
-		for j, i := range groups[name] {
+		for j, i := range plan.groups[name] {
 			out[i] = res[j]
 		}
 	}
@@ -253,26 +264,140 @@ func (s *Server) partBulk(w http.ResponseWriter, r *http.Request, db *engine.DB,
 	writeJSON(w, http.StatusOK, map[string]any{"results": out})
 }
 
+// writePlan is the partition of each document of a write: groups holds
+// the indexes of the documents of each partition, order the partitions in
+// the order of their first document.
+type writePlan struct {
+	groups map[string][]int
+	order  []string
+}
+
+func (p writePlan) docs(name string, docs [][]byte) [][]byte {
+	out := make([][]byte, len(p.groups[name]))
+
+	for j, i := range p.groups[name] {
+		out[j] = docs[i]
+	}
+
+	return out
+}
+
+// planWrite picks the partition of each document and checks the whole
+// write, before it makes any partition or writes any document. A document
+// goes to the partition of its time field. An _id that a partition holds
+// is duplicate_id, or with upsert goes to that partition, where it merges
+// into the stored document (also when its time field is of another
+// period).
+func (s *Server) planWrite(ctx context.Context, db *engine.DB, def catalog.Def, docs [][]byte, expireIn time.Duration, upsert bool) (writePlan, error) {
+	plan := writePlan{groups: map[string][]int{}}
+	held := map[string]string{}
+
+	for i, doc := range docs {
+		name, err := engine.PartitionName(def, doc)
+
+		if err != nil {
+			return writePlan{}, err
+		}
+
+		if id, ok := docIDOf(doc); ok {
+			name, err = s.targetOf(db, def, id, name, held, upsert)
+
+			if err != nil {
+				return writePlan{}, err
+			}
+		}
+
+		if _, seen := plan.groups[name]; !seen {
+			plan.order = append(plan.order, name)
+		}
+
+		plan.groups[name] = append(plan.groups[name], i)
+	}
+
+	for _, name := range plan.order {
+		// One group into a partition that exists is one transaction, which
+		// checks itself.
+		if _, err := db.Get(name); err == nil && len(plan.order) == 1 {
+			continue
+		}
+
+		if err := db.CheckPartitionInsert(ctx, def, name, expireIn, upsert, plan.docs(name, docs)); err != nil {
+			return writePlan{}, err
+		}
+	}
+
+	return plan, nil
+}
+
+// targetOf is the partition of a document with this _id: the partition
+// that holds the id, or name. held keeps the ids seen in this write.
+func (s *Server) targetOf(db *engine.DB, def catalog.Def, id, name string, held map[string]string, upsert bool) (string, error) {
+	if prev, ok := held[id]; ok {
+		if !upsert {
+			return "", &apiError{status: http.StatusConflict, code: "duplicate_id", msg: id + " is in docs twice"}
+		}
+
+		return prev, nil
+	}
+
+	holder := s.holderOf(db, def, id)
+
+	switch {
+	case holder == "" || holder == name:
+	case upsert:
+		name = holder
+	default:
+		return "", &apiError{status: http.StatusConflict, code: "duplicate_id", msg: id + " already exists in " + holder}
+	}
+
+	held[id] = name
+
+	return name, nil
+}
+
+// holderOf is the live partition that holds id, newest first, or "".
+func (s *Server) holderOf(db *engine.DB, def catalog.Def, id string) string {
+	for _, name := range slices.Backward(db.Partitions(def, true, time.Now())) {
+		col, err := db.Get(name)
+
+		if err != nil {
+			continue
+		}
+
+		if _, ok := col.Get(id); ok {
+			return name
+		}
+	}
+
+	return ""
+}
+
+// docIDOf is the _id of a document, when it is a string. A document with
+// no _id gets a new one, which no partition holds.
+func docIDOf(doc []byte) (string, bool) {
+	var head struct {
+		ID any `json:"_id"`
+	}
+
+	if json.Unmarshal(doc, &head) != nil {
+		return "", false
+	}
+
+	id, ok := head.ID.(string)
+
+	return id, ok && id != ""
+}
+
 // byID runs a route by id on the partition that holds the id, newest
 // partition first. With create (an upsert by id), a missing id goes to the
 // partition of the time field of the operators, or of now.
 func (s *Server) byID(h handler, create bool) partitionHandler {
 	return func(w http.ResponseWriter, r *http.Request, db *engine.DB, def catalog.Def) {
-		id := r.PathValue("id")
-		names := db.Partitions(def, true, time.Now())
+		if name := s.holderOf(db, def, r.PathValue("id")); name != "" {
+			r.SetPathValue("coll", name)
+			h(w, r, db)
 
-		for _, name := range slices.Backward(names) {
-			col, err := db.Get(name)
-			if err != nil {
-				continue
-			}
-
-			if _, ok := col.Get(id); ok {
-				r.SetPathValue("coll", name)
-				h(w, r, db)
-
-				return
-			}
+			return
 		}
 
 		if create {
@@ -290,15 +415,22 @@ func (s *Server) byID(h handler, create bool) partitionHandler {
 	}
 }
 
-// createByID is an _update/{id} of an id that no partition holds: with
-// upsert it creates the document in the partition of its time; without it
-// nothing matches.
+// createByID is an _update/{id} of an id that no partition holds. The
+// body is checked first, as on one collection. With upsert it creates the
+// document in the partition of its time. Without it nothing matches: the
+// update runs on the newest partition, which checks the whole body and
+// matches nothing.
 func (s *Server) createByID(w http.ResponseWriter, r *http.Request, db *engine.DB, def catalog.Def, h handler) {
 	var req updateReq
 
 	body, err := readBody(w, r, db.MaxLine(def.Name))
+
 	if err == nil {
 		err = decode(body, &req)
+	}
+
+	if err == nil {
+		err = checkUpdateByID(req)
 	}
 
 	if err != nil {
@@ -307,13 +439,25 @@ func (s *Server) createByID(w http.ResponseWriter, r *http.Request, db *engine.D
 		return
 	}
 
+	r.Body = io.NopCloser(bytes.NewReader(body))
+
 	if !req.Upsert {
-		writeJSON(w, http.StatusOK, map[string]any{"matched": 0, "modified": 0})
+		names := db.Partitions(def, true, time.Now())
+
+		if len(names) == 0 {
+			writeJSON(w, http.StatusOK, map[string]any{"matched": 0, "modified": 0})
+
+			return
+		}
+
+		r.SetPathValue("coll", names[len(names)-1])
+		h(w, r, db)
 
 		return
 	}
 
 	col, err := db.PartitionAt(def, engine.TimeOfUpsert(def, req.Update))
+
 	if err != nil {
 		writeError(w, err)
 
@@ -321,9 +465,24 @@ func (s *Server) createByID(w http.ResponseWriter, r *http.Request, db *engine.D
 	}
 
 	r.SetPathValue("coll", col.Name())
-	r.Body = io.NopCloser(bytes.NewReader(body))
 
 	h(w, r, db)
+}
+
+// checkUpdateByID runs the checks of an _update/{id} body that need no
+// collection.
+func checkUpdateByID(req updateReq) error {
+	if _, err := parseExpireIn(req.ExpireIn); err != nil {
+		return err
+	}
+
+	if req.Many {
+		return badRequest("many does not apply to one _id")
+	}
+
+	_, err := collection.JoinUpdate(req.Query, req.Update)
+
+	return err
 }
 
 // partUpdateBy runs the update on every live partition, newest first.
@@ -430,6 +589,11 @@ func (s *Server) partDeleteBy(w http.ResponseWriter, r *http.Request, db *engine
 		writeError(w, err)
 
 		return
+	}
+
+	// A body with no query is the empty filter, as on a plain collection.
+	if req.Query == nil {
+		req.Query = map[string]any{}
 	}
 
 	raw, _ := json.Marshal(req.Query)

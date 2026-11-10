@@ -77,6 +77,38 @@ func (db *DB) checkRename(from, to string, replace bool) error {
 		return fmt.Errorf("%w: %s exists (send replace to put %s in its place)", ErrExists, to, from)
 	}
 
+	skip := db.familyOf(from)
+
+	if replace {
+		skip = append(skip, db.familyOf(to)...)
+	}
+
+	return db.checkTargets(to, src.PartitionBy, skip)
+}
+
+// checkTargets checks the new names of a rename or a restore into to,
+// before any change: to must not be a partition name of a logical
+// collection (400 catalog_invalid), and for a partitioned source (by set),
+// no collection may hold a partition name of to (409 collection_exists).
+// The names in skip (the source, and what a replace sends to the trash)
+// do not count.
+func (db *DB) checkTargets(to, by string, skip []string) error {
+	if owner, ok := db.cat.PartitionOwner(to); ok && !slices.Contains(skip, owner.Name) {
+		return fmt.Errorf("%w: %s is a partition name of %s", catalog.ErrInvalid, to, owner.Name)
+	}
+
+	if by == "" {
+		return nil
+	}
+
+	for _, def := range db.cat.List() {
+		suffix, ok := strings.CutPrefix(def.Name, to+"-")
+
+		if ok && catalog.IsPeriod(by, suffix) && !slices.Contains(skip, def.Name) {
+			return fmt.Errorf("%w: %s exists and is not a partition of %s: rename or drop it first", ErrExists, def.Name, to)
+		}
+	}
+
 	return nil
 }
 
@@ -102,6 +134,11 @@ func (db *DB) tryRename(from, to string, replace bool) (bool, error) {
 
 	db.mu.Lock()
 	defer db.mu.Unlock()
+
+	// A Close that ran while this call waited for the locks ends it.
+	if err := db.checkOpen(); err != nil {
+		return false, err
+	}
 
 	now := db.familyOf(from)
 

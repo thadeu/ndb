@@ -72,7 +72,40 @@ func (s *Server) getBlob(w http.ResponseWriter, r *http.Request, db *engine.DB) 
 	w.Header().Set("Etag", `"`+strings.TrimPrefix(r.PathValue("ref"), "sha256:")+`"`)
 	w.Header().Set("Cache-Control", "private, immutable")
 
-	http.ServeContent(w, r, "", rd.ModTime(), rd)
+	http.ServeContent(&rangeErrorWriter{ResponseWriter: w}, r, "", rd.ModTime(), rd)
+}
+
+// rangeErrorWriter gives the JSON error body to the 416 of
+// http.ServeContent, which writes a text/plain body. It keeps the
+// Content-Range header that ServeContent sets.
+type rangeErrorWriter struct {
+	http.ResponseWriter
+	swallow bool
+}
+
+func (w *rangeErrorWriter) WriteHeader(status int) {
+	if status != http.StatusRequestedRangeNotSatisfiable {
+		w.ResponseWriter.WriteHeader(status)
+
+		return
+	}
+
+	w.swallow = true
+
+	w.Header().Del("X-Content-Type-Options")
+	writeError(w.ResponseWriter, &apiError{status: status, code: "invalid_range", msg: "the Range is out of the blob"})
+}
+
+func (w *rangeErrorWriter) Write(b []byte) (int, error) {
+	if w.swallow {
+		return len(b), nil
+	}
+
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *rangeErrorWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
 
 func blobError(err error, limit int64) error {

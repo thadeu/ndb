@@ -177,7 +177,5 @@ func (s *Server) ttl(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
-	secs := int64(math.Ceil(info.Remaining.Seconds()))
-
-	writeJSON(w, http.StatusOK, map[string]any{"_id": id, "ttl": secs, "expires_at": info.At.UTC().Format(time.RFC3339Nano)})
+	writeJSON(w, http.StatusOK, map[string]any{"_id": id, "ttl": info.Seconds, "expires_at": info.At.UTC().Format(time.RFC3339Nano)})
 }

@@ -78,8 +78,6 @@ func TestContractPartitionDefinitionRules(t *testing.T) {
 // partition_by cannot be added to a collection that exists: 409
 // catalog_conflict. Else its documents would hide behind a logical name.
 func TestContractPartitionByOnAnExistingCollection(t *testing.T) {
-	t.Skip("BUG: PUT {partition_by} on an existing plain collection is 200; its documents are no longer readable by the name")
-
 	_, h := newHandler(t)
 
 	expectStatus(t, call(h, "PUT", "/p", `{"time":"ts"}`), http.StatusOK)
@@ -142,8 +140,6 @@ func TestContractPartitionEnsureAgain(t *testing.T) {
 // "PUT /{coll}: change the logical definition and every partition": a key
 // set later (ttl here) reaches the partitions that exist.
 func TestContractPartitionEnsureReachesEveryPartition(t *testing.T) {
-	t.Skip("BUG: PUT on a logical name gives only indexes and unique to existing partitions; ttl, expires_field, durability, max_line_size, blob_threshold and pitr stay old")
-
 	h := cpSeed(t)
 
 	expectStatus(t, call(h, "PUT", "/calls", `{"ttl":"1h","durability":"relaxed"}`), http.StatusOK)
@@ -222,8 +218,6 @@ func TestContractPartitionInsertErrors(t *testing.T) {
 // A refused write (a bulk with a bad document) leaves no trace: no new
 // empty partition.
 func TestContractPartitionRefusedBulkMakesNoPartition(t *testing.T) {
-	t.Skip("BUG: a partitioned _bulk refused for a later bad document still creates the empty partition of the documents before it")
-
 	h := cpSeed(t)
 
 	ccExpect(t, call(h, "POST", "/calls/_bulk", `{"docs":[{"_id":"y","ts":"2026-12-01T00:00:00Z"},{"_id":"z"}]}`), http.StatusBadRequest, "invalid_doc")
@@ -236,8 +230,6 @@ func TestContractPartitionRefusedBulkMakesNoPartition(t *testing.T) {
 // "_bulk (all or nothing)" (http.md, Consistency): a bulk that fails must
 // write no document, also across partitions.
 func TestContractPartitionBulkIsAllOrNothing(t *testing.T) {
-	t.Skip("BUG: a partitioned _bulk that fails in a later partition (409 duplicate_id) keeps the documents of the partitions written before")
-
 	h := cpSeed(t)
 
 	rec := call(h, "POST", "/calls/_bulk", `{"docs":[{"_id":"new","ts":"2026-08-01T00:00:00Z"},{"_id":"d","ts":"2026-11-01T10:00:00Z"}]}`)
@@ -648,8 +640,6 @@ func TestContractPartitionRename(t *testing.T) {
 // fail before it moves anything (409 collection_exists), and leave the
 // collection as it was.
 func TestContractPartitionRenameOntoTakenPartitionNames(t *testing.T) {
-	t.Skip("BUG: rename of a logical name onto a name whose {to}-{period} exists is 500 internal and leaves the partitions closed and unreadable")
-
 	h := cpSeed(t)
 
 	expectStatus(t, call(h, "POST", "/phone-2026-10/_doc", `{"_id":"other"}`), http.StatusOK)
@@ -669,8 +659,6 @@ func TestContractPartitionRenameOntoTakenPartitionNames(t *testing.T) {
 // (implicit insert, PUT) must not take the writes of the logical
 // collection: they would be out of its reads.
 func TestContractPartitionNameTakenByAPlainCollection(t *testing.T) {
-	t.Skip("BUG: a plain collection named {coll}-{period} takes the logical writes of that period, and the logical reads do not see them")
-
 	h := cpSeed(t)
 
 	expectStatus(t, call(h, "POST", "/calls-2026-12/_doc", `{"_id":"z","ts":"2026-12-01T00:00:00Z"}`), http.StatusOK)
@@ -682,11 +670,64 @@ func TestContractPartitionNameTakenByAPlainCollection(t *testing.T) {
 	}
 }
 
+// The partition names belong to the partitions: an insert into a free
+// partition name makes that partition (the logical reads see it), a PUT of
+// one is 409 catalog_conflict, a rename onto one is 400 catalog_invalid,
+// and a new logical collection does not take the name of a collection
+// that holds one of its partition names.
+func TestContractPartitionNamesBelongToThePartitions(t *testing.T) {
+	h := cpSeed(t)
+
+	expectStatus(t, call(h, "POST", "/calls-2026-12/_doc", `{"_id":"z","ts":"2026-12-01T00:00:00Z"}`), http.StatusOK)
+	expectStatus(t, call(h, "POST", "/calls/_doc", `{"_id":"y","ts":"2026-12-02T00:00:00Z"}`), http.StatusOK)
+
+	if got := cpCount(t, h, "/calls/_count", `{"query":{"_id":{"$in":["y","z"]}}}`); got != `{"count":2}` {
+		t.Fatalf("count = %s", got)
+	}
+
+	if body := call(h, "GET", "/calls-2026-12", "").Body.String(); !strings.Contains(body, `"partition_of":"calls"`) {
+		t.Fatalf("calls-2026-12 = %s", body)
+	}
+
+	expectStatus(t, call(h, "PUT", "/plain", `{}`), http.StatusOK)
+	expectStatus(t, call(h, "PUT", "/logs-2026-01", `{}`), http.StatusOK)
+
+	ccRun(t, h, []ccCase{
+		{"PUT a partition name", "PUT", "/calls-2027-01", `{}`, http.StatusConflict, "catalog_conflict"},
+		{"rename onto a partition name", "POST", "/plain/_rename", `{"to":"calls-2027-01"}`, http.StatusBadRequest, "catalog_invalid"},
+		{"logical over a taken name", "PUT", "/logs", `{"time":"ts","partition_by":"month"}`, http.StatusConflict, "catalog_conflict"},
+	})
+
+	if got := cpPartitions(t, h, "calls"); slices.Contains(got, "calls-2027-01") {
+		t.Fatalf("partitions = %v", got)
+	}
+}
+
+// A PUT on the logical name that adds unique checks every partition first:
+// a duplicate value in one is 409 unique_violation, and no partition
+// changes. Without one, the new field is enforced at once.
+func TestContractPartitionUniqueAddedLater(t *testing.T) {
+	h := cpSeed(t)
+
+	// b is "missed" in calls-2026-10 too.
+	expectStatus(t, call(h, "POST", "/calls/_doc", `{"_id":"e","ts":"2026-10-30T00:00:00Z","status":"missed"}`), http.StatusOK)
+
+	ccExpect(t, call(h, "PUT", "/calls", `{"unique":["status"]}`), http.StatusConflict, "unique_violation")
+
+	for _, name := range []string{"calls", "calls-2026-09", "calls-2026-10"} {
+		if body := call(h, "GET", "/"+name, "").Body.String(); strings.Contains(body, `"unique"`) {
+			t.Fatalf("%s = %s", name, body)
+		}
+	}
+
+	expectStatus(t, call(h, "PUT", "/calls", `{"unique":["n"]}`), http.StatusOK)
+
+	ccExpect(t, call(h, "POST", "/calls/_doc", `{"_id":"x","ts":"2026-10-11T00:00:00Z","n":2}`), http.StatusConflict, "unique_violation")
+}
+
 // partition_of is set by ndb on a partition. A client that sends it in PUT
 // must not make a collection a partition of another one.
 func TestContractPartitionOfIsNotAClientKey(t *testing.T) {
-	t.Skip("BUG: PUT accepts partition_of: the collection joins the reads, drop and truncate of that logical collection")
-
 	h := cpSeed(t)
 
 	rec := call(h, "PUT", "/evil", `{"partition_of":"calls"}`)
@@ -786,4 +827,20 @@ func TestContractPartitionRetentionInLists(t *testing.T) {
 	// A by-id route does not reach a partition past the retention.
 	expectStatus(t, call(h, "GET", "/logs/_doc/old", ""), http.StatusNotFound)
 	expectStatus(t, call(h, "GET", "/logs/_doc/new", ""), http.StatusOK)
+}
+
+// queries.md: a _delete_by_query with no query is empty_filter, on a
+// partitioned collection too.
+func TestContractPartitionDeleteWithoutQueryIsEmptyFilter(t *testing.T) {
+	h := cpSeed(t)
+
+	for _, body := range []string{`{}`, `{"query":{}}`} {
+		rec := call(h, "POST", "/calls/_delete_by_query", body)
+
+		expectStatus(t, rec, http.StatusBadRequest)
+
+		if got := errorCode(t, rec); got != "empty_filter" {
+			t.Fatalf("%s: code = %q, want empty_filter", body, got)
+		}
+	}
 }

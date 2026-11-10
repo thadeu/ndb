@@ -73,6 +73,7 @@ var (
 	ErrInvalidPath       = &Error{Code: "invalid_path"}
 	ErrInvalidIndex      = &Error{Code: "invalid_index"}
 	ErrInvalidBlobRef    = &Error{Code: "invalid_blob_ref"}
+	ErrInvalidRange      = &Error{Code: "invalid_range"}
 	ErrInvalidPattern    = &Error{Code: "invalid_pattern"}
 	ErrPatternReadOnly   = &Error{Code: "pattern_read_only"}
 	ErrPatternTooWide    = &Error{Code: "pattern_too_wide"}
