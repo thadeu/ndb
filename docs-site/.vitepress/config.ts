@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig, type Plugin } from 'vitepress'
 
 import { codeGroup } from './code-group'
+import { llmsContexts, llmsSummaries } from './llms'
 import { tabs } from './nav'
 import { expandSnippets } from './snippets'
 
@@ -112,37 +113,59 @@ function docPages(): DocPage[] {
         .find((block) => block && !block.startsWith('#') && !block.startsWith('```') && !block.startsWith('|') && !block.startsWith('<') && !block.startsWith('-') && !block.startsWith('>') && !block.startsWith('*') && !block.endsWith(':'))
         ?.replace(/\s+/g, ' ') ?? ''
 
-      return { slug, title, summary, body }
+      return { slug, title, summary: llmsSummaries[slug] ?? summary, body }
     })
 }
 
 function writeLlms(outDir: string, version: string) {
   const pages = docPages()
+  const bySlug = new Map(pages.map((page) => [page.slug, page]))
+  const agents = readFileSync(resolve(here, '../llms-agents.md'), 'utf8').trim()
 
   const header = [
     '# ndb',
     '',
-    `> Drop NDJSON. Query it. NoSQL. One Go daemon (version ${version}) that stores NDJSON as its WAL and answers NoSQL JSON queries over a unix socket or TCP, with Go, Ruby (ndb, ndb-rails) and TypeScript (@thadeu/ndb) SDKs.`,
+    `> Drop NDJSON. Query it. NoSQL. One Go daemon (version ${version}) that stores NDJSON as its WAL and answers NoSQL JSON queries over a unix socket or TCP, with Go, Ruby (ndb, ndb-rails) and TypeScript (@thadeu/ndb) SDKs, and streams with the model of Redis Streams.`,
     '',
   ]
 
+  const contexts = llmsContexts.map((ctx) => `- [${ctx.title}](${siteUrl}/${ctx.file}): the agent guide and ${ctx.pages.length} pages (${ctx.pages.join(', ')}).`)
+
   const index = [
     ...header,
+    agents,
+    '',
+    '## One file for one kind of work',
+    '',
+    ...contexts,
+    '',
     '## Docs',
     '',
-    ...pages.map((page) => `- [${page.title}](${siteUrl}/${page.slug}.md): ${page.summary.slice(0, 200)}`),
+    ...pages.map((page) => `- [${page.title}](${siteUrl}/${page.slug}.md): ${page.summary.slice(0, 240)}`),
     '',
     '## Optional',
     '',
-    `- [Full docs in one file](${siteUrl}/llms-full.txt)`,
+    `- [Full docs in one file](${siteUrl}/llms-full.txt): every page (large).`,
     '- [Source code](https://github.com/thadeu/ndb)',
     '',
   ]
 
-  const full = [...header, ...pages.map((page) => `${page.body.trim()}\n`)].join('\n')
+  const full = [...header, agents, '', ...pages.map((page) => `${page.body.trim()}\n`)].join('\n')
 
   writeFileSync(resolve(outDir, 'llms.txt'), index.join('\n'))
   writeFileSync(resolve(outDir, 'llms-full.txt'), full)
+
+  for (const ctx of llmsContexts) {
+    const missing = ctx.pages.filter((slug) => !bySlug.has(slug))
+
+    if (missing.length > 0) {
+      throw new Error(`${ctx.file}: no page ${missing.join(', ')}`)
+    }
+
+    const body = [`# ${ctx.title}`, '', header[2], '', agents, '', ...ctx.pages.map((slug) => `${bySlug.get(slug)!.body.trim()}\n`)].join('\n')
+
+    writeFileSync(resolve(outDir, ctx.file), body)
+  }
 
   for (const page of pages) {
     const target = resolve(outDir, `${page.slug}.md`)

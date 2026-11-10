@@ -332,7 +332,7 @@ func TestStreamBuryWithACancelledContext(t *testing.T) {
 
 	cancel()
 
-	g.bury(cancelled, Work{DeadLetter: deadName}, entries[0], 3)
+	g.bury(cancelled, Work{DeadLetter: deadName}, entries[0], 3, ReasonMaxDeliveries)
 
 	sum, err := g.Pending(ctx)
 

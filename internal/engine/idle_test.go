@@ -157,6 +157,10 @@ func TestPITRWakesOnlyACollectionWithNewWrites(t *testing.T) {
 // Writes and reads that race with sleeps and wakes lose nothing, and a
 // restart finds every acked write.
 func TestSleepsRacingWithWritesLoseNothing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("heavy: it runs without -short (make test), not in CI")
+	}
+
 	dir := t.TempDir()
 	db := open(t, cfg(dir, nil))
 

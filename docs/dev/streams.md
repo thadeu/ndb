@@ -123,6 +123,199 @@ await group.work('worker-1', async (entry) => {
 }, { claimIdleMs: 60_000, maxDeliveries: 5, deadLetter: 'orders_dead', signal })
 ```
 
+## Delayed retry
+
+ndb only: Redis has no delayed retry. A worker that fails an entry can say
+**when** the entry comes back, and the wait can grow with the number of
+deliveries (15 s, 1 min, 10 min, 1 h, 6 h). With `claim` and `min_idle_ms`
+alone, every retry has the same wait.
+
+```bash
+# the handler failed on its 2nd delivery: give the entry back in 1 min
+curl --unix-socket /run/ndb/ndb.sock http://ndb/orders/_streams/groups/workers/nack \
+  -d '{"consumer":"w1","ids":["1731163600000-0"],"delay_ms":60000}'
+# {"nacked":1}
+
+# each worker, on a short tick (1 s): take the entries whose wait is over
+curl --unix-socket /run/ndb/ndb.sock http://ndb/orders/_streams/groups/workers/claim \
+  -d '{"consumer":"w1","due":true,"count":100}'
+# {"cursor":"0-0","entries":[{"_id":"1731163600000-0","order":42}],"deleted":[]}
+```
+
+- The wait is in the PEL entry, on disk with the rest of the PEL: no second
+  queue, and the entry is never in two places. A restart, a backup and a
+  restore keep it.
+- While it waits, the entry has **no owner**: the pending read of a worker
+  that restarts does not take it early, and any worker of the group takes
+  it when it is due. No read or claim gives it before its time, whatever
+  `min_idle_ms` or `force`. When it is due, a claim takes it at once.
+- The delivery count goes on: the claim that takes it again adds 1, so the
+  worker can choose the next wait from `deliveries`, and send the entry to
+  a dead-letter stream after the last one.
+- `ack` of a waiting entry removes it: so an app can cancel a retry.
+- The daemon knows nothing of tiers: the worker computes the wait and sends
+  it. At most 30 days.
+- `claim` with `due` reads only an index of the nacked entries, not the
+  whole PEL, so a short tick is cheap.
+
+The loop of a worker with retries: steps 1 to 4 of [A worker](#a-worker),
+plus a due claim on each tick; on a failure, `nack` with the wait of this
+delivery instead of leaving the entry pending.
+
+### Delayed retry in the SDKs
+
+The worker of each SDK does this loop with two options: the retry schedule
+and a max age. The example is the post-call outbox of fsw-esl: try 1 waits
+15 s, tries 2 to 5 wait 1 min, 6 to 11 wait 10 min, 12 to 23 wait 1 h, then
+6 h, until the entry is 15 days old. An entry that always fails runs 81
+times; the 82nd delivery goes to the dead letter with the reason `max_age`.
+
+```go
+// Go
+g.Work(ctx, "jobs-1", postCall, ndb.Work{
+	Retry: ndb.TierSteps(
+		ndb.Step{Wait: 15 * time.Second, UpTo: 1},
+		ndb.Step{Wait: time.Minute, UpTo: 5},
+		ndb.Step{Wait: 10 * time.Minute, UpTo: 11},
+		ndb.Step{Wait: time.Hour, UpTo: 23},
+		ndb.Step{Wait: 6 * time.Hour},
+	),
+	MaxAge:     15 * 24 * time.Hour,
+	DeadLetter: "postcall_jobs_dead",
+})
+```
+
+```ruby
+# Ruby (seconds)
+group.work("jobs-1",
+  retry: Ndb::Stream.tiers(
+    { wait: 15, up_to: 1 }, { wait: 60, up_to: 5 }, { wait: 600, up_to: 11 },
+    { wait: 3600, up_to: 23 }, { wait: 21_600 }
+  ),
+  max_age: 15 * 86_400,
+  dead_letter: "postcall_jobs_dead") { |entry| post_call(entry.doc) }
+
+# Rails
+class PostCallJob
+  include Ndb::Streams
+
+  stream :postcall_jobs, group: :jobs, max_age: 15.days, retry: [
+    { wait: 15.seconds, up_to: 1 }, { wait: 1.minute, up_to: 5 },
+    { wait: 10.minutes, up_to: 11 }, { wait: 1.hour, up_to: 23 }, { wait: 6.hours }
+  ]
+
+  def perform(event) = PostCall.deliver(event[:call_id])
+end
+```
+
+```ts
+// TypeScript (milliseconds)
+const minute = 60_000
+const hour = 60 * minute
+
+await group.work('jobs-1', postCall, {
+  retry: tiers(
+    { waitMs: 15_000, upTo: 1 },
+    { waitMs: minute, upTo: 5 },
+    { waitMs: 10 * minute, upTo: 11 },
+    { waitMs: hour, upTo: 23 },
+    { waitMs: 6 * hour },
+  ),
+  maxAgeMs: 15 * 24 * hour,
+  deadLetter: 'postcall_jobs_dead',
+})
+```
+
+The rules are the same in the three SDKs:
+
+- A failed handler nacks the entry with the wait of its delivery count. A
+  plain list of waits (`[15, 60, 600]`) is one wait for each try; the last
+  one repeats.
+- An entry that fails on its `max_deliveries`-th delivery goes to the dead
+  letter (reason `max_deliveries`), not to a nack.
+- An entry older than the max age, by the time of its ID, goes to the dead
+  letter (reason `max_age`) without the handler. One that gets too old in
+  the handler and fails goes there at once.
+- A stop during the handler leaves the entry pending: no nack, no dead
+  letter.
+- The worker claims the due entries every `due_every` (1 s by default with
+  a retry schedule). The claim of idle entries skips the nacked entries
+  that still wait.
+
+### The dead letter
+
+The dead letter (`<stream>_dead`, or the name you give) is a normal stream.
+When an entry goes there, the worker:
+
+1. appends `{stream, group, id, deliveries, reason, doc}` to the dead letter
+   (`reason` is `max_deliveries` or `max_age`, `doc` is the payload);
+2. acks the entry in its group, so it leaves the PEL there.
+
+Nothing delivers it again: an entry that failed for 15 days needs a person
+or a rule of the app before one more try. To send it back, append its `doc`
+to the source stream. It comes in as a **new** entry: a new ID, delivery
+count 0 and a new max age. If the work is not safe to repeat, keep the old
+`id` in the payload to see a replay.
+
+```ruby
+# Rails: one time, from a console or a rake task
+dead = Ndb::Rails.client.stream("postcall_jobs_dead")
+
+dead.range.each do |entry|
+  next unless entry.doc["reason"] == "max_age"
+
+  PostCallJob.append(entry.doc["doc"])   # a new entry of postcall_jobs
+  dead.delete(entry.id)                  # it is not in the dead letter any more
+end
+
+# Rails: a consumer of the dead letter, for a rule of the app
+class PostCallDeadJob
+  include Ndb::Streams
+
+  stream :postcall_jobs_dead, group: :replay
+
+  def perform(event)
+    return unless event[:reason] == "max_age" && Call.exists?(event[:doc]["call_id"])
+
+    PostCallJob.append(event[:doc].merge("replay_of" => event[:id]))
+  end
+end
+```
+
+```ruby
+# Ruby client
+db = Ndb.connect(ENV["NDB_URL"])
+dead = db.stream("postcall_jobs_dead")
+source = db.stream("postcall_jobs")
+
+dead.range.each do |entry|
+  source.append(entry.doc["doc"])
+  dead.delete(entry.id)
+end
+```
+
+- A consumer of the dead letter is a normal consumer: its own group, its
+  own retry and max age. Keep it simple, so a replay does not fail into a
+  second dead letter.
+- `event[:id]` in the dead letter is the ID of the source entry; the dead
+  entry has its own ID (`event.id`).
+- The dead letter grows until you trim or delete it (`max_len:` or
+  `retain:` on its stream, or `_streams/trim`).
+
+### ndb only
+
+These are not in Redis. An app that never uses them sees the behavior of
+Redis:
+
+- the route `POST /{s}/_streams/groups/{g}/nack`;
+- `due` in `claim` (a scan of the due entries) and in the `pending` list;
+- `retry_at` in each row of the `pending` list (`null` when the entry is
+  not nacked) and `waiting` in its summary;
+- the metric `ndb_stream_group_waiting`.
+
+The contract cases of these features are marked `"ndb_only": true` in
+`spec/streams`, so the run on a real Redis skips them.
+
 ## How the engine runs it
 
 - **Append** is a normal write: the whole entry goes to the WAL (`fsync` in
@@ -169,6 +362,8 @@ never fails with an internal error.
 
 - `ndb_stream_entries_added_total{stream}`: every entry ever appended.
 - `ndb_stream_group_pending{stream,group}`: entries delivered and not acked.
+- `ndb_stream_group_waiting{stream,group}`: nacked entries whose retry time
+  has not come (ndb only, see [Delayed retry](#delayed-retry)).
 - `ndb_stream_group_lag{stream,group}`: entries not delivered to the group
   yet, the `lag` of `GET /{s}/_streams/groups` (Redis 7 rules: exact, or an
   estimate after a trim or a delete; left out when it cannot be known).
@@ -200,6 +395,8 @@ never fails with an internal error.
 | `XCLAIM s g c min-idle id ...` | `POST /s/_streams/groups/g/claim {"consumer":"c","min_idle_ms":ms,"ids":[...]}` |
 | `XAUTOCLAIM s g c min-idle start COUNT n` | `... /claim {"consumer":"c","min_idle_ms":ms,"cursor":"start","count":n}` |
 | `JUSTID` | `"just_ids": true` |
+| `XCLAIM ... IDLE ms` / `TIME t` | `"idle_ms": ms` (no `time` key). A time in the future is now, in both |
+| none (ndb only) | `POST /s/_streams/groups/g/nack {"consumer":"c","ids":[...],"delay_ms":ms}`, `claim {"due":true}` |
 | `XINFO STREAM s` | `GET /s/_streams` |
 | `XINFO GROUPS s` | `GET /s/_streams/groups` |
 | `XINFO CONSUMERS s g` | `GET /s/_streams/groups/g/consumers` |

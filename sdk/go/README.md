@@ -380,6 +380,38 @@ leaves the entry pending: it is not a failure. An entry that had `MaxDeliveries`
 deliveries without an ack (it crashed the process) goes to the dead letter at
 the next start, without the handler.
 
+A delayed retry (ndb only): with `Retry`, `Work` nacks a failed entry with a
+wait that can grow with the deliveries, and any worker of the group takes it
+back when the wait ends. The entry has no owner while it waits, so a restart
+does not take it early.
+
+```go
+ndb.Work{
+	Retry: ndb.TierSteps( // 15 s, 4 × 1 min, 6 × 10 min, 12 × 1 h, then 6 h
+		ndb.Step{Wait: 15 * time.Second, UpTo: 1},
+		ndb.Step{Wait: time.Minute, UpTo: 5},
+		ndb.Step{Wait: 10 * time.Minute, UpTo: 11},
+		ndb.Step{Wait: time.Hour, UpTo: 23},
+		ndb.Step{Wait: 6 * time.Hour},
+	),
+	MaxAge:     15 * 24 * time.Hour,
+	DeadLetter: "orders_dead",
+}
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `Count` | 10 | The most entries per read. |
+| `Block` | 5 s | How long a read waits for new entries. |
+| `ClaimIdle` | 1 min | Claim the entries pending this long (not the nacked ones that still wait). Negative: off. |
+| `ClaimEvery` | `ClaimIdle / 2` (at least 1 s) | How often `Work` looks for idle entries. |
+| `MaxDeliveries` | 0 (no limit) | A failure on this delivery sends the entry to `DeadLetter` (reason `max_deliveries`), also with `Retry`. |
+| `DeadLetter` | none | The stream of `ndb.DeadEntry` (`Stream`, `Group`, `ID`, `Deliveries`, `Reason`, `Doc`). |
+| `Retry` | nil | `func(deliveries int64) time.Duration`: on a handler failure, nack with this wait. `nil`: the entry stays pending for `ClaimIdle`. `ndb.Tiers(waits...)`: the wait of try n is `waits[min(n, len)-1]`. `ndb.TierSteps(ndb.Step{Wait, UpTo}...)`: the first step with `n <= UpTo` (0: no bound); the last step repeats. |
+| `MaxAge` | 0 (no limit) | An entry older than this (by its ID time) goes to `DeadLetter` with reason `max_age`, without the handler, and is acked. A failure past `MaxAge` is not nacked: it goes to `DeadLetter` at once. |
+| `DueEvery` | 1 s with `Retry`, else off | How often `Work` claims the nacked entries whose wait ended (`ClaimDue`). Negative: off. |
+| `OnError` | none | Gets the errors that do not stop `Work`. |
+
 The calls one by one, when you need your own loop:
 
 | Redis | Go |
@@ -396,6 +428,7 @@ The calls one by one, when you need your own loop:
 | `XTRIM` | `orders.Trim(ctx, ndb.MaxLen(1000, false))` |
 | `XDEL` | `orders.Delete(ctx, id)` |
 | `XINFO GROUPS` / `CONSUMERS` | `orders.Groups(ctx)` / `g.Consumers(ctx)` |
+| ndb only: delayed retry | `g.Nack(ctx, "w1", time.Minute, ids...)` / `g.ClaimDue(ctx, "w2", "0-0", 100)` / `ndb.PendingQuery{Due: &yes}` (`PendingEntry.RetryAt`, `PendingSummary.Waiting`) |
 
 A blocked `Read` or `Tail` does not count against `WithMaxConns`.
 

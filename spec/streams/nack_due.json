@@ -1,0 +1,325 @@
+{
+  "name": "a nack with delay_ms 0 is due at once: claim due and a claim by ids take it whatever min_idle_ms, and the delivery count goes on",
+  "stream": "orders",
+  "ndb_only": true,
+  "steps": [
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-0"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-0"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 2
+        },
+        "id": "1-1"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-1"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 3
+        },
+        "id": "1-2"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-2"
+        }
+      }
+    },
+    {
+      "op": "group_create",
+      "group": "g",
+      "body": {
+        "start": "0"
+      }
+    },
+    {
+      "op": "read",
+      "group": "g",
+      "body": {
+        "consumer": "c1",
+        "count": 10
+      }
+    },
+    {
+      "op": "nack",
+      "group": "g",
+      "body": {
+        "consumer": "c1",
+        "ids": [
+          "1-0",
+          "1-1"
+        ],
+        "delay_ms": 0
+      },
+      "expect": {
+        "body": {
+          "nacked": 2
+        }
+      }
+    },
+    {
+      "op": "pending",
+      "group": "g",
+      "body": {
+        "start": "-",
+        "end": "+",
+        "count": 10,
+        "due": true
+      },
+      "expect": {
+        "body": [
+          {
+            "_id": "1-0",
+            "consumer": "",
+            "deliveries": 1
+          },
+          {
+            "_id": "1-1",
+            "consumer": "",
+            "deliveries": 1
+          }
+        ],
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms",
+          "retry_at"
+        ]
+      }
+    },
+    {
+      "op": "pending",
+      "group": "g",
+      "body": {
+        "start": "-",
+        "end": "+",
+        "count": 10,
+        "due": false
+      },
+      "expect": {
+        "body": [],
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    },
+    {
+      "op": "pending",
+      "group": "g",
+      "body": {},
+      "expect": {
+        "body": {
+          "count": 3,
+          "lowest": "1-0",
+          "highest": "1-2",
+          "consumers": [
+            {
+              "name": "c1",
+              "count": 1
+            }
+          ],
+          "waiting": 0
+        },
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    },
+    {
+      "op": "claim",
+      "group": "g",
+      "body": {
+        "consumer": "c2",
+        "due": true,
+        "count": 1
+      },
+      "expect": {
+        "body": {
+          "cursor": "1-1",
+          "entries": [
+            {
+              "_id": "1-0",
+              "n": 1
+            }
+          ],
+          "deleted": []
+        },
+        "ignore": [
+          "_ts"
+        ]
+      }
+    },
+    {
+      "op": "claim",
+      "group": "g",
+      "body": {
+        "consumer": "c3",
+        "min_idle_ms": 3600000,
+        "ids": [
+          "1-1"
+        ]
+      },
+      "expect": {
+        "body": {
+          "entries": [
+            {
+              "_id": "1-1",
+              "n": 2
+            }
+          ],
+          "deleted": []
+        },
+        "ignore": [
+          "_ts"
+        ]
+      }
+    },
+    {
+      "op": "claim",
+      "group": "g",
+      "body": {
+        "consumer": "c2",
+        "due": true,
+        "cursor": "0-0"
+      },
+      "expect": {
+        "body": {
+          "cursor": "0-0",
+          "entries": [],
+          "deleted": []
+        }
+      }
+    },
+    {
+      "op": "pending",
+      "group": "g",
+      "body": {
+        "start": "-",
+        "end": "+",
+        "count": 10
+      },
+      "expect": {
+        "body": [
+          {
+            "_id": "1-0",
+            "consumer": "c2",
+            "deliveries": 2,
+            "retry_at": null
+          },
+          {
+            "_id": "1-1",
+            "consumer": "c3",
+            "deliveries": 2,
+            "retry_at": null
+          },
+          {
+            "_id": "1-2",
+            "consumer": "c1",
+            "deliveries": 1,
+            "retry_at": null
+          }
+        ],
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    },
+    {
+      "op": "nack",
+      "group": "g",
+      "body": {
+        "consumer": "c3",
+        "ids": [
+          "1-1"
+        ],
+        "delay_ms": 0
+      },
+      "expect": {
+        "body": {
+          "nacked": 1
+        }
+      }
+    },
+    {
+      "op": "claim",
+      "group": "g",
+      "body": {
+        "consumer": "c4",
+        "min_idle_ms": 3600000,
+        "cursor": "0-0",
+        "just_ids": true
+      },
+      "expect": {
+        "body": {
+          "cursor": "0-0",
+          "entries": [
+            "1-1"
+          ],
+          "deleted": []
+        }
+      }
+    },
+    {
+      "op": "pending",
+      "group": "g",
+      "body": {
+        "start": "-",
+        "end": "+",
+        "count": 10
+      },
+      "expect": {
+        "body": [
+          {
+            "_id": "1-0",
+            "consumer": "c2",
+            "deliveries": 2,
+            "retry_at": null
+          },
+          {
+            "_id": "1-1",
+            "consumer": "c4",
+            "deliveries": 2,
+            "retry_at": null
+          },
+          {
+            "_id": "1-2",
+            "consumer": "c1",
+            "deliveries": 1,
+            "retry_at": null
+          }
+        ],
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    }
+  ]
+}

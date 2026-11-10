@@ -119,6 +119,10 @@ func unacked(t *testing.T, db *engine.DB) []string {
 // again and again. After each kill, every event before the stored position
 // must be in the work log (no gap). Duplicates in the log are allowed.
 func TestWatchConsumerKilledAtRandomPointsLosesNothing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("heavy: it runs without -short (make test), not in CI")
+	}
+
 	dir := t.TempDir()
 
 	db := open(t, cfg(dir, nil))

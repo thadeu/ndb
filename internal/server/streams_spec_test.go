@@ -14,10 +14,13 @@ import (
 // The contract cases of spec/streams (see its README): each one is a list of
 // steps on a new daemon.
 
+// NdbOnly marks a case of an ndb-only feature (nack, retry_at, due,
+// waiting): it runs on ndb, and TestStreamCasesOnRedis skips it.
 type streamCase struct {
-	Name   string       `json:"name"`
-	Stream string       `json:"stream"`
-	Steps  []streamStep `json:"steps"`
+	Name    string       `json:"name"`
+	Stream  string       `json:"stream"`
+	NdbOnly bool         `json:"ndb_only"`
+	Steps   []streamStep `json:"steps"`
 }
 
 type streamStep struct {
@@ -131,7 +134,7 @@ func streamRoute(s string, step streamStep) (string, string) {
 		return "PUT", g
 	case "group_destroy":
 		return "DELETE", g
-	case "setid", "read", "ack", "pending", "claim":
+	case "setid", "read", "ack", "nack", "pending", "claim":
 		return "POST", g + "/" + step.Op
 	case "consumer_create":
 		return "PUT", g + "/consumers/" + step.Consumer

@@ -21,8 +21,9 @@ module Ndb
     end
   end
 
-  # The answer of Group#claim and Group#auto_claim. cursor is where the next
-  # auto_claim starts ("0-0" when the scan is complete; nil for claim).
+  # The answer of Group#claim, Group#auto_claim and Group#claim_due. cursor
+  # is where the next scan starts ("0-0" when the scan is complete; nil for
+  # claim).
   # deleted holds the pending IDs whose entry is no longer in the stream.
   Claimed = Data.define(:cursor, :entries, :deleted)
 
@@ -48,7 +49,14 @@ module Ndb
 
       return nil if seq.empty? || !ms.match?(/\A\d+\z/)
 
-      Time.at(ms.to_i / 1000, ms.to_i % 1000, :millisecond).utc
+      time_of_ms(ms.to_i)
+    end
+
+    # The Time of a Unix time in milliseconds, or nil for nil.
+    def self.time_of_ms(ms)
+      return nil if ms.nil?
+
+      Time.at(ms / 1000, ms % 1000, :millisecond).utc
     end
 
     def initialize(client, name)
@@ -263,20 +271,42 @@ module Ndb
       @stream.call("POST", path("ack"), { ids: ids }).fetch("acked")
     end
 
+    # Gives entries back to the group after delay seconds (a Float is
+    # fine), for a retry (ndb only). Returns how many it gave back: only the
+    # IDs pending for consumer count. The entry stays pending with no owner
+    # ("consumer" "") until its retry time, and its delivery count does not
+    # change. After the retry time, any consumer takes it with #claim_due
+    # (or #claim). delay 0 makes it due at once; the most is 30 days.
+    def nack(consumer, *ids, delay: 0)
+      ids = ids.flatten
+
+      return 0 if ids.empty?
+
+      body = { consumer: consumer, ids: ids, delay_ms: (delay * 1000).round }
+
+      @stream.call("POST", path("nack"), body).fetch("nacked")
+    end
+
     # The pending list in short (XPENDING): "count", "lowest", "highest",
-    # "consumers" ([{"name", "count"}]).
+    # "consumers" ([{"name", "count"}]), and "waiting" (ndb only): the
+    # nacked entries whose retry time has not come.
     def pending
       @stream.call("POST", path("pending"), {})
     end
 
     # Pending entries in ID order (XPENDING with a range). Each one is a Hash
-    # with "_id", "consumer", "idle_ms", "deliveries". idle: seconds; only
-    # the entries idle for at least this long.
-    def pending_list(start: "-", stop: "+", count: 100, consumer: nil, idle: nil)
-      body = { start: start, end: stop, count: count, consumer: consumer }.compact
+    # with "_id", "consumer", "idle_ms", "deliveries" and "retry_at" (ndb
+    # only): the retry time (a Time) of a nacked entry, or nil. A nacked
+    # entry has "consumer" "". idle: seconds; only the entries idle for at
+    # least this long. due: true gives only the nacked entries whose retry
+    # time passed; false only the ones that still wait (ndb only).
+    def pending_list(start: "-", stop: "+", count: 100, consumer: nil, idle: nil, due: nil)
+      body = { start: start, end: stop, count: count, consumer: consumer, due: due }.compact
       body[:idle_ms] = (idle * 1000).round if idle && idle.positive?
 
-      @stream.call("POST", path("pending"), body) || []
+      rows = @stream.call("POST", path("pending"), body) || []
+
+      rows.each { |row| row["retry_at"] = Stream.time_of_ms(row["retry_at"]) }
     end
 
     # Moves the entries idle for at least min_idle seconds to consumer
@@ -299,6 +329,16 @@ module Ndb
     # in #claim.
     def auto_claim(consumer, min_idle: 0, cursor: "0-0", count: nil, just_ids: false)
       body = { consumer: consumer, min_idle_ms: (min_idle * 1000).round, cursor: cursor, count: count }.compact
+
+      claim_with(body, just_ids)
+    end
+
+    # Scans the nacked entries from cursor and moves up to count of the ones
+    # whose retry time passed to consumer (ndb only). It looks only at the
+    # nacked entries, not at the entries in flight at live workers, so a
+    # worker can call it often. just_ids: as in #claim.
+    def claim_due(consumer, cursor: "0-0", count: nil, just_ids: false)
+      body = { consumer: consumer, due: true, cursor: cursor, count: count }.compact
 
       claim_with(body, just_ids)
     end

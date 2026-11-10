@@ -53,7 +53,8 @@
           "count": 0,
           "lowest": null,
           "highest": null,
-          "consumers": []
+          "consumers": [],
+          "waiting": 0
         }
       }
     }

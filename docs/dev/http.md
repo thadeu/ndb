@@ -11,7 +11,7 @@ The routes have pages by group:
 | [Documents](http/documents.md) | `_doc`, `_bulk`, `_update/{id}`, `_expire`, `_persist`, `_ttl` |
 | [Queries](http/queries.md) | `_search`, `_count`, `_aggregate`, `_update_by_query`, `_delete_by_query`, patterns |
 | [Watch](http/watch.md) | `_watch`, `_ack` |
-| [Streams](http/streams.md) | `_streams`, `append`, `trim`, `groups`, `read`, `ack`, `pending`, `claim` (Redis Streams) |
+| [Streams](http/streams.md) | `_streams`, `append`, `trim`, `groups`, `read`, `ack`, `nack`, `pending`, `claim` (Redis Streams; `nack` is ndb only) |
 | [Errors](http/errors.md) | the error body and every code |
 
 The query language (operators, date math, `$elemMatch`) is on [Query](query.md), the pipeline stages are on [Aggregate](aggregate.md), the events are on [Watch](watch.md), and the stream model is on [Streams](streams.md). These pages link there and do not repeat it.
@@ -82,6 +82,7 @@ The query language (operators, date math, `$elemMatch`) is on [Query](query.md),
 | DELETE | `/{s}/_streams/groups/{g}/consumers/{c}` | [Streams](http/streams.md#delete-s-streams-groups-g-consumers-c) |
 | POST | `/{s}/_streams/groups/{g}/read` | [Streams](http/streams.md#post-s-streams-groups-g-read) |
 | POST | `/{s}/_streams/groups/{g}/ack` | [Streams](http/streams.md#post-s-streams-groups-g-ack) |
+| POST | `/{s}/_streams/groups/{g}/nack` | [Streams](http/streams.md#post-s-streams-groups-g-nack) (ndb only) |
 | POST | `/{s}/_streams/groups/{g}/pending` | [Streams](http/streams.md#post-s-streams-groups-g-pending) |
 | POST | `/{s}/_streams/groups/{g}/claim` | [Streams](http/streams.md#post-s-streams-groups-g-claim) |
 

@@ -1,0 +1,332 @@
+{
+  "name": "a nacked entry has no owner and waits for its retry time: no read or claim takes it before, delete consumer keeps it, ack cancels it",
+  "stream": "orders",
+  "ndb_only": true,
+  "steps": [
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-0"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-0"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 2
+        },
+        "id": "1-1"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-1"
+        }
+      }
+    },
+    {
+      "op": "group_create",
+      "group": "g",
+      "body": {
+        "start": "0"
+      }
+    },
+    {
+      "op": "read",
+      "group": "g",
+      "body": {
+        "consumer": "c1",
+        "count": 10
+      }
+    },
+    {
+      "op": "nack",
+      "group": "g",
+      "body": {
+        "consumer": "c2",
+        "ids": [
+          "1-0"
+        ],
+        "delay_ms": 3600000
+      },
+      "expect": {
+        "body": {
+          "nacked": 0
+        }
+      }
+    },
+    {
+      "op": "nack",
+      "group": "g",
+      "body": {
+        "consumer": "c1",
+        "ids": [
+          "1-0",
+          "9-9"
+        ],
+        "delay_ms": 3600000
+      },
+      "expect": {
+        "body": {
+          "nacked": 1
+        }
+      }
+    },
+    {
+      "op": "nack",
+      "group": "g",
+      "body": {
+        "consumer": "c1",
+        "ids": [
+          "1-0"
+        ],
+        "delay_ms": 3600000
+      },
+      "expect": {
+        "body": {
+          "nacked": 0
+        }
+      }
+    },
+    {
+      "op": "read",
+      "group": "g",
+      "body": {
+        "consumer": "c1",
+        "pending": true
+      },
+      "expect": {
+        "rows": [
+          {
+            "_id": "1-1",
+            "n": 2
+          }
+        ],
+        "ignore": [
+          "_ts"
+        ]
+      }
+    },
+    {
+      "op": "claim",
+      "group": "g",
+      "body": {
+        "consumer": "c2",
+        "min_idle_ms": 0,
+        "ids": [
+          "1-0"
+        ],
+        "force": true,
+        "just_ids": true
+      },
+      "expect": {
+        "body": {
+          "entries": [],
+          "deleted": []
+        }
+      }
+    },
+    {
+      "op": "claim",
+      "group": "g",
+      "body": {
+        "consumer": "c2",
+        "min_idle_ms": 0,
+        "cursor": "0-0",
+        "count": 10,
+        "just_ids": true
+      },
+      "expect": {
+        "body": {
+          "cursor": "0-0",
+          "entries": [
+            "1-1"
+          ],
+          "deleted": []
+        }
+      }
+    },
+    {
+      "op": "claim",
+      "group": "g",
+      "body": {
+        "consumer": "c2",
+        "due": true
+      },
+      "expect": {
+        "body": {
+          "cursor": "0-0",
+          "entries": [],
+          "deleted": []
+        }
+      }
+    },
+    {
+      "op": "pending",
+      "group": "g",
+      "body": {
+        "start": "-",
+        "end": "+",
+        "count": 10,
+        "due": false
+      },
+      "expect": {
+        "body": [
+          {
+            "_id": "1-0",
+            "consumer": "",
+            "deliveries": 1
+          }
+        ],
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms",
+          "retry_at"
+        ]
+      }
+    },
+    {
+      "op": "pending",
+      "group": "g",
+      "body": {
+        "start": "-",
+        "end": "+",
+        "count": 10,
+        "due": true
+      },
+      "expect": {
+        "body": [],
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    },
+    {
+      "op": "pending",
+      "group": "g",
+      "body": {},
+      "expect": {
+        "body": {
+          "count": 2,
+          "lowest": "1-0",
+          "highest": "1-1",
+          "consumers": [
+            {
+              "name": "c2",
+              "count": 1
+            }
+          ],
+          "waiting": 1
+        },
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    },
+    {
+      "op": "consumers",
+      "group": "g",
+      "expect": {
+        "body": [
+          {
+            "name": "c1",
+            "pending": 0
+          },
+          {
+            "name": "c2",
+            "pending": 1
+          }
+        ],
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    },
+    {
+      "op": "consumer_delete",
+      "group": "g",
+      "consumer": "c1",
+      "expect": {
+        "body": {
+          "pending": 0
+        }
+      }
+    },
+    {
+      "op": "pending",
+      "group": "g",
+      "body": {},
+      "expect": {
+        "body": {
+          "count": 2,
+          "lowest": "1-0",
+          "highest": "1-1",
+          "consumers": [
+            {
+              "name": "c2",
+              "count": 1
+            }
+          ],
+          "waiting": 1
+        },
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    },
+    {
+      "op": "ack",
+      "group": "g",
+      "body": {
+        "ids": [
+          "1-0"
+        ]
+      },
+      "expect": {
+        "body": {
+          "acked": 1
+        }
+      }
+    },
+    {
+      "op": "pending",
+      "group": "g",
+      "body": {},
+      "expect": {
+        "body": {
+          "count": 1,
+          "lowest": "1-1",
+          "highest": "1-1",
+          "consumers": [
+            {
+              "name": "c2",
+              "count": 1
+            }
+          ],
+          "waiting": 0
+        },
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    }
+  ]
+}

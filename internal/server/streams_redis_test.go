@@ -22,8 +22,10 @@ import (
 //	NDB_REDIS_ADDR=127.0.0.1:6390 go test -run TestStreamCasesOnRedis ./internal/server/
 //
 // Values are compared as text (Redis keeps strings) and ndb-only fields
-// (_ts) are left out. A case with a normal collection (not_a_stream) has no
-// Redis meaning and is skipped.
+// (_ts) are left out; the ndb-only fields of a pending answer get their
+// value with no nack (waiting 0, retry_at null). A case with a normal
+// collection (not_a_stream) has no Redis meaning and is skipped, and so is
+// a case marked ndb_only (a delayed retry: Redis has none).
 func TestStreamCasesOnRedis(t *testing.T) {
 	addr := os.Getenv("NDB_REDIS_ADDR")
 
@@ -49,6 +51,10 @@ func TestStreamCasesOnRedis(t *testing.T) {
 		}
 
 		t.Run(c.Name, func(t *testing.T) {
+			if c.NdbOnly {
+				t.Skip("an ndb-only case")
+			}
+
 			for _, s := range c.Steps {
 				if s.Op == "put_doc" || s.Op == "create" {
 					t.Skip("a normal collection has no Redis meaning")
@@ -473,10 +479,23 @@ func (r *redis) pending(s, g string, b map[string]any) (any, error) {
 			}
 		}
 
-		return map[string]any{"count": list[0], "lowest": list[1], "highest": list[2], "consumers": cons}, nil
+		return map[string]any{"count": list[0], "lowest": list[1], "highest": list[2], "consumers": cons, "waiting": int64(0)}, nil
 	}
 
-	v, err := r.do("XPENDING", s, g, text(b["start"], "-"), text(b["end"], "+"), text(b["count"], ""))
+	cmd := []string{"XPENDING", s, g}
+
+	if idle, ok := b["idle_ms"]; ok {
+		cmd = append(cmd, "IDLE", text(idle, ""))
+	}
+
+	cmd = append(cmd, text(b["start"], "-"), text(b["end"], "+"), text(b["count"], ""))
+
+	if c, ok := b["consumer"]; ok {
+		cmd = append(cmd, text(c, ""))
+	}
+
+	v, err := r.do(cmd...)
+
 	if err != nil {
 		return nil, err
 	}
@@ -486,7 +505,7 @@ func (r *redis) pending(s, g string, b map[string]any) (any, error) {
 	for _, p := range v.([]any) {
 		row := p.([]any)
 
-		out = append(out, map[string]any{"_id": row[0], "consumer": row[1], "deliveries": row[3]})
+		out = append(out, map[string]any{"_id": row[0], "consumer": row[1], "idle_ms": row[2], "deliveries": row[3], "retry_at": nil})
 	}
 
 	return out, nil
@@ -531,6 +550,18 @@ func (r *redis) claim(s, g string, b map[string]any) (any, error) {
 				deleted = append(deleted, id)
 			}
 		}
+	}
+
+	if idle, ok := b["idle_ms"]; ok {
+		cmd = append(cmd, "IDLE", text(idle, ""))
+	}
+
+	if n, ok := b["retry_count"]; ok {
+		cmd = append(cmd, "RETRYCOUNT", text(n, ""))
+	}
+
+	if b["force"] == true {
+		cmd = append(cmd, "FORCE")
 	}
 
 	if justIDs {

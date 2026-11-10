@@ -30,10 +30,22 @@ Each step runs in order on a new daemon. `op` names a route:
 | `setid` | `POST /{s}/_streams/groups/{group}/setid` |
 | `consumer_create`, `consumer_delete` | `PUT`, `DELETE /{s}/_streams/groups/{group}/consumers/{consumer}` |
 | `groups`, `consumers` | `GET /{s}/_streams/groups`, `/groups/{group}/consumers` |
-| `read`, `ack`, `pending`, `claim` | `POST /{s}/_streams/groups/{group}/<op>` |
+| `read`, `ack`, `nack`, `pending`, `claim` | `POST /{s}/_streams/groups/{group}/<op>` |
 | `search`, `count` | `POST /{s}/_search`, `/_count` |
 | `delete` | `DELETE /{s}/_doc/{id}` |
 | `put_doc` | `POST /{s}/_doc` (a normal collection, for `not_a_stream`) |
+
+Keys of a case:
+
+- `ndb_only: true`: the case is of a feature that Redis does not have (the
+  delayed retry: `nack`, `due`, `retry_at`, `waiting`). It runs on ndb;
+  `TestStreamCasesOnRedis` skips it. The other cases must pass on both.
+- `note` (optional): text for the reader, for example what Redis does in
+  the case. The runners do not read it.
+
+The Redis runner adds the ndb-only fields of a `pending` answer with their
+value when nothing is nacked (`"waiting": 0`, `"retry_at": null`), so every
+case can expect them.
 
 `expect` (optional; a step with no `expect` must not fail):
 

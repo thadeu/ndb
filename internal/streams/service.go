@@ -1002,7 +1002,7 @@ func (s *Service) CreateGroup(ctx context.Context, name, g, startArg string, ent
 			return err
 		}
 
-		for _, sub := range [][]byte{bPEL, bConsumers} {
+		for _, sub := range [][]byte{bPEL, bConsumers, bRetry} {
 			if _, err := b.CreateBucket(sub); err != nil {
 				return err
 			}
@@ -1099,6 +1099,7 @@ func (s *Service) CreateConsumer(ctx context.Context, name, g, c string) (bool, 
 }
 
 // DeleteConsumer deletes c and its pending entries, and gives their number.
+// A nacked entry has no owner, so it stays.
 func (s *Service) DeleteConsumer(ctx context.Context, name, g, c string) (int, error) {
 	st, err := s.open(ctx, name, false)
 	if err != nil {
@@ -1149,6 +1150,10 @@ type GroupInfo struct {
 	LastDeliveredID string `json:"last_delivered_id"`
 	EntriesRead     *int64 `json:"entries_read"`
 	Lag             *int64 `json:"lag"`
+
+	// Waiting is the count of nacked entries whose retry time has not
+	// come; only the metrics fill it.
+	Waiting int `json:"-"`
 }
 
 func (s *Service) Groups(ctx context.Context, name string) ([]GroupInfo, error) {
@@ -1352,8 +1357,9 @@ func (s *Service) Consumers(ctx context.Context, name, g string) ([]ConsumerInfo
 		counts := map[string]int{}
 		pel := b.Bucket(bPEL)
 
+		// A nacked entry has no owner: it counts for no consumer.
 		_ = pel.ForEach(func(k, _ []byte) error {
-			if p, ok := getPending(pel, k); ok {
+			if p, ok := getPending(pel, k); ok && p.Consumer != "" {
 				counts[p.Consumer]++
 			}
 
@@ -1695,10 +1701,19 @@ func (s *Service) readNew(ctx context.Context, st *stream, g string, o ReadOptio
 
 		if !o.NoAck {
 			pel := b.Bucket(bPEL)
+			idx := b.Bucket(bRetry)
 
 			for _, k := range keys {
 				if err := putPending(pel, k, pending{Consumer: o.Consumer, Delivered: now, Deliveries: 1}); err != nil {
 					return err
+				}
+
+				// After a setid back, the entry can be a nacked one: the new
+				// delivery replaces it.
+				if idx != nil && idx.Get([]byte(k)) != nil {
+					if err := idx.Delete([]byte(k)); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -1897,6 +1912,107 @@ func ackIn(store *bolt.DB, g string, keys []string) (int, error) {
 				return err
 			}
 
+			if err := unmarkRetry(b, []byte(k)); err != nil {
+				return err
+			}
+
+			n++
+		}
+
+		return nil
+	})
+
+	return n, err
+}
+
+// MaxNackDelay is the longest wait of a nack: 30 days, in ms.
+const MaxNackDelay = int64(30 * 24 * time.Hour / time.Millisecond)
+
+// NackOptions are the keys of a nack.
+type NackOptions struct {
+	Consumer string   `json:"consumer"`
+	IDs      []string `json:"ids"`
+	DelayMs  int64    `json:"delay_ms"`
+}
+
+// Nack gives entries back to the group after a wait (ndb only, Redis has
+// no delayed retry). Each ID pending for the consumer stays in the PEL with
+// no owner and RetryAt = now + DelayMs; its delivery count does not change.
+// Other IDs count 0. All the IDs are one transaction (one fsync).
+func (s *Service) Nack(ctx context.Context, name, g string, o NackOptions) (int, error) {
+	switch {
+	case o.Consumer == "":
+		return 0, badRequest("nack needs a consumer")
+	case o.DelayMs < 0 || o.DelayMs > MaxNackDelay:
+		return 0, badRequest("delay_ms is 0 to %d (30 days)", MaxNackDelay)
+	}
+
+	keys, err := keysOf(o.IDs)
+
+	if err != nil {
+		return 0, err
+	}
+
+	// As an ack: no stream lock, and bbolt joins the nacks that come at once
+	// into one transaction. A truncate, a drop or a rename can close the
+	// store between the unlock and the batch: then it opens it again.
+	for {
+		st, err := s.open(ctx, name, false)
+
+		if err != nil {
+			return 0, err
+		}
+
+		store := st.st
+
+		st.mu.Unlock()
+
+		// max: 0 is "no retry", so a nack at unix 0 still marks the entry.
+		retryAt := max(s.now().UnixMilli()+o.DelayMs, 1)
+		n, err := nackIn(store, g, o.Consumer, keys, retryAt)
+
+		if errors.Is(err, bolt.ErrDatabaseNotOpen) {
+			continue
+		}
+
+		return n, err
+	}
+}
+
+// nackIn clears the owner of the keys pending for consumer and sets their
+// RetryAt.
+func nackIn(store *bolt.DB, g, consumer string, keys []string, retryAt int64) (int, error) {
+	n := 0
+
+	err := store.Batch(func(tx *bolt.Tx) error {
+		n = 0
+
+		b, err := groupBucket(tx, g)
+
+		if err != nil {
+			return errGroup(g)
+		}
+
+		pel := b.Bucket(bPEL)
+
+		for _, k := range keys {
+			p, ok := getPending(pel, []byte(k))
+
+			if !ok || p.Consumer != consumer {
+				continue
+			}
+
+			p.Consumer = ""
+			p.RetryAt = retryAt
+
+			if err := putPending(pel, k, p); err != nil {
+				return err
+			}
+
+			if err := markRetry(b, k); err != nil {
+				return err
+			}
+
 			n++
 		}
 
@@ -1921,21 +2037,26 @@ func keysOf(ids []string) ([]string, error) {
 	return keys, nil
 }
 
-// PendingOptions are the keys of XPENDING. Count 0 is the summary.
+// PendingOptions are the keys of XPENDING. Count 0 is the summary. Due
+// (ndb only) keeps the nacked entries: true the ones whose retry time
+// passed, false the ones that still wait.
 type PendingOptions struct {
 	Start    string `json:"start"`
 	End      string `json:"end"`
 	Count    int    `json:"count"`
 	Consumer string `json:"consumer"`
 	IdleMs   int64  `json:"idle_ms"`
+	Due      *bool  `json:"due"`
 }
 
-// PendingSummary is XPENDING with no range.
+// PendingSummary is XPENDING with no range. Waiting (ndb only) counts the
+// nacked entries whose retry time has not come.
 type PendingSummary struct {
 	Count     int             `json:"count"`
 	Lowest    *string         `json:"lowest"`
 	Highest   *string         `json:"highest"`
 	Consumers []ConsumerCount `json:"consumers"`
+	Waiting   int             `json:"waiting"`
 }
 
 type ConsumerCount struct {
@@ -1943,12 +2064,14 @@ type ConsumerCount struct {
 	Count int    `json:"count"`
 }
 
-// PendingEntry is one row of XPENDING with a range.
+// PendingEntry is one row of XPENDING with a range. A nacked entry has
+// Consumer "" and RetryAt (ndb only, unix ms; nil when not nacked).
 type PendingEntry struct {
 	ID         string `json:"_id"`
 	Consumer   string `json:"consumer"`
 	IdleMs     int64  `json:"idle_ms"`
 	Deliveries int64  `json:"deliveries"`
+	RetryAt    *int64 `json:"retry_at"`
 }
 
 // Pending gives a PendingSummary (Count 0) or []PendingEntry.
@@ -2000,17 +2123,36 @@ func (s *Service) Pending(ctx context.Context, name, g string, o PendingOptions)
 			p, ok := getPending(pel, k)
 			idle := now - p.Delivered
 
-			if !ok || o.Consumer != "" && p.Consumer != o.Consumer || idle < o.IdleMs {
+			if !ok || o.Consumer != "" && p.Consumer != o.Consumer || idle < o.IdleMs || !dueMatch(o.Due, p, now) {
 				continue
 			}
 
-			out = append(out, PendingEntry{ID: id.String(), Consumer: p.Consumer, IdleMs: idle, Deliveries: p.Deliveries})
+			row := PendingEntry{ID: id.String(), Consumer: p.Consumer, IdleMs: idle, Deliveries: p.Deliveries}
+
+			if p.RetryAt != 0 {
+				at := p.RetryAt
+				row.RetryAt = &at
+			}
+
+			out = append(out, row)
 		}
 
 		return nil
 	})
 
 	return out, err
+}
+
+// dueMatch is the due filter of a pending list: nil keeps every entry.
+func dueMatch(due *bool, p pending, now int64) bool {
+	switch {
+	case due == nil:
+		return true
+	case *due:
+		return p.due(now)
+	}
+
+	return p.waiting(now)
 }
 
 func orDefault(s, def string) string {
@@ -2023,6 +2165,7 @@ func orDefault(s, def string) string {
 
 func (st *stream) pendingSummary(g string) (PendingSummary, error) {
 	sum := PendingSummary{Consumers: []ConsumerCount{}}
+	now := st.now().UnixMilli()
 
 	err := st.st.View(func(tx *bolt.Tx) error {
 		b, err := groupBucket(tx, g)
@@ -2044,8 +2187,14 @@ func (st *stream) pendingSummary(g string) (PendingSummary, error) {
 			sum.Highest = &text
 			sum.Count++
 
-			if p, ok := getPending(pel, k); ok {
+			p, ok := getPending(pel, k)
+
+			switch {
+			case !ok:
+			case p.Consumer != "":
 				counts[p.Consumer]++
+			case p.waiting(now):
+				sum.Waiting++
 			}
 
 			return nil
@@ -2069,7 +2218,8 @@ func (st *stream) pendingSummary(g string) (PendingSummary, error) {
 	return sum, err
 }
 
-// ClaimOptions are the keys of XCLAIM (IDs) and XAUTOCLAIM (Cursor).
+// ClaimOptions are the keys of XCLAIM (IDs) and XAUTOCLAIM (Cursor). Due
+// (ndb only) is a scan of the nacked entries whose retry time passed.
 type ClaimOptions struct {
 	Consumer   string   `json:"consumer"`
 	MinIdleMs  int64    `json:"min_idle_ms"`
@@ -2080,6 +2230,7 @@ type ClaimOptions struct {
 	IdleMs     *int64   `json:"idle_ms"`
 	RetryCount *int64   `json:"retry_count"`
 	Force      bool     `json:"force"`
+	Due        bool     `json:"due"`
 }
 
 // ClaimResult is the answer of a claim. Cursor is set only with a scan.
@@ -2090,9 +2241,15 @@ type ClaimResult struct {
 }
 
 func (s *Service) Claim(ctx context.Context, name, g string, o ClaimOptions) (ClaimResult, error) {
+	if o.Due && o.Cursor == "" {
+		o.Cursor = "0-0"
+	}
+
 	switch {
 	case o.Consumer == "":
 		return ClaimResult{}, badRequest("claim needs a consumer")
+	case o.Due && o.IDs != nil:
+		return ClaimResult{}, badRequest("due is a scan: it takes a cursor, not ids")
 	case (o.IDs == nil) == (o.Cursor == ""):
 		return ClaimResult{}, badRequest("claim takes ids or a cursor")
 	case o.Count < 0 || o.Count > MaxCount:
@@ -2137,11 +2294,17 @@ func (s *Service) Claim(ctx context.Context, name, g string, o ClaimOptions) (Cl
 
 			p, pend := getPending(pel, []byte(k))
 
+			// An entry gone from the stream leaves the PEL at any claim that
+			// looks at it, nacked or not.
 			if !exists {
 				if pend {
 					res.Deleted = append(res.Deleted, id.String())
 
 					if err := pel.Delete([]byte(k)); err != nil {
+						return err
+					}
+
+					if err := unmarkRetry(b, []byte(k)); err != nil {
 						return err
 					}
 				}
@@ -2157,15 +2320,29 @@ func (s *Service) Claim(ctx context.Context, name, g string, o ClaimOptions) (Cl
 				p = pending{Delivered: now}
 			}
 
-			if now-p.Delivered < o.MinIdleMs && pend {
+			// A nacked entry is never claimed before its retry time, and
+			// after it the wait is over: min_idle_ms does not count.
+			if p.waiting(now) {
 				continue
+			}
+
+			if pend && !p.due(now) && now-p.Delivered < o.MinIdleMs {
+				continue
+			}
+
+			if p.RetryAt != 0 {
+				p.RetryAt = 0
+
+				if err := unmarkRetry(b, []byte(k)); err != nil {
+					return err
+				}
 			}
 
 			p.Consumer = o.Consumer
 			p.Delivered = now
 
 			if o.IdleMs != nil {
-				p.Delivered = now - *o.IdleMs
+				p.Delivered = deliveredAt(now, *o.IdleMs)
 			}
 
 			if !o.JustIDs {
@@ -2202,6 +2379,19 @@ func (s *Service) Claim(ctx context.Context, name, g string, o ClaimOptions) (Cl
 	return res, err
 }
 
+// deliveredAt is the delivery time of a claim with idle_ms. As XCLAIM
+// IDLE, a time in the future (a negative idle) or before 1970 is now: a
+// delay comes only from a nack.
+func deliveredAt(now, idleMs int64) int64 {
+	at := now - idleMs
+
+	if at < 0 || at > now {
+		return now
+	}
+
+	return at
+}
+
 // claimCandidates gives the keys to look at: the IDs, or the PEL from the
 // cursor (count of them), and the next cursor (0-0 at the end).
 func (st *stream) claimCandidates(g string, o ClaimOptions) ([]string, ID, error) {
@@ -2209,6 +2399,10 @@ func (st *stream) claimCandidates(g string, o ClaimOptions) ([]string, ID, error
 		keys, err := keysOf(o.IDs)
 
 		return keys, ID{}, err
+	}
+
+	if o.Due {
+		return st.dueCandidates(g, o)
 	}
 
 	from, err := Parse(o.Cursor, 0)
@@ -2235,7 +2429,62 @@ func (st *stream) claimCandidates(g string, o ClaimOptions) ([]string, ID, error
 		k, _ := cur.Seek([]byte(from.Key()))
 
 		for ; k != nil && len(keys) < o.Count; k, _ = cur.Next() {
-			if p, ok := getPending(pel, k); ok && now-p.Delivered >= o.MinIdleMs {
+			p, ok := getPending(pel, k)
+
+			if ok && (p.due(now) || p.RetryAt == 0 && now-p.Delivered >= o.MinIdleMs) {
+				keys = append(keys, string(k))
+			}
+		}
+
+		if k != nil {
+			next, _ = FromKey(string(k))
+		}
+
+		return nil
+	})
+
+	return keys, next, err
+}
+
+// dueCandidates is the scan of claim with due: only the retry index, from
+// the cursor, so the entries in flight at live workers are not read. It
+// gives the due keys (count of them) and the next cursor (0-0 at the end).
+func (st *stream) dueCandidates(g string, o ClaimOptions) ([]string, ID, error) {
+	from, err := Parse(o.Cursor, 0)
+
+	if err != nil {
+		return nil, ID{}, err
+	}
+
+	var (
+		keys []string
+		next ID
+	)
+
+	now := st.now().UnixMilli()
+
+	err = st.st.View(func(tx *bolt.Tx) error {
+		b, err := groupBucket(tx, g)
+
+		if err != nil {
+			return errGroup(g)
+		}
+
+		idx := b.Bucket(bRetry)
+
+		if idx == nil {
+			return nil
+		}
+
+		pel := b.Bucket(bPEL)
+		cur := idx.Cursor()
+
+		k, _ := cur.Seek([]byte(from.Key()))
+
+		// A key of the index with no nacked entry behind it (a stale one)
+		// is not a candidate; the claim does not see it.
+		for ; k != nil && len(keys) < o.Count; k, _ = cur.Next() {
+			if p, ok := getPending(pel, k); ok && p.due(now) {
 				keys = append(keys, string(k))
 			}
 		}
@@ -2251,6 +2500,29 @@ func (st *stream) claimCandidates(g string, o ClaimOptions) ([]string, ID, error
 }
 
 // ---- metrics
+
+// waitingIn counts the nacked entries of group bucket b whose retry time
+// has not come. It reads only the retry index.
+func waitingIn(b *bolt.Bucket, now int64) int {
+	idx := b.Bucket(bRetry)
+
+	if idx == nil {
+		return 0
+	}
+
+	pel := b.Bucket(bPEL)
+	n := 0
+
+	_ = idx.ForEach(func(k, _ []byte) error {
+		if p, ok := getPending(pel, k); ok && p.waiting(now) {
+			n++
+		}
+
+		return nil
+	})
+
+	return n
+}
 
 // StreamMetrics are the series of one stream that /_metrics prints.
 type StreamMetrics struct {
@@ -2281,6 +2553,7 @@ func (s *Service) Metrics() []StreamMetrics {
 		if st.st != nil {
 			m := StreamMetrics{Name: st.name, Added: st.added}
 			sh := st.shapeOf(context.Background())
+			now := st.now().UnixMilli()
 
 			_ = st.st.View(func(tx *bolt.Tx) error {
 				groups := tx.Bucket(bGroups)
@@ -2291,6 +2564,7 @@ func (s *Service) Metrics() []StreamMetrics {
 					info := GroupInfo{Name: string(k), Pending: b.Bucket(bPEL).Stats().KeyN}
 
 					info.Lag = st.lagOf(sh, head)
+					info.Waiting = waitingIn(b, now)
 
 					m.Groups = append(m.Groups, info)
 

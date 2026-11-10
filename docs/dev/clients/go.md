@@ -679,7 +679,10 @@ n, err := g.Ack(ctx, e.ID, e2.ID) // XACK
 ```go
 sum, err := g.Pending(ctx) // XPENDING, the summary
 // sum.Count, sum.Lowest, sum.Highest (*string, nil when empty), sum.Consumers ([]{Name, Count})
+// sum.Waiting (ndb only): the nacked entries whose retry time has not come
 ```
+
+- A nacked entry counts in `Count`, and for no consumer in `Consumers`.
 
 ### PendingList
 
@@ -689,7 +692,7 @@ list, err := g.PendingList(ctx, ndb.PendingQuery{
 	Idle:     time.Minute,
 	Count:    50,
 })
-// each: ID, Consumer, IdleMs, Deliveries
+// each: ID, Consumer, IdleMs, Deliveries, RetryAt (*time.Time, nil when not nacked)
 ```
 
 Fields of `ndb.PendingQuery`:
@@ -700,8 +703,10 @@ Fields of `ndb.PendingQuery`:
 | `Count` | The most entries to give. Default 100. |
 | `Consumer` | Only the entries of this consumer. |
 | `Idle` | Only the entries idle for at least this long. |
+| `Due` | ndb only, a `*bool`. `true`: only the nacked entries whose retry time passed (a claim takes them now). `false`: only the nacked entries that still wait. `nil`: every entry. |
 
 - The entries come in ID order.
+- A nacked entry has `Consumer` `""` and a `RetryAt` (see [Nack](#nack)).
 
 ### Claim
 
@@ -746,6 +751,35 @@ for {
 - `c.Cursor` is where the next call starts. It is `"0-0"` when the scan is complete.
 - `g.AutoClaimIDs(ctx, consumer, minIdle, cursor, count)` is `AutoClaim` that gives only the IDs (`XAUTOCLAIM ... JUSTID`), in a `ndb.ClaimedIDs` (`Cursor`, `IDs`, `Deleted`). The delivery count of the entries does not change.
 
+### Nack
+
+ndb only: Redis has no delayed retry.
+
+```go
+n, err := g.Nack(ctx, "worker-1", time.Minute, e.ID) // give it back in 1 min
+```
+
+- `Nack(ctx, consumer, delay, ids...)` gives the entries back to the group after `delay`, for a retry, and returns how many it nacked.
+- Only the IDs pending **for this consumer** count. Other IDs count 0; they are not an error. So a worker that lost an entry to a claim cannot nack it. No IDs sends nothing.
+- The entry stays pending with no owner (`Consumer` `""`) and a retry time (`RetryAt`) of now + `delay`. Its delivery count does not change; the claim that takes it again adds 1.
+- While it waits, no read and no claim gives it: not the own pending read (it is no one's), not `Claim`, `AutoClaim` or `ClaimDue`. After `RetryAt`, any consumer of the group takes it with `ClaimDue` (or `Claim`, at once: `minIdle` does not count).
+- `delay` 0 makes the entry due at once. The most is 30 days. A negative or larger delay returns `ErrInvalidRequest`.
+- `Ack` of a nacked entry removes it: it cancels the retry.
+- `Work` with `Retry` calls `Nack` for you.
+
+### ClaimDue
+
+ndb only.
+
+```go
+c, err := g.ClaimDue(ctx, "worker-2", "0-0", 100)
+// c.Entries ([]Entry[T]), c.Cursor ("0-0" when the scan is complete), c.Deleted
+```
+
+- `ClaimDue(ctx, consumer, cursor, count)` scans the nacked entries from `cursor` and moves up to `count` of the ones whose retry time passed to the consumer, in ID order. Each one gets one more delivery. An empty cursor is `"0-0"`.
+- The scan looks only at the nacked entries, not at the entries in flight at live workers. So a worker can call it on a short tick: `Work` does it every `DueEvery`.
+- `g.ClaimDueIDs(ctx, consumer, cursor, count)` gives only the IDs, in a `ndb.ClaimedIDs`. The delivery count of the entries does not change.
+
 ### Work
 
 `Work` is the worker loop of the group. Use it in place of `Read`, `Ack` and `Claim` calls of your own.
@@ -774,7 +808,9 @@ err = g.Work(ctx, "worker-1", func(ctx context.Context, e ndb.Entry[Order]) erro
 1. It reads the consumer's own pending entries first (the ones it took before a restart and did not ack), and runs the handler on them.
 2. It reads new entries, and waits up to `Block` for them.
 3. It acks, in one call, each entry the handler did without an error. It acks a `Deleted` entry without the handler.
-4. Every `ClaimEvery`, it claims the entries of any consumer of the group that are idle for `ClaimIdle`, and runs the handler on them again.
+4. With `Retry`, it nacks each entry whose handler failed, with the wait of `Retry`. Without `Retry`, the entry stays pending.
+5. Every `DueEvery`, it claims the nacked entries whose wait ended (`ClaimDue`), and runs the handler on them again.
+6. Every `ClaimEvery`, it claims the entries of any consumer of the group that are idle for `ClaimIdle`, and runs the handler on them again. A nacked entry that still waits is not in this claim (the list pages on past it), so many waiting entries do not hide the idle ones.
 
 Fields of `ndb.Work`:
 
@@ -784,8 +820,11 @@ Fields of `ndb.Work`:
 | `Block` | 5 s | How long a read waits for new entries. |
 | `ClaimIdle` | 1 min | Claim the entries pending for this long. A negative value turns the claim off. |
 | `ClaimEvery` | `ClaimIdle / 2` (at least 1 s) | How often `Work` looks for idle entries. |
-| `MaxDeliveries` | 0 (no limit) | An entry delivered this many times is a poison message. |
-| `DeadLetter` | none | The stream that gets the poison messages, as `ndb.DeadEntry`. |
+| `MaxDeliveries` | 0 (no limit) | An entry delivered this many times is a poison message. Also with `Retry`: a failure on this delivery goes to `DeadLetter`, not to a nack. |
+| `DeadLetter` | none | The stream that gets the poison messages and the entries past `MaxAge`, as `ndb.DeadEntry`. |
+| `Retry` | nil | ndb only. `func(deliveries int64) time.Duration`: the wait before the next try of an entry whose handler failed on its `deliveries`-th delivery (1 is the first). `Work` nacks the entry with this wait. A wait below 0 is 0; above 30 days is 30 days. `nil` keeps the entry pending for `ClaimIdle`. Make one with `ndb.Tiers` or `ndb.TierSteps`. |
+| `MaxAge` | 0 (no limit) | An entry older than this, by the time of its ID (`Entry.Time`), goes to `DeadLetter` with reason `max_age`, without the handler, and is acked: no more tries. `Work` looks at each delivery, the first one too, and again at a failure: an entry that got too old in the handler is not nacked. |
+| `DueEvery` | 1 s with `Retry`, else off | How often `Work` claims the nacked entries whose wait ended. A negative value turns it off. A positive value turns it on also without `Retry`, for the entries that other workers nacked. |
 | `OnError` | none | Gets the errors that do not stop `Work`. |
 
 - **Stop:** `Work` runs until `ctx` ends, then returns nil. The acks of the work that is done still go after `ctx` ends.
@@ -793,19 +832,60 @@ Fields of `ndb.Work`:
 - Delivery is at least once. Make the work safe to repeat.
 - Run many workers with different consumer names to share the work. The group must exist (`Ensure`).
 - A failed read does not stop `Work`, also the read of the own pending entries at the start, and also when the group does not exist. It goes to `OnError`, and `Work` tries again with a backoff from 100 ms to 5 s. Only the end of `ctx` stops `Work`.
-- An entry whose doc does not decode into `T` (`Entry.Err`) does not go to the handler. It counts as a handler failure: it goes to `OnError`, stays pending, and after `MaxDeliveries` goes to `DeadLetter` with its raw doc. The other entries of the same read go on as usual.
+- An entry whose doc does not decode into `T` (`Entry.Err`) does not go to the handler. It counts as a handler failure: it goes to `OnError`, stays pending (or is nacked, with `Retry`), and after `MaxDeliveries` goes to `DeadLetter` with its raw doc. The other entries of the same read go on as usual.
 - **Crash:** the read of the own pending entries at the start is one more delivery. An entry that already had `MaxDeliveries` deliveries without an ack (the process died in its handler, for example OOM or SIGKILL) goes to `DeadLetter` at the start, without the handler. So a poison entry that kills the process does not run forever.
-- **Shutdown:** when `ctx` ends and the handler returns an error, `Work` does not count it as a failure. The entry stays pending (no ack, no dead letter, no `OnError`), and the next run, or a claim, gets it again.
+- **Shutdown:** when `ctx` ends and the handler returns an error, `Work` does not count it as a failure. The entry stays pending (no ack, no nack, no dead letter, no `OnError`), and the next run, or a claim, gets it again.
+- **Restart while an entry waits:** a nacked entry has no owner, so the own pending read of the restarted worker does not give it. The due claim of any worker of the group takes it when its wait ends.
+- A failed nack goes to `OnError` and leaves the entry pending: the idle claim takes it after `ClaimIdle`.
+
+### Delayed retry
+
+ndb only. A worker that fails an entry says **when** the entry comes back, and the wait can grow with the number of deliveries. The wait lives in the pending list of the daemon: the entry is on disk, it is in one place only, and it survives a restart of the worker and of the daemon.
+
+```go
+// The fsw-esl outbox: try 1 waits 15 s, tries 2 to 5 wait 1 min, 6 to 11
+// wait 10 min, 12 to 23 wait 1 h, then 6 h, until the entry is 15 days old.
+err = g.Work(ctx, "jobs-1", func(ctx context.Context, e ndb.Entry[Job]) error {
+	return postCall(ctx, e.Doc)
+}, ndb.Work{
+	Retry: ndb.TierSteps(
+		ndb.Step{Wait: 15 * time.Second, UpTo: 1},
+		ndb.Step{Wait: time.Minute, UpTo: 5},
+		ndb.Step{Wait: 10 * time.Minute, UpTo: 11},
+		ndb.Step{Wait: time.Hour, UpTo: 23},
+		ndb.Step{Wait: 6 * time.Hour},
+	),
+	MaxAge:     15 * 24 * time.Hour,
+	DeadLetter: "postcall_jobs_dead",
+	OnError:    func(err error) { log.Println(err) },
+})
+```
+
+With this schedule, an entry that always fails runs 81 times: 23 tries in the first 13 h 04 min 15 s, then one try each 6 h. The 82nd delivery is past 15 days: it goes to the dead letter with reason `max_age`.
+
+`ndb.Tiers(waits...)` gives one wait per try: the wait after the failure on delivery `n` is `waits[min(n, len(waits))-1]`, so the last wait repeats.
+
+```go
+ndb.Tiers(15*time.Second, time.Minute, 10*time.Minute) // 15 s, 1 min, then 10 min for each next try
+```
+
+`ndb.TierSteps(steps...)` gives the same with bounds. A `ndb.Step` has:
+
+- `Wait`: the wait before the next try.
+- `UpTo`: the last delivery of the step. For the failure on delivery `n`, the wait is the `Wait` of the **first** step with `n <= UpTo`. `UpTo` 0 is no bound: the step applies to every `n` that is left. After the last bound, the `Wait` of the last step repeats.
+
+So `UpTo` is a delivery count, and the failure on delivery `n` is try `n`: `Step{Wait: time.Minute, UpTo: 5}` after `Step{..., UpTo: 1}` covers the tries 2, 3, 4 and 5. A `Retry` of your own is any `func(int64) time.Duration`, for example an exponential backoff.
 - `OnError` gets the read errors, the handler and decode errors, the claim and ack errors, and the poison messages.
 
 ### DeadEntry and ErrPoison
 
-A poison message is an entry that fails on its `MaxDeliveries`-th delivery. At that failure, `Work` appends it to `DeadLetter` (when set), acks it, then sends an error that wraps `ndb.ErrPoison` to `OnError`. If the append to `DeadLetter` fails, the entry stays pending. The append and the ack go also when `ctx` ended.
+A poison message is an entry that fails on its `MaxDeliveries`-th delivery (reason `ndb.ReasonMaxDeliveries`, `"max_deliveries"`). An entry past `MaxAge` goes to the dead letter the same way (reason `ndb.ReasonMaxAge`, `"max_age"`). At that failure, `Work` appends it to `DeadLetter` (when set), acks it, then sends an error that wraps `ndb.ErrPoison` to `OnError`. If the append to `DeadLetter` fails, the entry stays pending. The append and the ack go also when `ctx` ended.
 
 ```go
 dead, err := ndb.StreamOf[ndb.DeadEntry](db, "orders-dead")
 rows, err := dead.Range(ctx, "-", "+", 100)
-// each Doc: Stream, Group, ID, Deliveries, Doc (json.RawMessage, the entry without _id and _ts)
+// each Doc: Stream, Group, ID, Deliveries, Reason ("max_deliveries" or "max_age"),
+// Doc (json.RawMessage, the entry without _id and _ts)
 
 ndb.Work{OnError: func(err error) {
 	if errors.Is(err, ndb.ErrPoison) {

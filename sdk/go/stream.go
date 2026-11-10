@@ -694,7 +694,32 @@ func (g *Group[T]) Ack(ctx context.Context, ids ...string) (int, error) {
 	return out.Acked, err
 }
 
-// PendingSummary is the pending list in short (XPENDING).
+// Nack gives entries back to the group after delay, for a retry (ndb
+// only: Redis has no delayed retry), and returns how many it nacked. Only
+// the IDs pending for consumer count; other IDs count 0, not an error. The
+// entry stays pending with no owner and a retry time of now + delay; its
+// delivery count does not change. While it waits, no read and no claim
+// gives it; after the delay, any consumer of the group takes it with
+// ClaimDue (or Claim, at once). delay 0 makes it due at once; the most is
+// 30 days. Ack of a nacked entry removes it: it cancels the retry.
+func (g *Group[T]) Nack(ctx context.Context, consumer string, delay time.Duration, ids ...string) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	body := map[string]any{"consumer": consumer, "ids": ids, "delay_ms": delay.Milliseconds()}
+
+	var out struct {
+		Nacked int `json:"nacked"`
+	}
+
+	err := g.s.call(ctx, http.MethodPost, g.path("nack"), body, &out)
+
+	return out.Nacked, err
+}
+
+// PendingSummary is the pending list in short (XPENDING). A nacked entry
+// counts in Count, and for no consumer in Consumers.
 type PendingSummary struct {
 	Count     int     `json:"count"`
 	Lowest    *string `json:"lowest"`
@@ -703,6 +728,10 @@ type PendingSummary struct {
 		Name  string `json:"name"`
 		Count int    `json:"count"`
 	} `json:"consumers"`
+
+	// Waiting (ndb only) is the count of nacked entries whose retry time
+	// has not come.
+	Waiting int `json:"waiting"`
 }
 
 // Pending returns the pending list in short.
@@ -728,6 +757,11 @@ type PendingQuery struct {
 
 	// Idle gives only the entries idle for at least this long.
 	Idle time.Duration `json:"-"`
+
+	// Due (ndb only) gives only nacked entries: true the ones whose retry
+	// time passed (a claim takes them now), false the ones that still
+	// wait. nil gives every entry.
+	Due *bool `json:"due,omitempty"`
 }
 
 type pendingBody struct {
@@ -735,12 +769,40 @@ type pendingBody struct {
 	IdleMs int64 `json:"idle_ms,omitempty"`
 }
 
-// PendingEntry is one pending entry.
+// PendingEntry is one pending entry. A nacked entry has no owner
+// (Consumer "") and a RetryAt.
 type PendingEntry struct {
 	ID         string `json:"_id"`
 	Consumer   string `json:"consumer"`
 	IdleMs     int64  `json:"idle_ms"`
 	Deliveries int64  `json:"deliveries"`
+
+	// RetryAt (ndb only) is the retry time of a nacked entry; nil when the
+	// entry is not nacked.
+	RetryAt *time.Time `json:"-"`
+}
+
+// UnmarshalJSON reads retry_at, which the daemon sends in unix ms.
+func (p *PendingEntry) UnmarshalJSON(raw []byte) error {
+	type plain PendingEntry
+
+	var row struct {
+		plain
+		RetryAt *int64 `json:"retry_at"`
+	}
+
+	if err := json.Unmarshal(raw, &row); err != nil {
+		return err
+	}
+
+	*p = PendingEntry(row.plain)
+
+	if row.RetryAt != nil {
+		at := time.UnixMilli(*row.RetryAt).UTC()
+		p.RetryAt = &at
+	}
+
+	return nil
 }
 
 // PendingList returns pending entries, in ID order (XPENDING with a range).
@@ -822,10 +884,10 @@ func pendingBound(id, empty string, seq uint64) (string, bool, error) {
 	return full.String(), true, nil
 }
 
-// Claimed is the answer of Claim and AutoClaim.
+// Claimed is the answer of Claim, AutoClaim and ClaimDue.
 type Claimed[T any] struct {
-	// Cursor is where the next AutoClaim starts; "0-0" when the scan is
-	// complete. Empty for Claim.
+	// Cursor is where the next AutoClaim or ClaimDue starts; "0-0" when
+	// the scan is complete. Empty for Claim.
 	Cursor string
 
 	Entries []Entry[T]
@@ -842,6 +904,7 @@ type claimBody struct {
 	Cursor    string   `json:"cursor,omitempty"`
 	Count     int      `json:"count,omitempty"`
 	JustIDs   bool     `json:"just_ids,omitempty"`
+	Due       bool     `json:"due,omitempty"`
 }
 
 // Claim moves the entries idle for at least minIdle to consumer (XCLAIM).
@@ -859,6 +922,20 @@ func (g *Group[T]) AutoClaim(ctx context.Context, consumer string, minIdle time.
 	}
 
 	return g.claim(ctx, claimBody{Consumer: consumer, MinIdleMs: minIdle.Milliseconds(), Cursor: cursor, Count: count})
+}
+
+// ClaimDue scans the nacked entries from cursor ("0-0" at the start) and
+// moves up to count of the ones whose retry time passed to consumer, in ID
+// order (ndb only). Each one gets one more delivery. The scan looks only
+// at nacked entries, not at the entries in flight at live workers, so a
+// worker can call it on a short tick. min idle does not count: the wait
+// was already chosen.
+func (g *Group[T]) ClaimDue(ctx context.Context, consumer, cursor string, count int) (Claimed[T], error) {
+	if cursor == "" {
+		cursor = "0-0"
+	}
+
+	return g.claim(ctx, claimBody{Consumer: consumer, Due: true, Cursor: cursor, Count: count})
 }
 
 func (g *Group[T]) claim(ctx context.Context, body claimBody) (Claimed[T], error) {
@@ -891,10 +968,10 @@ func (g *Group[T]) claim(ctx context.Context, body claimBody) (Claimed[T], error
 	return c, nil
 }
 
-// ClaimedIDs is the answer of ClaimIDs and AutoClaimIDs.
+// ClaimedIDs is the answer of ClaimIDs, AutoClaimIDs and ClaimDueIDs.
 type ClaimedIDs struct {
-	// Cursor is where the next AutoClaimIDs starts; "0-0" when the scan is
-	// complete. Empty for ClaimIDs.
+	// Cursor is where the next AutoClaimIDs or ClaimDueIDs starts; "0-0"
+	// when the scan is complete. Empty for ClaimIDs.
 	Cursor string
 
 	IDs []string
@@ -918,6 +995,16 @@ func (g *Group[T]) AutoClaimIDs(ctx context.Context, consumer string, minIdle ti
 	}
 
 	return g.claimIDs(ctx, claimBody{Consumer: consumer, MinIdleMs: minIdle.Milliseconds(), Cursor: cursor, Count: count, JustIDs: true})
+}
+
+// ClaimDueIDs is ClaimDue that gives only the IDs. The delivery count of
+// the entries does not change.
+func (g *Group[T]) ClaimDueIDs(ctx context.Context, consumer, cursor string, count int) (ClaimedIDs, error) {
+	if cursor == "" {
+		cursor = "0-0"
+	}
+
+	return g.claimIDs(ctx, claimBody{Consumer: consumer, Due: true, Cursor: cursor, Count: count, JustIDs: true})
 }
 
 func (g *Group[T]) claimIDs(ctx context.Context, body claimBody) (ClaimedIDs, error) {

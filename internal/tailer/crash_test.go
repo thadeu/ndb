@@ -91,6 +91,10 @@ func readIDs(t *testing.T, path string) map[string]bool {
 }
 
 func TestKillDuringIngestionLosesNothing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("heavy: it runs without -short (make test), not in CI")
+	}
+
 	data, col := t.TempDir(), t.TempDir()
 	out := filepath.Join(t.TempDir(), "out.ndjson")
 

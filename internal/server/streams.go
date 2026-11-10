@@ -29,6 +29,7 @@ func streamRoutes(s *Server) map[string][]route {
 		"_streams/groups/{}/consumers/{}": {{"PUT", s.ready(s.consumerCreate)}, {"DELETE", s.ready(s.consumerDelete)}},
 		"_streams/groups/{}/read":         {{"POST", s.ready(s.groupRead)}},
 		"_streams/groups/{}/ack":          {{"POST", s.ready(s.groupAck)}},
+		"_streams/groups/{}/nack":         {{"POST", s.ready(s.groupNack)}},
 		"_streams/groups/{}/pending":      {{"POST", s.ready(s.groupPending)}},
 		"_streams/groups/{}/claim":        {{"POST", s.ready(s.groupClaim)}},
 	}
@@ -303,6 +304,27 @@ func (s *Server) groupAck(w http.ResponseWriter, r *http.Request, _ *engine.DB) 
 	}
 
 	answer(w, http.StatusOK, map[string]int{"acked": n}, err)
+}
+
+// groupNack gives entries back to the group after a wait (ndb only).
+func (s *Server) groupNack(w http.ResponseWriter, r *http.Request, _ *engine.DB) {
+	var req streams.NackOptions
+
+	if err := streamBody(w, r, &req); err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	n, err := s.streams.Nack(r.Context(), r.PathValue("coll"), r.PathValue("group"), req)
+
+	if err == nil && s.debugOn(r) {
+		ids := req.IDs[:min(len(req.IDs), writeIDsMax)]
+
+		s.logWrite(w, r, "stream_nack", slog.String("group", r.PathValue("group")), slog.String("consumer", req.Consumer), slog.Int("nacked", n), slog.Int("count", len(req.IDs)), slog.Int64("delay_ms", req.DelayMs), slog.Any("ids", ids))
+	}
+
+	answer(w, http.StatusOK, map[string]int{"nacked": n}, err)
 }
 
 func (s *Server) groupPending(w http.ResponseWriter, r *http.Request, _ *engine.DB) {

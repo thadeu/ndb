@@ -403,7 +403,7 @@ bundle exec ndb streams -r ./consumers.rb    # without Rails
 - **Write.** `append`, with the aliases `enqueue` and `perform_async`. In an ActiveRecord transaction the append waits for the commit (Rails 7.2 or later) and returns `nil`. A rollback drops it.
 - **Read.** `OrderEvent.last`, `last(10)`, `find(id)`, `range(1.hour.ago, Time.now, count: 100)`, `count`.
 - **The event.** `event[:order_id]` (a symbol or a string), `event.to_h`, `event.id`, `event.time`, `event.deliveries`. The payload is JSON: a date comes as a String.
-- **Failure.** An error in `perform` (any exception but a signal or `exit`) leaves the entry pending. It comes again after `claim_idle`. Delivery is at least once, so `perform` must be safe to repeat.
+- **Failure.** An error in `perform` (any exception but a signal or `exit`) leaves the entry pending. It comes again after `claim_idle`, or after the wait of `retry:` (ndb only: `retry: [15.seconds, 1.minute, 10.minutes, 1.hour, 6.hours], max_age: 15.days`). Delivery is at least once, so `perform` must be safe to repeat.
 
 The options of `stream`, with their defaults:
 
@@ -412,8 +412,10 @@ stream :order_events,
   group: :billing,              # needed with perform
   concurrency: 1,               # threads of this class in each process
   max_deliveries: nil,          # after N deliveries the entry goes to the dead letter and is acked
-  dead_letter: nil,             # "<stream>_dead" when max_deliveries is set; false for none
+  dead_letter: nil,             # "<stream>_dead" when max_deliveries or max_age is set; false for none
   claim_idle: 1.minute,         # an entry pending this long is tried again
+  retry: nil,                   # waits before each retry ([15, 1.minute, ...], the last repeats) or ->(n) { seconds }
+  max_age: nil,                 # an entry older than this goes to the dead letter (15.days)
   start: :new,                  # a new group reads new entries only; :all reads from the start
   discard_on: [],               # these errors ack the entry without a retry
   max_len: nil,                 # keep only the newest N entries (a trim on each append)
@@ -446,6 +448,8 @@ With Puma, `plugin :ndb` in `config/puma.rb` runs `bundle exec ndb streams` (or 
 `ActiveSupport::Notifications` gets `append.ndb_streams` (`stream`, `class`, `count`) and `perform.ndb_streams` (`stream`, `group`, `class`, `event`).
 
 The `ndb` command of the gem only has `streams`. It gives every other command (`ndb serve`, ...) to the daemon binary of `NDB_BIN`, or to the first native `ndb` executable of `PATH` (not a shim of rbenv, mise or asdf).
+
+`ndb streams` logs the retry schedule of each consumer at the start. Inline mode runs `perform` once: a failure raises to the caller, and `retry:` does not apply.
 
 `ndb streams` loads `app/streams` itself before it starts, also when the app does not eager load. It does not exit when ndb is down: each thread makes its group and tries again. A second signal in the first 2 seconds of a stop does nothing.
 

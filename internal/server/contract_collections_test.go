@@ -339,6 +339,10 @@ func TestContractGetCollection(t *testing.T) {
 // A pattern matches at most 256 collections: one more is 400
 // pattern_too_wide on every read.
 func TestContractPatternTooWide(t *testing.T) {
+	if testing.Short() {
+		t.Skip("heavy: it runs without -short (make test), not in CI")
+	}
+
 	_, h := newHandler(t)
 
 	for i := range 257 {

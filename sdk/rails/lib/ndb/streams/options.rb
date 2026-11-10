@@ -10,6 +10,8 @@ module Ndb
         max_deliveries: nil,
         dead_letter: nil,
         claim_idle: 60.0,
+        retry: nil,
+        max_age: nil,
         start: :new,
         discard_on: [].freeze,
         max_len: nil,
@@ -117,6 +119,38 @@ module Ndb
           raise ArgumentError, "claim_idle is a number of seconds or a duration, not #{value.inspect}" unless value.respond_to?(:to_f) && !value.is_a?(String)
 
           value.to_f
+        end
+
+        # The retry schedule: an Array of waits (seconds or durations; the
+        # last one repeats) is an Ndb::Stream::Tiers; a callable
+        # ->(deliveries) { seconds } stays as it is. nil: a failed entry
+        # waits claim_idle.
+        def retry(value)
+          return nil if value.nil?
+          return value if value.respond_to?(:call)
+
+          unless value.is_a?(Array)
+            raise ArgumentError, "retry is an Array of waits or a callable ->(deliveries) { seconds }, not #{value.inspect}"
+          end
+
+          Ndb::Stream.tiers(*value.map { |wait| wait.is_a?(Hash) ? wait : seconds(:retry, wait) })
+        end
+
+        # Seconds: a number or an ActiveSupport duration, greater than 0.
+        def max_age(value)
+          return nil if value.nil?
+
+          age = seconds(:max_age, value)
+
+          raise ArgumentError, "max_age is greater than 0, not #{value.inspect}" unless age.positive?
+
+          age
+        end
+
+        def seconds(name, value)
+          return value.to_f if value.respond_to?(:to_f) && !value.is_a?(String)
+
+          raise ArgumentError, "#{name} takes numbers of seconds or durations, not #{value.inspect}"
         end
 
         def start(value)

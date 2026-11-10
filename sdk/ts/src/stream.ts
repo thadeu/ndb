@@ -107,10 +107,13 @@ export interface StreamReadOptions {
 }
 
 export interface PendingSummary {
+  // A nacked entry counts here, and for no consumer in consumers.
   count: number
   lowest: string | null
   highest: string | null
   consumers: { name: string; count: number }[]
+  // The nacked entries whose retry time has not come (ndb only).
+  waiting: number
 }
 
 export interface PendingQuery {
@@ -123,13 +126,37 @@ export interface PendingQuery {
   consumer?: string
   // Only the entries idle for at least this long (ms).
   idleMs?: number
+  // Only the nacked entries (ndb only): true the ones whose retry time
+  // passed (a claim takes them now), false the ones that still wait.
+  due?: boolean
 }
 
 export interface PendingEntry {
   id: string
+  // Empty for a nacked entry: it has no owner while it waits.
   consumer: string
   idleMs: number
   deliveries: number
+  // When a nacked entry is due again (ndb only); null when it is not nacked.
+  retryAt: Date | null
+}
+
+// The options of Group.claimDue.
+export interface ClaimDueOptions {
+  // Where the scan starts: default "0-0".
+  cursor?: string
+  // The most entries to claim.
+  count?: number
+  // Give only the IDs, as ClaimedIds.
+  justIds?: boolean
+}
+
+// The answer of claimDue with justIds.
+export interface ClaimedIds {
+  // Where the next scan starts; "0-0" when the scan is complete.
+  cursor: string
+  ids: string[]
+  deleted: string[]
 }
 
 // The answer of claim and autoClaim.
@@ -397,8 +424,10 @@ export class Group<T = Doc> {
   }
 
   // The pending list in short (XPENDING).
-  pending(): Promise<PendingSummary> {
-    return this.stream.call('POST', this.path('pending'), {})
+  async pending(): Promise<PendingSummary> {
+    const out = await this.stream.call<PendingSummary>('POST', this.path('pending'), {})
+
+    return { ...out, waiting: out.waiting ?? 0 }
   }
 
   // Pending entries, in ID order (XPENDING with a range).
@@ -409,13 +438,36 @@ export class Group<T = Doc> {
       count: q.count && q.count > 0 ? q.count : 100,
       consumer: q.consumer || undefined,
       idle_ms: q.idleMs ? Math.round(q.idleMs) : undefined,
+      due: q.due,
     }
 
-    type Row = { _id: string; consumer: string; idle_ms: number; deliveries: number }
+    type Row = { _id: string; consumer: string; idle_ms: number; deliveries: number; retry_at?: number | null }
 
     const rows = (await this.stream.call<Row[] | undefined>('POST', this.path('pending'), body)) ?? []
 
-    return rows.map((r) => ({ id: r._id, consumer: r.consumer, idleMs: r.idle_ms, deliveries: r.deliveries }))
+    return rows.map((r) => ({
+      id: r._id,
+      consumer: r.consumer,
+      idleMs: r.idle_ms,
+      deliveries: r.deliveries,
+      retryAt: r.retry_at == null ? null : new Date(r.retry_at),
+    }))
+  }
+
+  // Gives entries of consumer back to the group after delayMs, for a retry
+  // (ndb only), and returns how many it nacked. Only the IDs pending for
+  // consumer count. A nacked entry has no owner while it waits; it keeps its
+  // delivery count. When it is due, any consumer of the group takes it with
+  // claimDue (or claim). delayMs is 0 (due at once) to 30 days.
+  async nack(consumer: string, ids: string[], delayMs: number): Promise<number> {
+    if (ids.length === 0) {
+      return 0
+    }
+
+    const body = { consumer, ids, delay_ms: Math.round(delayMs) }
+    const out = await this.stream.call<{ nacked: number }>('POST', this.path('nack'), body)
+
+    return out.nacked
   }
 
   // Moves the entries idle for at least minIdleMs to consumer (XCLAIM). Each
@@ -428,6 +480,27 @@ export class Group<T = Doc> {
   // for at least minIdleMs to consumer (XAUTOCLAIM).
   autoClaim(consumer: string, minIdleMs: number, cursor = '0-0', count?: number): Promise<Claimed<T>> {
     return this.claimOf({ consumer, min_idle_ms: Math.round(minIdleMs), cursor: cursor || '0-0', count })
+  }
+
+  // Scans the nacked entries from cursor and moves up to count due ones (the
+  // retry time passed) to consumer, in ID order (ndb only). It does not look
+  // at the entries in flight at live workers, so a worker can call it on a
+  // short tick. Each entry gets one more delivery; with justIds, the answer
+  // has only IDs and the delivery count does not change.
+  claimDue(consumer: string, opts: ClaimDueOptions & { justIds: true }): Promise<ClaimedIds>
+  claimDue(consumer: string, opts?: ClaimDueOptions & { justIds?: false }): Promise<Claimed<T>>
+  async claimDue(consumer: string, opts: ClaimDueOptions = {}): Promise<Claimed<T> | ClaimedIds> {
+    const body = { consumer, due: true, cursor: opts.cursor || '0-0', count: opts.count, just_ids: opts.justIds || undefined }
+
+    if (!opts.justIds) {
+      return this.claimOf(body)
+    }
+
+    type Answer = { cursor?: string; entries?: string[]; deleted?: string[] }
+
+    const out = await this.stream.call<Answer>('POST', this.path('claim'), body)
+
+    return { cursor: out.cursor ?? '', ids: out.entries ?? [], deleted: out.deleted ?? [] }
   }
 
   // Runs a worker of the group as consumer until the signal aborts; see

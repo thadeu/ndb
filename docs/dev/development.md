@@ -17,7 +17,15 @@ Keep local test runs light:
 nice -n 10 go test -p 2 -race -parallel=2 -timeout 300s ./...
 ```
 
-`make fuzz-smoke` runs each fuzz target for 10 s with two workers. Long fuzz runs belong in CI.
+`make fuzz-smoke` runs each fuzz target for 10 s with two workers.
+
+**CI and local runs are not the same.** CI (`.github/workflows/ci.yml`) runs one plain pass, `go test -short ./...`, with no race detector, to check that everything passes at a low cost. The heavy tests skip with `-short`: the kill and crash loops (`TestKillDuringIngestionLosesNothing`, `TestSealingKillsLoseNoAckedRow`, `TestDaemonRecoversAfterSIGKILL`, ...), the engine comparisons and the 257-collection pattern test. Run them on your machine before a release: `make test`, `make race`, `make bench`. A new test that kills processes, loops many rounds or takes more than a few seconds starts with:
+
+```go
+if testing.Short() {
+	t.Skip("heavy: it runs without -short (make test), not in CI")
+}
+```
 
 SDK tests:
 

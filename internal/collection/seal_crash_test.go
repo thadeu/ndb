@@ -67,6 +67,10 @@ func sealID(n int) string {
 // After each kill, every acked insert must be there, and the rows must be a
 // prefix of the insert order with no duplicate.
 func TestSealingKillsLoseNoAckedRow(t *testing.T) {
+	if testing.Short() {
+		t.Skip("heavy: it runs without -short (make test), not in CI")
+	}
+
 	dir := t.TempDir()
 	segmentsSeen := 0
 

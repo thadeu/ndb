@@ -392,6 +392,42 @@ The calls one by one, when you need your own loop:
 A read with `block` waits longer than the client `timeout`: the read timeout
 of that one request is `block` + 5 seconds.
 
+### Delayed retry (ndb only)
+
+With `retry:`, a worker gives a failed entry back to the group after a wait
+that grows with its delivery count (`nack`). The entry has no owner while it
+waits: a restart does not take it early, and any worker of the group takes
+it when it is due. `max_age:` sends an entry older than that to the dead
+letter (with `"reason" => "max_age"`), with no retry. The fsw-esl schedule
+(try 1: 15 s, tries 2-5: 1 min, 6-11: 10 min, 12-23: 1 h, then 6 h):
+
+```ruby
+group.work(
+  "w1",
+  retry: Ndb::Stream.tiers(
+    { wait: 15, up_to: 1 },      # try 1: 15 s
+    { wait: 60, up_to: 5 },      # tries 2 to 5: 1 min
+    { wait: 600, up_to: 11 },    # tries 6 to 11: 10 min
+    { wait: 3600, up_to: 23 },   # tries 12 to 23: 1 h
+    { wait: 21_600 }             # then 6 h
+  ),
+  max_age: 15 * 86_400,                 # 15 days
+  dead_letter: "postcall_jobs_dead"
+) { |entry| post_call(entry.doc) }
+```
+
+`retry:` also takes a callable `->(deliveries) { seconds }`, or an Array
+with one wait for each try (`[15, 60, 600]`, the last one repeats). `due_every:` (1 s with `retry:`) is how often
+the worker claims the due entries. The calls one by one:
+
+| ndb only | Ruby |
+|---|---|
+| `nack` | `group.nack("w1", *ids, delay: 60)` (seconds; returns the count) |
+| due claim | `group.claim_due("w2", cursor: "0-0", count: 100)` (an `Ndb::Claimed`) |
+| pending | `group.pending["waiting"]`, `group.pending_list(due: true)`, each row `"retry_at"` (a `Time` or `nil`) |
+
+A dead letter entry has `"reason"`: `"max_deliveries"` or `"max_age"`.
+
 ## Redis Streams commands
 
 `Ndb::Client` has the stream commands of the [redis-rb](https://github.com/redis/redis-rb)

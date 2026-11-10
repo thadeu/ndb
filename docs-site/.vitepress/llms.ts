@@ -1,0 +1,63 @@
+// What llms.txt says of each page, and the smaller context files. The page
+// bodies come from docs/dev and docs/examples at build time (config.ts), so
+// only these short lines are kept by hand. A page with no line here gets its
+// first paragraph.
+
+export const llmsSummaries: Record<string, string> = {
+  architecture: 'One Go process: direct mode (the daemon reads your NDJSON files) and engine mode (writes go to a WAL with fsync), memory tables, Parquet segments, and the guarantees.',
+  storage: 'The data directory: catalog, WAL, segments, indexes, blobs, the stream group store, and how segments are sealed and compacted.',
+  wal: 'The WAL is plain NDJSON files and the source of truth; durability modes, fsync, retention and recovery.',
+  configuration: 'ndb.yml, the flags and env vars of ndb serve (listeners, tokens, logs), the defaults of a server and a user install, and the collection definition keys.',
+  http: 'The HTTP API contract: rules, every route, transport, auth, request and answer shapes, consistency, retries, long requests, limits and versioning.',
+  'http/errors': 'Every error code with its HTTP status and meaning, and the typed error of each SDK.',
+  query: 'The query language: filters, write operators, sort, fields, pagination and cursors, date math, $elemMatch, collection patterns and lookup.',
+  'http/queries': 'The routes _search, _count, _aggregate, _update_by_query and _delete_by_query: bodies, answers and errors.',
+  aggregate: 'The aggregation pipeline: $match, $group and its accumulators, $sort, $project, $having, $dateTrunc, $lookup, limits.',
+  watch: 'Watch and ack: stream the changes of a collection to a named consumer, the events, the delivery rules and the errors.',
+  streams: 'Streams (the Redis Streams model on disk): append, consumer groups, ack, pending, claim, a worker loop, delayed retry, the dead letter, the move from Redis and the contract between languages.',
+  clients: 'How the SDKs are built (a transport and a model layer), install, the address and token, retries while the daemon starts.',
+  'clients/go': 'The Go SDK: typed collections, queries, aggregate, watch, streams with Work (retry tiers, max age), admin, testing, and the ndbredis module (go-redis stream commands).',
+  'clients/ruby': 'The Ruby gem ndb (Ndb::Client): collections, queries, aggregate, watch, streams with the worker (retry tiers, max age), the Redis Streams commands (xadd, ...), the ndb executable, errors.',
+  'clients/rails': 'The ndb-rails gem: Ndb::Record models (where, find_by, find, to_ndb, lookup, aggregate), Ndb::Streams classes in app/streams (append, perform, retry, perform_now), testing.',
+  'clients/typescript': 'The TypeScript package @thadeu/ndb: typed collections, the query builder, aggregate, watch, streams with work (retry tiers, max age), and the ioredis and node-redis subpaths.',
+  'clients/cli': 'The ndb CLI: serve, query, write and admin commands over the same HTTP API, for scripts.',
+  examples: 'Five small programs that do the same work in Go, Ruby, TypeScript and curl.',
+  'examples/crud': 'Insert, read, update with the _v guard, delete and count.',
+  'examples/logs': 'Direct mode: query NDJSON files that other processes write, with no import.',
+  'examples/reports': 'Group, sum and average with an aggregation pipeline.',
+  'examples/outbox': 'An outbox with watch, a filter and ack, that continues after a restart.',
+  'examples/ttl-sessions': 'Documents that expire by themselves: expire_in, ttl, expire and persist.',
+  operations: 'The runbook: health, metrics, logs, backup and restore, recovery after a crash, compaction, retention, TTL and upgrades.',
+  pitr: 'Point in time recovery: a copy of a collection as it was at an instant, and a rename to put it in place.',
+  'http/system': 'The system routes: _health, _metrics, _log, _collections, _stats, _size, _backup, _restore, _pitr and _blobs.',
+  'http/collections': 'The collection routes: define (PUT), read, drop, truncate, rename, restore, indexes, stats, compact, quarantine, and partitioned collections.',
+  'http/documents': 'The document routes: _doc, _bulk, _update/{id} with the _v guard and upsert, _expire, _persist and _ttl.',
+  'http/watch': 'The wire contract of _watch and _ack.',
+  'http/streams': 'The wire contract of streams: entry IDs, append, trim, read without a group, groups, read, ack, nack, pending, claim and errors.',
+  deployment: 'How to choose a setup: one VM, Docker, systemd, Voodu, two VMs over WireGuard.',
+  'deploy/linux': 'Install on Linux with systemd.',
+  'deploy/docker': 'Run the daemon in Docker.',
+  'deploy/voodu': 'Run ndb with Voodu.',
+  'deploy/single-vm': 'One VM with the app and ndb.',
+  'deploy/cross-vm': 'The app on one VM and ndb on another, over WireGuard.',
+  development: 'Work on ndb itself: commands, tests (CI and local), fuzzing, the SDK tests and the code rules.',
+  releasing: 'How a release is made: versions, tags, artifacts.',
+  ui: 'ndb-ui, the web console: connections, browser, JSON editor, dev tools, live watch and backups.',
+  'ui/install': 'Install the console binary.',
+  'ui/docker': 'Run the console in Docker.',
+  'ui/guide': 'One section for each screen of the console.',
+}
+
+// The context files: the agent guide plus the pages one kind of work needs,
+// so an agent loads one file and not the whole site.
+export const llmsContexts: { file: string; title: string; pages: string[] }[] = [
+  { file: 'llms-rails.txt', title: 'ndb for a Rails app', pages: ['clients', 'clients/rails', 'query', 'streams', 'http/errors'] },
+  { file: 'llms-ruby.txt', title: 'ndb from Ruby', pages: ['clients', 'clients/ruby', 'query', 'streams', 'http/errors'] },
+  { file: 'llms-go.txt', title: 'ndb from Go', pages: ['clients', 'clients/go', 'query', 'streams', 'http/errors'] },
+  { file: 'llms-typescript.txt', title: 'ndb from TypeScript', pages: ['clients', 'clients/typescript', 'query', 'streams', 'http/errors'] },
+  {
+    file: 'llms-http.txt',
+    title: 'The ndb HTTP API',
+    pages: ['http', 'http/errors', 'http/system', 'http/collections', 'http/documents', 'http/queries', 'http/watch', 'http/streams', 'query', 'aggregate'],
+  },
+]

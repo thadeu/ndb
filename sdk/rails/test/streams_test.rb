@@ -62,6 +62,33 @@ class StreamsTest < Minitest::Test
     assert_empty options[:discard_on]
     assert_nil options[:max_len]
     assert_nil options[:retain]
+    assert_nil options[:retry]
+    assert_nil options[:max_age]
+  end
+
+  def test_the_retry_options_are_normalized
+    tiers = stream_class("orders", retry: [15, 1.minute, 10.minutes, 1.hour, 6.hours], max_age: 15.days).stream_options
+    proc_retry = ->(n) { n * 2 }
+    callable = stream_class("orders", retry: proc_retry, dead_letter: false).stream_options
+
+    assert_equal [15.0, 60.0, 600.0, 3600.0, 21_600.0, 21_600.0], (1..6).map { |n| tiers[:retry].call(n) }
+    assert_equal "15s, 1m, 10m, 1h, then 6h", tiers[:retry].to_s
+    assert_in_delta 1_296_000.0, tiers[:max_age]
+    assert_equal "orders_dead", tiers[:dead_letter], "max_age sends to the dead letter"
+    assert_same proc_retry, callable[:retry]
+    assert_equal "15s, 1m, 10m, 1h, then 6h; max age 15d", Ndb::Streams::Runner.retry_text(tiers)
+    assert_equal "after claim_idle (1m)", Ndb::Streams::Runner.retry_text(stream_class.stream_options)
+  end
+
+  def test_a_bad_retry_option_raises
+    klass = Class.new { include Ndb::Streams }
+
+    assert_raises(ArgumentError) { klass.stream :orders, retry: 15 }
+    assert_raises(ArgumentError) { klass.stream :orders, retry: [] }
+    assert_raises(ArgumentError) { klass.stream :orders, retry: ["15"] }
+    assert_raises(ArgumentError) { klass.stream :orders, retry: [-1] }
+    assert_raises(ArgumentError) { klass.stream :orders, max_age: 0 }
+    assert_raises(ArgumentError) { klass.stream :orders, max_age: "15d" }
   end
 
   def test_the_options_are_normalized
@@ -128,6 +155,44 @@ class StreamsTest < Minitest::Test
     second.include(Ndb::Streams)
 
     assert_equal [second], Ndb::Streams.classes
+  end
+
+  def test_perform_now_runs_the_delivery_path_with_no_request
+    seen = []
+
+    klass = stream_class("perform_now_#{NdbTestHelpers.next_name}", group: :billing, discard_on: [KeyError]) do
+      around_perform { |event, block| seen << [:around, event[:n]] && block.call }
+
+      define_method(:perform) do |event|
+        raise KeyError, "missing" if event[:n] == 0
+
+        seen << [event[:n], event["n"], event.id, event.deliveries, event.time.class]
+
+        event[:n] * 10
+      end
+    end
+
+    assert_equal 70, klass.perform_now(n: 7)
+    assert_equal 30, klass.perform_now('{"n":3}', _id: "1731163600000-0", _deliveries: 3)
+    assert_nil klass.perform_now(n: 0)
+
+    assert_equal [:around, 7], seen[0]
+    assert_equal [7, 7, seen[1][2], 1, Time], seen[1]
+    assert_equal [3, 3, "1731163600000-0", 3, Time], seen[3]
+    assert_equal 0, klass.count
+  end
+
+  def test_perform_now_needs_a_consumer_and_one_entry
+    writer = stream_class
+
+    assert_raises(ArgumentError) { writer.perform_now(n: 1) }
+
+    consumer = stream_class(writer.stream_name, group: :billing) { def perform(event) = event[:n] }
+
+    assert_raises(ArgumentError) { consumer.perform_now([{ n: 1 }, { n: 2 }]) }
+    assert_raises(ArgumentError) { consumer.perform_now(42) }
+    assert_raises(ArgumentError) { consumer.perform_now(n: 1, _bad: 2) }
+    assert_equal 5, consumer.perform_now({ "n" => 5 })
   end
 
   def test_a_class_without_perform_is_a_writer
