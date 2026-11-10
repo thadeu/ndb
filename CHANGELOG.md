@@ -16,6 +16,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Streams, access: a read-scoped token could create, delete or read a group named `pending`, or delete a consumer named `pending`. The read right now follows the shape of the route.
+- Streams: the write routes of every collection (`POST _doc`, `_bulk`, `_update`, `_update_by_query`, `_delete_by_query`, `_expire`, `_persist`) worked on a stream and could break the position of its groups. They now give `400 stream_append_only` (a new code, with a constant in each SDK).
+- Streams: a truncate, drop or rename during other stream requests could keep the old groups or give 500. `entries_read` and `lag` follow Redis after a delete, a trim and a group made at an ID (a group made without `entries_read` now shows `null`, as in Redis). A `min_id` trim keeps to `limit`, and `limit` without `approx` is an error. `_aggregate` and `_watch` on a stream give `<ms>-<seq>` IDs; a pattern read or a `$lookup` into a stream is refused. An append after the highest ID is an error, not `0-0`. A blocked read without a group waits for a stream that does not exist yet. Groups and consumers may have any name.
+- Stream workers (Go, Ruby, TypeScript, Rails): an entry that fails on its last allowed delivery goes to the dead letter at once; an entry left by a crash past the limit goes to the dead letter without the handler; a stop during the handler leaves the entry pending; a failed first read is retried. Go: an entry that does not decode no longer fails its batch (`Entry.Err`).
+- Ruby client: after an exception that is not a `StandardError` (`Timeout.timeout`, rack-timeout), the pool could give a connection with an unread answer to the next call. A read timeout is `Ndb::TimeoutError` and is not sent again.
+- Rails streams: `ndb streams` loads `app/streams` before it starts; any exception in `perform` is a failed entry, and a dead thread starts again; the daemon down at start does not end the process; a second signal in 2 s does not drop acks; the Puma plugin starts the child in its own process group; the code reloads in development; the `ndb` executable never runs itself through a version-manager shim.
+- Redis commands: `COUNT 0` and exclusive ranges with an ID of only the ms (`(5`) give what Redis gives; `xreadgroup` on many streams delivers nothing when a group is missing.
 - Streams: a pending read of a group (`"pending": true`, `XREADGROUP ... 0`) counts as a delivery, as in Redis: delivery count + 1 and a new delivery time. A deleted entry does not change. Before, the count stayed the same, and the Redis parity test failed.
 
 ## [1.15.0] - 2026-11-09
