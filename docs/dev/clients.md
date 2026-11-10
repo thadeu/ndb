@@ -6,7 +6,7 @@ Every SDK has two layers: a small transport (HTTP over a unix socket or TCP) and
 |---|---|---|
 | Go | Go services and workers | [Go](clients/go.md) |
 | Ruby | scripts, workers, any Ruby app | [Ruby](clients/ruby.md) |
-| Rails | Rails apps, ActiveModel style (`Ndb::Record`) | [Rails](clients/rails.md) |
+| Rails | Rails apps, ActiveModel style (`Ndb::Record`), streams (`Ndb::Streams`) | [Rails](clients/rails.md) |
 | TypeScript | Node.js apps and workers | [TypeScript](clients/typescript.md) |
 | CLI | the terminal, shell scripts, admin | [CLI](clients/cli.md) |
 | `curl` | anything with HTTP | [HTTP API](http.md) |
@@ -18,6 +18,7 @@ Sources are in `sdk/`: `sdk/go`, `sdk/ruby` (gem `ndb`), `sdk/rails` (gem `ndb-r
 | SDK | Install |
 |---|---|
 | Go | `go get github.com/thadeu/ndb/sdk/go@latest` (the module is tagged `sdk/go/vX.Y.Z`) |
+| Go, the stream commands of go-redis | `go get github.com/thadeu/ndb/sdk/go/ndbredis@latest` (its own module, tagged `sdk/go/ndbredis/vX.Y.Z`) |
 | Ruby (plain client, no dependencies) | `gem "ndb"` |
 | Rails (ActiveModel layer) | `gem "ndb-rails"` (installs `ndb`) |
 | TypeScript | `pnpm add @thadeu/ndb` (the name `ndb` is taken on npm) |

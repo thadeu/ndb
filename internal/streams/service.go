@@ -30,6 +30,13 @@ type Service struct {
 
 	mu      sync.Mutex
 	streams map[string]*stream
+
+	// held are the names that a truncate, a drop or a rename holds (Hold):
+	// an open of one waits until the channel is closed.
+	held map[string]chan struct{}
+
+	// shut is set by Close: no store opens after it.
+	shut bool
 }
 
 type stream struct {
@@ -38,6 +45,10 @@ type stream struct {
 	col  *engine.Collection
 	st   *bolt.DB
 	now  func() time.Time
+
+	// closed is set when the stream leaves the map (Hold, Close, or a new
+	// collection under the name). A caller that finds it set opens again.
+	closed bool
 
 	last       ID
 	added      int64
@@ -64,8 +75,15 @@ type appendReq struct {
 }
 
 func New(db func() *engine.DB) *Service {
-	return &Service{db: db, now: time.Now, streams: map[string]*stream{}}
+	return &Service{db: db, now: time.Now, streams: map[string]*stream{}, held: map[string]chan struct{}{}}
 }
+
+// errClosed tells that the stream closed while the caller used it: the
+// caller opens it again. It does not go out of the package.
+var errClosed = errors.New("streams: the stream closed, open it again")
+
+// errShut is the answer after Close.
+var errShut = errors.New("streams: the daemon is closing")
 
 // Errors of the streams contract.
 func errNotStream(name string) error {
@@ -74,6 +92,12 @@ func errNotStream(name string) error {
 
 func errTooSmall(id, last ID) error {
 	return query.NewError("stream_id_too_small", "%s is not greater than the last ID %s", id, last)
+}
+
+// errExhausted: the last ID is the highest ID, so no entry can come after
+// it (Redis: "The stream has exhausted the last possible ID").
+func errExhausted() error {
+	return query.NewError("stream_id_too_small", "the stream has exhausted the last possible ID %s", Max)
 }
 
 func errGroup(g string) error {
@@ -89,8 +113,25 @@ func badRequest(format string, args ...any) error {
 }
 
 // open gives the stream, made when create is true and it does not exist.
-// The caller holds nothing; the stream comes locked.
+// The caller holds nothing; the stream comes locked. It waits while a
+// truncate, a drop or a rename holds the name.
 func (s *Service) open(ctx context.Context, name string, create bool) (*stream, error) {
+	for {
+		st, err := s.openOnce(ctx, name, create)
+
+		if !errors.Is(err, errClosed) {
+			return st, err
+		}
+	}
+}
+
+// openOnce is one try of open: errClosed when the name is held or the
+// stream closed before it got the lock.
+func (s *Service) openOnce(ctx context.Context, name string, create bool) (*stream, error) {
+	if err := s.waitHeld(ctx, name); err != nil {
+		return nil, err
+	}
+
 	db := s.db()
 
 	def, ok := db.Definition(name)
@@ -115,10 +156,25 @@ func (s *Service) open(ctx context.Context, name string, create bool) (*stream, 
 
 	s.mu.Lock()
 
+	if s.shut {
+		s.mu.Unlock()
+
+		return nil, errShut
+	}
+
+	if s.held[name] != nil {
+		s.mu.Unlock()
+
+		return nil, errClosed
+	}
+
 	st := s.streams[name]
 
 	if st != nil && st.col != col {
-		st.close()
+		st.mu.Lock()
+		st.shutDown()
+		st.mu.Unlock()
+
 		st = nil
 	}
 
@@ -131,6 +187,12 @@ func (s *Service) open(ctx context.Context, name string, create bool) (*stream, 
 
 	st.mu.Lock()
 
+	if st.closed {
+		st.mu.Unlock()
+
+		return nil, errClosed
+	}
+
 	if st.st == nil {
 		if err := st.load(ctx, def.Durability == catalog.Relaxed); err != nil {
 			st.mu.Unlock()
@@ -140,6 +202,24 @@ func (s *Service) open(ctx context.Context, name string, create bool) (*stream, 
 	}
 
 	return st, nil
+}
+
+// waitHeld waits while a truncate, a drop or a rename holds name.
+func (s *Service) waitHeld(ctx context.Context, name string) error {
+	s.mu.Lock()
+	ch := s.held[name]
+	s.mu.Unlock()
+
+	if ch == nil {
+		return nil
+	}
+
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // load opens the group store and finds the last ID: the highest of the one
@@ -214,40 +294,99 @@ func (st *stream) close() {
 	}
 }
 
-// Forget closes the store of a stream before a truncate, a drop or a
-// rename. With reset, the group store is deleted: a truncated stream has no
-// groups.
-func (s *Service) Forget(name string, reset bool) {
+// shutDown closes the store and marks the stream closed; the caller holds
+// st.mu. A blocked read wakes and opens the stream again.
+func (st *stream) shutDown() {
+	st.close()
+	st.closed = true
+
+	close(st.wake)
+	st.wake = make(chan struct{})
+}
+
+// Hold closes the streams of names and keeps them closed until release: an
+// open of one of them waits. A truncate, a drop and a rename hold their
+// names while the engine changes the collection dir, so no request opens
+// the old group store in that time. With reset, release deletes the group
+// store first: a truncated stream has no groups.
+func (s *Service) Hold(names ...string) (release func(reset bool)) {
+	names = slices.Clone(names)
+	slices.Sort(names)
+	names = slices.Compact(names)
+
 	s.mu.Lock()
 
-	st := s.streams[name]
+	var open []*stream
 
-	delete(s.streams, name)
+	// The names are held in sorted order, so two holds never wait on each
+	// other.
+	for _, name := range names {
+		for s.held[name] != nil {
+			ch := s.held[name]
+
+			s.mu.Unlock()
+			<-ch
+			s.mu.Lock()
+		}
+
+		s.held[name] = make(chan struct{})
+
+		if st := s.streams[name]; st != nil {
+			open = append(open, st)
+
+			delete(s.streams, name)
+		}
+	}
 
 	s.mu.Unlock()
 
-	if st != nil {
+	for _, st := range open {
 		st.mu.Lock()
-
-		dir := st.col.Dir()
-
-		st.close()
+		st.shutDown()
 		st.mu.Unlock()
+	}
 
+	return func(reset bool) {
 		if reset {
-			_ = os.Remove(filepath.Join(dir, StoreFile))
+			s.removeStores(names)
 		}
+
+		s.mu.Lock()
+
+		for _, name := range names {
+			close(s.held[name])
+			delete(s.held, name)
+		}
+
+		s.mu.Unlock()
 	}
 }
 
-// Close closes every store.
+// removeStores deletes the group store of each name, if it has one.
+func (s *Service) removeStores(names []string) {
+	db := s.db()
+
+	for _, name := range names {
+		col, err := db.Get(name)
+
+		if err != nil {
+			continue
+		}
+
+		_ = os.Remove(filepath.Join(col.Dir(), StoreFile))
+	}
+}
+
+// Close closes every store. No store opens after it.
 func (s *Service) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.shut = true
+
 	for name, st := range s.streams {
 		st.mu.Lock()
-		st.close()
+		st.shutDown()
 		st.mu.Unlock()
 
 		delete(s.streams, name)
@@ -377,20 +516,37 @@ func (s *Service) Append(ctx context.Context, name string, docs []map[string]any
 		}
 	}
 
-	st, err := s.open(ctx, name, !o.NoCreate)
-	if err != nil {
-		return nil, err
+	var ids []ID
+
+	// A stream that a truncate, a drop or a rename closes before the
+	// insert gives errClosed: the append opens it again.
+	for {
+		st, err := s.open(ctx, name, !o.NoCreate)
+
+		if err != nil {
+			return nil, err
+		}
+
+		st.mu.Unlock()
+
+		ids, err = s.commit(ctx, st, &appendReq{docs: docs, idArg: o.ID, done: make(chan struct{})})
+
+		if errors.Is(err, errClosed) {
+			continue
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
+		break
 	}
 
-	st.mu.Unlock()
-
-	ids, err := s.commit(ctx, st, &appendReq{docs: docs, idArg: o.ID, done: make(chan struct{})})
-
-	if err != nil || o.Trim == nil {
-		return ids, err
+	if o.Trim == nil {
+		return ids, nil
 	}
 
-	_, err = s.Trim(ctx, name, *o.Trim)
+	_, err := s.Trim(ctx, name, *o.Trim)
 
 	return ids, err
 }
@@ -435,7 +591,15 @@ func (s *Service) commit(ctx context.Context, st *stream, req *appendReq) ([]ID,
 		st.qmu.Unlock()
 
 		st.mu.Lock()
-		s.insertRound(flushCtx, st, batch)
+
+		if st.closed {
+			for _, r := range batch {
+				r.err = errClosed
+			}
+		} else {
+			s.insertRound(flushCtx, st, batch)
+		}
+
 		st.mu.Unlock()
 
 		for _, r := range batch {
@@ -526,8 +690,11 @@ func (s *Service) nextID(last ID, arg string) (ID, error) {
 	case arg == "" || arg == "*":
 		ms := uint64(s.now().UnixMilli())
 
-		if ms > last.Ms {
+		switch {
+		case ms > last.Ms:
 			return ID{ms, 0}, nil
+		case last == Max:
+			return ID{}, errExhausted()
 		}
 
 		return last.Next(), nil
@@ -538,8 +705,12 @@ func (s *Service) nextID(last ID, arg string) (ID, error) {
 		}
 
 		switch {
+		case last == Max:
+			return ID{}, errExhausted()
 		case id.Ms > last.Ms:
 			return ID{id.Ms, 0}, nil
+		case id.Ms == last.Ms && last.Seq == Max.Seq:
+			return ID{}, errTooSmall(ID{id.Ms, Max.Seq}, last)
 		case id.Ms == last.Ms && !last.IsZero():
 			return last.Next(), nil
 		case id.Ms == last.Ms:
@@ -580,10 +751,17 @@ type TrimOptions struct {
 const ApproxBlock = 1024
 
 // Trim deletes the oldest entries, by count or by ID; Limit caps the
-// deletes.
+// deletes of an approximate trim, as LIMIT in Redis (it needs approx).
 func (s *Service) Trim(ctx context.Context, name string, o TrimOptions) (int, error) {
-	if (o.MaxLen == nil) == (o.MinID == "") {
+	switch {
+	case (o.MaxLen == nil) == (o.MinID == ""):
 		return 0, badRequest("trim takes max_len or min_id")
+	case o.MaxLen != nil && *o.MaxLen < 0:
+		return 0, badRequest("max_len must be >= 0")
+	case o.Limit < 0:
+		return 0, badRequest("limit must be >= 0")
+	case o.Limit > 0 && !o.Approx:
+		return 0, badRequest("limit needs approx: true (LIMIT needs ~ in Redis)")
 	}
 
 	st, err := s.open(ctx, name, false)
@@ -593,108 +771,58 @@ func (s *Service) Trim(ctx context.Context, name string, o TrimOptions) (int, er
 
 	defer st.mu.Unlock()
 
-	var cut ID
+	drop, err := st.toDrop(ctx, o)
 
-	switch {
-	case o.MaxLen != nil:
-		if *o.MaxLen < 0 {
-			return 0, badRequest("max_len must be >= 0")
-		}
-
-		n, err := st.count(ctx, nil)
-		if err != nil {
-			return 0, err
-		}
-
-		drop := int64(n) - *o.MaxLen
-
-		if o.Approx {
-			drop -= drop % ApproxBlock
-		}
-
-		if o.Limit > 0 {
-			drop = min(drop, int64(o.Limit))
-		}
-
-		if drop <= 0 {
-			return 0, nil
-		}
-
-		rows, err := st.find(ctx, map[string]any{"sort": map[string]any{"_id": 1}, "limit": drop, "fields": []string{"_id"}})
-		if err != nil || len(rows) == 0 {
-			return 0, err
-		}
-
-		var r struct {
-			ID string `json:"_id"`
-		}
-
-		_ = json.Unmarshal(rows[len(rows)-1], &r)
-		cut, _ = FromKey(r.ID)
-	default:
-		min, err := Parse(o.MinID, 0)
-		if err != nil {
-			return 0, err
-		}
-
-		below, ok, err := st.lastBelow(ctx, min)
-		if err != nil || !ok {
-			return 0, err
-		}
-
-		cut = below
-
-		if o.Approx {
-			n, err := st.count(ctx, map[string]any{"_id": map[string]any{"$lte": cut.Key()}})
-			if err != nil {
-				return 0, err
-			}
-
-			keep := n - n%ApproxBlock
-
-			if keep == 0 {
-				return 0, nil
-			}
-
-			if keep < n {
-				rows, err := st.find(ctx, map[string]any{"sort": map[string]any{"_id": 1}, "limit": keep, "fields": []string{"_id"}})
-				if err != nil || len(rows) == 0 {
-					return 0, err
-				}
-
-				var r struct {
-					ID string `json:"_id"`
-				}
-
-				_ = json.Unmarshal(rows[len(rows)-1], &r)
-				cut, _ = FromKey(r.ID)
-			}
-		}
+	if err != nil {
+		return 0, err
 	}
 
-	return st.deleteUpTo(ctx, cut)
-}
+	if o.Approx {
+		drop -= drop % ApproxBlock
+	}
 
-// lastBelow is the highest ID lower than id.
-func (st *stream) lastBelow(ctx context.Context, id ID) (ID, bool, error) {
-	rows, err := st.find(ctx, map[string]any{
-		"query":  map[string]any{"_id": map[string]any{"$lt": id.Key()}},
-		"sort":   map[string]any{"_id": -1},
-		"limit":  1,
-		"fields": []string{"_id"},
-	})
+	if o.Limit > 0 {
+		drop = min(drop, int64(o.Limit))
+	}
+
+	if drop <= 0 {
+		return 0, nil
+	}
+
+	rows, err := st.find(ctx, map[string]any{"sort": map[string]any{"_id": 1}, "limit": drop, "fields": []string{"_id"}})
+
 	if err != nil || len(rows) == 0 {
-		return ID{}, false, err
+		return 0, err
 	}
 
 	var r struct {
 		ID string `json:"_id"`
 	}
 
-	_ = json.Unmarshal(rows[0], &r)
-	got, ok := FromKey(r.ID)
+	_ = json.Unmarshal(rows[len(rows)-1], &r)
+	cut, _ := FromKey(r.ID)
 
-	return got, ok, nil
+	return st.deleteUpTo(ctx, cut)
+}
+
+// toDrop is the number of the oldest entries that a trim deletes before
+// approx and limit: the entries over max_len, or the entries below min_id.
+func (st *stream) toDrop(ctx context.Context, o TrimOptions) (int64, error) {
+	if o.MaxLen != nil {
+		n, err := st.count(ctx, nil)
+
+		return int64(n) - *o.MaxLen, err
+	}
+
+	min, err := Parse(o.MinID, 0)
+
+	if err != nil {
+		return 0, err
+	}
+
+	n, err := st.count(ctx, map[string]any{"_id": map[string]any{"$lt": min.Key()}})
+
+	return int64(n), err
 }
 
 // deleteUpTo deletes every entry up to cut, in batches of IDs (a delete by
@@ -824,25 +952,29 @@ type GroupHead struct {
 }
 
 // start reads the start of a group: "$", "0" or an ID, and its
-// entries_read (given, or known from the start, or -1).
+// entries_read: the given one, else -1 (unknown), as in Redis 7. The lag
+// of a group with an unknown entries_read is an estimate (lagOf).
 func (st *stream) start(arg string, entriesRead *int64) (ID, int64, error) {
+	read := int64(-1)
+
+	if entriesRead != nil {
+		read = *entriesRead
+	}
+
 	switch arg {
 	case "", "$":
-		return st.last, st.added, nil
+		return st.last, read, nil
 	case "0", "0-0", "-":
-		return ID{}, 0, nil
+		return ID{}, read, nil
 	}
 
 	id, err := Parse(arg, 0)
+
 	if err != nil {
 		return ID{}, 0, err
 	}
 
-	if entriesRead != nil {
-		return id, *entriesRead, nil
-	}
-
-	return id, -1, nil
+	return id, read, nil
 }
 
 func (s *Service) CreateGroup(ctx context.Context, name, g, startArg string, entriesRead *int64, noCreate bool) (GroupHead, error) {
@@ -1028,6 +1160,7 @@ func (s *Service) Groups(ctx context.Context, name string) ([]GroupInfo, error) 
 	defer st.mu.Unlock()
 
 	out := []GroupInfo{}
+	sh := st.shapeOf(ctx)
 
 	err = st.st.View(func(tx *bolt.Tx) error {
 		groups := tx.Bucket(bGroups)
@@ -1042,12 +1175,9 @@ func (s *Service) Groups(ctx context.Context, name string) ([]GroupInfo, error) 
 			if head.Read >= 0 {
 				read := head.Read
 				info.EntriesRead = &read
-
-				if !head.Last.Less(st.maxDeleted) {
-					lag := st.added - head.Read
-					info.Lag = &lag
-				}
 			}
+
+			info.Lag = st.lagOf(sh, head)
 
 			out = append(out, info)
 
@@ -1055,7 +1185,143 @@ func (s *Service) Groups(ctx context.Context, name string) ([]GroupInfo, error) 
 		})
 	})
 
+	if err == nil {
+		err = sh.err
+	}
+
 	return out, err
+}
+
+// ---- entries_read and lag, as in Redis 7 (t_stream.c)
+
+// shape is the length and the first ID of the data, read once and only
+// when an estimate needs them.
+type shape struct {
+	st    *stream
+	ctx   context.Context
+	known bool
+	err   error
+
+	length int64
+	first  ID
+}
+
+func (st *stream) shapeOf(ctx context.Context) *shape {
+	return &shape{st: st, ctx: ctx}
+}
+
+func (sh *shape) load() {
+	if sh.known {
+		return
+	}
+
+	sh.known = true
+
+	n, err := sh.st.count(sh.ctx, nil)
+
+	if err != nil {
+		sh.err = err
+
+		return
+	}
+
+	first, _, err := sh.st.edge(sh.ctx, 1)
+
+	if err != nil {
+		sh.err = err
+
+		return
+	}
+
+	sh.length, sh.first = int64(n), first
+}
+
+// hasTombstones is streamRangeHasTombstones from start to the end: an
+// entry deleted one by one (XDEL) at or after start, while the stream has
+// entries after it.
+func (st *stream) hasTombstones(sh *shape, start ID) bool {
+	if st.maxDeleted.IsZero() {
+		return false
+	}
+
+	sh.load()
+
+	if sh.length == 0 || st.maxDeleted.Less(sh.first) {
+		return false
+	}
+
+	return !st.maxDeleted.Less(start)
+}
+
+// estimate is streamEstimateDistanceFromFirstEverEntry: the entries_read
+// of a group whose last delivered ID is id, or -1 when it cannot be known.
+func (st *stream) estimate(sh *shape, id ID) int64 {
+	if st.added == 0 {
+		return 0
+	}
+
+	sh.load()
+
+	if sh.length == 0 && !st.last.Less(id) {
+		return st.added
+	}
+
+	switch {
+	case id == st.last:
+		return st.added
+	case st.last.Less(id):
+		return -1
+	}
+
+	if st.maxDeleted.IsZero() || st.maxDeleted.Less(sh.first) {
+		switch {
+		case id.Less(sh.first):
+			return st.added - sh.length
+		case id == sh.first:
+			return st.added - sh.length + 1
+		}
+	}
+
+	return -1
+}
+
+// lagOf is the lag of XINFO GROUPS: exact from entries_read when no
+// deleted entry is after the group, else from the estimate; nil when it
+// cannot be known.
+func (st *stream) lagOf(sh *shape, head group) *int64 {
+	var lag int64
+
+	switch {
+	case st.added == 0:
+		lag = 0
+	case head.Read >= 0 && !st.hasTombstones(sh, head.Last):
+		lag = st.added - head.Read
+	default:
+		read := st.estimate(sh, head.Last)
+
+		if read < 0 {
+			return nil
+		}
+
+		lag = st.added - read
+	}
+
+	return &lag
+}
+
+// delivered is the entries_read of a group after it gets id, as XREADGROUP
+// counts it: one more while the count is valid and no deleted entry is
+// ahead, else the estimate.
+func (st *stream) delivered(sh *shape, read int64, id ID) int64 {
+	if read >= 0 && !st.hasTombstones(sh, id) {
+		return read + 1
+	}
+
+	if st.added > 0 {
+		return st.estimate(sh, id)
+	}
+
+	return read
 }
 
 // ConsumerInfo is one row of GET /{s}/_streams/groups/{g}/consumers.
@@ -1200,6 +1466,168 @@ func (s *Service) Read(ctx context.Context, name, g string, o ReadOptions) ([]js
 	}
 }
 
+// TailOptions are the keys of a read without a group.
+type TailOptions struct {
+	After   string   `json:"after"`
+	Count   int      `json:"count"`
+	BlockMs int64    `json:"block_ms"`
+	Fields  []string `json:"fields"`
+}
+
+func (o *TailOptions) check() error {
+	switch {
+	case o.Count < 0 || o.Count > MaxCount:
+		return badRequest("count is 1 to %d", MaxCount)
+	case o.BlockMs < 0:
+		return badRequest("block_ms must be >= 0")
+	}
+
+	if o.Count == 0 {
+		o.Count = 10
+	}
+
+	return nil
+}
+
+// Tail is XREAD: the entries after an ID, with no group and no PEL. After
+// is an ID ("0" by default) or "$", the last ID when the call starts. With
+// BlockMs and no entry, it waits for an append.
+func (s *Service) Tail(ctx context.Context, name string, o TailOptions) ([]json.RawMessage, error) {
+	if err := o.check(); err != nil {
+		return nil, err
+	}
+
+	deadline := s.now().Add(time.Duration(o.BlockMs) * time.Millisecond)
+
+	var (
+		after ID
+		known bool
+	)
+
+	for {
+		st, err := s.open(ctx, name, false)
+
+		// XREAD BLOCK on a missing key waits for it, as for an entry. The
+		// stream is made by an append that does not go through a wake of
+		// this stream, so the wait polls.
+		if errors.Is(err, catalog.ErrUnknown) && o.BlockMs > 0 {
+			if !known {
+				after, known, err = s.startOfMissing(o.After)
+
+				if err != nil {
+					return nil, err
+				}
+			}
+
+			if done, err := waitPoll(ctx, deadline); done {
+				return nil, err
+			}
+
+			continue
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
+		if !known {
+			after, _, err = st.start(tailStart(o.After), nil)
+			known = err == nil
+		}
+
+		var rows []json.RawMessage
+
+		if err == nil {
+			body := map[string]any{
+				"query": map[string]any{"_id": map[string]any{"$gt": after.Key()}},
+				"sort":  map[string]any{"_id": 1},
+				"limit": o.Count,
+			}
+
+			if len(o.Fields) > 0 {
+				body["fields"] = withID(o.Fields)
+			}
+
+			rows, err = st.find(ctx, body)
+		}
+
+		wake := st.wake
+
+		st.mu.Unlock()
+
+		if err != nil || len(rows) > 0 || o.BlockMs == 0 {
+			return rows, err
+		}
+
+		wait := time.Until(deadline)
+
+		if wait <= 0 {
+			return rows, nil
+		}
+
+		timer := time.NewTimer(wait)
+
+		select {
+		case <-wake:
+			timer.Stop()
+		case <-timer.C:
+			return rows, nil
+		case <-ctx.Done():
+			timer.Stop()
+
+			return nil, ctx.Err()
+		}
+	}
+}
+
+// missingPoll is how often a blocked tail on a missing stream looks for it.
+const missingPoll = 50 * time.Millisecond
+
+// startOfMissing is the start of a tail on a stream that does not exist:
+// every ID, "$" too, is after 0-0 (the last ID of a missing key in Redis).
+func (s *Service) startOfMissing(after string) (ID, bool, error) {
+	switch tailStart(after) {
+	case "$", "0", "0-0", "-":
+		return ID{}, true, nil
+	}
+
+	id, err := Parse(after, 0)
+
+	return id, err == nil, err
+}
+
+// waitPoll waits one poll, or until the deadline or the end of ctx. done
+// tells that the tail ends: at the deadline (no error, no rows) or with
+// the error of ctx.
+func waitPoll(ctx context.Context, deadline time.Time) (bool, error) {
+	wait := time.Until(deadline)
+
+	if wait <= 0 {
+		return true, nil
+	}
+
+	timer := time.NewTimer(min(wait, missingPoll))
+
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		return false, nil
+	case <-ctx.Done():
+		return true, ctx.Err()
+	}
+}
+
+// tailStart is the start of a tail: no value is the start of the stream,
+// not "$" as for a group.
+func tailStart(after string) string {
+	if after == "" {
+		return "0"
+	}
+
+	return after
+}
+
 func (s *Service) readNew(ctx context.Context, st *stream, g string, o ReadOptions) ([]json.RawMessage, error) {
 	var head group
 
@@ -1275,16 +1703,26 @@ func (s *Service) readNew(ctx context.Context, st *stream, g string, o ReadOptio
 			}
 		}
 
-		last, _ := FromKey(keys[len(keys)-1])
+		read := head.Read
+		sh := st.shapeOf(ctx)
+
+		var last ID
+
+		for _, k := range keys {
+			last, _ = FromKey(k)
+			read = st.delivered(sh, read, last)
+		}
+
+		if sh.err != nil {
+			return sh.err
+		}
 
 		if err := putID(b, "last", last); err != nil {
 			return err
 		}
 
-		if head.Read >= 0 {
-			if err := putInt(b, "read", head.Read+int64(len(keys))); err != nil {
-				return err
-			}
+		if err := putInt(b, "read", read); err != nil {
+			return err
 		}
 
 		return st.checkpoint(tx)
@@ -1317,7 +1755,14 @@ func (s *Service) readPending(ctx context.Context, st *stream, g string, o ReadO
 		pel := b.Bucket(bPEL)
 		cur := pel.Cursor()
 
-		for k, _ := cur.Seek([]byte(after.Next().Key())); k != nil && len(keys) < o.Count; k, _ = cur.Next() {
+		// No ID is after the highest one: Next would wrap to 0-0.
+		k, _ := cur.Seek([]byte(after.Next().Key()))
+
+		if after == Max {
+			k = nil
+		}
+
+		for ; k != nil && len(keys) < o.Count; k, _ = cur.Next() {
 			if p, ok := getPending(pel, k); ok && p.Consumer == o.Consumer {
 				keys = append(keys, string(k))
 			}
@@ -1403,21 +1848,37 @@ func (s *Service) Ack(ctx context.Context, name, g string, ids []string) (int, e
 		return 0, err
 	}
 
-	st, err := s.open(ctx, name, false)
-	if err != nil {
-		return 0, err
+	// A truncate, a drop or a rename can close the store between the
+	// unlock and the batch: the ack opens the stream again.
+	for {
+		st, err := s.open(ctx, name, false)
+
+		if err != nil {
+			return 0, err
+		}
+
+		// An ack changes only the PEL: it does not need the stream lock, so
+		// it runs while a read holds it, and bbolt joins the acks that come
+		// at once into one transaction (one fsync).
+		store := st.st
+
+		st.mu.Unlock()
+
+		n, err := ackIn(store, g, keys)
+
+		if errors.Is(err, bolt.ErrDatabaseNotOpen) {
+			continue
+		}
+
+		return n, err
 	}
+}
 
-	// An ack changes only the PEL: it does not need the stream lock, so it
-	// runs while a read holds it, and bbolt joins the acks that come at
-	// once into one transaction (one fsync).
-	store := st.st
-
-	st.mu.Unlock()
-
+// ackIn removes keys from the PEL of g in store.
+func ackIn(store *bolt.DB, g string, keys []string) (int, error) {
 	n := 0
 
-	err = store.Batch(func(tx *bolt.Tx) error {
+	err := store.Batch(func(tx *bolt.Tx) error {
 		n = 0
 
 		b, err := groupBucket(tx, g)
@@ -1799,7 +2260,8 @@ type StreamMetrics struct {
 }
 
 // Metrics gives the series of the streams used since the start (the open
-// ones). It reads no entry: the counters and the group stores only.
+// ones). It reads the counters and the group stores; it counts the entries
+// only when a lag needs the estimate of Redis (lagOf).
 func (s *Service) Metrics() []StreamMetrics {
 	s.mu.Lock()
 
@@ -1818,6 +2280,7 @@ func (s *Service) Metrics() []StreamMetrics {
 
 		if st.st != nil {
 			m := StreamMetrics{Name: st.name, Added: st.added}
+			sh := st.shapeOf(context.Background())
 
 			_ = st.st.View(func(tx *bolt.Tx) error {
 				groups := tx.Bucket(bGroups)
@@ -1827,10 +2290,7 @@ func (s *Service) Metrics() []StreamMetrics {
 					head := readGroup(b)
 					info := GroupInfo{Name: string(k), Pending: b.Bucket(bPEL).Stats().KeyN}
 
-					if head.Read >= 0 && !head.Last.Less(st.maxDeleted) {
-						lag := st.added - head.Read
-						info.Lag = &lag
-					}
+					info.Lag = st.lagOf(sh, head)
 
 					m.Groups = append(m.Groups, info)
 

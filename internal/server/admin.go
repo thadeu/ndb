@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -187,6 +188,8 @@ func (s *Server) compact(w http.ResponseWriter, r *http.Request, db *engine.DB) 
 		return
 	}
 
+	longPoll(w)
+
 	began := time.Now()
 
 	res, err := col.Compact()
@@ -195,6 +198,8 @@ func (s *Server) compact(w http.ResponseWriter, r *http.Request, db *engine.DB) 
 
 		return
 	}
+
+	s.logInfo(w, r, "compaction done", slog.Any("before", res.Before), slog.Any("after", res.After), slog.Int64("ms", time.Since(began).Milliseconds()))
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"collection":  name,
@@ -291,17 +296,21 @@ func cutLine(s string, max int) (string, bool) {
 func (s *Server) truncate(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
 
-	s.streams.Forget(name, false)
+	// The hold keeps every stream request out until the group store is
+	// gone: a request that opened it in between would keep the old groups.
+	release := s.streams.Hold(name)
 
-	if err := db.Truncate(name, r.URL.Query().Get("confirm")); err != nil {
+	err := db.Truncate(name, r.URL.Query().Get("confirm"))
+
+	release(err == nil && isStream(db, name))
+
+	if err != nil {
 		writeError(w, err)
 
 		return
 	}
 
-	if isStream(db, name) {
-		s.afterTruncate(db, name)
-	}
+	s.logInfo(w, r, "collection truncated")
 
 	writeJSON(w, http.StatusOK, map[string]any{"collection": name, "truncated": true})
 }
@@ -311,13 +320,19 @@ func (s *Server) truncate(w http.ResponseWriter, r *http.Request, db *engine.DB)
 func (s *Server) drop(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
 
-	s.streams.Forget(name, false)
+	release := s.streams.Hold(name)
 
-	if err := db.Drop(name, r.URL.Query().Get("confirm")); err != nil {
+	err := db.Drop(name, r.URL.Query().Get("confirm"))
+
+	release(false)
+
+	if err != nil {
 		writeError(w, err)
 
 		return
 	}
+
+	s.logInfo(w, r, "collection dropped")
 
 	writeJSON(w, http.StatusOK, map[string]any{"collection": name, "dropped": true})
 }
@@ -346,10 +361,11 @@ func (s *Server) rename(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
 
 	if err == nil {
-		s.streams.Forget(name, false)
-		s.streams.Forget(req.To, false)
+		release := s.streams.Hold(name, req.To)
 
 		err = db.Rename(name, req.To, req.Replace)
+
+		release(false)
 	}
 
 	if err != nil {
@@ -357,6 +373,8 @@ func (s *Server) rename(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 
 		return
 	}
+
+	s.logInfo(w, r, "collection renamed", slog.String("to", req.To), slog.Bool("replace", req.Replace))
 
 	writeJSON(w, http.StatusOK, map[string]any{"collection": req.To, "renamed_from": name, "replaced": req.Replace})
 }

@@ -16,7 +16,9 @@ module Ndb
 
   # A worker of a group: it runs the block on each entry. A block that
   # returns acks the entry; a block that raises leaves it pending, and a
-  # worker of the group claims it again after claim_idle.
+  # worker of the group claims it again after claim_idle. Any Exception is
+  # a failed entry (also NotImplementedError or SystemStackError), but a
+  # SignalException or SystemExit goes on to the caller.
   #
   #   worker = orders.group("billing").worker("w1", max_deliveries: 5) { |e| charge(e.doc) }
   #   thread = worker.start   # or worker.run, which blocks
@@ -30,11 +32,17 @@ module Ndb
     # for new entries, in seconds (5). claim_idle: entries pending this
     # long, of any consumer, are claimed and tried again (60; nil or a
     # negative value turns the claim off). claim_every: how often to look
-    # for them (claim_idle / 2, at least 1). max_deliveries: an entry
-    # delivered this many times goes to dead_letter (a stream name) and is
-    # acked; nil is no limit. on_error: a callable that gets the errors that
-    # do not stop the worker (a failed read, a raise in the block, a
-    # PoisonMessage).
+    # for them (claim_idle / 2, at least 1). max_deliveries: an entry that
+    # fails on its max_deliveries-th delivery goes to dead_letter (a stream
+    # name) and is acked at once; nil is no limit. on_error: a callable that
+    # gets the errors that do not stop the worker (a failed read, a raise in
+    # the block, a PoisonMessage). A failed read, also of a group or stream
+    # that does not exist yet, is reported and tried again with a backoff
+    # (0.1 s, doubled up to 5 s): a worker that starts before its group
+    # waits for it.
+    #
+    # The block gets the entry. A block with two parameters also gets the
+    # delivery count of the entry (1 on the first delivery).
     def initialize(group, consumer, count: 10, block: 5, claim_idle: 60, claim_every: nil, max_deliveries: nil, dead_letter: nil, on_error: nil, &handler)
       raise ArgumentError, "a worker needs a block" unless handler
 
@@ -124,18 +132,56 @@ module Ndb
     end
 
     # The consumer's own pending entries, in ID order. An entry that fails
-    # stays pending; the loop moves past it.
+    # stays pending; the loop moves past it. A failed read goes to on_error
+    # and is tried again after a backoff, also a group (or stream) that
+    # does not exist yet: the worker waits for it.
+    #
+    # The pending read counts one more delivery. With max_deliveries, an
+    # entry above the limit had max_deliveries deliveries without an ack:
+    # the process stopped in the block (a crash). It goes to the dead letter
+    # without the block.
     def work_pending
       after = "0"
+      backoff = 0
 
       until stopped?
-        entries = @group.read(@consumer, count: @count, pending: true, after: after)
+        begin
+          entries = @group.read(@consumer, count: @count, pending: true, after: after)
+        rescue Ndb::Error => e
+          report(e)
+
+          backoff = [[backoff * 2, 0.1].max, 5].min
+
+          pause(backoff)
+
+          next
+        end
+
+        backoff = 0
 
         return if entries.empty?
 
-        handle(entries)
+        counts = pending_counts(entries)
+
+        handle(without_crashed(entries, counts), counts)
 
         after = entries.last.id
+      end
+    end
+
+    # The entries to run: the ones above max_deliveries go to the dead
+    # letter. Their count has the pending read, so they ran count - 1 times.
+    def without_crashed(entries, counts)
+      return entries unless @max_deliveries
+
+      entries.reject do |entry|
+        n = counts.fetch(entry.id, 1)
+
+        next false if entry.deleted? || n <= @max_deliveries
+
+        bury(entry, n - 1)
+
+        true
       end
     end
 
@@ -149,6 +195,7 @@ module Ndb
       deliveries = idle.to_h { |p| [p["_id"], p["deliveries"]] }
       claimed = @group.claim(@consumer, deliveries.keys, min_idle: @claim_idle)
 
+      # An entry at the limit is one that a stopped process did not bury.
       retry_entries = claimed.entries.reject do |entry|
         n = deliveries[entry.id]
 
@@ -159,10 +206,27 @@ module Ndb
         true
       end
 
-      handle(retry_entries)
+      # The claim counted one more delivery.
+      handle(retry_entries, deliveries.transform_values { |n| n + 1 })
     rescue Ndb::Error => e
       report(e)
     end
+
+    # The delivery counts of the consumer's pending entries, by ID. Only a
+    # block that takes the count, or a max_deliveries, needs the request.
+    def pending_counts(entries)
+      return {} unless counts? || @max_deliveries
+
+      rows = @group.pending_list(start: entries.first.id, stop: entries.last.id, count: entries.size, consumer: @consumer)
+
+      rows.to_h { |p| [p["_id"], p["deliveries"]] }
+    rescue Ndb::Error => e
+      report(e)
+
+      {}
+    end
+
+    def counts? = @handler.arity == 2
 
     # Sends a poison entry to the dead letter, acks it, then reports it.
     def bury(entry, deliveries)
@@ -182,8 +246,9 @@ module Ndb
     end
 
     # Runs the block on each entry and acks the ones that worked, in one
-    # call. A deleted entry is acked without the block.
-    def handle(entries)
+    # call. A deleted entry is acked without the block. counts has the
+    # delivery count of the entries that were delivered before.
+    def handle(entries, counts = {})
       done = []
 
       entries.each do |entry|
@@ -195,22 +260,32 @@ module Ndb
           next
         end
 
+        n = counts.fetch(entry.id, 1)
+
         begin
-          @handler.call(entry)
+          counts? ? @handler.call(entry, n) : @handler.call(entry)
 
           done << entry.id
-        rescue StandardError => e
+        rescue SignalException, SystemExit
+          raise
+        rescue Exception => e
           report(e)
+
+          bury(entry, n) if @max_deliveries && n >= @max_deliveries
         end
       end
+    ensure
+      # Also after a signal or Thread#raise in the block: the entries done
+      # before it are acked.
+      ack_done(done)
+    end
 
-      return if done.empty?
+    def ack_done(ids)
+      return if ids.nil? || ids.empty?
 
-      begin
-        @group.ack(done)
-      rescue Ndb::Error => e
-        report(e)
-      end
+      @group.ack(ids)
+    rescue Ndb::Error => e
+      report(e)
     end
   end
 

@@ -24,6 +24,7 @@ type streamStep struct {
 	Op       string          `json:"op"`
 	Group    string          `json:"group"`
 	Consumer string          `json:"consumer"`
+	ID       string          `json:"id"`
 	Body     json.RawMessage `json:"body"`
 	Expect   *struct {
 		Body   json.RawMessage   `json:"body"`
@@ -122,6 +123,8 @@ func streamRoute(s string, step streamStep) (string, string) {
 		return "PUT", "/" + s
 	case "append", "trim":
 		return "POST", "/" + s + "/_streams/" + step.Op
+	case "tail":
+		return "POST", "/" + s + "/_streams/read"
 	case "info":
 		return "GET", "/" + s + "/_streams"
 	case "group_create":
@@ -142,6 +145,8 @@ func streamRoute(s string, step streamStep) (string, string) {
 		return "POST", "/" + s + "/_" + step.Op
 	case "put_doc":
 		return "POST", "/" + s + "/_doc"
+	case "delete":
+		return "DELETE", "/" + s + "/_doc/" + step.ID
 	}
 
 	panic("unknown op " + step.Op)

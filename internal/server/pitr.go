@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -65,6 +66,8 @@ func (s *Server) runRestore(w http.ResponseWriter, r *http.Request, db *engine.D
 		}
 	}
 
+	longPoll(w)
+
 	start := time.Now()
 
 	if err == nil {
@@ -76,6 +79,8 @@ func (s *Server) runRestore(w http.ResponseWriter, r *http.Request, db *engine.D
 
 		return
 	}
+
+	s.logInfo(w, r, "collection restored", slog.String("from", name), slog.String("to", req.To), slog.Time("at", at.UTC()), slog.Int64("ms", time.Since(start).Milliseconds()))
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"collection":  req.To,

@@ -12,7 +12,7 @@ Finds documents. No `query` matches every document.
 |---|---|---|---|
 | `query` | object | `{}` | the filter, see [Filters](../query.md#filters) |
 | `sort` | object | insertion order | `{"field": 1 or -1}`, in key order; `_id` is the last tie-break |
-| `fields` | string[] | all | return only these paths (dot paths allowed) |
+| `fields` | string[] | all | return only these paths (dot paths allowed); `_id` too is left out unless you list it |
 | `limit` | int | none | rows of one page |
 | `skip` | int | 0 | rows to skip (offset pages) |
 | `after` | string | none | the `X-Ndb-Next` of the previous page (cursor pages) |
@@ -40,7 +40,7 @@ curl --unix-socket /run/ndb/ndb.sock -i http://ndb/calls/_search -d '{
 }'
 # X-Ndb-Total: 812
 # X-Ndb-Next: eyJz...
-# [{"_id":"...","call_id":"c-1","status":"answered"}, ...]
+# [{"call_id":"c-1","status":"answered"}, ...]
 ```
 
 ```go [Go]
@@ -214,7 +214,7 @@ Removes the first document that matches, or every match with `many`.
 
 | Body key | Type | Default | Meaning |
 |---|---|---|---|
-| `query` | object | required | the filter; it must not be empty |
+| `query` | object | required | the filter; it must not be empty. No `query` (the body `{}`) is the same empty filter: `400 empty_filter` |
 | `many` | bool | `false` | delete every match |
 
 **Answer:** `{"deleted":n}`. **Rules and errors:** as for `_update_by_query`. With `many`, when the index alone answers the query (one indexed field with `$eq`, `$in` or a range), ndb deletes the matches without reading them.

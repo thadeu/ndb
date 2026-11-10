@@ -10,7 +10,8 @@ import (
 
 // Handler does the work on one entry. nil acks it. An error leaves it
 // pending: after Work.ClaimIdle, a worker of the group claims it and tries
-// again.
+// again. An error while ctx ends (Work stops) is not a failure: the entry
+// stays pending and does not go to the dead letter.
 type Handler[T any] func(ctx context.Context, e Entry[T]) error
 
 // Work says how Group.Work runs.
@@ -31,8 +32,8 @@ type Work struct {
 	ClaimEvery time.Duration
 
 	// MaxDeliveries: an entry delivered this many times is a poison
-	// message. It goes to DeadLetter (when set) and is acked. Zero is no
-	// limit.
+	// message. When its handler fails on that delivery, it goes to
+	// DeadLetter (when set) and is acked at once. Zero is no limit.
 	MaxDeliveries int64
 
 	// DeadLetter is the stream that gets the poison messages, as a
@@ -68,13 +69,18 @@ var ErrPoison = errors.New("ndb: poison message")
 //
 // Delivery is at least once: the work on an entry must be safe to repeat.
 // Run many workers with different consumer names to share the work. The
-// group must exist (Group.Ensure).
+// group must exist (Group.Ensure). A failed read, also of a group that
+// does not exist, goes to OnError, and Work tries again with a backoff.
+//
+// An entry whose doc does not decode into T (Entry.Err) does not go to the
+// handler: it is a failure of the handler, so it stays pending and, after
+// MaxDeliveries, goes to DeadLetter with its raw doc. An own pending entry
+// that already had MaxDeliveries deliveries without an ack (it crashed the
+// process) goes to DeadLetter at the start, without the handler.
 func (g *Group[T]) Work(ctx context.Context, consumer string, h Handler[T], w Work) error {
 	w = w.withDefaults()
 
-	if err := g.workPending(ctx, consumer, h, w); err != nil {
-		return quiet(ctx, err)
-	}
+	g.workPending(ctx, consumer, h, w)
 
 	nextClaim := time.Now().Add(w.ClaimEvery)
 	backoff := time.Duration(0)
@@ -101,7 +107,7 @@ func (g *Group[T]) Work(ctx context.Context, consumer string, h Handler[T], w Wo
 
 			w.report(fmt.Errorf("ndb: read %s/%s: %w", g.s.name, g.name, err))
 
-			backoff = min(max(backoff*2, 100*time.Millisecond), 5*time.Second)
+			backoff = nextBackoff(backoff)
 
 			sleep(ctx, backoff)
 
@@ -110,7 +116,7 @@ func (g *Group[T]) Work(ctx context.Context, consumer string, h Handler[T], w Wo
 
 		backoff = 0
 
-		g.handle(ctx, h, w, entries)
+		g.handle(ctx, h, w, entries, nil)
 	}
 
 	return nil
@@ -142,28 +148,65 @@ func (w Work) report(err error) {
 	}
 }
 
+// nextBackoff is the wait after one more failed read: 100 ms, then twice
+// the last wait, at most 5 s.
+func nextBackoff(last time.Duration) time.Duration {
+	return min(max(last*2, 100*time.Millisecond), 5*time.Second)
+}
+
 // workPending does the work on the consumer's own pending entries, in ID
-// order. An entry that fails stays pending; the loop moves past it.
-func (g *Group[T]) workPending(ctx context.Context, consumer string, h Handler[T], w Work) error {
+// order. An entry that fails stays pending; the loop moves past it. A
+// failed read goes to OnError and is tried again: only the end of ctx
+// stops the loop.
+func (g *Group[T]) workPending(ctx context.Context, consumer string, h Handler[T], w Work) {
 	after := "0"
+	backoff := time.Duration(0)
 
 	for ctx.Err() == nil {
 		entries, err := g.Read(ctx, consumer, Read{Pending: true, After: after, Count: w.Count})
 
 		if err != nil {
-			return err
+			if ctx.Err() != nil {
+				return
+			}
+
+			w.report(fmt.Errorf("ndb: read pending %s/%s: %w", g.s.name, g.name, err))
+
+			backoff = nextBackoff(backoff)
+
+			sleep(ctx, backoff)
+
+			continue
 		}
+
+		backoff = 0
 
 		if len(entries) == 0 {
-			return nil
+			return
 		}
 
-		g.handle(ctx, h, w, entries)
+		counts := g.pendingCounts(ctx, consumer, w, entries)
+		retry := make([]Entry[T], 0, len(entries))
+
+		for _, e := range entries {
+			n := counts[e.ID]
+
+			// The pending read is one more delivery. An entry above the
+			// limit had MaxDeliveries deliveries without an ack: the
+			// process stopped in its handler (a crash). Do not run it again.
+			if w.MaxDeliveries > 0 && n > w.MaxDeliveries && !e.Deleted {
+				g.bury(ctx, w, e, n-1)
+
+				continue
+			}
+
+			retry = append(retry, e)
+		}
+
+		g.handle(ctx, h, w, retry, counts)
 
 		after = entries[len(entries)-1].ID
 	}
-
-	return nil
 }
 
 // workIdle claims the idle entries of the group, poison ones first to the
@@ -198,24 +241,56 @@ func (g *Group[T]) workIdle(ctx context.Context, consumer string, h Handler[T], 
 	}
 
 	retry := make([]Entry[T], 0, len(claimed.Entries))
+	counts := make(map[string]int64, len(claimed.Entries))
 
 	for _, e := range claimed.Entries {
 		n := deliveries[e.ID]
 
+		// A process that stopped before the bury left it pending.
 		if w.MaxDeliveries > 0 && n >= w.MaxDeliveries {
 			g.bury(ctx, w, e, n)
 
 			continue
 		}
 
+		// The claim is one more delivery.
+		counts[e.ID] = n + 1
+
 		retry = append(retry, e)
 	}
 
-	g.handle(ctx, h, w, retry)
+	g.handle(ctx, h, w, retry, counts)
+}
+
+// pendingCounts gives the delivery counts of the consumer's own pending
+// entries. Only a worker with MaxDeliveries needs them.
+func (g *Group[T]) pendingCounts(ctx context.Context, consumer string, w Work, entries []Entry[T]) map[string]int64 {
+	if w.MaxDeliveries <= 0 || len(entries) == 0 {
+		return nil
+	}
+
+	rows, err := g.PendingList(ctx, PendingQuery{Start: entries[0].ID, End: entries[len(entries)-1].ID, Count: len(entries), Consumer: consumer})
+
+	if err != nil {
+		w.report(fmt.Errorf("ndb: pending %s/%s: %w", g.s.name, g.name, err))
+
+		return nil
+	}
+
+	counts := make(map[string]int64, len(rows))
+
+	for _, p := range rows {
+		counts[p.ID] = p.Deliveries
+	}
+
+	return counts
 }
 
 // bury sends a poison entry to the dead letter, acks it, then reports it.
+// It runs to the end also when ctx ended: the entry already failed.
 func (g *Group[T]) bury(ctx context.Context, w Work, e Entry[T], deliveries int64) {
+	ctx = context.WithoutCancel(ctx)
+
 	if w.DeadLetter != "" {
 		dead, err := StreamOf[DeadEntry](g.s.db, w.DeadLetter)
 
@@ -240,8 +315,13 @@ func (g *Group[T]) bury(ctx context.Context, w Work, e Entry[T], deliveries int6
 }
 
 // handle runs h on each entry and acks the ones that worked, in one call.
-// A deleted entry is acked without h: there is nothing to do.
-func (g *Group[T]) handle(ctx context.Context, h Handler[T], w Work, entries []Entry[T]) {
+// A deleted entry is acked without h: there is nothing to do. An entry
+// that does not decode into T is a failure without h. counts has the
+// delivery count of an entry delivered before (no count is 1); an entry
+// that fails on its MaxDeliveries-th delivery goes to the dead letter at
+// once. A handler error while ctx ends is not a failure: the entry stays
+// pending for the next run, and handle stops.
+func (g *Group[T]) handle(ctx context.Context, h Handler[T], w Work, entries []Entry[T], counts map[string]int64) {
 	done := make([]string, 0, len(entries))
 
 	for _, e := range entries {
@@ -255,8 +335,28 @@ func (g *Group[T]) handle(ctx context.Context, h Handler[T], w Work, entries []E
 			continue
 		}
 
-		if err := h(ctx, e); err != nil {
-			w.report(fmt.Errorf("ndb: handler %s/%s %s: %w", g.s.name, g.name, e.ID, err))
+		err := e.Err
+
+		if err == nil {
+			err = h(ctx, e)
+
+			if err != nil && ctx.Err() != nil {
+				break
+			}
+
+			if err != nil {
+				err = fmt.Errorf("ndb: handler %s/%s %s: %w", g.s.name, g.name, e.ID, err)
+			}
+		}
+
+		if err != nil {
+			w.report(err)
+
+			n := max(counts[e.ID], 1)
+
+			if w.MaxDeliveries > 0 && n >= w.MaxDeliveries {
+				g.bury(ctx, w, e, n)
+			}
 
 			continue
 		}
@@ -272,15 +372,6 @@ func (g *Group[T]) handle(ctx context.Context, h Handler[T], w Work, entries []E
 	if _, err := g.Ack(context.WithoutCancel(ctx), done...); err != nil {
 		w.report(fmt.Errorf("ndb: ack %s/%s: %w", g.s.name, g.name, err))
 	}
-}
-
-// quiet turns the error of a cancelled ctx into nil.
-func quiet(ctx context.Context, err error) error {
-	if ctx.Err() != nil {
-		return nil
-	}
-
-	return err
 }
 
 func sleep(ctx context.Context, d time.Duration) {

@@ -117,7 +117,7 @@ In the SDKs: Go `ndb.FromNow()`, `ndb.Limit(n)`, `ndb.WatchQuery(...)`; Ruby `fr
 - `watch_lagged` (an error line in the stream): the consumer was too slow. Reconnect. The stream resumes from the last ack.
 - `history_truncated` (HTTP 410): the WAL files that the watch must read were deleted by `wal_retention`. This happens with no saved position and `from: "beginning"`, or with a position before the oldest kept file. The stream never skips the gap in silence. Start from `now`, or rebuild from a search. A saved position is safe: ndb keeps the file that holds it.
 - `invalid_position` (an error line): the saved position is not valid.
-- A truncate or a drop ends the open streams of the collection. Reconnect: after a truncate, the stream resumes from the last ack with the `truncate` event; after a drop, the collection is unknown (404).
+- A truncate or a drop ends the open streams of the collection. The open stream can end before it sends the `truncate` line: do not wait for it there. Reconnect: after a truncate, the stream resumes from the last ack with the `truncate` event; after a drop, the collection is unknown (404).
 - The SDKs retry only the initial open of the stream, never in the middle. The Go stream ends when `ctx` is cancelled; the TypeScript stream ends with its `AbortSignal`.
 
 A full consumer is in the [outbox example](/examples/outbox).

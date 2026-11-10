@@ -1,0 +1,82 @@
+{
+  "name": "an unknown key of the aggregate body is invalid_pipeline",
+  "collection": "calls",
+  "setup": {
+    "catalog": {
+      "time": "ts",
+      "write": "engine",
+      "indexes": [
+        "status"
+      ]
+    },
+    "writes": [
+      {
+        "op": "bulk",
+        "body": {
+          "docs": [
+            {
+              "_id": "c1",
+              "status": "answered",
+              "dur": 10,
+              "queue": "sales",
+              "ts": "2026-11-01T10:15:00Z",
+              "tags": [
+                "a"
+              ]
+            },
+            {
+              "_id": "c2",
+              "status": "answered",
+              "dur": 20,
+              "queue": "sales",
+              "ts": "2026-11-01T10:45:00Z"
+            },
+            {
+              "_id": "c3",
+              "status": "missed",
+              "dur": null,
+              "queue": "sales",
+              "ts": "2026-11-01T11:05:00Z"
+            },
+            {
+              "_id": "c4",
+              "status": "answered",
+              "dur": 30,
+              "queue": "support",
+              "ts": "2026-11-02T09:00:00Z"
+            },
+            {
+              "_id": "c5",
+              "status": "missed",
+              "queue": "support",
+              "ts": "2026-11-02T09:30:00Z"
+            },
+            {
+              "_id": "c6",
+              "status": "abandoned",
+              "dur": "n/a",
+              "queue": "support",
+              "ts": "2026-11-03T23:30:00Z"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "request": {
+    "op": "aggregate",
+    "body": {
+      "pipeline": [
+        {
+          "$group": {
+            "_id": null
+          }
+        }
+      ],
+      "bogus": 1
+    }
+  },
+  "expect": {
+    "error": "invalid_pipeline"
+  }
+}

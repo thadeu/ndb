@@ -1,0 +1,217 @@
+{
+  "name": "a trim before a group's position: entries_read is unknown and the lag is the entries left",
+  "stream": "orders",
+  "steps": [
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-1"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-1"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-2"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-2"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-3"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-3"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-4"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-4"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-5"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-5"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-6"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-6"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-7"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-7"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-8"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-8"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-9"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-9"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-10"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-10"
+        }
+      }
+    },
+    {
+      "op": "group_create",
+      "group": "g",
+      "body": {
+        "start": "0"
+      }
+    },
+    {
+      "op": "trim",
+      "body": {
+        "max_len": 5
+      },
+      "expect": {
+        "body": {
+          "deleted": 5
+        }
+      }
+    },
+    {
+      "op": "groups",
+      "expect": {
+        "body": [
+          {
+            "name": "g",
+            "consumers": 0,
+            "pending": 0,
+            "last_delivered_id": "0-0",
+            "entries_read": null,
+            "lag": 5
+          }
+        ]
+      }
+    },
+    {
+      "op": "read",
+      "group": "g",
+      "body": {
+        "consumer": "c",
+        "count": 2
+      },
+      "expect": {
+        "rows": [
+          {
+            "_id": "1-6",
+            "n": 1
+          },
+          {
+            "_id": "1-7",
+            "n": 1
+          }
+        ],
+        "ignore": [
+          "_ts"
+        ]
+      }
+    },
+    {
+      "op": "groups",
+      "expect": {
+        "body": [
+          {
+            "name": "g",
+            "consumers": 1,
+            "pending": 2,
+            "last_delivered_id": "1-7",
+            "entries_read": 7,
+            "lag": 3
+          }
+        ]
+      }
+    }
+  ]
+}

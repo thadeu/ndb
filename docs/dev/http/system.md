@@ -174,9 +174,9 @@ The default window and every collection with one, dropped ones included: `{"defa
 
 Stores bytes in the blob store (content addressed, deduplicated) and returns the reference to keep in a document field.
 
-**Body:** the raw bytes. `Content-Type` is kept as the type of the blob.
+**Body:** the raw bytes. `Content-Type` goes into the reference as its `type`.
 
-**Answer:** `{"$blob":"sha256:<hex>","size":N,"type":"audio/wav"}`.
+**Answer:** `{"$blob":"sha256:<hex>","size":N,"type":"audio/wav"}`. The answer has `type` only when the request sent a `Content-Type`.
 
 **Errors:** `413 request_too_large` over `blob_max_size` (default 1 GiB).
 
@@ -208,7 +208,9 @@ A field of a document can hold the reference: `{"_id":"c1","recording":{"$blob":
 
 The bytes of a blob. `Range: bytes=0-1023` reads a part (`206`). `?type=` sets the content type of the answer.
 
-**Errors:** `404 not_found`, `400 invalid_blob_ref` when the reference is not `sha256:<64 hex>`.
+The reference is `sha256:<64 hex>` or the bare `<64 hex>` (lowercase hex in both forms).
+
+**Errors:** `404 not_found`, `400 invalid_blob_ref` when the reference is not one of these forms, `416 invalid_range` when the `Range` is out of the blob (the error body of every route, with `Content-Range: bytes */<size>`).
 
 ::: code-group
 
@@ -229,3 +231,30 @@ const bytes = await db.getBlob(blob) // Uint8Array
 ```
 
 :::
+
+## `GET /_log`
+
+The log settings of the daemon: `{"level":"info","format":"text","body_max":2048,"slow_ms":1000}`. Over TCP it needs a token with admin of `*`, else `403 forbidden`. See [Logs](../operations.md#logs).
+
+```bash
+curl --unix-socket /run/ndb/ndb.sock http://ndb/_log
+```
+
+## `PUT /_log`
+
+Changes the log settings at run time, without a restart. Every key is optional. The change lasts until the daemon stops; `ndb.yml` keeps the settings of the next start.
+
+| Body key | Type | Meaning |
+|---|---|---|
+| `level` | string | `debug`, `info`, `warn`, `error` or `quiet` |
+| `body_max` | int | the largest body or document in a log line, in bytes; `0` logs no bodies |
+| `slow_ms` | int | a request over this is a `warn` line; `0` turns it off |
+
+The format (`text` or `json`) stays the one of the start.
+
+**Answer:** the new settings, as `GET /_log`. **Errors:** `400 invalid_request` for an unknown level, a negative number or an unknown key (`format` too); `403 forbidden` over TCP without admin of `*`.
+
+```bash
+curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/_log -d '{"level":"debug","body_max":512}'
+# {"body_max":512,"format":"text","level":"debug","slow_ms":1000}
+```

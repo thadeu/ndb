@@ -335,10 +335,13 @@ orders.info                                  # length, first and last ID, groups
 
 A worker in a group. It reads its own pending entries first, then new ones
 (waiting up to `block` seconds). A block that returns acks the entry; a
-block that raises leaves it pending. The worker also claims the entries
+block that raises any exception (also `NotImplementedError`) leaves it
+pending, but a signal or `exit` goes on. The worker also claims the entries
 other workers left idle. An entry delivered `max_deliveries` times goes to
 the dead-letter stream as `{stream, group, id, deliveries, doc}`, is acked,
-and `on_error` gets an `Ndb::PoisonMessage`:
+and `on_error` gets an `Ndb::PoisonMessage`. An own pending entry that
+crashed the process `max_deliveries` times goes there at the next start,
+without the block:
 
 ```ruby
 group = orders.group("billing")
@@ -362,7 +365,11 @@ worker.run # blocks until worker.stop; worker.start runs it in a Thread
 seconds). `group.work("worker-1", stop: -> { done }, **options) { |entry| ... }`
 is the same loop in one call: it ends when the `stop` callable returns true.
 Delivery is at least once: make the work safe to repeat. Run many workers
-with different consumer names to share the work.
+with different consumer names to share the work. A failed read goes to
+`on_error` and is tried again after a backoff (0.1 s, doubled up to 5 s),
+also when the group or the stream does not exist yet (`Ndb::UnknownGroup`,
+`Ndb::UnknownCollection`): a worker that starts before its group waits for
+it. Only `stop` ends the worker.
 
 The calls one by one, when you need your own loop:
 
@@ -375,13 +382,95 @@ The calls one by one, when you need your own loop:
 | `XACK` | `group.ack(*ids)` |
 | `XPENDING` | `group.pending` / `group.pending_list(idle: 60)` |
 | `XCLAIM` / `XAUTOCLAIM` | `group.claim("w2", *ids, min_idle: 60)` / `group.auto_claim("w2", min_idle: 60, cursor: "0-0", count: 100)` |
+| `XCLAIM ... IDLE` / `RETRYCOUNT` / `FORCE` / `JUSTID` | `group.claim("w2", *ids, idle: 90, retry_count: 5, force: true, just_ids: true)` |
 | `XTRIM` | `orders.trim(max_len: 1000)` / `orders.trim(min_id: id)` |
 | `XDEL` | `orders.delete(id)` |
 | `XREVRANGE` | `orders.rev_range("+", "-", count: 10)` |
+| `XREAD` | `orders.read(after: "0", count: 100, block: 5)` (`after: "$"`: only new entries) |
 | `XINFO GROUPS` / `CONSUMERS` | `orders.groups` / `group.consumers` |
 
 A read with `block` waits longer than the client `timeout`: the read timeout
 of that one request is `block` + 5 seconds.
+
+## Redis Streams commands
+
+`Ndb::Client` has the stream commands of the [redis-rb](https://github.com/redis/redis-rb)
+gem (`Ndb::RedisCommands`), with the same arguments and the same answers as
+redis-rb 5. An app that uses Redis Streams picks its backend in one place
+and keeps its calls:
+
+```ruby
+# config/initializers/streams.rb: the factory of the app
+STREAMS = ENV["STREAMS_BACKEND"] == "ndb" ? Ndb.connect : Redis.new
+
+STREAMS.xadd("orders", { order_id: 42 }, maxlen: 1000)                      # "1731164400000-0"
+STREAMS.xgroup(:create, "orders", "billing", "$", mkstream: true)           # "OK"
+STREAMS.xreadgroup("billing", "w1", "orders", ">", count: 10, block: 5000)  # { "orders" => [[id, { "order_id" => "42" }]] }
+STREAMS.xack("orders", "billing", id)                                       # 1
+```
+
+Times are in milliseconds, as in redis-rb (`block:`, `min_idle_time`,
+`idle:`).
+
+| Method | Answer |
+|---|---|
+| `xadd(key, entry, approximate: nil, maxlen: nil, minid: nil, nomkstream: nil, id: "*")` | the ID (a String); `nil` with `nomkstream:` and no stream |
+| `xlen(key)` | Integer (0 for no stream) |
+| `xrange(key, start = "-", range_end = "+", count: nil)` | `[[id, { "field" => "value" }], ...]`; `"(id"` leaves the ID out |
+| `xrevrange(key, range_end = "+", start = "-", count: nil)` | the same, from the highest ID |
+| `xread(keys, ids, count: nil, block: nil)` | `{ "stream" => [[id, fields], ...] }`, only the streams with entries; `{}` for none |
+| `xdel(key, *ids)` | how many it deleted |
+| `xtrim(key, len_or_id, strategy: "MAXLEN", approximate: false, limit: nil)` | how many it deleted (`strategy: "MINID"` with an ID) |
+| `xgroup(subcommand, key, group, id_or_consumer = nil, mkstream: false)` | `create`, `setid`: `"OK"`; `destroy`, `createconsumer`: 1 or 0; `delconsumer`: the pending count |
+| `xreadgroup(group, consumer, keys, ids, count: nil, block: nil, noack: nil)` | as `xread`. `">"`: new entries. An ID (`"0"`): the pending entries of the consumer after it; the key is in the answer also with `[]`, and a deleted entry is `[id, nil]` |
+| `xack(key, group, *ids)` | how many were pending |
+| `xpending(key, group)` | `{ "size" => 2, "min_entry_id" => id, "max_entry_id" => id, "consumers" => { "w1" => "2" } }` |
+| `xpending(key, group, start, end, count, consumer = nil, idle: nil)` | `[{ "entry_id" => id, "consumer" => "w1", "elapsed" => 1200, "count" => 1 }, ...]` |
+| `xclaim(key, group, consumer, min_idle_time, *ids, idle:, retrycount:, force:, justid:)` | `[[id, fields], ...]`; the IDs with `justid: true` |
+| `xautoclaim(key, group, consumer, min_idle_time, start, count: nil, justid: false)` | `{ "next" => "0-0", "entries" => [[id, fields], ...] }`; `"entries"` are IDs with `justid: true` |
+| `xinfo(:stream, key)` | `{ "length", "last-generated-id", "max-deleted-entry-id", "entries-added", "recorded-first-entry-id", "groups", "first-entry", "last-entry" }`; an entry is `[id, [field, value, ...]]` |
+| `xinfo(:groups, key)` | `[{ "name", "consumers", "pending", "last-delivered-id", "entries-read", "lag" }, ...]` |
+| `xinfo(:consumers, key, group)` | `[{ "name", "pending", "idle", "inactive" }, ...]` |
+
+The differences from Redis:
+
+- **Values.** Redis keeps strings. ndb keeps the JSON value that `xadd` got:
+  a number stays a number and a nested Hash stays an object, so a query or
+  an index can use it. A read gives every value as a String, as Redis does:
+  a string as it is, a number or a boolean with `to_s` (`42` is `"42"`),
+  `nil` as `""`, and a nested value as its JSON text
+  (`{ city: "Recife" }` is `'{"city":"Recife"}'`). redis-rb refuses a nested
+  value in `xadd`; ndb takes it. Field names become Strings.
+- **Field names.** A name that starts with `_` is reserved (`_id`, `_ts`).
+- **Many streams.** ndb reads one stream for each request. `xread` and
+  `xreadgroup` with many keys and no `block:` send one request for each key,
+  in order. With `block:` and more than one key they raise
+  `Ndb::NotSupported`.
+- **`block: 0`** waits with no limit, as in Redis: it is a loop of reads of
+  30 seconds each. A blocking `xread` on a stream that does not exist looks
+  for the stream every 0.5 seconds until the time ends.
+- **Errors** are `Ndb::Error` subclasses, not `Redis::CommandError`: rescue
+  both in code that runs on the two backends. The message starts as in
+  Redis, and the daemon message follows in parentheses:
+
+  | Case | Class | Message starts with |
+  |---|---|---|
+  | `xgroup(:create)` on a group that exists | `Ndb::GroupExists` | `BUSYGROUP` |
+  | a group command on a group or a stream that does not exist | `Ndb::UnknownGroup`, `Ndb::UnknownCollection` | `NOGROUP` |
+  | `xgroup(:create)` without `mkstream:` and no stream | `Ndb::UnknownCollection` | `ERR The XGROUP subcommand requires the key to exist` |
+  | `xinfo(:stream)` or `xinfo(:groups)` with no stream | `Ndb::UnknownCollection` | `ERR no such key` |
+
+  A different number of keys and IDs is an `ArgumentError`, sent before any
+  request.
+- **`xclaim`** has `idle:`, `retrycount:`, `force:` and `justid:`. `time:`
+  raises `Ndb::NotSupported` (use `idle:`); any other option is an
+  `ArgumentError`.
+- **`xinfo(:stream)`** has no `radix-tree-keys` and `radix-tree-nodes`, and
+  there is no `FULL` form.
+- A trim or a delete keeps the pending references, as up to Redis 8.0.
+  `xautoclaim` and `xclaim` drop the pending IDs whose entry is gone.
+- These are methods of `Ndb::Client`. There is no `multi`, `pipelined` or
+  other Redis command.
 
 ## Blobs
 
@@ -498,6 +587,13 @@ ndb = Ndb.connect("unix:///tmp/ndb-test.sock")
 ```
 
 Use a new collection name per test. Run the suite with `bundle exec rake test` in `sdk/ruby`.
+
+The cases of the Redis Streams commands (`test/redis_commands_test.rb`) also run on a real Redis, to prove that the answers have the same shape, when `NDB_REDIS_ADDR` is set and the `redis` gem loads (it is not a dependency of this gem; without them the cases are skipped). They use their own keys and never flush the server:
+
+```sh
+docker run -d --rm --name ndb-redis-rb -p 6391:6379 redis:7.4
+NDB_REDIS_ADDR=redis://127.0.0.1:6391 bundle exec rake test
+```
 
 ## License
 

@@ -362,6 +362,102 @@ loaded.recording.each_chunk { |chunk| out.write(chunk) } # 1 MiB ranges
 
 A blob behaves like a read-only IO (`read`, `each_chunk`, `eof?`, `rewind`). A loaded blob reads the daemon in 1 MiB ranges, so memory stays small. The same content always gives the same reference. You can also use `Ndb::Blob.new(io_or_string, content_type: "audio/wav")`.
 
+## Streams
+
+A stream is an append-only log with consumer groups, as in Redis Streams. A class in `app/streams` appends to a stream, consumes it, or does both. There is no base class: `include Ndb::Streams`.
+
+```ruby
+# app/streams/order_event.rb: a writer
+class OrderEvent
+  include Ndb::Streams
+end
+
+OrderEvent.append(order_id: 42)                    # one entry, returns its ID
+OrderEvent.append([{ order_id: 1 }, { order_id: 2 }])  # many entries, returns their IDs
+OrderEvent.append('{"order_id":42}')               # a JSON string
+```
+
+```ruby
+# app/streams/billing_paid.rb: a consumer
+class BillingPaid
+  include Ndb::Streams
+
+  stream :order_events, group: :billing
+
+  def perform(event)
+    Invoice.create!(order_id: event[:order_id])
+  end
+end
+```
+
+Run the consumers:
+
+```sh
+bundle exec ndb streams                      # every consumer class of app/streams
+bundle exec ndb streams --only BillingPaid -c 4
+bundle exec ndb streams -r ./consumers.rb    # without Rails
+```
+
+- **Name.** The stream name comes from the class name, with the ActiveSupport inflections (`OrderEvent` is `order_events`, `Category` is `categories`). `stream :orders` sets it. `stream OrderEvent, group: :billing` takes the stream of another class.
+- **Role.** A class without `perform` is a writer. A class with `perform` is a consumer and needs `group:`. Each group gets every entry one time, so each service has its own group. Two classes with the same group on one stream are an error.
+- **Write.** `append`, with the aliases `enqueue` and `perform_async`. In an ActiveRecord transaction the append waits for the commit (Rails 7.2 or later) and returns `nil`. A rollback drops it.
+- **Read.** `OrderEvent.last`, `last(10)`, `find(id)`, `range(1.hour.ago, Time.now, count: 100)`, `count`.
+- **The event.** `event[:order_id]` (a symbol or a string), `event.to_h`, `event.id`, `event.time`, `event.deliveries`. The payload is JSON: a date comes as a String.
+- **Failure.** An error in `perform` (any exception but a signal or `exit`) leaves the entry pending. It comes again after `claim_idle`. Delivery is at least once, so `perform` must be safe to repeat.
+
+The options of `stream`, with their defaults:
+
+```ruby
+stream :order_events,
+  group: :billing,              # needed with perform
+  concurrency: 1,               # threads of this class in each process
+  max_deliveries: nil,          # after N deliveries the entry goes to the dead letter and is acked
+  dead_letter: nil,             # "<stream>_dead" when max_deliveries is set; false for none
+  claim_idle: 1.minute,         # an entry pending this long is tried again
+  start: :new,                  # a new group reads new entries only; :all reads from the start
+  discard_on: [],               # these errors ack the entry without a retry
+  max_len: nil,                 # keep only the newest N entries (a trim on each append)
+  retain: nil                   # delete entries older than this ("30d", or 30.days)
+```
+
+`around_perform` runs a block around each `perform`, on the instance. A subclass gets the config and the blocks of its parent, so an app can have its own `ApplicationStream`.
+
+```ruby
+class ApplicationStream
+  include Ndb::Streams
+
+  around_perform { |event, block| Current.set(tenant: event[:tenant]) { block.call } }
+end
+```
+
+Each thread is a consumer with a stable name: `NDB_CONSUMER` (or the hostname), then `:` and the thread index. After a restart it reads its own pending entries first. Set `NDB_CONSUMER` to a different value in each process that runs on the same host. `SIGTERM` and `SIGINT` stop the process after the current entries.
+
+At boot, any process of the app loads `app/streams` and makes the missing groups in a background thread. `config/ndb.yml` can hold the defaults of the command:
+
+```yaml
+production:
+  streams:
+    concurrency: 4
+    only: [BillingPaid]
+```
+
+With Puma, `plugin :ndb` in `config/puma.rb` runs `bundle exec ndb streams` (or `bin/ndb streams`) next to Puma and stops it with Puma. It is on in development only. `NDB_STREAMS_IN_PUMA=true` or `false` sets it.
+
+`ActiveSupport::Notifications` gets `append.ndb_streams` (`stream`, `class`, `count`) and `perform.ndb_streams` (`stream`, `group`, `class`, `event`).
+
+The `ndb` command of the gem only has `streams`. It gives every other command (`ndb serve`, ...) to the daemon binary of `NDB_BIN`, or to the first native `ndb` executable of `PATH` (not a shim of rbenv, mise or asdf).
+
+`ndb streams` loads `app/streams` itself before it starts, also when the app does not eager load. It does not exit when ndb is down: each thread makes its group and tries again. A second signal in the first 2 seconds of a stop does nothing.
+
+In tests, `Ndb::Streams.inline!` makes an append write the entry and then call `perform` of each consumer of the stream, in the same thread. `ndb/rails/minitest` adds `assert_streamed` and `assert_no_streamed`, `ndb/rails/rspec` adds `have_streamed`, and both truncate the streams a test used.
+
+```ruby
+Ndb::Streams.inline!
+
+assert_streamed OrderEvent, order_id: 42
+expect(OrderEvent).to have_streamed(order_id: 42)
+```
+
 ## Errors
 
 The transport and daemon errors are defined by the gem `ndb`. They all live in the `Ndb` module (`Ndb::Error`, `Ndb::NotFound`, ...). For an ActiveRecord-like `rescue`, this gem adds one alias: `Ndb::RecordNotUnique` is `Ndb::UniqueViolation` (the same class). `Ndb::StaleObjectError`, `Ndb::RecordInvalid` and `Ndb::RecordNotSaved` exist only here, and they inherit from `Ndb::Error`. Every error has `code` (the daemon code) and `status` (the HTTP status).

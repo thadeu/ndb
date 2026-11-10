@@ -30,6 +30,8 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			return
 		}
 
+		noteToken(w, t.Name)
+
 		segs, _ := segments(r.URL.EscapedPath())
 		coll, need := required(r.Method, segs)
 
@@ -74,7 +76,8 @@ func isUnix(r *http.Request) bool {
 // every token, so the time does not depend on the sent token or on which one
 // matches.
 func (s *Server) tokenOf(r *http.Request) (Token, bool) {
-	got, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	got, ok := bearerToken(r.Header.Get("Authorization"))
+
 	if !ok {
 		return Token{}, false
 	}
@@ -95,4 +98,16 @@ func (s *Server) tokenOf(r *http.Request) (Token, bool) {
 	}
 
 	return found, match == 1
+}
+
+// bearerToken reads the token of an "Authorization: Bearer <token>" header.
+// The scheme is case-insensitive (RFC 9110 11.1).
+func bearerToken(header string) (string, bool) {
+	scheme, token, ok := strings.Cut(header, " ")
+
+	if !ok || !strings.EqualFold(scheme, "Bearer") {
+		return "", false
+	}
+
+	return token, true
 }

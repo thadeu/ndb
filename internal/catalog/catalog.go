@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	bolt "go.etcd.io/bbolt"
 )
@@ -191,7 +192,37 @@ func (c *Catalog) Ensure(decl Def, src Source) (Def, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	next, err := c.merged(decl, src)
+
+	if err != nil {
+		return Def{}, err
+	}
+
+	return next, c.save(next)
+}
+
+// Merged is the definition that Ensure of decl would save, with the same
+// checks. It saves nothing.
+func (c *Catalog) Merged(decl Def, src Source) (Def, error) {
+	if err := validateDecl(decl); err != nil {
+		return Def{}, err
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.merged(decl, src)
+}
+
+// merged runs the merge of Ensure. The caller holds c.mu.
+func (c *Catalog) merged(decl Def, src Source) (Def, error) {
 	cur, exists := c.defs[decl.Name]
+
+	if !exists {
+		if err := c.checkNewName(decl); err != nil {
+			return Def{}, err
+		}
+	}
 
 	next := withDefaults(decl, src)
 
@@ -199,6 +230,7 @@ func (c *Catalog) Ensure(decl Def, src Source) (Def, error) {
 		var err error
 
 		next, err = merge(cur, decl, src)
+
 		if err != nil {
 			return Def{}, err
 		}
@@ -208,7 +240,90 @@ func (c *Catalog) Ensure(decl Def, src Source) (Def, error) {
 		return Def{}, err
 	}
 
-	return next, c.save(next)
+	return next, nil
+}
+
+// checkNewName keeps the partition names for the partitions: a new
+// collection named {logical}-{period} must be that partition, and a new
+// logical collection must not find a collection that holds one of its
+// partition names. The caller holds c.mu.
+func (c *Catalog) checkNewName(decl Def) error {
+	if owner, ok := c.partitionOwner(decl.Name); ok && decl.PartitionOf != owner.Name {
+		return fmt.Errorf("%w: %s is a partition name of %s: write to %s, which makes its partitions", ErrConflict, decl.Name, owner.Name, owner.Name)
+	}
+
+	if decl.PartitionBy == "" {
+		return nil
+	}
+
+	for name := range c.defs {
+		suffix, ok := strings.CutPrefix(name, decl.Name+"-")
+
+		if ok && IsPeriod(decl.PartitionBy, suffix) {
+			return fmt.Errorf("%w: %s exists and would be a partition name of %s: rename or drop it first", ErrConflict, name, decl.Name)
+		}
+	}
+
+	return nil
+}
+
+// PartitionOwner returns the logical collection that name is a partition
+// name of ({logical}-{period}), whether or not that partition exists.
+func (c *Catalog) PartitionOwner(name string) (Def, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.partitionOwner(name)
+}
+
+// partitionOwner is PartitionOwner. The caller holds c.mu.
+func (c *Catalog) partitionOwner(name string) (Def, bool) {
+	for _, d := range c.defs {
+		if d.PartitionBy == "" {
+			continue
+		}
+
+		if suffix, ok := strings.CutPrefix(name, d.Name+"-"); ok && IsPeriod(d.PartitionBy, suffix) {
+			return d, true
+		}
+	}
+
+	return Def{}, false
+}
+
+// PartitionDef is the definition of the partition name of the logical
+// collection logical: the same keys, with partition_of set.
+func PartitionDef(logical Def, name string) Def {
+	part := logical
+	part.Name, part.PartitionBy, part.PartitionOf = name, "", logical.Name
+	part.OpsFromYAML = false
+
+	return part
+}
+
+// IsPeriod tells if suffix is a period of partition_by by, as the
+// partition names use it: 2026-11-07 (day), 2026-w45 (week), 2026-11
+// (month) or 2026 (year).
+func IsPeriod(by, suffix string) bool {
+	layout := map[string]string{"day": "2006-01-02", "month": "2006-01", "year": "2006"}[by]
+
+	if by == "week" {
+		var y, w int
+
+		if _, err := fmt.Sscanf(suffix, "%04d-w%02d", &y, &w); err != nil {
+			return false
+		}
+
+		return w >= 1 && w <= 53 && fmt.Sprintf("%04d-w%02d", y, w) == suffix
+	}
+
+	if layout == "" {
+		return false
+	}
+
+	at, err := time.Parse(layout, suffix)
+
+	return err == nil && at.Format(layout) == suffix
 }
 
 // EnsureImplicit returns the collection, creating it with defaults when
@@ -216,6 +331,12 @@ func (c *Catalog) Ensure(decl Def, src Source) (Def, error) {
 func (c *Catalog) EnsureImplicit(name string) (Def, error) {
 	if d, ok := c.Get(name); ok {
 		return d, nil
+	}
+
+	// A partition name of a logical collection becomes that partition, so
+	// its documents are in the reads of the logical name.
+	if owner, ok := c.PartitionOwner(name); ok {
+		return c.Ensure(PartitionDef(owner, name), FromCode)
 	}
 
 	if !c.opts.AllowImplicit {
@@ -382,8 +503,17 @@ func merge(cur, decl Def, src Source) (Def, error) {
 		{"expires_field", cur.ExpiresField, decl.ExpiresField, func(v string) { next.ExpiresField = v }},
 		{"write", string(cur.Write), string(decl.Write), func(v string) { next.Write = WriteMode(v) }},
 		{"path", cur.Path, decl.Path, func(v string) { next.Path = v }},
-		{"partition_by", cur.PartitionBy, decl.PartitionBy, func(v string) { next.PartitionBy = v }},
 		{"partition_of", cur.PartitionOf, decl.PartitionOf, func(v string) { next.PartitionOf = v }},
+	}
+
+	// partition_by is set at creation only: a collection that exists has
+	// its documents under its own name, not in partitions.
+	if decl.PartitionBy != "" && decl.PartitionBy != cur.PartitionBy {
+		if cur.PartitionBy == "" {
+			return Def{}, fmt.Errorf("%w: %s exists without partition_by: partition_by is set when the collection is made", ErrConflict, cur.Name)
+		}
+
+		return Def{}, fmt.Errorf("%w: %s.partition_by is %q, declared %q", ErrConflict, cur.Name, cur.PartitionBy, decl.PartitionBy)
 	}
 
 	for _, f := range fixed {

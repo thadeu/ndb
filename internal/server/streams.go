@@ -3,12 +3,12 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
 
 	"github.com/thadeu/ndb/internal/collection"
 	"github.com/thadeu/ndb/internal/engine"
+	"github.com/thadeu/ndb/internal/feed"
 	"github.com/thadeu/ndb/internal/streams"
 )
 
@@ -21,6 +21,7 @@ func streamRoutes(s *Server) map[string][]route {
 		"_streams":                        {{"GET", s.ready(s.streamInfo)}},
 		"_streams/append":                 {{"POST", s.ready(s.streamAppend)}},
 		"_streams/trim":                   {{"POST", s.ready(s.streamTrim)}},
+		"_streams/read":                   {{"POST", s.ready(s.streamRead)}},
 		"_streams/groups":                 {{"GET", s.ready(s.streamGroups)}},
 		"_streams/groups/{}":              {{"PUT", s.ready(s.groupCreate)}, {"DELETE", s.ready(s.groupDestroy)}},
 		"_streams/groups/{}/setid":        {{"POST", s.ready(s.groupSetID)}},
@@ -95,6 +96,10 @@ func (s *Server) streamAppend(w http.ResponseWriter, r *http.Request, db *engine
 
 	s.metrics.writes.Add(int64(len(ids)))
 
+	if s.debugOn(r) {
+		s.logWrite(w, r, "stream_append", slog.Int("count", len(ids)), slog.Any("ids", firstIDs(ids)), s.body("body", body))
+	}
+
 	if req.Doc != nil && len(req.Docs) == 0 {
 		writeJSON(w, http.StatusCreated, map[string]string{"_id": ids[0].String()})
 
@@ -121,6 +126,10 @@ func (s *Server) streamTrim(w http.ResponseWriter, r *http.Request, _ *engine.DB
 
 	n, err := s.streams.Trim(r.Context(), r.PathValue("coll"), req)
 
+	if err == nil && s.debugOn(r) {
+		s.logWrite(w, r, "stream_trim", slog.Int("deleted", n), slog.Any("options", req))
+	}
+
 	answer(w, http.StatusOK, map[string]int{"deleted": n}, err)
 }
 
@@ -145,11 +154,19 @@ func (s *Server) groupCreate(w http.ResponseWriter, r *http.Request, _ *engine.D
 
 	head, err := s.streams.CreateGroup(r.Context(), r.PathValue("coll"), r.PathValue("group"), req.Start, req.EntriesRead, req.NoCreate)
 
+	if err == nil {
+		s.logInfo(w, r, "stream group created", slog.String("group", r.PathValue("group")), slog.String("start", req.Start))
+	}
+
 	answer(w, http.StatusCreated, head, err)
 }
 
 func (s *Server) groupDestroy(w http.ResponseWriter, r *http.Request, _ *engine.DB) {
 	err := s.streams.DestroyGroup(r.Context(), r.PathValue("coll"), r.PathValue("group"))
+
+	if err == nil {
+		s.logInfo(w, r, "stream group destroyed", slog.String("group", r.PathValue("group")))
+	}
 
 	answer(w, http.StatusOK, map[string]bool{"deleted": true}, err)
 }
@@ -168,6 +185,10 @@ func (s *Server) groupSetID(w http.ResponseWriter, r *http.Request, _ *engine.DB
 
 	head, err := s.streams.SetID(r.Context(), r.PathValue("coll"), r.PathValue("group"), req.ID, req.EntriesRead)
 
+	if err == nil && s.debugOn(r) {
+		s.logWrite(w, r, "stream_group_setid", slog.String("group", r.PathValue("group")), slog.String("id", req.ID))
+	}
+
 	answer(w, http.StatusOK, head, err)
 }
 
@@ -180,11 +201,19 @@ func (s *Server) groupConsumers(w http.ResponseWriter, r *http.Request, _ *engin
 func (s *Server) consumerCreate(w http.ResponseWriter, r *http.Request, _ *engine.DB) {
 	created, err := s.streams.CreateConsumer(r.Context(), r.PathValue("coll"), r.PathValue("group"), r.PathValue("consumer"))
 
+	if err == nil && s.debugOn(r) {
+		s.logWrite(w, r, "stream_consumer_create", slog.String("group", r.PathValue("group")), slog.String("consumer", r.PathValue("consumer")), slog.Bool("created", created))
+	}
+
 	answer(w, http.StatusOK, map[string]bool{"created": created}, err)
 }
 
 func (s *Server) consumerDelete(w http.ResponseWriter, r *http.Request, _ *engine.DB) {
 	n, err := s.streams.DeleteConsumer(r.Context(), r.PathValue("coll"), r.PathValue("group"), r.PathValue("consumer"))
+
+	if err == nil && s.debugOn(r) {
+		s.logWrite(w, r, "stream_consumer_delete", slog.String("group", r.PathValue("group")), slog.String("consumer", r.PathValue("consumer")), slog.Int("pending", n))
+	}
 
 	answer(w, http.StatusOK, map[string]int{"pending": n}, err)
 }
@@ -197,6 +226,8 @@ func (s *Server) groupRead(w http.ResponseWriter, r *http.Request, _ *engine.DB)
 
 		return
 	}
+
+	longPoll(w)
 
 	ctx, stop := context.WithCancel(r.Context())
 
@@ -220,6 +251,40 @@ func (s *Server) groupRead(w http.ResponseWriter, r *http.Request, _ *engine.DB)
 	writePage(w, r, collection.Page{Rows: unpadRows(rows), Plan: "stream"})
 }
 
+// streamRead is a read without a group (XREAD): it changes nothing.
+func (s *Server) streamRead(w http.ResponseWriter, r *http.Request, _ *engine.DB) {
+	var req streams.TailOptions
+
+	if err := streamBody(w, r, &req); err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	longPoll(w)
+
+	ctx, stop := context.WithCancel(r.Context())
+
+	defer stop()
+
+	go func() {
+		select {
+		case <-s.stopCtx.Done():
+			stop()
+		case <-ctx.Done():
+		}
+	}()
+
+	rows, err := s.streams.Tail(ctx, r.PathValue("coll"), req)
+	if err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	writePage(w, r, collection.Page{Rows: unpadRows(rows), Plan: "stream"})
+}
+
 func (s *Server) groupAck(w http.ResponseWriter, r *http.Request, _ *engine.DB) {
 	var req struct {
 		IDs []string `json:"ids"`
@@ -232,6 +297,10 @@ func (s *Server) groupAck(w http.ResponseWriter, r *http.Request, _ *engine.DB) 
 	}
 
 	n, err := s.streams.Ack(r.Context(), r.PathValue("coll"), r.PathValue("group"), req.IDs)
+
+	if err == nil && s.debugOn(r) {
+		s.logWrite(w, r, "stream_ack", slog.String("group", r.PathValue("group")), slog.Int("acked", n), slog.Int("count", len(req.IDs)), slog.Any("ids", req.IDs[:min(len(req.IDs), writeIDsMax)]))
+	}
 
 	answer(w, http.StatusOK, map[string]int{"acked": n}, err)
 }
@@ -261,6 +330,10 @@ func (s *Server) groupClaim(w http.ResponseWriter, r *http.Request, _ *engine.DB
 
 	res, err := s.streams.Claim(r.Context(), r.PathValue("coll"), r.PathValue("group"), req)
 
+	if err == nil && s.debugOn(r) {
+		s.logWrite(w, r, "stream_claim", slog.String("group", r.PathValue("group")), slog.Int("claimed", len(res.Entries)), slog.Any("options", req))
+	}
+
 	res.Entries = unpadRows(res.Entries)
 
 	answer(w, http.StatusOK, res, err)
@@ -275,6 +348,24 @@ func unpadRows(rows []json.RawMessage) []json.RawMessage {
 }
 
 // ---- the routes of every collection, on a stream
+
+// notOnStream refuses a write route of every collection on a stream: an
+// entry is added only by an append (it makes the ID and moves the groups),
+// it never changes, and it is deleted one by one (DELETE /{s}/_doc/{id})
+// or by a trim.
+func notOnStream(fn handler) handler {
+	return func(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+		name := r.PathValue("coll")
+
+		if isStream(db, name) {
+			writeError(w, &apiError{status: http.StatusBadRequest, code: "stream_append_only", msg: name + " is a stream: add entries with _streams/append, delete them with DELETE _doc/{id} or _streams/trim"})
+
+			return
+		}
+
+		fn(w, r, db)
+	}
+}
 
 // isStream tells whether name is a stream.
 func isStream(db *engine.DB, name string) bool {
@@ -300,6 +391,56 @@ func streamFind(run func(context.Context, []byte) (collection.Page, error)) func
 	}
 }
 
+// streamAggregate wraps an aggregate of a stream: the _id values of the
+// $match stages that see the entries are padded, and the _id of the output
+// rows are given back as <ms>-<seq>.
+func streamAggregate(run func(context.Context, []byte) (collection.Page, error)) func(context.Context, []byte) (collection.Page, error) {
+	return func(ctx context.Context, body []byte) (collection.Page, error) {
+		padded, err := streams.PadPipeline(body)
+		if err != nil {
+			return collection.Page{}, err
+		}
+
+		page, err := run(ctx, padded)
+
+		page.Rows = unpadRows(page.Rows)
+
+		return page, err
+	}
+}
+
+// noStreamIn refuses a read over a pattern that matches a stream: the _id
+// of a stream entry is padded on disk, and one query cannot be right for
+// both a stream and a collection.
+func noStreamIn(db *engine.DB, pattern string) error {
+	names, err := db.Match(pattern)
+
+	if err != nil {
+		return err
+	}
+
+	for _, name := range names {
+		if isStream(db, name) {
+			return badRequest("the pattern %s matches the stream %s: read a stream by its name", pattern, name)
+		}
+	}
+
+	return nil
+}
+
+// unpadEvent gives a watch event of a stream with its _id as <ms>-<seq>.
+func unpadEvent(ev feed.Event) feed.Event {
+	if id, ok := streams.FromKey(ev.ID); ok {
+		ev.ID = id.String()
+	}
+
+	if ev.Doc != nil {
+		ev.Doc = streams.Unpad(ev.Doc)
+	}
+
+	return ev
+}
+
 // streamDocID is the _id on disk of the id of a /_doc route on a stream.
 func streamDocID(id string) string {
 	parsed, err := streams.Parse(id, 0)
@@ -308,15 +449,4 @@ func streamDocID(id string) string {
 	}
 
 	return parsed.Key()
-}
-
-// afterTruncate deletes the group store of a stream that was truncated: a
-// truncated stream has no groups.
-func (s *Server) afterTruncate(db *engine.DB, name string) {
-	col, err := db.Get(name)
-	if err != nil {
-		return
-	}
-
-	_ = os.Remove(filepath.Join(col.Dir(), streams.StoreFile))
 }

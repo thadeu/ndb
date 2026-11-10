@@ -6,7 +6,7 @@ The routes have pages by group:
 
 | Page | Routes |
 |---|---|
-| [System](http/system.md) | `/_health`, `/_metrics`, `/_collections`, `/_stats`, `/_size`, `/_backup`, `/_restore`, `/_pitr`, `/_blobs` |
+| [System](http/system.md) | `/_health`, `/_metrics`, `/_collections`, `/_stats`, `/_size`, `/_backup`, `/_restore`, `/_pitr`, `/_blobs`, `/_log` |
 | [Collections](http/collections.md) | `PUT`, `GET`, `DELETE /{coll}`, `_truncate`, `_rename`, `_restore`, `_pitr`, `_indexes`, `_stats`, `_compact`, `_quarantine` |
 | [Documents](http/documents.md) | `_doc`, `_bulk`, `_update/{id}`, `_expire`, `_persist`, `_ttl` |
 | [Queries](http/queries.md) | `_search`, `_count`, `_aggregate`, `_update_by_query`, `_delete_by_query`, patterns |
@@ -40,6 +40,8 @@ The query language (operators, date math, `$elemMatch`) is on [Query](query.md),
 | GET | `/_pitr` | [System](http/system.md#get-pitr) |
 | POST | `/_blobs` | [System](http/system.md#post-blobs) |
 | GET | `/_blobs/{ref}` | [System](http/system.md#get-blobs-ref) |
+| GET | `/_log` | [System](http/system.md#get-log) |
+| PUT | `/_log` | [System](http/system.md#put-log) |
 | PUT | `/{coll}` | [Collections](http/collections.md#put-coll) |
 | GET | `/{coll}` | [Collections](http/collections.md#get-coll) |
 | DELETE | `/{coll}?confirm={coll}` | [Collections](http/collections.md#delete-coll) |
@@ -70,6 +72,7 @@ The query language (operators, date math, `$elemMatch`) is on [Query](query.md),
 | GET | `/{s}/_streams` | [Streams](http/streams.md#get-s-streams) |
 | POST | `/{s}/_streams/append` | [Streams](http/streams.md#post-s-streams-append) |
 | POST | `/{s}/_streams/trim` | [Streams](http/streams.md#post-s-streams-trim) |
+| POST | `/{s}/_streams/read` | [Streams](http/streams.md#post-s-streams-read) |
 | GET | `/{s}/_streams/groups` | [Streams](http/streams.md#get-s-streams-groups) |
 | PUT | `/{s}/_streams/groups/{g}` | [Streams](http/streams.md#put-s-streams-groups-g) |
 | DELETE | `/{s}/_streams/groups/{g}` | [Streams](http/streams.md#delete-s-streams-groups-g) |
@@ -93,7 +96,7 @@ Any other path is `404 unknown_route`. A known path with another method is `405 
 
 ## Authentication
 
-- With `-token-file` or `tokens:`, every TCP request needs `Authorization: Bearer <token>`, or the answer is `401 unauthorized`.
+- With `-token-file` or `tokens:`, every TCP request needs `Authorization: Bearer <token>`, or the answer is `401 unauthorized`. The scheme is case-insensitive (`bearer` works too, RFC 9110 11.1); the token is exact.
 - A scoped token without the right for the route and collection is `403 forbidden`. See [Scoped tokens](configuration.md#scoped-tokens).
 - The unix socket needs no token: file permissions protect it.
 - ndb serves plain HTTP; TLS comes from a proxy in front (Caddy). See [TLS](configuration.md#tls).
@@ -104,8 +107,8 @@ See [Authentication](configuration.md#authentication).
 ## Requests
 
 - **Body:** one JSON object, UTF-8, `Content-Type: application/json`. A blob upload is raw bytes.
-- **Unknown keys are errors** (`invalid_request` or `invalid_query`), so a typo never passes silently.
-- **Size:** a body is at most the `max_line_size` of the collection (default 1 MiB), else `413 request_too_large`. A blob is at most `blob_max_size` (default 1 GiB).
+- **Unknown keys are errors** (`invalid_request` or `invalid_query`; `invalid_pipeline` on `_aggregate`), so a typo never passes silently.
+- **Size:** a body is at most the `max_line_size` of the collection (default 1 MiB), else `413 request_too_large`. A system route has its own limit: `POST /_backup` takes at most 64 KiB, `POST /_restore` at most 1 MiB (the engine default), `PUT /_log` at most 4 KiB. A blob is at most `blob_max_size` (default 1 GiB).
 - **Numbers:** JSON numbers. Queries and sorts compare them as 64-bit floats; an integer in a document keeps its exact text.
 - **Times:** on the collection `time` field (and `expires_field`), RFC 3339 strings compare as instants, and a string that starts with `now` is [date math](query.md#date-math) (`now-7d/d`).
 - **Ids:** `_id` is a string. A document without one gets a UUIDv7 (time ordered). See [Document id](configuration.md#document-id).
@@ -136,11 +139,13 @@ A row is the document. `_v` is added with `"versions": true`, and `_coll` on a r
 | `X-Ndb-Took-Ms` | always | time spent by the daemon, in ms |
 | `X-Ndb-Explain` | `"explain": true` | JSON of the plan counters, see [Search](query.md#search) |
 
+**Request id:** every answer has `X-Request-Id`: the one of the request when it is 1 to 128 of `A-Z a-z 0-9 - _ . :`, else a new one. The log lines of the request have it as `request_id` (see [Logs](operations.md#logs)).
+
 **Status codes:** `200` for every success, the codes of [Errors](http/errors.md) otherwise. A write that matches nothing is `200` with `"matched": 0`, not an error.
 
 ## Order and pagination
 
-- `sort` is an object, `field: 1` or `-1`, in key order. `_id` is always the last tie-break, so the order is total. With no `sort`, the order is insertion order.
+- `sort` is an object, `field: 1` or `-1`, in key order. `_id` is always the last tie-break, in the direction of the last sort key (`-1` gives `_id` descending), so the order is total. With no `sort`, the order is insertion order.
 - `skip` + `limit` give offset pages; the cost grows with `skip`.
 - `after` takes the `X-Ndb-Next` of the previous page. The cursor is opaque and bound to the `query` and `sort`: another query gets `cursor_mismatch`. Rows inserted during the walk do not move pages already read.
 - `"snapshot": true` keeps the rows of the first page for 60 s of idle time, so every page sees the same data; after that, `cursor_expired`.
@@ -176,7 +181,7 @@ Two routes keep the request open. They are not the same feature.
 - An error after the response started is a line `{"error":{"code","message"}}`.
 - See [Watch routes](http/watch.md).
 
-**A stream group read with `block_ms`** (`POST /{s}/_streams/groups/{g}/read`) is a normal JSON request that waits up to `block_ms` for new entries. With none, the answer is `[]`. It sends no heartbeat.
+**A stream read with `block_ms`** (`POST /{s}/_streams/groups/{g}/read`, or `POST /{s}/_streams/read` without a group) is a normal JSON request that waits up to `block_ms` for new entries. With none, the answer is `[]`. It sends no heartbeat.
 
 - Set the client read timeout above `block_ms`. The SDKs do this for you.
 - See [Stream routes](http/streams.md#post-s-streams-groups-g-read).

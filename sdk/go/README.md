@@ -370,8 +370,15 @@ err = g.Work(ctx, "worker-1", func(ctx context.Context, e ndb.Entry[Order]) erro
 })
 ```
 
-`Work` returns when `ctx` ends. Delivery is at least once: make the work safe
-to repeat. Run many workers with different consumer names to share the work.
+`Work` returns when `ctx` ends; a failed read goes to `OnError` and `Work`
+tries again. Delivery is at least once: make the work safe to repeat. Run many
+workers with different consumer names to share the work. An entry whose doc
+does not decode into `T` comes with `e.Err` set (and `e.Raw()`), not as an
+error of the read; `Work` counts it as a handler failure, so it goes to the
+dead letter after `MaxDeliveries`. A handler error while `ctx` ends (shutdown)
+leaves the entry pending: it is not a failure. An entry that had `MaxDeliveries`
+deliveries without an ack (it crashed the process) goes to the dead letter at
+the next start, without the handler.
 
 The calls one by one, when you need your own loop:
 
@@ -383,11 +390,32 @@ The calls one by one, when you need your own loop:
 | `XACK` | `g.Ack(ctx, ids...)` |
 | `XPENDING` | `g.Pending(ctx)` / `g.PendingList(ctx, ndb.PendingQuery{Idle: time.Minute})` |
 | `XCLAIM` / `XAUTOCLAIM` | `g.Claim(ctx, "w2", time.Minute, ids...)` / `g.AutoClaim(ctx, "w2", time.Minute, "0-0", 100)` |
+| `XCLAIM` / `XAUTOCLAIM ... JUSTID` | `g.ClaimIDs(ctx, "w2", time.Minute, ids...)` / `g.AutoClaimIDs(ctx, "w2", time.Minute, "0-0", 100)` |
+| `XREAD` | `orders.Tail(ctx, ndb.Tail{After: lastID, Count: 100, Block: 5 * time.Second})` |
+| `XGROUP CREATE` without `MKSTREAM` | `g.Create(ctx, ndb.StartNew, ndb.GroupNoCreate())` |
 | `XTRIM` | `orders.Trim(ctx, ndb.MaxLen(1000, false))` |
 | `XDEL` | `orders.Delete(ctx, id)` |
 | `XINFO GROUPS` / `CONSUMERS` | `orders.Groups(ctx)` / `g.Consumers(ctx)` |
 
-A blocked `Read` does not count against `WithMaxConns`.
+A blocked `Read` or `Tail` does not count against `WithMaxConns`.
+
+`Tail` reads without a group: it changes no group and no pending list. `After`
+is an ID (default `"0"`, the start) or `ndb.StartNew` (`$`): only the entries
+appended after the call starts. To read on, send the ID of the last entry as
+`After`. In `Range`, `RevRange` and `PendingList`, `"(id"` leaves that ID out,
+as in Redis; an ID with only the ms is `<ms>-0` as a start and `<ms>-<max>` as
+an end. A bad ID returns `ndb.ErrInvalidStreamID`.
+
+### The commands of go-redis
+
+An app that uses Redis Streams with go-redis can keep its calls: the module
+[`ndbredis`](ndbredis/README.md) has the stream methods of go-redis v9
+(`XAdd`, `XReadGroup`, `XAck`, ...) on ndb streams. It is a module of its own,
+so this SDK stays without dependencies.
+
+```go
+streams := ndbredis.New(db) // a redis.StreamCmdable
+```
 
 ## Blobs
 

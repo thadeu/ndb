@@ -8,7 +8,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log/slog"
 	"net"
 	"os"
 	"os/signal"
@@ -23,6 +22,7 @@ import (
 
 	"github.com/thadeu/ndb/internal/config"
 	"github.com/thadeu/ndb/internal/engine"
+	"github.com/thadeu/ndb/internal/logging"
 	"github.com/thadeu/ndb/internal/segment"
 	"github.com/thadeu/ndb/internal/server"
 )
@@ -71,6 +71,9 @@ func run(args []string) error {
 
 	tokenFile := fl.String("token-file", "", "file with the bearer token the TCP listener requires (unix socket stays open)")
 
+	logLevel := fl.String("log-level", "", "debug, info, warn, error or quiet (default NDB_LOG_LEVEL, then log_level, then info)")
+	logFormat := fl.String("log-format", "", "text or json (default NDB_LOG_FORMAT, then log_format, then text)")
+
 	if err := fl.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -114,6 +117,17 @@ func run(args []string) error {
 		}
 	}
 
+	logOpts, err := logOptions(cfg, os.Getenv, logFlags{
+		level:     *logLevel,
+		format:    *logFormat,
+		levelSet:  set["log-level"],
+		formatSet: set["log-format"],
+	})
+
+	if err != nil {
+		return err
+	}
+
 	// memory_limit is the Go heap soft limit (plan §11.4). Without it (and
 	// without GOMEMLIMIT) the default keeps the daemon near 512 MB: the GC
 	// works harder instead of letting the heap double.
@@ -140,7 +154,13 @@ func run(args []string) error {
 		}
 	}
 
-	return serve(ctx, cfg, token)
+	// The log lines go out from one goroutine, in blocks: a debug log does
+	// not slow the requests. Close writes what waits.
+	out := logging.NewAsync(os.Stderr, 0)
+
+	defer out.Close()
+
+	return serve(ctx, cfg, token, setupLog(out, logOpts))
 }
 
 // readTokenFile returns the trimmed token. An empty file is an error: it
@@ -177,8 +197,18 @@ func scopedTokens(tokens []config.Token) ([]server.Token, error) {
 
 // serve listens, recovers the data dir, and stops in order when ctx ends:
 // no new requests, in-flight requests finish, then the collections close.
-func serve(ctx context.Context, cfg config.Config, token string) error {
-	log := slog.Default()
+func serve(ctx context.Context, cfg config.Config, token string, lg *logging.Logger) error {
+	log := lg.Logger
+
+	log.Info("ndb starting",
+		"version", version,
+		"pid", os.Getpid(),
+		"data_dir", cfg.DataDir,
+		"log_level", logging.LevelName(lg.Level()),
+		"log_format", lg.Format(),
+		"log_body_max", lg.BodyMax(),
+		"slow_ms", lg.SlowMs(),
+	)
 
 	scoped, err := scopedTokens(cfg.Tokens)
 	if err != nil {
@@ -196,6 +226,7 @@ func serve(ctx context.Context, cfg config.Config, token string) error {
 	srv.SetBlobLimit(cfg.BlobMaxSize)
 	srv.SetToken(token)
 	srv.SetTokens(scoped)
+	srv.SetLogger(lg)
 
 	errc := make(chan error, len(listeners))
 
@@ -203,8 +234,15 @@ func serve(ctx context.Context, cfg config.Config, token string) error {
 		go func() { errc <- srv.Serve(l) }()
 	}
 
+	log.Info("listening", "unix", cfg.Listen.Unix, "tcp", cfg.Listen.TCP, "token_file", token != "", "scoped_tokens", len(scoped))
+
+	began := time.Now()
+
 	db, err := engine.Open(cfg, log)
+
 	if err != nil {
+		log.Error("recovery failed", "data_dir", cfg.DataDir, "err", err)
+
 		_ = srv.Shutdown(context.Background())
 
 		return err
@@ -212,13 +250,24 @@ func serve(ctx context.Context, cfg config.Config, token string) error {
 
 	srv.Attach(db)
 
-	log.Info("ndb ready", "data_dir", cfg.DataDir, "unix", cfg.Listen.Unix, "tcp", cfg.Listen.TCP)
+	log.Info("ndb ready",
+		"version", version,
+		"data_dir", cfg.DataDir,
+		"collections", len(db.Definitions()),
+		"recovery_ms", time.Since(began).Milliseconds(),
+		"unix", cfg.Listen.Unix,
+		"tcp", cfg.Listen.TCP,
+	)
 
 	var stopErr error
 
 	select {
 	case <-ctx.Done():
 	case stopErr = <-errc:
+	}
+
+	if stopErr != nil {
+		log.Error("listener failed", "err", stopErr)
 	}
 
 	log.Info("ndb stopping")
@@ -235,7 +284,17 @@ func serve(ctx context.Context, cfg config.Config, token string) error {
 		log.Warn("shutdown timed out, requests still running", "err", err)
 	}
 
-	return errors.Join(stopErr, db.Close())
+	err = errors.Join(stopErr, db.Close())
+
+	if err != nil {
+		log.Error("ndb stopped with an error", "err", err)
+
+		return err
+	}
+
+	log.Info("ndb stopped")
+
+	return nil
 }
 
 // listen opens the configured listeners. A stale socket file from a dead

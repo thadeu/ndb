@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"math"
+	"math/big"
 	"slices"
 	"sort"
 	"strconv"
@@ -167,6 +168,10 @@ func newFieldOp(op, path string, val any) (fieldOp, error) {
 	fo := fieldOp{op: op, path: path, val: val}
 
 	switch op {
+	case "$set", "$setOnInsert":
+		if err := checkDollarKeys(val, path); err != nil {
+			return fo, err
+		}
 	case "$inc":
 		if _, ok := val.(json.Number); !ok {
 			return fo, errf("invalid_field", "$inc.%s needs a number", path)
@@ -195,20 +200,22 @@ func newFieldOp(op, path string, val any) (fieldOp, error) {
 
 func checkPush(path string, val any) error {
 	m, ok := val.(map[string]any)
+
 	if !ok {
-		return nil
+		return checkDollarKeys(val, path)
 	}
 
 	each, has := m["$each"]
+
 	if !has {
-		return nil
+		return checkDollarKeys(val, path)
 	}
 
 	if _, ok := each.([]any); !ok || len(m) != 1 {
 		return errf("invalid_field", "$push.%s: $each needs an array and nothing else", path)
 	}
 
-	return nil
+	return checkDollarKeys(each, path)
 }
 
 // pullTest compiles the element test of $pull. A scalar or an array is an
@@ -341,8 +348,9 @@ func incField(m map[string]any, o fieldOp, cur any, exists bool) (bool, error) {
 	}
 
 	sum, err := addNumbers(base, delta)
+
 	if err != nil {
-		return false, errf("invalid_field", "$inc.%s: %v", o.path, err)
+		return false, errf("invalid_field", "$inc.%s: %s", o.path, strings.TrimPrefix(err.Error(), "invalid_field: "))
 	}
 
 	if exists && numEqual(base, sum) {
@@ -353,14 +361,61 @@ func incField(m map[string]any, o fieldOp, cur any, exists bool) (bool, error) {
 }
 
 func numEqual(a, b json.Number) bool {
-	x, err1 := a.Float64()
-	y, err2 := b.Float64()
+	d, ok := numCompare(a, b)
 
-	return err1 == nil && err2 == nil && x == y
+	return ok && d == 0
 }
 
-// addNumbers keeps integers exact and falls back to float64 on overflow or
-// a fraction.
+// numCompare compares two JSON numbers exactly. A float64 compare loses
+// the digits of an integer above 2^53. ok is false when one is not a number.
+func numCompare(a, b json.Number) (int, bool) {
+	i, errI := a.Int64()
+	j, errJ := b.Int64()
+
+	if errI == nil && errJ == nil {
+		return cmpInt(i, j), true
+	}
+
+	f, errF := a.Float64()
+	g, errG := b.Float64()
+
+	if errF != nil || errG != nil {
+		return 0, false
+	}
+
+	// Rounding keeps the order, so two different floats give the answer.
+	if f != g {
+		if f < g {
+			return -1, true
+		}
+
+		return 1, true
+	}
+
+	x, okA := new(big.Rat).SetString(a.String())
+	y, okB := new(big.Rat).SetString(b.String())
+
+	if !okA || !okB {
+		return 0, false
+	}
+
+	return x.Cmp(y), true
+}
+
+func cmpInt(a, b int64) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	}
+
+	return 0
+}
+
+// addNumbers keeps integers exact and uses float64 for a fraction. A sum of
+// two integers out of the int64 range is an error, not a float that loses
+// digits.
 func addNumbers(a, b json.Number) (json.Number, error) {
 	x, err1 := a.Int64()
 	y, err2 := b.Int64()
@@ -368,12 +423,15 @@ func addNumbers(a, b json.Number) (json.Number, error) {
 	if err1 == nil && err2 == nil {
 		overflow := (y > 0 && x > math.MaxInt64-y) || (y < 0 && x < math.MinInt64-y)
 
-		if !overflow {
-			return json.Number(strconv.FormatInt(x+y, 10)), nil
+		if overflow {
+			return "", errf("invalid_field", "integer overflow: the result is out of the int64 range")
 		}
+
+		return json.Number(strconv.FormatInt(x+y, 10)), nil
 	}
 
 	f, err := a.Float64()
+
 	if err != nil {
 		return "", err
 	}
@@ -463,6 +521,14 @@ func boundField(m map[string]any, o fieldOp, cur any, exists bool) (bool, error)
 	}
 
 	d := query.Compare(b, a)
+
+	if x, ok := o.val.(json.Number); ok {
+		if y, ok := cur.(json.Number); ok {
+			if exact, ok := numCompare(x, y); ok {
+				d = exact
+			}
+		}
+	}
 
 	if (o.op == "$min" && d >= 0) || (o.op == "$max" && d <= 0) {
 		return false, nil

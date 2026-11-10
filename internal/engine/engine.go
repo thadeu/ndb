@@ -27,6 +27,7 @@ import (
 	"github.com/thadeu/ndb/internal/lock"
 	"github.com/thadeu/ndb/internal/metrics"
 	"github.com/thadeu/ndb/internal/tailer"
+	"github.com/thadeu/ndb/internal/writer"
 )
 
 // DefaultMaxLine is the line limit of a collection without max_line_size.
@@ -63,9 +64,11 @@ type DB struct {
 	// collection of the daemon shares.
 	shared *collection.Shared
 
-	// mu guards cols. Opening a collection (recovery) runs under it.
-	mu   sync.RWMutex
-	cols map[string]*Collection
+	// mu guards cols and closed. Opening a collection (recovery) runs
+	// under it. After Close, closed is true and no collection opens again.
+	mu     sync.RWMutex
+	cols   map[string]*Collection
+	closed bool
 
 	// swap is held for writing by Truncate and Drop, and for reading by the
 	// work that reads the files of many collections (backup, blob GC), so
@@ -90,6 +93,12 @@ type DB struct {
 // Open takes the lock on cfg.DataDir, opens the catalog, declares the
 // collections of ndb.yml and opens every collection in the catalog.
 func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
+	began := time.Now()
+
+	if log == nil {
+		log = slog.Default()
+	}
+
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -173,6 +182,8 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		}
 	}
 
+	db.log.Info("recovery done", "data_dir", cfg.DataDir, "collections", len(db.cols), "ms", time.Since(began).Milliseconds())
+
 	db.gcWait.Add(3)
 
 	go db.sweepPartitionsLoop()
@@ -197,22 +208,48 @@ func (db *DB) Stop() {
 	}
 }
 
+// ErrClosed is every call on a DB after Close. It is writer.ErrClosed for
+// errors.Is, so the API answers 503 closed.
+var ErrClosed error = closedError{}
+
+type closedError struct{}
+
+func (closedError) Error() string {
+	return "closed: the database is closed"
+}
+
+func (closedError) Is(target error) bool {
+	return target == writer.ErrClosed
+}
+
 // Close stops the tailers, closes the collections and the catalog, and
 // releases the lock. Writes that were acked are durable before it returns.
+// After Close, every call gives ErrClosed. A second Close does nothing.
 func (db *DB) Close() error {
 	db.cancel()
 	db.gcWait.Wait()
 	db.trashWait.Wait()
 
 	db.mu.Lock()
-	defer db.mu.Unlock()
 
+	if db.closed {
+		db.mu.Unlock()
+
+		return nil
+	}
+
+	db.closed = true
+	cols := db.cols
+	db.cols = map[string]*Collection{}
+
+	db.mu.Unlock()
+
+	// Take live of each collection without db.mu (the order of rename is
+	// live, then db.mu), so the calls in flight end first.
 	var errs []error
 
-	for name, col := range db.cols {
-		errs = append(errs, col.close())
-
-		delete(db.cols, name)
+	for _, col := range cols {
+		errs = append(errs, col.shut())
 	}
 
 	errs = append(errs, db.cursors.Close(), db.cat.Close(), db.lock.Release())
@@ -220,10 +257,23 @@ func (db *DB) Close() error {
 	return errors.Join(errs...)
 }
 
+// checkOpen is ErrClosed after Close. The caller holds db.mu.
+func (db *DB) checkOpen() error {
+	if db.closed {
+		return ErrClosed
+	}
+
+	return nil
+}
+
 // Get returns an open collection. An unknown name gives catalog.ErrUnknown.
 func (db *DB) Get(name string) (*Collection, error) {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
+
+	if err := db.checkOpen(); err != nil {
+		return nil, err
+	}
 
 	col, ok := db.cols[name]
 
@@ -240,9 +290,15 @@ func (db *DB) GetOrCreate(name string) (*Collection, error) {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
+	if err := db.checkOpen(); err != nil {
+		return nil, err
+	}
+
 	if col, ok := db.cols[name]; ok {
 		return col, nil
 	}
+
+	_, known := db.cat.Get(name)
 
 	def, err := db.cat.EnsureImplicit(name)
 	if err != nil {
@@ -253,14 +309,40 @@ func (db *DB) GetOrCreate(name string) (*Collection, error) {
 		return nil, err
 	}
 
+	if !known {
+		db.log.Info("collection created", "collection", name, "implicit", true)
+	}
+
 	return db.cols[name], nil
 }
 
 // Ensure is ensure_collection: it creates the collection or merges decl into
 // it by the rules of plan §5.2, and returns the final definition.
+// partition_of is set by ndb only, so a declaration that sends it is
+// invalid_request. A new unique field on a collection with data is
+// checked first (unique.go).
 func (db *DB) Ensure(decl catalog.Def) (catalog.Def, error) {
+	if err := checkDecl(decl); err != nil {
+		return catalog.Def{}, err
+	}
+
+	return db.ensure(decl)
+}
+
+// ensure is Ensure, also for the partitions that ndb makes.
+func (db *DB) ensure(decl catalog.Def) (catalog.Def, error) {
+	if cur, ok := db.cat.Get(decl.Name); ok && cur.Write == catalog.Engine && len(newUnique(cur, decl)) > 0 {
+		if col, err := db.Get(decl.Name); err == nil {
+			return db.ensureUnique(col, decl)
+		}
+	}
+
 	db.mu.Lock()
 	defer db.mu.Unlock()
+
+	if err := db.checkOpen(); err != nil {
+		return catalog.Def{}, err
+	}
 
 	def, err := db.cat.Ensure(decl, catalog.FromCode)
 	if err != nil {
@@ -275,6 +357,10 @@ func (db *DB) Ensure(decl catalog.Def) (catalog.Def, error) {
 func (db *DB) DropIndex(name, field string) (catalog.Def, error) {
 	db.mu.Lock()
 	defer db.mu.Unlock()
+
+	if err := db.checkOpen(); err != nil {
+		return catalog.Def{}, err
+	}
 
 	def, err := db.cat.DropIndex(name, field)
 	if err != nil {
@@ -319,6 +405,10 @@ func (db *DB) MaxLine(name string) int64 {
 // attach opens def if it is not open yet, or adds its indexes to the open
 // collection. The caller holds db.mu.
 func (db *DB) attach(def catalog.Def) error {
+	if err := db.checkOpen(); err != nil {
+		return err
+	}
+
 	if def.PartitionBy != "" {
 		return nil // a logical collection: its partitions hold the data
 	}

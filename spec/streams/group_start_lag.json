@@ -1,0 +1,220 @@
+{
+  "name": "a group made at an ID with no entries_read has an estimated lag: null after the last ID, or between the first and the last",
+  "stream": "orders",
+  "steps": [
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "5-1"
+      },
+      "expect": {
+        "body": {
+          "_id": "5-1"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "5-2"
+      },
+      "expect": {
+        "body": {
+          "_id": "5-2"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "5-3"
+      },
+      "expect": {
+        "body": {
+          "_id": "5-3"
+        }
+      }
+    },
+    {
+      "op": "group_create",
+      "group": "g",
+      "body": {
+        "start": "5-1"
+      }
+    },
+    {
+      "op": "group_create",
+      "group": "h",
+      "body": {
+        "start": "4-0"
+      }
+    },
+    {
+      "op": "group_create",
+      "group": "k",
+      "body": {
+        "start": "9-0"
+      }
+    },
+    {
+      "op": "group_create",
+      "group": "z",
+      "body": {
+        "start": "$"
+      }
+    },
+    {
+      "op": "groups",
+      "expect": {
+        "body": [
+          {
+            "name": "g",
+            "consumers": 0,
+            "pending": 0,
+            "last_delivered_id": "5-1",
+            "entries_read": null,
+            "lag": 2
+          },
+          {
+            "name": "h",
+            "consumers": 0,
+            "pending": 0,
+            "last_delivered_id": "4-0",
+            "entries_read": null,
+            "lag": 3
+          },
+          {
+            "name": "k",
+            "consumers": 0,
+            "pending": 0,
+            "last_delivered_id": "9-0",
+            "entries_read": null,
+            "lag": null
+          },
+          {
+            "name": "z",
+            "consumers": 0,
+            "pending": 0,
+            "last_delivered_id": "5-3",
+            "entries_read": null,
+            "lag": 0
+          }
+        ]
+      }
+    },
+    {
+      "op": "read",
+      "group": "g",
+      "body": {
+        "consumer": "c",
+        "count": 1
+      },
+      "expect": {
+        "rows": [
+          {
+            "_id": "5-2",
+            "n": 1
+          }
+        ],
+        "ignore": [
+          "_ts"
+        ]
+      }
+    },
+    {
+      "op": "groups",
+      "expect": {
+        "body": [
+          {
+            "name": "g",
+            "consumers": 1,
+            "pending": 1,
+            "last_delivered_id": "5-2",
+            "entries_read": null,
+            "lag": null
+          },
+          {
+            "name": "h",
+            "consumers": 0,
+            "pending": 0,
+            "last_delivered_id": "4-0",
+            "entries_read": null,
+            "lag": 3
+          },
+          {
+            "name": "k",
+            "consumers": 0,
+            "pending": 0,
+            "last_delivered_id": "9-0",
+            "entries_read": null,
+            "lag": null
+          },
+          {
+            "name": "z",
+            "consumers": 0,
+            "pending": 0,
+            "last_delivered_id": "5-3",
+            "entries_read": null,
+            "lag": 0
+          }
+        ]
+      }
+    },
+    {
+      "op": "read",
+      "group": "g",
+      "body": {
+        "consumer": "c",
+        "count": 1
+      }
+    },
+    {
+      "op": "groups",
+      "expect": {
+        "body": [
+          {
+            "name": "g",
+            "consumers": 1,
+            "pending": 2,
+            "last_delivered_id": "5-3",
+            "entries_read": 3,
+            "lag": 0
+          },
+          {
+            "name": "h",
+            "consumers": 0,
+            "pending": 0,
+            "last_delivered_id": "4-0",
+            "entries_read": null,
+            "lag": 3
+          },
+          {
+            "name": "k",
+            "consumers": 0,
+            "pending": 0,
+            "last_delivered_id": "9-0",
+            "entries_read": null,
+            "lag": null
+          },
+          {
+            "name": "z",
+            "consumers": 0,
+            "pending": 0,
+            "last_delivered_id": "5-3",
+            "entries_read": null,
+            "lag": 0
+          }
+        ]
+      }
+    }
+  ]
+}

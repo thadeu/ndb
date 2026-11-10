@@ -42,7 +42,8 @@ func (id ID) IsZero() bool {
 	return id == ID{}
 }
 
-// Next is the ID right after id.
+// Next is the ID right after id. Max has no next ID: the caller checks
+// it first (Next of Max wraps to 0-0).
 func (id ID) Next() ID {
 	if id.Seq == math.MaxUint64 {
 		return ID{id.Ms + 1, 0}
@@ -127,23 +128,99 @@ func PadQuery(body []byte) ([]byte, error) {
 		return body, nil
 	}
 
-	var q map[string]any
+	raw, err := PadFilter(top["query"])
 
-	dec := json.NewDecoder(bytes.NewReader(top["query"]))
-	dec.UseNumber()
-
-	if err := dec.Decode(&q); err != nil || q == nil {
-		return body, nil
-	}
-
-	padWhere(q)
-
-	raw, err := json.Marshal(q)
 	if err != nil {
 		return nil, err
 	}
 
 	top["query"] = raw
+
+	return json.Marshal(top)
+}
+
+// PadFilter is PadQuery for a filter alone (the query of a watch, or a
+// $match stage).
+func PadFilter(filter json.RawMessage) (json.RawMessage, error) {
+	q, ok := decodeFilter(filter)
+
+	if !ok {
+		return filter, nil
+	}
+
+	padWhere(q)
+
+	return json.Marshal(q)
+}
+
+func decodeFilter(raw json.RawMessage) (map[string]any, bool) {
+	var q map[string]any
+
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+
+	if err := dec.Decode(&q); err != nil || q == nil {
+		return nil, false
+	}
+
+	return q, true
+}
+
+// keepsDocs are the stages after which a document is still an entry of
+// the stream, so a later $match on _id is a match on the entry ID.
+var keepsDocs = map[string]bool{"$match": true, "$sort": true, "$limit": true, "$skip": true}
+
+// PadPipeline pads the _id values of the $match stages of an aggregate body
+// that come before the first stage that changes the documents ($group,
+// $project and the others). After such a stage, _id is not the entry ID.
+func PadPipeline(body []byte) ([]byte, error) {
+	var top map[string]json.RawMessage
+
+	if err := json.Unmarshal(body, &top); err != nil || top["pipeline"] == nil {
+		return body, nil
+	}
+
+	var stages []map[string]json.RawMessage
+
+	if err := json.Unmarshal(top["pipeline"], &stages); err != nil {
+		return body, nil
+	}
+
+	for _, stage := range stages {
+		if len(stage) != 1 {
+			break
+		}
+
+		name := ""
+
+		for k := range stage {
+			name = k
+		}
+
+		if !keepsDocs[name] {
+			break
+		}
+
+		if name != "$match" {
+			continue
+		}
+
+		raw, err := PadFilter(stage[name])
+
+		if err != nil {
+			return nil, err
+		}
+
+		stage[name] = raw
+	}
+
+	raw, err := json.Marshal(stages)
+
+	if err != nil {
+		return nil, err
+	}
+
+	top["pipeline"] = raw
 
 	return json.Marshal(top)
 }

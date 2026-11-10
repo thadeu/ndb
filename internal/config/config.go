@@ -14,6 +14,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/thadeu/ndb/internal/catalog"
+	"github.com/thadeu/ndb/internal/logging"
 )
 
 var ErrInvalid = errors.New("config: invalid ndb.yml")
@@ -96,6 +97,18 @@ type Config struct {
 	// Tokens are the bearer tokens of the TCP listener, each with what it
 	// may do. The secret of each is in a file.
 	Tokens []Token `yaml:"tokens"`
+
+	// LogLevel is debug, info, warn, error or quiet (default info).
+	// LogFormat is text or json (default text). NDB_LOG_LEVEL,
+	// NDB_LOG_FORMAT and the flags of ndb serve override them.
+	LogLevel  string `yaml:"log_level"`
+	LogFormat string `yaml:"log_format"`
+
+	// LogBodyMax is the largest body or document in a log line, in bytes
+	// (default 2048; 0 = no bodies). LogSlowMs is the duration of a slow
+	// request, a warn line (default 1000; 0 = off).
+	LogBodyMax int `yaml:"log_body_max"`
+	LogSlowMs  int `yaml:"slow_ms"`
 }
 
 // Token is one bearer token of ndb.yml: a name, the file that holds the
@@ -136,6 +149,10 @@ func defaults() Config {
 		PITR:          DefaultPITR,
 		IdleClose:     DefaultIdleClose,
 		Collections:   map[string]catalog.Def{},
+		LogLevel:      logging.DefaultLevel,
+		LogFormat:     logging.DefaultFormat,
+		LogBodyMax:    logging.DefaultBodyMax,
+		LogSlowMs:     logging.DefaultSlowMs,
 	}
 
 	if home, ok := userHomeFunc(); ok {
@@ -255,6 +272,10 @@ func Load(path string) (Config, error) {
 		return Config{}, err
 	}
 
+	if err := checkLog(cfg); err != nil {
+		return Config{}, err
+	}
+
 	cfg.resolve(filepath.Dir(path))
 
 	return cfg, nil
@@ -284,6 +305,26 @@ func checkTokens(tokens []Token) error {
 		}
 
 		seen[t.Name] = true
+	}
+
+	return nil
+}
+
+func checkLog(cfg Config) error {
+	if _, err := logging.ParseLevel(cfg.LogLevel); err != nil {
+		return fmt.Errorf("%w: log_level: %v", ErrInvalid, err)
+	}
+
+	if _, err := logging.ParseFormat(cfg.LogFormat); err != nil {
+		return fmt.Errorf("%w: log_format: %v", ErrInvalid, err)
+	}
+
+	if cfg.LogBodyMax < 0 {
+		return fmt.Errorf("%w: log_body_max: %d is under 0", ErrInvalid, cfg.LogBodyMax)
+	}
+
+	if cfg.LogSlowMs < 0 {
+		return fmt.Errorf("%w: slow_ms: %d is under 0", ErrInvalid, cfg.LogSlowMs)
 	}
 
 	return nil

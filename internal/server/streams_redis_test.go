@@ -114,8 +114,10 @@ func redisCode(err error) string {
 	msg := err.Error()
 
 	switch {
-	case strings.Contains(msg, "equal or smaller"):
+	case strings.Contains(msg, "equal or smaller"), strings.Contains(msg, "exhausted the last possible ID"):
 		return "stream_id_too_small"
+	case strings.Contains(msg, "LIMIT cannot be used without"), strings.Contains(msg, "LIMIT argument must be"):
+		return "invalid_request"
 	case strings.Contains(msg, "greater than 0-0"), strings.Contains(msg, "Invalid stream ID"):
 		return "invalid_stream_id"
 	case strings.HasPrefix(msg, "BUSYGROUP"):
@@ -150,13 +152,28 @@ func redisStep(r *redis, s string, step streamStep) (any, error) {
 
 		return map[string]any{"_id": id}, err
 	case "trim":
-		if v, ok := b["max_len"]; ok {
-			n, err := r.do("XTRIM", s, "MAXLEN", text(v, ""))
+		args := []string{"XTRIM", s, "MINID"}
+		at := text(b["min_id"], "")
 
-			return map[string]any{"deleted": n}, err
+		if v, ok := b["max_len"]; ok {
+			args[2], at = "MAXLEN", text(v, "")
 		}
 
-		n, err := r.do("XTRIM", s, "MINID", text(b["min_id"], ""))
+		if b["approx"] == true {
+			args = append(args, "~")
+		}
+
+		args = append(args, at)
+
+		if v, ok := b["limit"]; ok {
+			args = append(args, "LIMIT", text(v, ""))
+		}
+
+		n, err := r.do(args...)
+
+		return map[string]any{"deleted": n}, err
+	case "delete":
+		n, err := r.do("XDEL", s, step.ID)
 
 		return map[string]any{"deleted": n}, err
 	case "info":
@@ -197,6 +214,8 @@ func redisStep(r *redis, s string, step streamStep) (any, error) {
 		return r.consumers(s, g)
 	case "read":
 		return r.read(s, g, b)
+	case "tail":
+		return r.tail(s, b)
 	case "ack":
 		args := []string{"XACK", s, g}
 
@@ -414,6 +433,18 @@ func (r *redis) read(s, g string, b map[string]any) (any, error) {
 	}
 
 	v, err := r.do(append(cmd, "STREAMS", s, from)...)
+	if err != nil || v == nil {
+		return []any{}, err
+	}
+
+	stream := v.([]any)[0].([]any)
+
+	return entries(stream[1]), nil
+}
+
+// tail is XREAD: a read without a group.
+func (r *redis) tail(s string, b map[string]any) (any, error) {
+	v, err := r.do("XREAD", "COUNT", text(b["count"], "10"), "STREAMS", s, text(b["after"], "0"))
 	if err != nil || v == nil {
 		return []any{}, err
 	}

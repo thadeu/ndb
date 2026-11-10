@@ -45,15 +45,30 @@ class RailtieTest < Minitest::Test
     assert_kind_of Ndb::Client, Ndb::Rails.client
   end
 
-  # One Rails app per process: this test boots it and checks both effects.
+  # One Rails app per process: this test boots it and checks every effect.
   def test_boot_reads_ndb_yml_and_ensures_collections_when_eager_loading
     klass = model do
       attribute :a, :string, index: true
     end
 
+    stream = "boot_#{NdbTestHelpers.next_name}"
+
+    Ndb::Streams.reset!
+
     Dir.mktmpdir do |dir|
       FileUtils.mkdir_p(File.join(dir, "config"))
-      File.write(File.join(dir, "config", "ndb.yml"), "test:\n  socket: #{TestDaemon.socket}\n  timeout: 3\n")
+      File.write(File.join(dir, "config", "ndb.yml"), "test:\n  socket: #{TestDaemon.socket}\n  timeout: 3\n  streams:\n    concurrency: 2\n")
+
+      FileUtils.mkdir_p(File.join(dir, "app", "streams"))
+      File.write(File.join(dir, "app", "streams", "railtie_boot_consumer.rb"), <<~RUBY)
+        class RailtieBootConsumer
+          include Ndb::Streams
+
+          stream "#{stream}", group: :boot
+
+          def perform(event) = nil
+        end
+      RUBY
 
       app = Class.new(Rails::Application) do
         config.root = dir
@@ -69,6 +84,17 @@ class RailtieTest < Minitest::Test
       assert_equal TestDaemon.socket, Ndb::Rails.configuration.socket
       assert_equal 3, Ndb::Rails.configuration.timeout
       assert(client.collections.any? { |c| c["name"] == klass.collection_name })
+      assert_equal({ "concurrency" => 2 }, Ndb::Rails.configuration.streams)
+
+      boot = Thread.list.find { |thread| thread.name == "ndb-streams-boot" }
+
+      boot&.join(10)
+
+      assert_equal ["RailtieBootConsumer"], Ndb::Streams.consumers.map(&:name)
+      assert_equal ["boot"], client.stream(stream).groups.map { |row| row["name"] }
     end
+  ensure
+    Ndb::Rails.configuration.streams = {}
+    Ndb::Streams.reset!
   end
 end

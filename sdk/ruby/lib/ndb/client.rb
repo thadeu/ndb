@@ -14,6 +14,9 @@ module Ndb
   # reads the answers; it has no query semantics. Ndb::Collection is the
   # friendlier layer on top of it.
   class Client
+    # The x* commands of redis-rb (xadd, xreadgroup, ...) on ndb streams.
+    include RedisCommands
+
     DEFAULT_SOCKET = "/run/ndb/ndb.sock"
 
     attr_reader :pool, :endpoint

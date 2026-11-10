@@ -335,7 +335,7 @@ await g.work('worker-1', async (e, signal) => {
 })
 ```
 
-`work` resolves when the signal aborts; the abort also ends a blocked read. Delivery is at least once: make the work safe to repeat. Run many workers with different consumer names to share the work. A deleted entry is acked without the handler. Defaults: `count` 10, `blockMs` 5000, `claimIdleMs` 60000 (negative turns the claim off), `claimEveryMs` `claimIdleMs / 2` (at least 1000).
+`work` resolves when the signal aborts; the abort also ends a blocked read. Delivery is at least once: make the work safe to repeat. Run many workers with different consumer names to share the work. A deleted entry is acked without the handler. Defaults: `count` 10, `blockMs` 5000, `claimIdleMs` 60000 (negative turns the claim off), `claimEveryMs` `claimIdleMs / 2` (at least 1000). A handler that throws after the abort leaves its entry pending: it is not reported and not buried. A failed read goes to `onError` and is tried again after a backoff (100 ms, doubled up to 5 s), also when the group or the stream does not exist yet: a worker that starts before its group waits for it. Only the abort ends `work`. An error that `onError` throws is ignored.
 
 The calls one by one, when you need your own loop:
 
@@ -349,11 +349,129 @@ The calls one by one, when you need your own loop:
 | `XCLAIM` / `XAUTOCLAIM` | `g.claim('w2', 60_000, ids)` / `g.autoClaim('w2', 60_000, '0-0', 100)` |
 | `XGROUP SETID` / `DESTROY` | `g.setId(id)` / `g.destroy()` |
 | `XGROUP CREATECONSUMER` / `DELCONSUMER` | `g.createConsumer('w1')` / `g.deleteConsumer('w1')` |
+| `XREAD` (no group) | `orders.read({ after: id, count: 100, blockMs: 5000, signal })`; `after: '$'` gives only later entries |
 | `XTRIM` | `orders.trim({ maxLen: 1000 })` or `{ minId, approx, limit }` |
 | `XDEL` | `orders.delete(id)` |
 | `XINFO GROUPS` / `CONSUMERS` | `orders.groups()` / `g.consumers()` |
 
 A blocked read has no request timeout: it waits as long as `blockMs`. Stream errors have their own classes: `StreamIdError` (`invalid_stream_id`, `stream_id_too_small`), `UnknownGroupError`, `GroupExistsError` and `NotAStreamError`. `db.stream(name)` with one argument is a stream; with a method and a path it is a raw request.
+
+### Redis commands (ioredis and node-redis)
+
+An app that uses Redis Streams can change to ndb and keep its calls. Two subpaths give the stream commands of the two Redis libraries on top of ndb streams, with the same arguments and the same answers. The app selects the backend in one place:
+
+```ts
+import { connect } from '@thadeu/ndb'
+import { ioredis } from '@thadeu/ndb/ioredis'
+import { Redis } from 'ioredis'
+
+const streams = process.env.STREAMS_BACKEND === 'ndb' ? ioredis(connect()) : new Redis()
+
+await streams.xadd('orders', 'MAXLEN', '~', 1000, '*', 'order_id', '42')
+await streams.xgroup('CREATE', 'orders', 'billing', '$', 'MKSTREAM')
+
+const got = await streams.xreadgroup('GROUP', 'billing', 'w1', 'COUNT', 10, 'BLOCK', 5000, 'STREAMS', 'orders', '>')
+// [['orders', [['1731164400000-0', ['order_id', '42']]]]], or null
+
+await streams.xack('orders', 'billing', '1731164400000-0')
+```
+
+The adapters have no dependency: the main entry does not load them, and they do not import `ioredis` or `redis`. Their types are structural. A type test in this package checks that each adapter is assignable to the stream commands of its library (`Pick<Redis, ...>` of ioredis 5, `Pick<RedisClientType, ...>` of node-redis 5), so the two sides of the `?:` above have the same methods.
+
+#### `@thadeu/ndb/ioredis`
+
+`ioredis(db)` gives the methods of ioredis 5: lowercase names, the arguments of the Redis command in the same order (option words in any case), an optional callback as the last argument, and the raw arrays of Redis as the answer.
+
+| Method | Arguments | Answer |
+|---|---|---|
+| `xadd` | `key [NOMKSTREAM] [MAXLEN\|MINID [=\|~] n [LIMIT n]] id field value ...` | the ID; `null` with `NOMKSTREAM` and no stream |
+| `xlen` | `key` | a number |
+| `xrange` / `xrevrange` | `key start end [COUNT n]` (`(id` leaves the ID out) | `[[id, [field, value, ...]], ...]` |
+| `xread` | `[COUNT n] [BLOCK ms] STREAMS key ... id ...` | `[[key, [[id, [field, value]]]]]` or `null` |
+| `xdel` | `key id ...` | a number |
+| `xtrim` | `key MAXLEN\|MINID [=\|~] n [LIMIT n]` | a number |
+| `xgroup` | `CREATE key group id [MKSTREAM] [ENTRIESREAD n]`, `SETID key group id [ENTRIESREAD n]`, `DESTROY key group`, `CREATECONSUMER key group consumer`, `DELCONSUMER key group consumer` | `'OK'`, `'OK'`, `1`/`0`, `1`/`0`, the pending count |
+| `xreadgroup` | `GROUP group consumer [COUNT n] [BLOCK ms] [NOACK] STREAMS key ... id ...` | as `xread`; with an ID that is not `>`, `[[key, []]]` when there is no entry, and `[id, null]` for a deleted entry |
+| `xack` | `key group id ...` | a number |
+| `xpending` | `key group` | `[count, lowestId, highestId, [[consumer, '2']]]`, or `[0, null, null, null]` |
+| `xpending` | `key group [IDLE ms] start end count [consumer]` | `[[id, consumer, idleMs, deliveries], ...]` |
+| `xclaim` | `key group consumer minIdle id ... [IDLE ms] [RETRYCOUNT n] [FORCE] [JUSTID] [LASTID id]` | entries as `xrange`; IDs with `JUSTID` |
+| `xautoclaim` | `key group consumer minIdle start [COUNT n] [JUSTID]` | `[nextStart, entries or IDs, deletedIds]` |
+| `xinfo` | `STREAM key`, `GROUPS key`, `CONSUMERS key group` | flat `[name, value, ...]` arrays, with the field names of Redis |
+
+The return types are those of ioredis (`unknown[]` for `xreadgroup`, `xpending`, `xclaim` and `xautoclaim`; `unknown` for `xgroup` and `xinfo`). The subpath exports `EntryReply`, `StreamsReply` and `GroupStreamsReply` for a cast.
+
+#### `@thadeu/ndb/node-redis`
+
+`nodeRedis(db)` gives the methods of node-redis 5 (the `redis` package): camel case names, options as an object, and the answers that node-redis makes from the arrays.
+
+```ts
+import { nodeRedis } from '@thadeu/ndb/node-redis'
+import { createClient } from 'redis'
+
+const streams = process.env.STREAMS_BACKEND === 'ndb' ? nodeRedis(connect()) : await createClient().connect()
+
+await streams.xAdd('orders', '*', { order_id: '42' }, { TRIM: { strategy: 'MAXLEN', strategyModifier: '~', threshold: 1000 } })
+await streams.xGroupCreate('orders', 'billing', '$', { MKSTREAM: true })
+
+const got = await streams.xReadGroup('billing', 'w1', { key: 'orders', id: '>' }, { COUNT: 10, BLOCK: 5000 })
+// [{ name: 'orders', messages: [{ id: '1731164400000-0', message: { order_id: '42' } }] }], or null
+```
+
+| Method | Answer |
+|---|---|
+| `xAdd(key, id, message, { TRIM }?)` | the ID |
+| `xAddNoMkStream(key, id, message, { TRIM }?)` | the ID, or `null` when there is no stream |
+| `xLen(key)` | a number |
+| `xRange(key, start, end, { COUNT }?)` / `xRevRange(key, end, start, { COUNT }?)` | `[{ id, message }]` |
+| `xRead(streams, { COUNT, BLOCK }?)` | `[{ name, messages: [{ id, message }] }]` or `null` |
+| `xDel(key, id \| ids)` | a number |
+| `xTrim(key, 'MAXLEN' \| 'MINID', threshold, { strategyModifier, LIMIT }?)` | a number |
+| `xGroupCreate(key, group, id, { MKSTREAM, ENTRIESREAD }?)` / `xGroupSetId(key, group, id, { ENTRIESREAD }?)` | `'OK'` |
+| `xGroupDestroy(key, group)` / `xGroupCreateConsumer(key, group, consumer)` | `1` or `0` |
+| `xGroupDelConsumer(key, group, consumer)` | the pending count |
+| `xReadGroup(group, consumer, streams, { COUNT, BLOCK, NOACK }?)` | as `xRead` |
+| `xAck(key, group, id \| ids)` | a number |
+| `xPending(key, group)` | `{ pending, firstId, lastId, consumers: [{ name, deliveriesCounter }] \| null }` |
+| `xPendingRange(key, group, start, end, count, { IDLE, consumer }?)` | `[{ id, consumer, millisecondsSinceLastDelivery, deliveriesCounter }]` |
+| `xClaim(key, group, consumer, minIdle, id \| ids, { IDLE, RETRYCOUNT, FORCE, LASTID }?)` | `[{ id, message }]` |
+| `xClaimJustId(...)` | IDs |
+| `xAutoClaim(key, group, consumer, minIdle, start, { COUNT }?)` | `{ nextId, messages, deletedMessages }` |
+| `xAutoClaimJustId(...)` | the same, with IDs in `messages` |
+| `xInfoStream(key)` | `{ length, 'last-generated-id', 'entries-added', 'first-entry', ... }` |
+| `xInfoGroups(key)` | `[{ name, consumers, pending, 'last-delivered-id', 'entries-read', lag }]` |
+| `xInfoConsumers(key, group)` | `[{ name, pending, idle, inactive }]` |
+
+The answers are those of the default client (RESP 2, no type mapping). A `TRIM` needs its `strategy`, as with a real Redis.
+
+#### What is different from Redis
+
+- **Values are text.** Redis keeps strings, so the adapters give every value as a string, and they store the values of `xadd` as strings. An entry that other ndb code appended with JSON types comes back as text: `42` is `'42'`, `true` is `'true'`, and `null`, an array or an object are JSON text.
+- **Field order.** The daemon gives the fields of an entry in name order, not in the order of the `xadd`. A field name that starts with `_` is reserved, and a field name given two times is kept one time.
+- **One stream for each request.** `xread` and `xreadgroup` with many streams send one request for each stream. With `BLOCK` and more than one stream they throw (`not_supported`). Before an `xreadgroup` of `>` on many streams, the adapters check the group of each stream, so a `NOGROUP` on one stream gives nothing from the others, as in Redis.
+- **No `COUNT`, or `COUNT 0` or less.** Redis gives every entry. The adapters give at most 10 000 in one read (`xrange` has no limit). A `COUNT` over 10 000 is read as 10 000.
+- **`BLOCK 0`** waits with no limit, as in Redis: the adapter repeats a 30 s read. A blocked `xread` on a stream that does not exist looks for it each 500 ms.
+- **Not supported** (the call throws): `XREAD` with the ID `+`, `XREADGROUP ... CLAIM`, `XCLAIM ... TIME`, `XINFO STREAM ... FULL`, `XGROUP HELP` and `XINFO HELP`, the Redis 8.2 options `DELREF` and `ACKED`, and the idempotent `XADD` options. `LASTID` and `KEEPREF` are read and have no effect.
+- **Not there**: `XSETID`, `XACKDEL`, `XDELEX`, the `Buffer` variants of ioredis (`xreadBuffer`, ...), pipelines and `MULTI`. The object has only the methods of the tables.
+- **`xinfo`**: `radix-tree-keys` and `radix-tree-nodes` are `0`.
+- **A range of `xpending`** does not take `(id`.
+- **Errors in the arguments** are those of Redis: a negative `BLOCK`, `LIMIT` without `~`, an argument after the end of `xtrim`, and a number that is not decimal digits (`0x10`, `5000.0`). The option words go in any order where Redis takes them.
+- **`(id` without a seq** in `xrange` is read as in Redis: `(1000` as a start leaves out only `1000-0`, and `(2000` as an end leaves out only `2000-<max seq>`.
+- **Errors** are `ReplyError` (exported by the two subpaths), a subclass of `NdbError`. Its `message` is the text of Redis, so a check such as `err.message.startsWith('BUSYGROUP')` works on the two backends. `code` and `status` are those of ndb, and `cause` is the ndb error.
+
+| Case | `message` starts with | `code` |
+|---|---|---|
+| The group exists | `BUSYGROUP` | `group_exists` |
+| No such group, or no stream in a group command | `NOGROUP` | `unknown_group`, `unknown_collection` |
+| `XGROUP` without `MKSTREAM`, and no stream | `ERR The XGROUP subcommand requires the key to exist` | `unknown_collection` |
+| `XINFO` and no stream | `ERR no such key` | `unknown_collection` |
+| An ID that is not greater than the last one | `ERR The ID specified in XADD is equal or smaller` | `stream_id_too_small` |
+| A bad ID | `ERR Invalid stream ID` | `invalid_stream_id` |
+| The name is a collection that is not a stream | `WRONGTYPE` | `not_a_stream` |
+| A bad argument list | `ERR` | `invalid_request` |
+| Something ndb does not have | `ERR ndb: ... is not supported` | `not_supported` |
+
+An error that Redis does not have (`unauthorized`, `not_ready`, a network error) stays as it is. As in Redis, these give a value and not an error when the stream does not exist: `xlen` (0), `xrange` (`[]`), `xread` (`null`), `xdel`, `xtrim` and `xack` (0).
 
 ## Blobs
 

@@ -17,13 +17,15 @@ export interface WorkOptions {
   // How often (ms) the worker looks for idle entries: default claimIdleMs / 2,
   // at least 1000.
   claimEveryMs?: number
-  // An entry delivered this many times is a poison message. It goes to
-  // deadLetter (when set) and is acked. 0 is no limit.
+  // An entry delivered this many times is a poison message. When the handler
+  // fails on that delivery, it goes to deadLetter (when set) and is acked at
+  // once. 0 is no limit.
   maxDeliveries?: number
   // The stream that gets the poison messages, as a DeadEntry.
   deadLetter?: string
   // Gets the errors that do not stop the worker: a failed read, a handler
-  // error, a poison message (PoisonError).
+  // error, a poison message (PoisonError). An error that onError throws is
+  // ignored: it does not stop the worker or its acks.
   onError?: (err: unknown) => void
   // Stops the worker. Without it, the worker runs forever.
   signal?: AbortSignal
@@ -61,6 +63,7 @@ interface Settings {
 }
 
 function settingsOf(opts: WorkOptions): Settings {
+  const onError = opts.onError ?? (() => {})
   const claimIdleMs = opts.claimIdleMs === undefined || opts.claimIdleMs === 0 ? 60_000 : opts.claimIdleMs
   const claimEveryMs = opts.claimEveryMs && opts.claimEveryMs > 0 ? opts.claimEveryMs : Math.max(claimIdleMs / 2, 1000)
 
@@ -71,7 +74,14 @@ function settingsOf(opts: WorkOptions): Settings {
     claimEveryMs,
     maxDeliveries: opts.maxDeliveries ?? 0,
     deadLetter: opts.deadLetter ?? '',
-    report: opts.onError ?? (() => {}),
+    report: (err) => {
+      // A throw in onError must not drop the acks of the batch.
+      try {
+        onError(err)
+      } catch {
+        // Nothing to do: onError is the place for errors.
+      }
+    },
     signal: opts.signal ?? new AbortController().signal,
   }
 }
@@ -93,19 +103,14 @@ function wrap(what: string, err: unknown): Error {
 //     the ones delivered maxDeliveries times to deadLetter.
 //
 // Delivery is at least once: the work on an entry must be safe to repeat.
-// The group must exist (Group.ensure).
+// The group must exist (Group.ensure). A read that fails, also of a group or
+// stream that does not exist yet, goes to onError and is tried again after a
+// backoff (100 ms, doubled up to 5 s): a worker that starts before its group
+// waits for it. Only the signal ends the worker.
 export async function workGroup<T>(g: Group<T>, consumer: string, h: Handler<T>, opts: WorkOptions): Promise<void> {
   const w = settingsOf(opts)
 
-  try {
-    await workPending(g, consumer, h, w)
-  } catch (err) {
-    if (w.signal.aborted) {
-      return
-    }
-
-    throw err
-  }
+  await workPending(g, consumer, h, w)
 
   let nextClaim = Date.now() + w.claimEveryMs
   let backoff = 0
@@ -144,18 +149,56 @@ export async function workGroup<T>(g: Group<T>, consumer: string, h: Handler<T>,
 }
 
 // workPending does the work on the consumer's own pending entries, in ID
-// order. An entry that fails stays pending; the loop moves past it.
+// order. An entry that fails stays pending; the loop moves past it. A read
+// that fails is reported and tried again after a wait, as in the main loop,
+// also of a group or stream that does not exist yet.
 async function workPending<T>(g: Group<T>, consumer: string, h: Handler<T>, w: Settings): Promise<void> {
   let after = '0'
+  let backoff = 0
 
   while (!w.signal.aborted) {
-    const entries = await g.read(consumer, { pending: true, after, count: w.count, signal: w.signal })
+    let entries: Entry<T>[]
+
+    try {
+      entries = await g.read(consumer, { pending: true, after, count: w.count, signal: w.signal })
+    } catch (err) {
+      if (w.signal.aborted) {
+        return
+      }
+
+      w.report(wrap(`pending read ${g.stream.name}/${g.name}`, err))
+
+      backoff = Math.min(Math.max(backoff * 2, 100), 5000)
+
+      await sleep(backoff, w.signal)
+
+      continue
+    }
+
+    backoff = 0
 
     if (entries.length === 0) {
       return
     }
 
-    await handle(g, h, w, entries)
+    const counts = await pendingCounts(g, consumer, w, entries)
+    const todo: Entry<T>[] = []
+
+    for (const e of entries) {
+      const n = counts.get(e.id) ?? 1
+
+      // Delivered maxDeliveries times with no ack: the process stopped in
+      // the handler (a crash, a kill). Do not run it again.
+      if (w.maxDeliveries > 0 && n > w.maxDeliveries && !e.deleted) {
+        await bury(g, w, e, n - 1)
+
+        continue
+      }
+
+      todo.push(e)
+    }
+
+    await handle(g, h, w, todo, counts)
 
     after = entries[entries.length - 1]!.id
   }
@@ -191,20 +234,46 @@ async function workIdle<T>(g: Group<T>, consumer: string, h: Handler<T>, w: Sett
   }
 
   const retry: Entry<T>[] = []
+  const counts = new Map<string, number>()
 
   for (const e of claimed.entries) {
     const n = deliveries.get(e.id) ?? 0
 
+    // A process that stopped before the bury left it pending.
     if (w.maxDeliveries > 0 && n >= w.maxDeliveries) {
       await bury(g, w, e, n)
 
       continue
     }
 
+    // The claim is one more delivery.
+    counts.set(e.id, n + 1)
     retry.push(e)
   }
 
-  await handle(g, h, w, retry)
+  await handle(g, h, w, retry, counts)
+}
+
+// pendingCounts gives the delivery counts of the consumer's own pending
+// entries. Only a worker with maxDeliveries needs them.
+async function pendingCounts<T>(g: Group<T>, consumer: string, w: Settings, entries: Entry<T>[]): Promise<Map<string, number>> {
+  const counts = new Map<string, number>()
+
+  if (w.maxDeliveries <= 0 || entries.length === 0) {
+    return counts
+  }
+
+  try {
+    const rows = await g.pendingList({ start: entries[0]!.id, end: entries[entries.length - 1]!.id, count: entries.length, consumer })
+
+    for (const p of rows) {
+      counts.set(p.id, p.deliveries)
+    }
+  } catch (err) {
+    w.report(wrap(`pending ${g.stream.name}/${g.name}`, err))
+  }
+
+  return counts
 }
 
 // bury sends a poison entry to the dead letter, acks it, then reports it.
@@ -234,8 +303,10 @@ async function bury<T>(g: Group<T>, w: Settings, e: Entry<T>, deliveries: number
 }
 
 // handle runs h on each entry and acks the ones that worked, in one call. A
-// deleted entry is acked without h: there is nothing to do.
-async function handle<T>(g: Group<T>, h: Handler<T>, w: Settings, entries: Entry<T>[]): Promise<void> {
+// deleted entry is acked without h: there is nothing to do. counts has the
+// delivery count of an entry delivered before (no count is 1); an entry that
+// fails on its maxDeliveries-th delivery goes to the dead letter at once.
+async function handle<T>(g: Group<T>, h: Handler<T>, w: Settings, entries: Entry<T>[], counts = new Map<string, number>()): Promise<void> {
   const done: string[] = []
 
   for (const e of entries) {
@@ -254,7 +325,19 @@ async function handle<T>(g: Group<T>, h: Handler<T>, w: Settings, entries: Entry
 
       done.push(e.id)
     } catch (err) {
+      // A stop (the signal aborted) is not a failure of the entry: it stays
+      // pending, with no report and no bury, and the worker stops.
+      if (w.signal.aborted) {
+        break
+      }
+
       w.report(wrap(`handler ${g.stream.name}/${g.name} ${e.id}`, err))
+
+      const n = counts.get(e.id) ?? 1
+
+      if (w.maxDeliveries > 0 && n >= w.maxDeliveries) {
+        await bury(g, w, e, n)
+      }
     }
   }
 

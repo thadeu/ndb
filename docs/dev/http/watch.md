@@ -25,7 +25,7 @@ Opens a long-lived NDJSON stream: first the events after the last ack of the con
 
 - `op` is `put`, `del` or `truncate`. A delete by the TTL sweeper has `"_expired": true`.
 - A heartbeat line comes after 15 s without events. Ignore it.
-- The stream ends on a truncate or a drop of the collection, on shutdown, after `limit` events, or with an error line. Reconnect: the consumer resumes after its last ack.
+- The stream ends on a truncate or a drop of the collection, on shutdown, after `limit` events, or with an error line. Reconnect: the consumer resumes after its last ack. A stream that a truncate ends can end before it sends the `truncate` line. The `truncate` event always comes on the next connect, so do not depend on it in the open stream.
 
 **Errors before the stream:** `404 unknown_collection`, `410 history_truncated`, `400 invalid_query`, `400 pattern_read_only`. **In the stream:** `watch_lagged`, `invalid_position`.
 
@@ -75,7 +75,7 @@ Stores the `pos` of an event that the consumer has processed. The next `_watch` 
 | `consumer` | string | the consumer name |
 | `pos` | string | the `pos` of the event |
 
-**Answer:** `{"ok":true}`. **Errors:** `400 invalid_position`, `404 unknown_collection`.
+**Answer:** `{"ok":true}`. **Errors:** `400 invalid_position` (a token that is not valid, or a position after the last change of the collection: an ack of `e99.1` on a collection at tx 5 would skip the changes up to tx 99), `404 unknown_collection`.
 
 ```bash
 curl --unix-socket /run/ndb/ndb.sock http://ndb/calls/_ack -d '{"consumer":"relay","pos":"e1.1"}'

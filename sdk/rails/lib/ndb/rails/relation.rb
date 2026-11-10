@@ -82,6 +82,18 @@ module Ndb
       with(group: fields.flatten.map(&:to_s))
     end
 
+    # The JSON body that this relation sends to the daemon, as a String,
+    # with no request (like to_sql of ActiveRecord). It is the body of
+    # POST /{collection}/_search; pretty: true gives it on many lines.
+    #
+    #   Call.where(status: "failed").order(created_at: :desc).limit(10).to_ndb
+    #   # => {"query":{"status":"failed"},"sort":{"created_at":-1},"limit":10,"versions":true}
+    def to_ndb(pretty: false)
+      body = to_query.merge("versions" => true)
+
+      pretty ? JSON.pretty_generate(body) : JSON.generate(body)
+    end
+
     # The find body: JSON only, the daemon decides what it means.
     def to_query
       query = {}
@@ -178,18 +190,36 @@ module Ndb
       @result.next
     end
 
-    # The last record (or count of them) of the loaded records, in the
-    # order of the relation.
-    def last(count = nil)
-      count ? records.last(count) : records.last
-    end
-
+    # The first record (or count of them), in the order of the relation.
+    # With no order, the order is the primary key (as ActiveRecord does),
+    # so first and last are the two ends of one order. The daemon gives
+    # only count rows (limit), not the whole relation.
     def first(count = nil)
       return count ? records.first(count) : records.first if loaded?
 
-      found = limit(count || 1).to_a
+      found = by_key.limit(count || 1).to_a
 
       count ? found : found.first
+    end
+
+    # The last record (or count of them, in the order of the relation). The
+    # order is turned around and the daemon gives only count rows; a
+    # relation with a limit, an offset or a page is loaded instead, because
+    # its last row depends on that window.
+    def last(count = nil)
+      return count ? records.last(count) : records.last if loaded? || windowed?
+
+      found = by_key.reverse_order.limit(count || 1).to_a.reverse
+
+      count ? found : found.last
+    end
+
+    # The relation with its order turned around (asc and desc swap). With no
+    # order, it is the primary key in descending order.
+    def reverse_order
+      sort = by_key.values[:order].transform_values { |dir| -dir }
+
+      with(order: sort)
     end
 
     def find(*ids)
@@ -291,6 +321,17 @@ module Ndb
 
     def add_clause(clause)
       with(where: values[:where] + [clause])
+    end
+
+    # The relation, ordered by the primary key when it has no order.
+    def by_key
+      return self unless values[:order].empty?
+
+      with(order: { klass.primary_key => 1 })
+    end
+
+    def windowed?
+      values[:limit] || values[:offset] || values[:page]
     end
 
     def direction(value)

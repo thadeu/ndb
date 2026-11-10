@@ -90,6 +90,22 @@ export interface ReadOptions {
   signal?: AbortSignal
 }
 
+// The options of Stream.read, a read without a group.
+export interface StreamReadOptions {
+  // Give the entries with an ID greater than after. Default "0": from the
+  // start of the stream. "$": only the entries appended after the call
+  // starts.
+  after?: string
+  // The most entries to give: default 10, at most 10 000.
+  count?: number
+  // Wait up to this long (ms) for a new entry when there is none.
+  blockMs?: number
+  // Give only these fields (and _id).
+  fields?: string[]
+  // Ends the read, also a blocked one.
+  signal?: AbortSignal
+}
+
 export interface PendingSummary {
   count: number
   lowest: string | null
@@ -205,6 +221,20 @@ export class Stream<T = Doc> {
   // range from end down to start (XREVRANGE).
   revRange(end = '+', start = '-', count?: number): Promise<Entry<T>[]> {
     return this.rangeOf(start, end, count, -1)
+  }
+
+  // The entries after an ID, in ID order, without a group (XREAD). It
+  // changes no group. To read on, give the last ID of the answer as after;
+  // do not give "$" again. An empty answer is an empty array.
+  read(opts: StreamReadOptions = {}): Promise<Entry<T>[]> {
+    const body = {
+      after: opts.after,
+      count: opts.count,
+      block_ms: opts.blockMs ? Math.max(1, Math.round(opts.blockMs)) : undefined,
+      fields: opts.fields,
+    }
+
+    return this.rows('_streams/read', body, opts.signal)
   }
 
   // Removes one entry by ID (XDEL) and returns 1, or 0 when it is not there.

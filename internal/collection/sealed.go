@@ -223,7 +223,18 @@ func (c *Collection) openSidecars(r *segRef, fields []indexField) error {
 	}
 
 	for _, f := range c.def.Unique {
-		k, err := segment.OpenKeys(fsys, uniquePath(r.path, f))
+		path := uniquePath(r.path, f)
+
+		// A unique field added after the seal of this segment has no file
+		// yet: it is made now, from the rows.
+		if _, err := fsys.Stat(path); err != nil {
+			if err := c.writeUniqueFile(r, f); err != nil {
+				return err
+			}
+		}
+
+		k, err := segment.OpenKeys(fsys, path)
+
 		if err != nil {
 			return err
 		}
@@ -232,6 +243,25 @@ func (c *Collection) openSidecars(r *segRef, fields []indexField) error {
 	}
 
 	return nil
+}
+
+// writeUniqueFile writes the key file of the unique field f of a segment.
+func (c *Collection) writeUniqueFile(r *segRef, f string) error {
+	var entries []segment.KeyEntry
+
+	err := segmentRows(r)(func(row sideRow) error {
+		if key, ok := uniqueKey(row.doc, f); ok && !row.del {
+			entries = append(entries, segment.KeyEntry{Key: uniqueEntry(key, row.id), Row: row.row})
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	return segment.WriteKeys(c.seal.fs, uniquePath(r.path, f), entries, false, false)
 }
 
 // sidecarsExist tells if the key files of the segment were written (a

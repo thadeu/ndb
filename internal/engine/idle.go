@@ -141,6 +141,10 @@ func (c *Collection) wake() error {
 	c.live.Lock()
 	defer c.live.Unlock()
 
+	if c.closed {
+		return ErrClosed
+	}
+
 	if !c.asleep || c.dropped {
 		return nil
 	}

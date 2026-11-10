@@ -1,0 +1,163 @@
+{
+  "name": "a read without a group gives the entries after an ID and changes no group",
+  "stream": "orders",
+  "steps": [
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-0"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-0"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 2
+        },
+        "id": "1-1"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-1"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 3
+        },
+        "id": "1-2"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-2"
+        }
+      }
+    },
+    {
+      "op": "tail",
+      "body": {
+        "count": 2
+      },
+      "expect": {
+        "rows": [
+          {
+            "_id": "1-0",
+            "n": 1
+          },
+          {
+            "_id": "1-1",
+            "n": 2
+          }
+        ],
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    },
+    {
+      "op": "tail",
+      "body": {
+        "after": "1-1"
+      },
+      "expect": {
+        "rows": [
+          {
+            "_id": "1-2",
+            "n": 3
+          }
+        ],
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    },
+    {
+      "op": "tail",
+      "body": {
+        "after": "1-2"
+      },
+      "expect": {
+        "rows": []
+      }
+    },
+    {
+      "op": "tail",
+      "body": {
+        "after": "$"
+      },
+      "expect": {
+        "rows": []
+      }
+    },
+    {
+      "op": "group_create",
+      "group": "g",
+      "body": {
+        "start": "0"
+      },
+      "expect": {
+        "body": {
+          "group": "g",
+          "last_delivered_id": "0-0"
+        }
+      }
+    },
+    {
+      "op": "tail",
+      "body": {
+        "after": "0"
+      },
+      "expect": {
+        "rows": [
+          {
+            "_id": "1-0",
+            "n": 1
+          },
+          {
+            "_id": "1-1",
+            "n": 2
+          },
+          {
+            "_id": "1-2",
+            "n": 3
+          }
+        ],
+        "ignore": [
+          "_ts",
+          "idle_ms",
+          "inactive_ms"
+        ]
+      }
+    },
+    {
+      "op": "groups",
+      "expect": {
+        "body": [
+          {
+            "name": "g",
+            "consumers": 0,
+            "pending": 0,
+            "last_delivered_id": "0-0",
+            "lag": 3,
+            "entries_read": null
+          }
+        ]
+      }
+    }
+  ]
+}

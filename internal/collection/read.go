@@ -7,7 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"slices"
 	"sort"
 	"strconv"
@@ -323,6 +323,18 @@ func (c *Collection) EnsureIndex(field string) error {
 func (c *Collection) build(s *secondary, items []cand, segs []*segRef) {
 	defer c.rd.wg.Done()
 
+	began := time.Now()
+
+	// A small build (each open of a collection makes one) is debug; a
+	// large one is info.
+	level := slog.LevelDebug
+
+	if s.total >= indexBuildInfoRows {
+		level = slog.LevelInfo
+	}
+
+	slog.Log(context.Background(), level, "index build started", "collection", c.def.Name, "field", s.field, "total", s.total)
+
 	for start := 0; start < len(items); start += buildChunk {
 		if c.buildStopped() {
 			return
@@ -361,7 +373,7 @@ func (c *Collection) build(s *secondary, items []cand, segs []*segRef) {
 		}
 
 		if err := c.buildIndexFile(r, f); err != nil {
-			log.Printf("ndb: index %s: segment %s: %v", s.field, r.path, err)
+			slog.Error("index build failed", "collection", c.def.Name, "field", s.field, "segment", r.path, "err", err)
 
 			return
 		}
@@ -374,7 +386,12 @@ func (c *Collection) build(s *secondary, items []cand, segs []*segRef) {
 	c.mu.Lock()
 	s.ready = true
 	c.mu.Unlock()
+
+	slog.Log(context.Background(), level, "index build done", "collection", c.def.Name, "field", s.field, "total", s.total, "ms", time.Since(began).Milliseconds())
 }
+
+// indexBuildInfoRows is the size from which an index build is an info line.
+const indexBuildInfoRows = 10_000
 
 // buildStopped runs the test gate and tells if the collection is closing.
 func (c *Collection) buildStopped() bool {
@@ -1116,9 +1133,69 @@ func copyPath(dst, src map[string]any, parts []string) {
 	copyPath(child, sub, parts[1:])
 }
 
-// withVersion adds "_v" as the first field of the doc object.
+// withVersion adds "_v" as the first field of the doc object. A "_v" that
+// the stored doc holds (written before it was refused) is dropped, so the
+// answer never has two.
 func withVersion(doc json.RawMessage, v uint64) json.RawMessage {
-	return prependField(doc, "_v", strconv.AppendUint(nil, v, 10))
+	return prependField(dropTopField(doc, versionField), versionField, strconv.AppendUint(nil, v, 10))
+}
+
+// dropTopField removes the top-level key of the doc object and keeps the
+// order and the bytes of the other fields. A doc without the key, or one
+// that does not decode, comes back as it is.
+func dropTopField(doc json.RawMessage, key string) json.RawMessage {
+	if !bytes.Contains(doc, []byte(strconv.Quote(key))) {
+		return doc
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(doc))
+
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return doc
+	}
+
+	first := true
+
+	for dec.More() {
+		start := dec.InputOffset()
+
+		tok, err := dec.Token()
+
+		if err != nil {
+			return doc
+		}
+
+		var val json.RawMessage
+
+		if err := dec.Decode(&val); err != nil {
+			return doc
+		}
+
+		end := dec.InputOffset()
+
+		if tok != key {
+			first = false
+
+			continue
+		}
+
+		// The cut of the first field takes the comma after it; the cut of
+		// another field starts at the comma before it.
+		if first {
+			rest := bytes.TrimLeft(doc[end:], " \t\r\n")
+
+			if len(rest) > 0 && rest[0] == ',' {
+				end = int64(len(doc) - len(rest) + 1)
+			}
+		}
+
+		out := make(json.RawMessage, 0, len(doc))
+		out = append(out, doc[:start]...)
+
+		return append(out, doc[end:]...)
+	}
+
+	return doc
 }
 
 // prependField adds key with the JSON value val as the first field of the

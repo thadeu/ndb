@@ -98,7 +98,7 @@ func required(method string, segs []string) (string, access) {
 
 	if strings.HasPrefix(segs[0], "_") {
 		switch segs[0] {
-		case "_backup":
+		case "_backup", "_log":
 			return "*", accessAdmin
 		case "_restore":
 			return "", accessAdmin
@@ -141,11 +141,19 @@ func required(method string, segs []string) (string, access) {
 	return coll, accessRead
 }
 
-// streamAccess is the right of a /{s}/_streams route: a GET and pending
-// read; every other route changes the stream or its groups (a group read
-// moves the PEL), so it is a write.
+// streamAccess is the right of a /{s}/_streams route. Reads: every GET, a
+// read without a group (/{s}/_streams/read) and a pending list
+// (/{s}/_streams/groups/{g}/pending). Every other route changes the stream
+// or its groups (a group read moves the PEL), so it is a write. The rule
+// uses the shape of the path, so a group or consumer named "read" or
+// "pending" gets no read right.
 func streamAccess(method string, segs []string) access {
-	if method == "GET" || segs[len(segs)-1] == "pending" {
+	switch {
+	case method == "GET":
+		return accessRead
+	case len(segs) == 3 && segs[2] == "read":
+		return accessRead
+	case len(segs) == 5 && segs[2] == "groups" && segs[4] == "pending":
 		return accessRead
 	}
 

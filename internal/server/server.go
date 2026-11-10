@@ -6,12 +6,15 @@ package server
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"sync/atomic"
 	"time"
 
 	"github.com/thadeu/ndb/internal/engine"
+	"github.com/thadeu/ndb/internal/logging"
 	"github.com/thadeu/ndb/internal/streams"
 )
 
@@ -42,13 +45,17 @@ type Server struct {
 
 	// streams runs the /{s}/_streams routes.
 	streams *streams.Service
+
+	// log is the logger of the request lines (logs.go).
+	log *logging.Logger
 }
 
 func New() *Server {
 	stopCtx, stop := context.WithCancel(context.Background())
 	s := &Server{heartbeat: defaultHeartbeat, stopCtx: stopCtx, started: time.Now()}
+	s.log = logging.New(os.Stderr, logging.Options{Level: slog.LevelInfo, Format: logging.DefaultFormat, BodyMax: logging.DefaultBodyMax, SlowMs: logging.DefaultSlowMs})
 	s.streams = streams.New(func() *engine.DB { return s.db.Load() })
-	s.handler = s.authenticate(s.routes())
+	s.handler = s.observe(s.authenticate(s.routes()))
 	s.http = &http.Server{
 		Handler:           s.handler,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -125,6 +132,7 @@ func (s *Server) routes() http.Handler {
 			"_pitr":        {{"GET", s.ready(s.pitrAll)}},
 			"_blobs":       {{"POST", s.ready(s.putBlob)}},
 			"_blobs/{}":    {{"GET", s.ready(s.getBlob)}},
+			"_log":         {{"GET", s.getLog}, {"PUT", s.putLog}},
 		},
 		coll: map[string][]route{
 			"": {
@@ -140,18 +148,18 @@ func (s *Server) routes() http.Handler {
 			"_restore":         {{"POST", s.ready(s.restore)}},
 			"_pitr":            {{"GET", s.ready(s.pitr)}},
 			"_quarantine":      {{"GET", s.ready(s.quarantine)}},
-			"_doc":             {{"POST", s.ready(s.insertOne)}},
-			"_bulk":            {{"POST", s.ready(s.bulk)}},
+			"_doc":             {{"POST", s.ready(notOnStream(s.insertOne))}},
+			"_bulk":            {{"POST", s.ready(notOnStream(s.bulk))}},
 			"_doc/{}":          {{"GET", s.ready(s.get)}, {"DELETE", s.ready(s.removeID)}},
-			"_update/{}":       {{"POST", s.ready(s.updateID)}},
-			"_expire/{}":       {{"POST", s.ready(s.expire)}},
-			"_persist/{}":      {{"POST", s.ready(s.persist)}},
+			"_update/{}":       {{"POST", s.ready(notOnStream(s.updateID))}},
+			"_expire/{}":       {{"POST", s.ready(notOnStream(s.expire))}},
+			"_persist/{}":      {{"POST", s.ready(notOnStream(s.persist))}},
 			"_ttl/{}":          {{"GET", s.ready(s.ttl)}},
 			"_search":          {{"POST", s.readyOr(s.find, s.findPattern)}},
 			"_count":           {{"POST", s.readyOr(s.countDocs, s.countPattern)}},
 			"_aggregate":       {{"POST", s.readyOr(s.aggregate, s.aggregatePattern)}},
-			"_update_by_query": {{"POST", s.ready(s.update)}},
-			"_delete_by_query": {{"POST", s.ready(s.remove)}},
+			"_update_by_query": {{"POST", s.ready(notOnStream(s.update))}},
+			"_delete_by_query": {{"POST", s.ready(notOnStream(s.remove))}},
 			"_watch":           {{"POST", s.ready(s.watch)}},
 			"_ack":             {{"POST", s.ready(s.ack)}},
 		},

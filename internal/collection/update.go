@@ -347,7 +347,11 @@ func (c *Collection) writeMatch(v *view, id string, cur *entry, m map[string]any
 		return nil, nil
 	}
 
+	// A document stored before _v was refused can hold one: drop it.
+	delete(m, versionField)
+
 	doc, err := c.finishDoc(v, id, m)
+
 	if err != nil {
 		return nil, err
 	}

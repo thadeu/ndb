@@ -38,6 +38,7 @@ The SDKs turn each code into a typed error: Go `ndb.ErrUnknownCollection` (`erro
 | `invalid_blob_ref` | 400 | The blob reference is not `sha256:<64 hex>`. |
 | `invalid_position` | 400 | The watch position is not valid. |
 | `not_a_stream` | 400 | A [stream](../streams.md) route, or `"stream": true`, on a collection that is not a stream. |
+| `stream_append_only` | 400 | A write route of every collection (`_doc` POST, `_bulk`, `_update`, `_update_by_query`, `_delete_by_query`, `_expire`, `_persist`) on a stream. |
 | `invalid_stream_id`, `stream_id_too_small` | 400 | A stream entry ID that is not `<ms>-<seq>` (or `0-0` in an append), or an append ID that is not greater than the last one. |
 | `unknown_group` | 404 | The stream group does not exist. |
 | `group_exists` | 409 | A stream group create with a name that exists. |
@@ -48,6 +49,7 @@ The SDKs turn each code into a typed error: Go `ndb.ErrUnknownCollection` (`erro
 | `collection_exists` | 409 | A rename to a name that exists (without `replace`), or a restore `to` a name that exists. |
 | `unknown_route` | 404 | No route has this path. |
 | `method_not_allowed` | 405 | The path exists with other methods (see `Allow`). |
+| `invalid_range` | 416 | The `Range` of a `GET /_blobs/{ref}` is out of the blob. `Content-Range: bytes */<size>` gives the size. |
 | `duplicate_id` | 409 | A document with this `_id` exists. |
 | `unique_violation` | 409 | A `unique` field value exists. |
 | `catalog_conflict` | 409 | Two declarations disagree (`write`, `path`, `time`). |

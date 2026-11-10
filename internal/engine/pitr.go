@@ -374,7 +374,9 @@ func (db *DB) Restore(name, into string, until, now time.Time) error {
 		return fmt.Errorf("%w: %s", catalog.ErrUnknown, name)
 	case def.PartitionOf != "":
 		return fmt.Errorf("%w: %s is a partition of %s: restore %s", catalog.ErrInvalid, name, def.PartitionOf, def.PartitionOf)
-	case IsPattern(into) || !catalog.ValidName(into) || into == name:
+	case into == name:
+		return fmt.Errorf("%w: to must differ from the collection: restore into a new name, then rename it onto %s with replace", catalog.ErrInvalid, name)
+	case IsPattern(into) || !catalog.ValidName(into):
 		return fmt.Errorf("%w: bad collection name %q", catalog.ErrInvalid, into)
 	}
 
@@ -391,6 +393,10 @@ func (db *DB) Restore(name, into string, until, now time.Time) error {
 
 	if _, taken := db.cat.Get(into); taken {
 		return fmt.Errorf("%w: %s", ErrExists, into)
+	}
+
+	if err := db.checkTargets(into, def.PartitionBy, nil); err != nil {
+		return err
 	}
 
 	db.swap.RLock()

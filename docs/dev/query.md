@@ -84,7 +84,7 @@ All keys are optional. An unknown key is `invalid_query`.
 |---|---|
 | `query` | filter object. See [Filters](#filters). No `query` matches every document. |
 | `fields` | return only these paths (dot paths allowed). |
-| `sort` | object `field: 1` or `-1`. The key order is the sort order. The document id is always the last sort key. With no `sort`, the order is insertion order. |
+| `sort` | object `field: 1` or `-1`. The key order is the sort order. The document id is always the last sort key, in the direction of the last key of `sort`. With no `sort`, the order is insertion order. |
 | `limit`, `skip` | non-negative integers. |
 | `after` | cursor from the previous page. See [Pagination](#pagination). |
 | `count` | add the total number of matches in header `X-Ndb-Total`. `POST /{coll}/_count` answers only the number. |
@@ -180,7 +180,8 @@ const rows = await orders
 |---|---|
 | `foreign_key`, `fk` | the field of the foreign key. Required. |
 | `primary_key`, `pk` | the field it points to. Default `_id`. |
-| `query`, `sort`, `limit` | filter, order and cut the documents of a `has_many` or `has_one` (the keys of a search). |
+| `query`, `sort` | filter and order the documents of a `has_many` or `has_one` (the keys of a search). On a `belongs_to`, `query`, `sort` and `limit` are `400 lookup_invalid`. |
+| `limit` | cut the documents of a `has_many` (1 to 1000). On a `has_one` (always one document) it is `400 lookup_invalid`. |
 | `fields` | keep these fields of the related documents. |
 | `lookup` | the lookups of the related documents. Two levels at most. |
 
@@ -192,7 +193,7 @@ const rows = await orders
 - **The name** of a lookup replaces a field of that name in the row.
 - **Scope:** a [scoped token](configuration.md#scoped-tokens) must read every collection of the lookup, else `403 forbidden`.
 - **Consistency:** each collection reads its own snapshot. A write between two reads can show on one side only (as MongoDB without a transaction).
-- Patterns (`logs-*`) and partitioned collections take a lookup, as source and as the other side. `_count` does not.
+- A pattern (`logs-*`) or a partitioned collection can be the source of a lookup. Only a partitioned collection can be the other side: a pattern there is `400 lookup_invalid` (the other side is one collection name). `_count` takes no lookup.
 - An `_aggregate` takes [`$lookup`](aggregate.md#lookup) at the end of the pipeline.
 
 ## Filters
@@ -399,10 +400,10 @@ A write operator in `query`, or another key in `update`, is `400 unknown_operato
 | `{"$set": {"f": v}}` | set the field |
 | `{"$setOnInsert": {"f": v}}` | set the field only when an [upsert](#upsert) creates the document. On a match it does nothing, so a racing writer is never overwritten. |
 | `{"$unset": {"f": true}}` | remove the field (`true` or `""`) |
-| `{"$inc": {"f": n}}` | add a number. A negative number subtracts. A missing field is 0. A field that is not a number is `invalid_field`. Integers stay exact. |
+| `{"$inc": {"f": n}}` | add a number. A negative number subtracts. A missing field is 0. A field that is not a number is `invalid_field`. Integers stay exact, also above 2^53: a sum of two integers out of the int64 range is `invalid_field` (integer overflow), and the document does not change. A fraction gives a float. |
 | `{"$push": {"f": v}}` | append one value. `{"$push": {"f": {"$each": [a, b]}}}` appends many. A missing field becomes a new array. A field that is not an array is `invalid_field`. |
 | `{"$pull": {"f": v}}` | remove every element equal to `v`. A condition removes the elements that match it: `{"$gte": 5}`, or `{"status": "done"}` for arrays of objects. |
-| `{"$min": {"f": v}}`, `{"$max": {"f": v}}` | set when the field is missing or `v` is lower (higher). Numbers, or strings in lexical order. A different type than the field is `invalid_field`. |
+| `{"$min": {"f": v}}`, `{"$max": {"f": v}}` | set when the field is missing or `v` is lower (higher). Numbers, or strings in lexical order. A different type than the field is `invalid_field`. Numbers compare exactly, also integers above 2^53. |
 
 Several operators can go in one `update`, on different fields:
 
@@ -478,9 +479,10 @@ Create once, never overwrite: the query finds the document, `$setOnInsert` fills
 curl ... /users/_update_by_query -d '{"query":{"email":"a@b.c"},"update":{"$setOnInsert":{"name":"Ana","plan":"free"}},"upsert":true}'
 ```
 
-A counter that expires, as a rate limit:
+A counter that expires, as a rate limit. An upsert does not create the collection (`404 unknown_collection`), so declare it first, with an `expires_field` for `expire_in`:
 
 ```bash
+curl -X PUT ... /hits -d '{"expires_field":"expires_at"}'
 curl ... /hits/_update/ip:1.2.3.4 -d '{"update":{"$inc":{"n":1}},"upsert":true,"expire_in":"60s"}'
 ```
 
@@ -490,7 +492,7 @@ HTTP 400:
 
 | Code | Cause |
 |---|---|
-| `unknown_operator` | a key of `update` that is not a write operator, a write operator in `query`, or an unknown `$` key |
+| `unknown_operator` | a key of `update` that is not a write operator, a write operator in `query`, or a top-level `$` key of `query` that is not `$and`, `$or`, `$nor` or `$not`. An unknown operator on a field (`{"n":{"$bogus":1}}`) is `invalid_query`, as in a search. |
 | `no_update` | no write operator |
 | `conflicting_update` | the same field, or a field and its parent (`a` and `a.b`), in two operators |
 | `invalid_field` | a field name that starts with `$`, or a value of the wrong type |

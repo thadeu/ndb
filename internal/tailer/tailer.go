@@ -501,6 +501,8 @@ func (t *Tailer) handle(ctx context.Context, fl *file, l []byte, start int64, re
 		return nil
 	}
 
+	waited := false
+
 	for {
 		err := t.cfg.Sink.Apply(fl.path, start, l)
 
@@ -512,6 +514,12 @@ func (t *Tailer) handle(ctx context.Context, fl *file, l []byte, start int64, re
 			return t.reject(fl, start, err.Error(), l, true)
 		}
 
+		if !waited {
+			t.log.Warn("memtable full, the tail waits for a seal", "file", fl.path, "offset", start)
+
+			waited = true
+		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -521,7 +529,13 @@ func (t *Tailer) handle(ctx context.Context, fl *file, l []byte, start int64, re
 }
 
 func (t *Tailer) reject(fl *file, off int64, reason string, l []byte, whole bool) error {
-	if err := t.quar.add(fl.path, off, reason, l, whole); err != nil {
+	added, err := t.quar.add(fl.path, off, reason, l, whole)
+
+	if added {
+		t.log.Warn("line quarantined", "file", fl.path, "offset", off, "reason", reason, "bytes", len(l))
+	}
+
+	if err != nil {
 		t.log.Error("cannot write quarantine row", "file", fl.path, "offset", off, "err", err)
 	}
 

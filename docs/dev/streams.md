@@ -7,7 +7,9 @@ stays pending, and another worker can claim it.
 
 Use it as a durable work queue or event log that you can also search: a
 stream is a collection, so `_search`, `_count` and `_aggregate` read it with
-the [filters](query.md#filters).
+the [filters](query.md#filters). A pattern route that matches a stream, and
+a lookup into a stream, are refused: see
+[Read, count and delete entries](http/streams.md#read-count-and-delete-entries).
 
 The wire contract is on [Stream routes](http/streams.md); this page is how
 to use them.
@@ -53,9 +55,10 @@ The loop of a worker:
    none.
 3. Process each entry, then ack it.
 4. From time to time, claim the entries that other workers left idle
-   (`claim` with `min_idle_ms` and a `cursor`). An entry with many
-   deliveries (`deliveries` in `pending`) is a poison message: append it to
-   a dead-letter stream and ack it.
+   (`claim` with `min_idle_ms` and a `cursor`).
+5. When an entry fails on its last allowed delivery (`deliveries` in
+   `pending`), it is a poison message: append it to a dead-letter stream
+   and ack it at once.
 
 Delivery is **at least once**: after a crash or a claim, an entry can come
 again. Make the work safe to repeat.
@@ -63,7 +66,9 @@ again. Make the work safe to repeat.
 ### The worker in the SDKs
 
 Each SDK runs this loop for you: a handler that returns acks the entry, one
-that fails leaves it pending. The details are in the README of each SDK.
+that fails leaves it pending. The details are on the page of each client:
+[Go](clients/go.md#work), [Ruby](clients/ruby.md#group-worker),
+[Rails](clients/rails.md#streams), [TypeScript](clients/typescript.md#work).
 
 Go:
 
@@ -89,6 +94,21 @@ worker = group.worker("worker-1", claim_idle: 60, max_deliveries: 5, dead_letter
 end
 
 worker.run # worker.stop from another thread ends it
+```
+
+Rails, with a class in `app/streams` (the gem `ndb-rails`). `bundle exec ndb
+streams` runs the loop for every class:
+
+```ruby
+class BillingPaid
+  include Ndb::Streams
+
+  stream :orders, group: :billing, claim_idle: 1.minute, max_deliveries: 5
+
+  def perform(event)
+    charge(event.to_h)
+  end
+end
 ```
 
 TypeScript:
@@ -118,14 +138,25 @@ await group.work('worker-1', async (entry) => {
   entries went to which consumer, with one fsync, before the answer. Read in
   batches (`count`) so one fsync covers many entries; `no_ack` writes
   nothing (at most once).
-- Streams do not use `_watch`: a worker pulls entries; `block_ms` is a
-  request that waits until an append wakes it.
+- Workers do not use `_watch`: a worker pulls entries; `block_ms` is a
+  request that waits until an append wakes it. `_watch` works on a stream
+  (its events give the entry ID), for a change feed.
+
+## Truncate, drop and rename
+
+A truncate, a drop or a rename of a stream holds the stream while the
+engine changes its dir: a stream request that comes in that time waits for
+the end, then sees the new state. A truncate deletes the groups. An append,
+a read or an ack that was in flight finishes before, or runs again after on
+the new state (an ack after a truncate is then `404 unknown_group`); it
+never fails with an internal error.
 
 ## Trim and retention
 
 - `trim` with `max_len` or `min_id`, or `trim` in the append. `approx: true`
   deletes whole blocks of 1 024 entries only: with a trim on every append,
-  it deletes once per block instead of once per append.
+  it deletes once per block instead of once per append. `limit` (with
+  `approx` only, as in Redis) caps the deletes of one trim.
 - `retention` of the stream deletes old entries by time (`_ts`), as for any
   collection.
 - A trim does not change the groups: the PEL keeps the IDs of deleted
@@ -139,8 +170,8 @@ await group.work('worker-1', async (entry) => {
 - `ndb_stream_entries_added_total{stream}`: every entry ever appended.
 - `ndb_stream_group_pending{stream,group}`: entries delivered and not acked.
 - `ndb_stream_group_lag{stream,group}`: entries not delivered to the group
-  yet (left out when it cannot be known, after a trim in the part the group
-  did not read).
+  yet, the `lag` of `GET /{s}/_streams/groups` (Redis 7 rules: exact, or an
+  estimate after a trim or a delete; left out when it cannot be known).
 
 ## Redis command map
 
@@ -154,7 +185,7 @@ await group.work('worker-1', async (entry) => {
 | `XRANGE s a b COUNT n` | `POST /s/_search {"query":{"_id":{"$gte":"a","$lte":"b"}},"sort":{"_id":1},"limit":n}` |
 | `XREVRANGE s b a` | the same with `"sort":{"_id":-1}` |
 | `XDEL s id` | `DELETE /s/_doc/id` |
-| `XREAD STREAMS s id` | `_search` with `{"_id":{"$gt":"id"}}` |
+| `XREAD COUNT n BLOCK ms STREAMS s id` | `POST /s/_streams/read {"after":"id","count":n,"block_ms":ms}` |
 | `XGROUP CREATE s g $ MKSTREAM` | `PUT /s/_streams/groups/g {"start":"$"}` |
 | `XGROUP SETID s g id` | `POST /s/_streams/groups/g/setid {"id":"id"}` |
 | `XGROUP DESTROY s g` | `DELETE /s/_streams/groups/g` |
@@ -173,6 +204,141 @@ await group.work('worker-1', async (entry) => {
 | `XINFO GROUPS s` | `GET /s/_streams/groups` |
 | `XINFO CONSUMERS s g` | `GET /s/_streams/groups/g/consumers` |
 
+`XREAD`, with or without `BLOCK`, reads one stream for each request.
+
+Not supported: a read of many streams in one request (`XREAD` /
+`XREADGROUP` with many keys; send one request for each stream); `XSETID`;
+the Redis 8.2 commands and options `XACKDEL`, `XDELEX`, `DELREF` and `ACKED`
+(a trim keeps the PEL references, as `KEEPREF` and as up to Redis 8.0).
+
+Each SDK also has these commands with the names and the shapes of its Redis
+library: see [Move from Redis Streams](#move-from-redis-streams).
+
+## Move from Redis Streams
+
+An app that uses Redis Streams can change to ndb and keep its calls. Each
+SDK has the stream commands of its Redis library, with the same arguments
+and the same answers, on top of the routes of the
+[map](#redis-command-map). The app picks its backend in one place, its
+factory. So the two backends can run side by side, and the change is one
+setting.
+
+The adapters are code in the SDKs. The daemon does not speak the Redis
+protocol (RESP): a Redis client cannot connect to ndb.
+
+Ruby, with [redis-rb](clients/ruby.md#redis-streams-commands). The methods
+are on `Ndb::Client`:
+
+```ruby
+# config/initializers/streams.rb
+STREAMS = ENV["STREAMS_BACKEND"] == "ndb" ? Ndb.connect : Redis.new
+
+STREAMS.xadd("orders", { order_id: 42 }, maxlen: 1000)
+STREAMS.xreadgroup("billing", "w1", "orders", ">", count: 10, block: 5000)
+```
+
+Go, with [go-redis](clients/go.md#redis-streams-commands-ndbredis). The
+module `ndbredis` returns go-redis types; the app writes an interface with
+the commands it uses:
+
+```go
+type Streams interface {
+	XAdd(ctx context.Context, a *redis.XAddArgs) *redis.StringCmd
+	XReadGroup(ctx context.Context, a *redis.XReadGroupArgs) *redis.XStreamSliceCmd
+	XAck(ctx context.Context, stream, group string, ids ...string) *redis.IntCmd
+}
+
+var streams Streams = rdb // a *redis.Client
+
+if cfg.Backend == "ndb" {
+	streams = ndbredis.New(db) // db is a *ndb.DB
+}
+```
+
+TypeScript, with [ioredis](clients/typescript.md#ioredis):
+
+```ts
+import { connect } from '@thadeu/ndb'
+import { ioredis } from '@thadeu/ndb/ioredis'
+import { Redis } from 'ioredis'
+
+const streams = process.env.STREAMS_BACKEND === 'ndb' ? ioredis(connect()) : new Redis()
+
+await streams.xadd('orders', '*', 'order_id', '42')
+```
+
+TypeScript, with [node-redis](clients/typescript.md#node-redis):
+
+```ts
+import { connect } from '@thadeu/ndb'
+import { nodeRedis } from '@thadeu/ndb/node-redis'
+import { createClient } from 'redis'
+
+const streams = process.env.STREAMS_BACKEND === 'ndb' ? nodeRedis(connect()) : await createClient().connect()
+
+await streams.xAdd('orders', '*', { order_id: '42' })
+```
+
+What is different from Redis, in every language:
+
+| | Redis | ndb, through the Redis commands |
+|---|---|---|
+| Values in an answer | text | text too. A value that ndb keeps as a number, a boolean or an object comes back as its text (`42` is `"42"`, an object is its JSON text). |
+| Order of the fields of an entry | the order of the `XADD` | name order |
+| Field names | any | a name that starts with `_` is reserved (`_id`, `_ts`) |
+| Stream names | any key (`orders:eu`) | an ndb collection name: `a-z`, digits, `_` and `-`, at most 64 characters, the first one a letter or a digit |
+| A read of many streams | one command | one request for each stream, one after the other |
+| A blocked read (`BLOCK`) | many streams | one stream. With more than one, the call fails. |
+| `MULTI` and pipelines | yes | no. Each call sends its requests at once. |
+| Other Redis commands | yes | no. Only the stream commands (`X...`). |
+| Errors | the error class of the library | the error type of the ndb SDK. The message starts as in Redis (`BUSYGROUP`, `NOGROUP`, ...). |
+| Entries deleted while pending | the PEL keeps the ID (up to Redis 8.0) | the same |
+
+Some differences are in one adapter only: what a write keeps (the Ruby and
+Go adapters keep the JSON type of a value; the TypeScript adapters keep
+text), the most entries of a read without a count, and the options that
+are not supported. Each client page has its full list:
+[Ruby](clients/ruby.md#differences-from-redis),
+[Go](clients/go.md#differences-from-redis),
+[TypeScript](clients/typescript.md#differences-from-redis).
+
+After the move, an app can change to the native calls of the SDK (`append`,
+`read`, the [worker](#the-worker-in-the-sdks)) one call at a time: the two
+forms read and write the same streams.
+
+## The contract between languages
+
+A stream often has a writer in one language and consumers in others. The
+entry is JSON, so the contract is the JSON object. Four rules keep it
+stable:
+
+- **Field names in snake_case.** `order_id`, not `orderId` or `OrderID`.
+  Each SDK then maps the name to its own style (a Go `ndb:"order_id"` tag,
+  a Ruby Hash key, a TypeScript type). A name cannot start with `_`.
+- **JSON types only.** A string, a number, a boolean, `null`, an array or an
+  object. A date is an RFC 3339 string (`"2026-11-09T15:00:00Z"`): JSON has
+  no date type, and each consumer parses the string. Do not send a
+  language-specific value (a Ruby Symbol as a value, a Go `time.Duration`
+  as a number of nanoseconds). The time of the entry itself is in its ID
+  and in `_ts`.
+- **One group for each service.** A group gets every entry one time. The
+  consumers of one group share the entries. So billing and mail each have
+  their own group and each get all the entries. Two services in one group
+  split the entries: each one gets only a part.
+- **A version field `v`.** Each entry has `"v": 1`. A consumer reads `v`
+  first and ignores (or sends to its dead letter) a version that it does
+  not know. Add a field without a new version; change the meaning or the
+  type of a field with a new version.
+
+```json
+{ "v": 1, "order_id": 42, "total": 99.9, "paid_at": "2026-11-09T15:00:00Z" }
+```
+
+- An entry that was written through the TypeScript Redis adapters has text
+  values only (`"42"`, not `42`). When native consumers read the same
+  stream, write with the native `append` or parse the text.
+- ndb does not check the contract: a stream takes any JSON object.
+
 ## Backup and PITR
 
 - A [backup](operations.md) keeps the groups: their position and their
@@ -182,8 +348,3 @@ await group.work('worker-1', async (entry) => {
 - A PITR restore gives the entries as they were at the instant, not the
   groups: the PEL has no history of its changes. Make the groups again on
   the restored stream, with `start` at the last ID each one processed.
-
-Not supported: a read of many streams in one call (`XREAD` / `XREADGROUP`
-with many keys); `XSETID`; the Redis 8.2 options `KEEPREF`, `DELREF`,
-`ACKED`, `XACKDEL` and `XDELEX` (a trim keeps the PEL references, as up to
-Redis 8.0).

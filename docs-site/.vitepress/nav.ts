@@ -116,6 +116,8 @@ export const tabs: Tab[] = [
           { text: 'How the engine runs it', link: '/streams#how-the-engine-runs-it' },
           { text: 'Trim and retention', link: '/streams#trim-and-retention' },
           { text: 'Redis command map', link: '/streams#redis-command-map' },
+          { text: 'Move from Redis Streams', link: '/streams#move-from-redis-streams' },
+          { text: 'The contract between languages', link: '/streams#the-contract-between-languages' },
         ],
       },
     ],

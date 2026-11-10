@@ -1,0 +1,184 @@
+{
+  "name": "a delete in the unread part makes entries_read unknown until the group reads past it; then lag is exact again",
+  "stream": "orders",
+  "steps": [
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "5-1"
+      },
+      "expect": {
+        "body": {
+          "_id": "5-1"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "5-2"
+      },
+      "expect": {
+        "body": {
+          "_id": "5-2"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "5-3"
+      },
+      "expect": {
+        "body": {
+          "_id": "5-3"
+        }
+      }
+    },
+    {
+      "op": "group_create",
+      "group": "g",
+      "body": {
+        "start": "0"
+      }
+    },
+    {
+      "op": "groups",
+      "expect": {
+        "body": [
+          {
+            "name": "g",
+            "consumers": 0,
+            "pending": 0,
+            "last_delivered_id": "0-0",
+            "entries_read": null,
+            "lag": 3
+          }
+        ]
+      }
+    },
+    {
+      "op": "delete",
+      "id": "5-2",
+      "expect": {
+        "body": {
+          "deleted": 1
+        }
+      }
+    },
+    {
+      "op": "read",
+      "group": "g",
+      "body": {
+        "consumer": "c",
+        "count": 1
+      },
+      "expect": {
+        "rows": [
+          {
+            "_id": "5-1",
+            "n": 1
+          }
+        ],
+        "ignore": [
+          "_ts"
+        ]
+      }
+    },
+    {
+      "op": "groups",
+      "expect": {
+        "body": [
+          {
+            "name": "g",
+            "consumers": 1,
+            "pending": 1,
+            "last_delivered_id": "5-1",
+            "entries_read": null,
+            "lag": null
+          }
+        ]
+      }
+    },
+    {
+      "op": "read",
+      "group": "g",
+      "body": {
+        "consumer": "c",
+        "count": 100
+      },
+      "expect": {
+        "rows": [
+          {
+            "_id": "5-3",
+            "n": 1
+          }
+        ],
+        "ignore": [
+          "_ts"
+        ]
+      }
+    },
+    {
+      "op": "groups",
+      "expect": {
+        "body": [
+          {
+            "name": "g",
+            "consumers": 1,
+            "pending": 2,
+            "last_delivered_id": "5-3",
+            "entries_read": 3,
+            "lag": 0
+          }
+        ]
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "6-0"
+      },
+      "expect": {
+        "body": {
+          "_id": "6-0"
+        }
+      }
+    },
+    {
+      "op": "read",
+      "group": "g",
+      "body": {
+        "consumer": "c",
+        "count": 100
+      }
+    },
+    {
+      "op": "groups",
+      "expect": {
+        "body": [
+          {
+            "name": "g",
+            "consumers": 1,
+            "pending": 3,
+            "last_delivered_id": "6-0",
+            "entries_read": 4,
+            "lag": 0
+          }
+        ]
+      }
+    }
+  ]
+}

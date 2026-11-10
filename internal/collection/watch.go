@@ -117,8 +117,19 @@ func (f *engineFeed) Now() string {
 
 func (f *engineFeed) Merge(old, ack string) (string, error) {
 	a, err := parseEnginePos(ack)
+
 	if err != nil || ack == "" {
 		return "", feed.ErrBadPos
+	}
+
+	// A consumer acks an event it has read, so a position after the last
+	// commit is a bad token: it would skip the changes up to it.
+	var last uint64
+
+	f.hub.Subscribe(1, func() { last = f.last }).Close()
+
+	if a.tx > last {
+		return "", errf("invalid_position", "the position e%d is after the last change of the collection (tx %d)", a.tx, last)
 	}
 
 	o, err := parseEnginePos(old)

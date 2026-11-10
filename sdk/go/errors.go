@@ -73,6 +73,7 @@ var (
 	ErrInvalidPath       = &Error{Code: "invalid_path"}
 	ErrInvalidIndex      = &Error{Code: "invalid_index"}
 	ErrInvalidBlobRef    = &Error{Code: "invalid_blob_ref"}
+	ErrInvalidRange      = &Error{Code: "invalid_range"}
 	ErrInvalidPattern    = &Error{Code: "invalid_pattern"}
 	ErrPatternReadOnly   = &Error{Code: "pattern_read_only"}
 	ErrPatternTooWide    = &Error{Code: "pattern_too_wide"}
@@ -83,6 +84,7 @@ var (
 	ErrStopping          = &Error{Code: "stopping"}
 	ErrInternal          = &Error{Code: "internal"}
 	ErrNotAStream        = &Error{Code: "not_a_stream"}
+	ErrStreamAppendOnly  = &Error{Code: "stream_append_only"}
 	ErrInvalidStreamID   = &Error{Code: "invalid_stream_id"}
 	ErrStreamIDTooSmall  = &Error{Code: "stream_id_too_small"}
 	ErrUnknownGroup      = &Error{Code: "unknown_group"}

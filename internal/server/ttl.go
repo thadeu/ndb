@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -94,6 +95,10 @@ func (s *Server) expire(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 
 	s.metrics.writes.Add(1)
 
+	if s.debugOn(r) {
+		s.logWrite(w, r, "expire", slog.String("_id", id), slog.Uint64("_v", v), slog.Time("expires_at", at.UTC()))
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{"_id": id, "_v": v, "expires_at": at.UTC().Format(time.RFC3339Nano)})
 }
 
@@ -140,6 +145,10 @@ func (s *Server) persist(w http.ResponseWriter, r *http.Request, db *engine.DB) 
 
 	s.metrics.writes.Add(1)
 
+	if s.debugOn(r) {
+		s.logWrite(w, r, "persist", slog.String("_id", id), slog.Uint64("_v", v))
+	}
+
 	writeJSON(w, http.StatusOK, writeResult{ID: id, V: v})
 }
 
@@ -168,7 +177,5 @@ func (s *Server) ttl(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
-	secs := int64(math.Ceil(info.Remaining.Seconds()))
-
-	writeJSON(w, http.StatusOK, map[string]any{"_id": id, "ttl": secs, "expires_at": info.At.UTC().Format(time.RFC3339Nano)})
+	writeJSON(w, http.StatusOK, map[string]any{"_id": id, "ttl": info.Seconds, "expires_at": info.At.UTC().Format(time.RFC3339Nano)})
 }

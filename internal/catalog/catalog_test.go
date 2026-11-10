@@ -363,3 +363,26 @@ func TestIDSettingIsInvalid(t *testing.T) {
 		t.Fatalf("err = %v, want catalog_invalid that points to unique", err)
 	}
 }
+
+func TestIsPeriod(t *testing.T) {
+	for _, c := range []struct {
+		by, suffix string
+		want       bool
+	}{
+		{"day", "2026-11-07", true},
+		{"day", "2026-11-7", false},
+		{"day", "2026-02-30", false},
+		{"week", "2026-w45", true},
+		{"week", "2026-w00", false},
+		{"week", "2026-w5", false},
+		{"month", "2026-11", true},
+		{"month", "2026-13", false},
+		{"year", "2026", true},
+		{"year", "26", false},
+		{"hour", "2026", false},
+	} {
+		if got := catalog.IsPeriod(c.by, c.suffix); got != c.want {
+			t.Errorf("IsPeriod(%q, %q) = %v", c.by, c.suffix, got)
+		}
+	}
+}

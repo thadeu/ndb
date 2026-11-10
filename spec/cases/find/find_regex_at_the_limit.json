@@ -1,0 +1,98 @@
+{
+  "name": "a $regex pattern of exactly 1 KiB is valid",
+  "collection": "orders",
+  "setup": {
+    "catalog": {
+      "write": "engine"
+    },
+    "writes": [
+      {
+        "op": "bulk",
+        "body": {
+          "docs": [
+            {
+              "_id": "o1",
+              "g": 1,
+              "n": 5,
+              "s": "x",
+              "tags": [
+                "p",
+                "q"
+              ],
+              "items": [
+                {
+                  "sku": "a",
+                  "qty": 1
+                },
+                {
+                  "sku": "b",
+                  "qty": 5
+                }
+              ],
+              "scores": [
+                5,
+                25
+              ]
+            },
+            {
+              "_id": "o2",
+              "g": 1,
+              "n": 3,
+              "s": "y",
+              "items": [
+                {
+                  "sku": "a",
+                  "qty": 3
+                }
+              ],
+              "scores": [
+                5,
+                15
+              ]
+            },
+            {
+              "_id": "o3",
+              "g": 2,
+              "n": "str",
+              "items": []
+            },
+            {
+              "_id": "o4",
+              "g": 2,
+              "s": null,
+              "n": null,
+              "items": {
+                "sku": "a",
+                "qty": 9
+              }
+            },
+            {
+              "_id": "o5",
+              "g": 3,
+              "tags": [
+                "q"
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "request": {
+    "op": "search",
+    "body": {
+      "query": {
+        "s": {
+          "$regex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "fields": [
+        "_id"
+      ]
+    }
+  },
+  "expect": {
+    "ordered": false,
+    "rows": []
+  }
+}

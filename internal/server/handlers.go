@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -79,6 +80,12 @@ func (s *Server) find(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 
 // findPattern is _search over every collection of a pattern (logs-2026-*).
 func (s *Server) findPattern(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+	if err := noStreamIn(db, r.PathValue("coll")); err != nil {
+		writeError(w, err)
+
+		return
+	}
+
 	s.read(w, r, db, &s.metrics.find, s.withLookup(r, db, func(ctx context.Context, body []byte) (collection.Page, error) {
 		return db.FindPattern(ctx, r.PathValue("coll"), body)
 	}))
@@ -94,11 +101,23 @@ func (s *Server) aggregate(w http.ResponseWriter, r *http.Request, db *engine.DB
 		return
 	}
 
-	s.read(w, r, db, &s.metrics.aggregate, s.withLookupStages(r, db, col.Aggregate))
+	run := col.Aggregate
+
+	if isStream(db, r.PathValue("coll")) {
+		run = streamAggregate(run)
+	}
+
+	s.read(w, r, db, &s.metrics.aggregate, s.withLookupStages(r, db, run))
 }
 
 // aggregatePattern is aggregate over every collection of a pattern.
 func (s *Server) aggregatePattern(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+	if err := noStreamIn(db, r.PathValue("coll")); err != nil {
+		writeError(w, err)
+
+		return
+	}
+
 	s.read(w, r, db, &s.metrics.aggregate, s.withLookupStages(r, db, func(ctx context.Context, body []byte) (collection.Page, error) {
 		return db.AggregatePattern(ctx, r.PathValue("coll"), body)
 	}))
@@ -153,6 +172,12 @@ func (s *Server) countDocs(w http.ResponseWriter, r *http.Request, db *engine.DB
 
 // countPattern is _count over every collection of a pattern.
 func (s *Server) countPattern(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+	if err := noStreamIn(db, r.PathValue("coll")); err != nil {
+		writeError(w, err)
+
+		return
+	}
+
 	s.runCount(w, r, db, func(ctx context.Context, body []byte) (collection.Page, error) {
 		return db.FindPattern(ctx, r.PathValue("coll"), body)
 	})
@@ -215,9 +240,16 @@ func (s *Server) insertOne(w http.ResponseWriter, r *http.Request, db *engine.DB
 	}
 
 	res, ok := s.insertDocs(w, r, db, name, [][]byte{body}, 0, false)
-	if ok {
-		writeJSON(w, http.StatusOK, res[0])
+
+	if !ok {
+		return
 	}
+
+	if s.debugOn(r) {
+		s.logWrite(w, r, "insert", slog.String("_id", res[0].ID), slog.Uint64("_v", res[0].V), s.body("doc", body))
+	}
+
+	writeJSON(w, http.StatusOK, res[0])
 }
 
 // bulk is POST /{coll}/_bulk: {"docs": [...], "expire_in", "upsert"}, all
@@ -258,9 +290,20 @@ func (s *Server) bulk(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	}
 
 	res, ok := s.insertDocs(w, r, db, name, docs, expireIn, req.Upsert)
-	if ok {
-		writeJSON(w, http.StatusOK, map[string]any{"results": res})
+
+	if !ok {
+		return
 	}
+
+	if s.debugOn(r) {
+		attrs := resultsAttrs(res)
+
+		attrs = append(attrs, slog.Bool("upsert", req.Upsert), slog.Duration("expire_in", expireIn), s.docsAttr(docs))
+
+		s.logWrite(w, r, "bulk", attrs...)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"results": res})
 }
 
 // insertDocs writes docs in one transaction. On an error it answers it and
@@ -382,6 +425,24 @@ func (s *Server) runUpdate(w http.ResponseWriter, r *http.Request, db *engine.DB
 
 	s.metrics.writes.Add(int64(res.Modified))
 
+	if s.debugOn(r) {
+		op := "update_by_query"
+
+		if id != "" {
+			op = "update"
+		}
+
+		s.logWrite(w, r, op,
+			slog.String("_id", id),
+			slog.Int("matched", res.Matched),
+			slog.Int("modified", res.Modified),
+			slog.Bool("many", req.Many),
+			slog.Bool("upsert", req.Upsert),
+			s.body("body", body),
+			s.body("doc", res.Doc),
+		)
+	}
+
 	out := map[string]any{"matched": res.Matched, "modified": res.Modified}
 
 	if res.Doc != nil && !opts.Many {
@@ -455,6 +516,10 @@ func (s *Server) removeID(w http.ResponseWriter, r *http.Request, db *engine.DB)
 
 	s.metrics.writes.Add(int64(n))
 
+	if s.debugOn(r) {
+		s.logWrite(w, r, "delete", slog.String("_id", id), slog.Int("deleted", n))
+	}
+
 	writeJSON(w, http.StatusOK, map[string]int{"deleted": n})
 }
 
@@ -475,7 +540,13 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
+	// A body with no query is the empty filter, as in _update_by_query.
+	if req.Query == nil {
+		req.Query = map[string]any{}
+	}
+
 	raw, err := json.Marshal(req.Query)
+
 	if err != nil {
 		writeError(w, err)
 
@@ -483,6 +554,7 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	}
 
 	col, err := db.Get(name)
+
 	if err != nil {
 		writeError(w, err)
 
@@ -497,6 +569,10 @@ func (s *Server) remove(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	}
 
 	s.metrics.writes.Add(int64(n))
+
+	if s.debugOn(r) {
+		s.logWrite(w, r, "delete_by_query", slog.Bool("many", req.Many), slog.Int("deleted", n), s.body("body", body))
+	}
 
 	writeJSON(w, http.StatusOK, map[string]int{"deleted": n})
 }
@@ -529,6 +605,12 @@ func (s *Server) ensure(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		writeError(w, err)
 
 		return
+	}
+
+	s.logInfo(w, r, "collection ensured", slog.Bool("stream", final.Stream), slog.Int("indexes", len(final.Indexes)))
+
+	if s.debugOn(r) {
+		s.logWrite(w, r, "ensure", s.body("body", body))
 	}
 
 	if final.PartitionBy != "" {
@@ -584,6 +666,8 @@ func (s *Server) ensureIndex(w http.ResponseWriter, r *http.Request, db *engine.
 		return
 	}
 
+	s.logInfo(w, r, "index ensured", slog.String("field", r.PathValue("field")))
+
 	writeJSON(w, http.StatusOK, map[string]any{"collection": name, "indexes": def.Indexes})
 }
 
@@ -596,6 +680,8 @@ func (s *Server) dropIndex(w http.ResponseWriter, r *http.Request, db *engine.DB
 
 		return
 	}
+
+	s.logInfo(w, r, "index dropped", slog.String("field", r.PathValue("field")))
 
 	writeJSON(w, http.StatusOK, map[string]any{"collection": name, "indexes": def.Indexes})
 }
@@ -614,6 +700,8 @@ func indexBodies(st engine.Stats) []indexBody {
 // client asks for application/x-ndjson. The rows are the same in both; the
 // page data is in headers, sent before the body.
 func writePage(w http.ResponseWriter, r *http.Request, page collection.Page) {
+	noteRows(w, len(page.Rows))
+
 	h := w.Header()
 
 	h.Set("X-Ndb-Plan", page.Plan)

@@ -1,0 +1,58 @@
+{
+  "name": "$in takes date math, and RFC 3339 offsets compare as instants",
+  "collection": "events",
+  "setup": {
+    "catalog": {
+      "write": "engine",
+      "time": "at"
+    },
+    "writes": [
+      {
+        "op": "bulk",
+        "body": {
+          "docs": [
+            {
+              "_id": "e1",
+              "at": "2020-01-01T00:00:00Z",
+              "note": "now-1h"
+            },
+            {
+              "_id": "e2",
+              "at": "2099-01-01T00:00:00Z",
+              "note": "x"
+            },
+            {
+              "_id": "e3",
+              "at": "2020-06-01T12:00:00+02:00",
+              "note": "y"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "request": {
+    "op": "search",
+    "body": {
+      "query": {
+        "at": {
+          "$in": [
+            "now/d",
+            "2020-01-01T01:00:00+01:00"
+          ]
+        }
+      },
+      "fields": [
+        "_id"
+      ]
+    }
+  },
+  "expect": {
+    "ordered": false,
+    "rows": [
+      {
+        "_id": "e1"
+      }
+    ]
+  }
+}
