@@ -343,3 +343,63 @@ func TestLogKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestSecurityDefaults(t *testing.T) {
+	cfg, err := config.Load(write(t, "{}"))
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(cfg.CORSOrigins) != 0 || len(cfg.AllowedHosts) != 0 || cfg.TrustProxy || cfg.MaxConns != 0 || cfg.MaxWatches != 0 {
+		t.Fatalf("got %+v", cfg)
+	}
+
+	if cfg.AuthFailures != 10 || cfg.AuthWindow != time.Minute || cfg.AuthLockout != 5*time.Minute {
+		t.Fatalf("lockout = %d in %v for %v", cfg.AuthFailures, cfg.AuthWindow, cfg.AuthLockout)
+	}
+}
+
+func TestSecurityKeys(t *testing.T) {
+	cfg, err := config.Load(write(t, `
+cors_origins: [https://app.example.com, "http://localhost:5173"]
+allowed_hosts: [ndb.internal]
+trust_proxy: true
+auth_failures: 5
+auth_window: 30s
+auth_lockout: 1h
+max_conns: 512
+max_watches: 64
+`))
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(cfg.CORSOrigins) != 2 || cfg.AllowedHosts[0] != "ndb.internal" || !cfg.TrustProxy {
+		t.Fatalf("got %+v", cfg)
+	}
+
+	if cfg.AuthFailures != 5 || cfg.AuthWindow != 30*time.Second || cfg.AuthLockout != time.Hour || cfg.MaxConns != 512 || cfg.MaxWatches != 64 {
+		t.Fatalf("got %+v", cfg)
+	}
+
+	for _, bad := range []string{
+		"cors_origins: [app.example.com]",
+		"cors_origins: [\"https://app.example.com/path\"]",
+		"cors_origins: [\"ftp://app.example.com\"]",
+		"cors_origins: [\"*\"]",
+		"allowed_hosts: [\"ndb.internal:7070\"]",
+		"allowed_hosts: [\"http://ndb.internal\"]",
+		"allowed_hosts: [\"\"]",
+		"auth_failures: -1",
+		"auth_window: soon",
+		"auth_lockout: 0s",
+		"max_conns: -1",
+		"max_watches: -1",
+	} {
+		if _, err := config.Load(write(t, bad)); !errors.Is(err, config.ErrInvalid) {
+			t.Fatalf("%q: err = %v, want ErrInvalid", bad, err)
+		}
+	}
+}

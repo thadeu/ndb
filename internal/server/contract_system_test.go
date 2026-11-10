@@ -727,9 +727,13 @@ func TestContractBackupOnUnixSocket(t *testing.T) {
 
 // With -token-file, every TCP request needs the token, /_health and
 // /_metrics included, and a known route or not: 401 unauthorized with the
-// error body.
+// error body. The lockout is off here: the test makes 22 failures from one
+// IP (TestLockout covers it).
 func TestContractTokenOnEverySystemRoute(t *testing.T) {
-	_, tcp, addr := tokenServer(t, "s3cret")
+	_, tcp, addr := authServer(t, func(srv *server.Server) {
+		srv.SetToken("s3cret")
+		srv.SetSecurity(server.Security{})
+	})
 
 	routes := []struct{ method, path, body string }{
 		{"GET", "/_health", ""},

@@ -90,6 +90,7 @@ func (s *Server) metricsPage(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintf(w, "# TYPE ndb_writes_total counter\nndb_writes_total %d\n", s.metrics.writes.Load())
 	fmt.Fprintf(w, "# TYPE ndb_collections gauge\nndb_collections %d\n", collections)
 	fmt.Fprintf(w, "# TYPE ndb_ready gauge\nndb_ready %d\n", ready)
+	fmt.Fprintf(w, "# TYPE ndb_watch_streams gauge\nndb_watch_streams %d\n", s.watches.Load())
 
 	fmt.Fprint(w, "# TYPE ndb_query_seconds histogram\n")
 	s.metrics.find.Write(w, "ndb_query_seconds", `type="find"`)

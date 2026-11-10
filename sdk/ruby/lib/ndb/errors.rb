@@ -71,6 +71,10 @@ module Ndb
   # The daemon refused a token for this route, or a route over TCP.
   class Forbidden < Error; end
 
+  # The IP failed the token check too many times, or max_watches streams are
+  # open (HTTP 429). Wait for the Retry-After seconds.
+  class TooManyRequests < Error; end
+
   # A document, an id, a batch, a path or an index definition is not valid.
   class InvalidDocument < Error; end
 
@@ -153,6 +157,7 @@ module Ndb
     "lookup_too_large" => LookupError,
     "invalid_pipeline" => InvalidQuery,
     "forbidden" => Forbidden,
+    "too_many_requests" => TooManyRequests,
     "invalid_doc" => InvalidDocument,
     "missing_id" => InvalidDocument,
     "invalid_id" => InvalidDocument,

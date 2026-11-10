@@ -28,6 +28,7 @@ export const llmsSummaries: Record<string, string> = {
   'examples/outbox': 'An outbox with watch, a filter and ack, that continues after a restart.',
   'examples/ttl-sessions': 'Documents that expire by themselves: expire_in, ttl, expire and persist.',
   operations: 'The runbook: health, metrics, logs, backup and restore, recovery after a crash, compaction, retention, TTL and upgrades.',
+  security: 'The threat model: unix socket and TCP, tokens and scopes, the CSRF and DNS rebinding guards (cors_origins, allowed_hosts), the token lockout, TLS with a proxy, data at rest, debug logs, the images, the DoS limits (max_conns, max_watches) and operator injection in apps.',
   pitr: 'Point in time recovery: a copy of a collection as it was at an instant, and a rename to put it in place.',
   'http/system': 'The system routes: _health, _metrics, _log, _collections, _stats, _size, _backup, _restore, _pitr and _blobs.',
   'http/collections': 'The collection routes: define (PUT), read, drop, truncate, rename, restore, indexes, stats, compact, quarantine, and partitioned collections.',

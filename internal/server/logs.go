@@ -26,6 +26,9 @@ import (
 // requestIDMax is the longest X-Request-Id that ndb takes from a client.
 const requestIDMax = 128
 
+// userAgentMax is the longest User-Agent on a request line.
+const userAgentMax = 256
+
 // writeIDsMax and writeDocsMax limit a write line of a batch: the first
 // ids and the first docs, then the counts.
 const (
@@ -207,6 +210,10 @@ func (s *Server) logRequest(rl *reqLog, r *http.Request) {
 
 	if rl.token != "" {
 		attrs = append(attrs, slog.String("token", rl.token))
+	}
+
+	if ua := r.UserAgent(); ua != "" {
+		attrs = append(attrs, slog.String("user_agent", cut(ua, userAgentMax)))
 	}
 
 	if r.URL.RawQuery != "" {

@@ -40,7 +40,7 @@ production:
   token: <%= ENV["NDB_TOKEN"] %>
 ```
 
-Keys: `url`, `socket`, `token`, `timeout`, `pool_size`, `ready_timeout`. Any other key is ignored.
+Keys: `url`, `socket`, `token`, `timeout`, `pool_size`, `ready_timeout`, `user_agent`. Any other key is ignored.
 
 Any app: configure in code, for example in `config/initializers/ndb.rb`.
 
@@ -51,6 +51,7 @@ Ndb::Rails.configure do |c|
   c.timeout = 30
   c.pool_size = 16
   c.ready_timeout = 10
+  c.user_agent = "myapp/1.2"                # optional: the token of your app
 end
 ```
 
@@ -60,6 +61,7 @@ end
 - The token is `token`, or env `NDB_TOKEN`. It goes only in the `Authorization` header. A unix socket does not need it.
 - `ready_timeout` is how long a call retries while the daemon is not ready (`not_ready`, or the socket is missing or refuses). It uses backoff with jitter. A write is retried only when the daemon certainly did not process it. A read is also retried after a dropped connection. A timeout is never retried.
 - The pool drops its connections after a `fork`.
+- Every request sends `User-Agent: ndb-ruby/<version> (ruby <version>; <platform>) ndb-rails/<version> rails/<Rails.version>`, then the `user_agent` of the configuration (the token of your app, such as `myapp/1.2`), so the daemon can tell the apps apart.
 - `Ndb::Rails.client` is an `Ndb::Client` built from this configuration (`Ndb::Rails.configuration`). You can also build one: `Ndb::Client.new(socket: "/tmp/ndb.sock", token: nil, timeout: 30, pool_size: 16, ready_timeout: 10)`. The [`ndb` README](https://github.com/thadeu/ndb/blob/main/sdk/ruby/README.md) documents every client call.
 
 ## Define a model

@@ -48,6 +48,13 @@ type Server struct {
 
 	// log is the logger of the request lines (logs.go).
 	log *logging.Logger
+
+	// sec are the browser guards and the limits (guard.go, limit.go).
+	// fails counts the failed token checks by IP; watches is the count of
+	// open _watch streams.
+	sec     Security
+	fails   *failLimiter
+	watches atomic.Int64
 }
 
 func New() *Server {
@@ -55,7 +62,9 @@ func New() *Server {
 	s := &Server{heartbeat: defaultHeartbeat, stopCtx: stopCtx, started: time.Now()}
 	s.log = logging.New(os.Stderr, logging.Options{Level: slog.LevelInfo, Format: logging.DefaultFormat, BodyMax: logging.DefaultBodyMax, SlowMs: logging.DefaultSlowMs})
 	s.streams = streams.New(func() *engine.DB { return s.db.Load() })
-	s.handler = s.observe(s.authenticate(s.routes()))
+	s.SetSecurity(DefaultSecurity())
+
+	s.handler = s.observe(s.guard(s.authenticate(s.routes())))
 	s.http = &http.Server{
 		Handler:           s.handler,
 		ReadHeaderTimeout: 10 * time.Second,

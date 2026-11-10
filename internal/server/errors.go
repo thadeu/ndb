@@ -119,6 +119,8 @@ func statusOf(code string) int {
 		return http.StatusForbidden
 	case "history_truncated":
 		return http.StatusGone
+	case "too_many_requests":
+		return http.StatusTooManyRequests
 	case "group_limit_exceeded", "lookup_too_large":
 		return http.StatusUnprocessableEntity
 	case "canceled":

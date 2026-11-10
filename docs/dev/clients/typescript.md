@@ -40,6 +40,7 @@ await ndb.close()
 - The address is `unix:///path`, `tcp://host:port`, or `https://host` (ndb behind a TLS proxy; `http://` works too). Without an address, `connect` reads `NDB_URL`. With no address and no `NDB_URL`, it throws a `TypeError`: there is no default address.
 - A local daemon that you start with no flags and not as root listens on the unix socket `~/.ndb/ndb.sock` and on TCP `127.0.0.1:7070`. As root (or with `/var/lib/ndb`), it listens only on `/run/ndb/ndb.sock`. Give the full path: ``connect(`unix://${os.homedir()}/.ndb/ndb.sock`)`` or `connect('tcp://127.0.0.1:7070')`. See [Configuration](../configuration.md).
 - The token goes only in the `Authorization` header. A unix socket does not need it.
+- Every request sends `User-Agent: ndb-ts/<version> (node v24.1.0; linux)` (`bun v…` or `deno v…` on those runtimes). `connect(addr, { userAgent: 'myapp/1.2' })` adds the token of your app at the end, so the daemon can tell the apps apart. A browser cannot set a User-Agent: there the SDK sends none. `VERSION` is exported.
 - `readyTimeout` is in milliseconds. It sets how long a call retries when the daemon is not ready (`not_ready`, or the socket is missing or refuses). Default 10000. Zero turns the retry off. Writes are retried only when the daemon certainly did not process them. Reads are also retried after a dropped connection.
 - The pool has up to 16 connections. There is no setting for it.
 - `new Ndb(addr, opts)` does the same as `connect`.

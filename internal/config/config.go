@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -109,7 +110,41 @@ type Config struct {
 	// request, a warn line (default 1000; 0 = off).
 	LogBodyMax int `yaml:"log_body_max"`
 	LogSlowMs  int `yaml:"slow_ms"`
+
+	// CORSOrigins are the browser origins (https://app.example.com) that
+	// may call the daemon. Empty (default): every request with an Origin
+	// header is refused (CSRF guard).
+	CORSOrigins []string `yaml:"cors_origins"`
+
+	// AllowedHosts are more Host names that a TCP request with no token
+	// may use; an IP, localhost and a name with no dot always pass (DNS
+	// rebinding guard).
+	AllowedHosts []string `yaml:"allowed_hosts"`
+
+	// TrustProxy takes the client IP of the token lockout from the last
+	// X-Forwarded-For hop. Set it only behind a proxy that sets the header.
+	TrustProxy bool `yaml:"trust_proxy"`
+
+	// AuthFailures failed token checks of one IP in AuthWindow lock the IP
+	// out for AuthLockout (default 10 in 1m, for 5m; 0 = off).
+	AuthFailures    int           `yaml:"auth_failures"`
+	AuthWindowText  string        `yaml:"auth_window"`
+	AuthLockoutText string        `yaml:"auth_lockout"`
+	AuthWindow      time.Duration `yaml:"-"`
+	AuthLockout     time.Duration `yaml:"-"`
+
+	// MaxConns is the most open connections of the TCP listener, and
+	// MaxWatches the most open _watch streams (0 = no limit, the default).
+	MaxConns   int `yaml:"max_conns"`
+	MaxWatches int `yaml:"max_watches"`
 }
+
+// The defaults of the token lockout.
+const (
+	DefaultAuthFailures = 10
+	DefaultAuthWindow   = "1m"
+	DefaultAuthLockout  = "5m"
+)
 
 // Token is one bearer token of ndb.yml: a name, the file that holds the
 // secret, and the collections (names or globs, such as calls*) it may read,
@@ -153,6 +188,12 @@ func defaults() Config {
 		LogFormat:     logging.DefaultFormat,
 		LogBodyMax:    logging.DefaultBodyMax,
 		LogSlowMs:     logging.DefaultSlowMs,
+
+		AuthFailures:    DefaultAuthFailures,
+		AuthWindowText:  DefaultAuthWindow,
+		AuthLockoutText: DefaultAuthLockout,
+		AuthWindow:      time.Minute,
+		AuthLockout:     5 * time.Minute,
 	}
 
 	if home, ok := userHomeFunc(); ok {
@@ -276,6 +317,10 @@ func Load(path string) (Config, error) {
 		return Config{}, err
 	}
 
+	if err := cfg.checkSecurity(); err != nil {
+		return Config{}, err
+	}
+
 	cfg.resolve(filepath.Dir(path))
 
 	return cfg, nil
@@ -325,6 +370,67 @@ func checkLog(cfg Config) error {
 
 	if cfg.LogSlowMs < 0 {
 		return fmt.Errorf("%w: slow_ms: %d is under 0", ErrInvalid, cfg.LogSlowMs)
+	}
+
+	return nil
+}
+
+// checkSecurity checks the browser guards and the limits, and parses the
+// lockout durations.
+func (c *Config) checkSecurity() error {
+	for _, o := range c.CORSOrigins {
+		if err := CheckOrigin(o); err != nil {
+			return fmt.Errorf("%w: cors_origins: %v", ErrInvalid, err)
+		}
+	}
+
+	for _, h := range c.AllowedHosts {
+		if err := CheckHost(h); err != nil {
+			return fmt.Errorf("%w: allowed_hosts: %v", ErrInvalid, err)
+		}
+	}
+
+	if c.AuthFailures < 0 {
+		return fmt.Errorf("%w: auth_failures: %d is under 0", ErrInvalid, c.AuthFailures)
+	}
+
+	var err error
+
+	if c.AuthWindow, err = catalog.ParseDuration(c.AuthWindowText); err != nil {
+		return fmt.Errorf("%w: auth_window: %v", ErrInvalid, err)
+	}
+
+	if c.AuthLockout, err = catalog.ParseDuration(c.AuthLockoutText); err != nil {
+		return fmt.Errorf("%w: auth_lockout: %v", ErrInvalid, err)
+	}
+
+	if c.MaxConns < 0 {
+		return fmt.Errorf("%w: max_conns: %d is under 0", ErrInvalid, c.MaxConns)
+	}
+
+	if c.MaxWatches < 0 {
+		return fmt.Errorf("%w: max_watches: %d is under 0", ErrInvalid, c.MaxWatches)
+	}
+
+	return nil
+}
+
+// CheckOrigin tells if o is a browser origin: http or https, a host, an
+// optional port, and no path ("https://app.example.com:8443").
+func CheckOrigin(o string) error {
+	u, err := url.Parse(o)
+
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || strings.Trim(u.Path, "/") != "" || u.RawQuery != "" || u.User != nil {
+		return fmt.Errorf("%q is not an origin: want scheme://host[:port], such as https://app.example.com", o)
+	}
+
+	return nil
+}
+
+// CheckHost tells if h is a host name with no scheme, port or path.
+func CheckHost(h string) error {
+	if h == "" || strings.ContainsAny(h, ":/ ") {
+		return fmt.Errorf("%q is not a host name: want a name such as ndb.internal (no scheme, no port)", h)
 	}
 
 	return nil

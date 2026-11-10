@@ -536,7 +536,7 @@ func TestSocketPathTooLongNamesTheLimit(t *testing.T) {
 		t.Fatalf("cli err = %v", err)
 	}
 
-	_, err = listen(config.Listen{Unix: long})
+	_, err = listen(config.Listen{Unix: long}, 0)
 	if err == nil || !strings.Contains(err.Error(), "limit") {
 		t.Fatalf("daemon err = %v", err)
 	}

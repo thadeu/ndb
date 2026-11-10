@@ -74,6 +74,14 @@ func run(args []string) error {
 	logLevel := fl.String("log-level", "", "debug, info, warn, error or quiet (default NDB_LOG_LEVEL, then log_level, then info)")
 	logFormat := fl.String("log-format", "", "text or json (default NDB_LOG_FORMAT, then log_format, then text)")
 
+	var corsOrigins, allowedHosts listFlag
+
+	fl.Var(&corsOrigins, "cors-origin", "browser origin that may call the daemon, such as https://app.example.com (repeat it; overrides cors_origins)")
+	fl.Var(&allowedHosts, "allowed-host", "Host name a TCP request with no token may use (repeat it; overrides allowed_hosts)")
+
+	maxConns := fl.Int("max-conns", 0, "most open TCP connections (0 = no limit; overrides max_conns)")
+	maxWatches := fl.Int("max-watches", 0, "most open _watch streams (0 = no limit; overrides max_watches)")
+
 	if err := fl.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -115,6 +123,30 @@ func run(args []string) error {
 		if cfg.Listen.UnixMode, err = parseUnixMode(*unixMode); err != nil {
 			return err
 		}
+	}
+
+	if set["cors-origin"] {
+		if cfg.CORSOrigins, err = checkList(corsOrigins, "-cors-origin", config.CheckOrigin); err != nil {
+			return err
+		}
+	}
+
+	if set["allowed-host"] {
+		if cfg.AllowedHosts, err = checkList(allowedHosts, "-allowed-host", config.CheckHost); err != nil {
+			return err
+		}
+	}
+
+	if set["max-conns"] {
+		cfg.MaxConns = *maxConns
+	}
+
+	if set["max-watches"] {
+		cfg.MaxWatches = *maxWatches
+	}
+
+	if cfg.MaxConns < 0 || cfg.MaxWatches < 0 {
+		return errors.New("-max-conns and -max-watches must be zero or more")
 	}
 
 	logOpts, err := logOptions(cfg, os.Getenv, logFlags{
@@ -161,6 +193,44 @@ func run(args []string) error {
 	defer out.Close()
 
 	return serve(ctx, cfg, token, setupLog(out, logOpts))
+}
+
+// listFlag is a flag that can be given more than once.
+type listFlag []string
+
+func (f *listFlag) String() string {
+	return strings.Join(*f, ",")
+}
+
+func (f *listFlag) Set(v string) error {
+	*f = append(*f, v)
+
+	return nil
+}
+
+// checkList checks each value of a list flag.
+func checkList(values []string, name string, check func(string) error) ([]string, error) {
+	for _, v := range values {
+		if err := check(v); err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+	}
+
+	return values, nil
+}
+
+// security is what the server takes from the browser guards and the
+// limits of ndb.yml.
+func security(cfg config.Config) server.Security {
+	return server.Security{
+		CORSOrigins:  cfg.CORSOrigins,
+		AllowedHosts: cfg.AllowedHosts,
+		TrustProxy:   cfg.TrustProxy,
+		AuthFailures: cfg.AuthFailures,
+		AuthWindow:   cfg.AuthWindow,
+		AuthLockout:  cfg.AuthLockout,
+		MaxWatches:   cfg.MaxWatches,
+	}
 }
 
 // readTokenFile returns the trimmed token. An empty file is an error: it
@@ -215,7 +285,8 @@ func serve(ctx context.Context, cfg config.Config, token string, lg *logging.Log
 		return err
 	}
 
-	listeners, err := listen(cfg.Listen)
+	listeners, err := listen(cfg.Listen, cfg.MaxConns)
+
 	if err != nil {
 		return err
 	}
@@ -227,6 +298,7 @@ func serve(ctx context.Context, cfg config.Config, token string, lg *logging.Log
 	srv.SetToken(token)
 	srv.SetTokens(scoped)
 	srv.SetLogger(lg)
+	srv.SetSecurity(security(cfg))
 
 	errc := make(chan error, len(listeners))
 
@@ -234,7 +306,8 @@ func serve(ctx context.Context, cfg config.Config, token string, lg *logging.Log
 		go func() { errc <- srv.Serve(l) }()
 	}
 
-	log.Info("listening", "unix", cfg.Listen.Unix, "tcp", cfg.Listen.TCP, "token_file", token != "", "scoped_tokens", len(scoped))
+	log.Info("listening", "unix", cfg.Listen.Unix, "tcp", cfg.Listen.TCP, "token_file", token != "", "scoped_tokens", len(scoped),
+		"cors_origins", len(cfg.CORSOrigins), "allowed_hosts", len(cfg.AllowedHosts), "max_conns", cfg.MaxConns, "max_watches", cfg.MaxWatches)
 
 	began := time.Now()
 
@@ -298,8 +371,9 @@ func serve(ctx context.Context, cfg config.Config, token string, lg *logging.Log
 }
 
 // listen opens the configured listeners. A stale socket file from a dead
-// daemon is removed first.
-func listen(l config.Listen) ([]net.Listener, error) {
+// daemon is removed first. maxConns limits the open TCP connections (0 =
+// no limit); the unix socket has no limit.
+func listen(l config.Listen, maxConns int) ([]net.Listener, error) {
 	var out []net.Listener
 
 	closeAll := func() {
@@ -346,7 +420,7 @@ func listen(l config.Listen) ([]net.Listener, error) {
 			return nil, err
 		}
 
-		out = append(out, tl)
+		out = append(out, server.LimitListener(tl, maxConns))
 	}
 
 	return out, nil

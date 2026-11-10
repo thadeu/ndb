@@ -47,6 +47,11 @@ type DB struct {
 	// prefix goes before the name of every Collection (WithPrefix).
 	prefix string
 
+	// userAgent is the User-Agent of every request; userAgentSuffix is the
+	// token of the app (WithUserAgent).
+	userAgent       string
+	userAgentSuffix string
+
 	mu      sync.Mutex
 	ensured map[string]bool
 
@@ -103,6 +108,8 @@ func Connect(addr string, opts ...ConnectOption) (*DB, error) {
 	for _, opt := range opts {
 		opt(db)
 	}
+
+	db.userAgent = userAgent(db.userAgentSuffix)
 
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 
@@ -261,8 +268,11 @@ func (db *DB) doOnce(ctx context.Context, method, path string, body []byte) (*ht
 	return nil, apiError(resp)
 }
 
-// authorize adds the bearer token, when the handle has one.
+// authorize adds the User-Agent and the bearer token, when the handle has
+// one.
 func (db *DB) authorize(req *http.Request) {
+	req.Header.Set("User-Agent", db.userAgent)
+
 	if db.token != "" {
 		req.Header.Set("Authorization", "Bearer "+db.token)
 	}

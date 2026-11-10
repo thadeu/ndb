@@ -17,7 +17,8 @@ Web console for the ndb daemon ("Ndb Console"). Bun, Hono, and server-rendered J
 - **Design:** Light theme in `src/assets/app.css`. All colors are CSS variables on `:root`, and rules are grouped by part with `/* part: ... */` comments. Do not add a CSS framework. Before you add a class, search for it.
 - **Responsive:** Every UI change must work at 360 px: tables in an `overflow-x` wrapper, rows that stack.
 - **URL first:** Collection, filter, and selected `_id` live in the query string, so a link shows the same view.
-- **Writes:** Every POST route checks `Origin` (the `csrf` middleware in `src/app.tsx`).
+- **Writes:** Every POST route checks `Origin` (the `csrf` middleware in `src/app.tsx`), and `originGuard` (`src/guard.ts`) refuses any write with the `Origin` of another site.
+- **Hosts:** `hostGuard` (`src/guard.ts`) answers only for IPs, `localhost`, and `NDB_UI_ALLOWED_HOSTS` (DNS rebinding). Tests pass `allowedHosts` to `createApp`.
 - **Prefix:** Pages use relative URLs and a `<base>` tag. `X-Forwarded-Prefix` sets the mount path (`src/prefix.ts`).
 - **Doctype:** Every page starts with `<!doctype html>`, through the layout.
 - **Runtime:** Bun 1.4 or later (`mise.toml` pins it). The build compiles one binary with the styles and islands inside.

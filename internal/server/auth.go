@@ -8,11 +8,13 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // authenticate checks the bearer token of every request that did not come in
 // on the unix socket (guarded by file permissions instead), and that the
-// token may do what the request asks (scope.go).
+// token may do what the request asks (scope.go). An IP with too many
+// failed checks is locked out for a time (limit.go).
 func (s *Server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if len(s.tokens) == 0 || isUnix(r) {
@@ -21,8 +23,22 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			return
 		}
 
+		ip := s.clientIP(r)
+		now := time.Now()
+
+		if left := s.fails.locked(ip, now); left > 0 {
+			tooManyFailures(w, ip, left)
+
+			return
+		}
+
 		t, ok := s.tokenOf(r)
+
 		if !ok {
+			if s.fails.fail(ip, now) {
+				s.logLockout(w, r, ip)
+			}
+
 			w.Header().Set("WWW-Authenticate", "Bearer")
 
 			writeError(w, &apiError{status: http.StatusUnauthorized, code: "unauthorized", msg: "missing or wrong bearer token"})

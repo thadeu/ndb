@@ -93,7 +93,9 @@ Any other path is `404 unknown_route`. A known path with another method is `405 
 - **HTTP/1.1**, on a unix socket (`listen.unix`, default `/run/ndb/ndb.sock`) and, when `listen.tcp` is set, on TCP. Connections are kept alive; the SDKs keep a pool.
 - On a unix socket the host name in the URL does not matter: `curl --unix-socket /run/ndb/ndb.sock http://ndb/_health`.
 - The daemon has no TLS. Across machines, put it on a private network (WireGuard) or behind a TLS proxy. See [Deployment](deployment.md).
-- **No CORS.** The daemon is for servers: apps, the console server, the CLI. A browser goes through an app, never to the daemon, so the daemon sends no CORS headers.
+- **No browsers by default.** The daemon is for servers: apps, the console server, the CLI. A request with an `Origin` header, or with `Sec-Fetch-Site: cross-site` or `same-site`, is `403 forbidden` on every listener (CSRF guard). An origin in `cors_origins` gets the CORS headers (`Access-Control-Allow-Origin`, `Vary: Origin`) and a `204` answer to its preflight `OPTIONS`; any other `OPTIONS` is `405`.
+- **Host.** On TCP with no token configured, the `Host` must be an IP, `localhost`, a name with no dot, or a name in `allowed_hosts`; else `403 forbidden` (DNS rebinding guard). With a token, and on the unix socket, the `Host` is not checked.
+- **Limits.** `max_conns` limits the open TCP connections (a new one waits). `max_watches` limits the open `_watch` streams (`429 too_many_requests`, with `Retry-After`).
 
 ## Authentication
 
@@ -102,8 +104,9 @@ Any other path is `404 unknown_route`. A known path with another method is `405 
 - The unix socket needs no token: file permissions protect it.
 - ndb serves plain HTTP; TLS comes from a proxy in front (Caddy). See [TLS](configuration.md#tls).
 - `POST /_backup` works on the unix socket only; over TCP it is `403 forbidden`.
+- After `auth_failures` failed token checks (default 10 in 1 min) one IP gets `429 too_many_requests` with `Retry-After` for `auth_lockout` (default 5 min), also with the right token. The unix socket has no lockout.
 
-See [Authentication](configuration.md#authentication).
+See [Authentication](configuration.md#authentication) and [Security](security.md): the threat model, the browser guards, TLS and the limits.
 
 ## Requests
 
@@ -199,6 +202,8 @@ Two routes keep the request open. They are not the same feature.
 | Group table of one aggregate | 256 MiB | `422 group_limit_exceeded` |
 | Snapshot cursor idle time | 60 s | `400 cursor_expired` |
 | Watch heartbeat | 15 s of silence | — |
+| Open `_watch` streams | `max_watches`, default no limit | `429 too_many_requests` |
+| Open TCP connections | `max_conns`, default no limit | a new connection waits |
 | `_quarantine` `limit` | 1000 | — |
 | Stream read or claim `count` | 10 000 | `400 invalid_request` |
 

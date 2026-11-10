@@ -15,6 +15,10 @@ module Ndb
       # ("test2_" for a parallel test worker). nil by default.
       attr_accessor :collection_prefix
 
+      # user_agent is the token of the app (for example "myapp/1.2"). It goes
+      # at the end of the User-Agent of every request. nil by default.
+      attr_accessor :user_agent
+
       # The `streams:` block of config/ndb.yml, for `ndb streams`:
       # "concurrency" (the threads of each consumer class) and "only" (the
       # names of the classes to run).
@@ -38,6 +42,7 @@ module Ndb
         @timeout = settings["timeout"] if settings.key?("timeout")
         @pool_size = settings["pool_size"] if settings.key?("pool_size")
         @ready_timeout = settings["ready_timeout"] if settings.key?("ready_timeout")
+        @user_agent = settings["user_agent"] if settings.key?("user_agent")
         @streams = settings["streams"] if settings["streams"].is_a?(Hash)
 
         self

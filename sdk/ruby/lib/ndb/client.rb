@@ -19,7 +19,11 @@ module Ndb
 
     DEFAULT_SOCKET = "/run/ndb/ndb.sock"
 
-    attr_reader :pool, :endpoint
+    attr_reader :pool, :endpoint, :user_agent
+
+    # The User-Agent of the gem: its version, the Ruby version and the
+    # platform.
+    USER_AGENT = "ndb-ruby/#{VERSION} (ruby #{RUBY_VERSION}; #{RUBY_PLATFORM})".freeze
 
     RETRY_BASE = 0.05
     RETRY_CAP = 1.0
@@ -31,11 +35,15 @@ module Ndb
     # ready_timeout is how many seconds a call retries while the daemon is
     # starting or recovering (not_ready, socket missing or refusing), with
     # exponential backoff and jitter. 0 turns it off.
-    def initialize(url: nil, socket: nil, token: nil, timeout: 30, pool_size: 16, ready_timeout: 10)
+    #
+    # user_agent is the token of the app (for example "myapp/1.2"). It goes
+    # after the User-Agent of the gem, so the daemon can tell the apps apart.
+    def initialize(url: nil, socket: nil, token: nil, timeout: 30, pool_size: 16, ready_timeout: 10, user_agent: nil)
       @endpoint = Endpoint.parse(url || socket || presence(ENV["NDB_URL"]) || DEFAULT_SOCKET)
       @token = presence(token) || presence(ENV["NDB_TOKEN"])
       @pool = Pool.new(@endpoint, timeout: timeout, size: pool_size)
       @ready_timeout = ready_timeout.to_f
+      @user_agent = [USER_AGENT, presence(user_agent.to_s.strip)].compact.join(" ")
     end
 
     def socket = @endpoint.path
@@ -393,7 +401,10 @@ module Ndb
       end
     end
 
+    # Adds the User-Agent, and the bearer token when the client has one.
     def authorize(headers)
+      headers = headers.merge("User-Agent" => @user_agent)
+
       @token ? headers.merge("Authorization" => "Bearer #{@token}") : headers
     end
 

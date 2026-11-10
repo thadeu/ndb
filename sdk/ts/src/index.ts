@@ -1,6 +1,7 @@
 export { connect, Ndb } from './ndb.js'
 export { Collection } from './collection.js'
 export { newId } from './id.js'
+export { VERSION } from './version.js'
 export { clean, cleanAll, UnsafeCleanError, type CleanOptions } from './testing.js'
 export { Query } from './query.js'
 export { belongsTo, hasMany, hasOne } from './lookup.js'

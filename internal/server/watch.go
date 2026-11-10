@@ -86,7 +86,16 @@ func (s *Server) watch(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		}
 	}
 
+	if !s.watchStarted() {
+		s.tooManyWatches(w)
+
+		return
+	}
+
+	defer s.watchEnded()
+
 	events, err := db.WatchWhere(name, req.Consumer, req.From, req.Query)
+
 	if err != nil {
 		writeError(w, err)
 

@@ -57,7 +57,8 @@ Ndb.connect(
   token: nil,                 # bearer token
   timeout: 30,                # seconds, per request
   pool_size: 16,              # idle connections kept
-  ready_timeout: 10           # seconds to retry while the daemon starts; 0 turns it off
+  ready_timeout: 10,          # seconds to retry while the daemon starts; 0 turns it off
+  user_agent: nil             # token of your app, such as "myapp/1.2"
 )
 ```
 
@@ -65,6 +66,7 @@ Ndb.connect(
 - `/run/ndb/ndb.sock` is the socket of a server install (root, or `/var/lib/ndb` exists). A local daemon that you start as a user with no flags (`ndb serve`) listens on `~/.ndb/ndb.sock` and on TCP `127.0.0.1:7070`. Connect to it with `Ndb.connect("unix://#{Dir.home}/.ndb/ndb.sock")` or `Ndb.connect("tcp://127.0.0.1:7070")`, or set `NDB_URL`.
 - The token is `token:`, or env `NDB_TOKEN`. It goes only in the `Authorization` header. A unix socket does not need it.
 - A bad address raises `ArgumentError` at once.
+- Every request sends `User-Agent: ndb-ruby/<Ndb::VERSION> (ruby <RUBY_VERSION>; <RUBY_PLATFORM>)`. `user_agent: "myapp/1.2"` adds the token of your app at the end, so the daemon can tell the apps apart.
 - `ready_timeout` is how long a call retries while the daemon is not ready (`not_ready`, or the socket is missing or refuses). It uses exponential backoff (50 ms up to 1 s) with jitter. A write is retried only when the daemon certainly did not process it. A read is also retried after a dropped connection. A timeout is never retried. When the deadline passes, the last error is raised.
 - A read that gets no answer in `timeout` raises `Ndb::TimeoutError`, also on a reused connection. It is not sent again.
 - A reused keep-alive connection that the server closed is sent again only for a read. A write is never sent twice.

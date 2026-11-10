@@ -79,6 +79,7 @@ var (
 	ErrPatternTooWide    = &Error{Code: "pattern_too_wide"}
 	ErrNotSupported      = &Error{Code: "not_supported"}
 	ErrForbidden         = &Error{Code: "forbidden"}
+	ErrTooManyRequests   = &Error{Code: "too_many_requests"}
 	ErrUnknownRoute      = &Error{Code: "unknown_route"}
 	ErrMethodNotAllowed  = &Error{Code: "method_not_allowed"}
 	ErrStopping          = &Error{Code: "stopping"}

@@ -12,7 +12,7 @@ Without `-config`, the daemon and the CLI look for the file in this order: `NDB_
 ## Flags
 
 ```
-ndb [-config ndb.yml] [-data-dir DIR] [-unix PATH] [-tcp ADDR] [-unix-mode 0660] [-token-file FILE] [-log-level info] [-log-format text] [-version]
+ndb [-config ndb.yml] [-data-dir DIR] [-unix PATH] [-tcp ADDR] [-unix-mode 0660] [-token-file FILE] [-cors-origin URL]... [-allowed-host NAME]... [-max-conns N] [-max-watches N] [-log-level info] [-log-format text] [-version]
 ndb backup [-config f] [-data-dir d] [-url unix://sock] <dest> [-gzip]
 ```
 
@@ -24,6 +24,10 @@ ndb backup [-config f] [-data-dir d] [-url unix://sock] <dest> [-gzip]
 | `-tcp` | overrides `listen.tcp`, for example `10.10.0.1:7070`. |
 | `-unix-mode` | overrides `listen.unix_mode`: permission of the socket file, octal. Default `0660` (owner and group). |
 | `-token-file` | file with the bearer token that the TCP listener requires. See [Authentication](#authentication). |
+| `-cors-origin` | overrides `cors_origins`. Give it once for each origin. |
+| `-allowed-host` | overrides `allowed_hosts`. Give it once for each name. |
+| `-max-conns` | overrides `max_conns`. |
+| `-max-watches` | overrides `max_watches`. |
 | `-log-level` | overrides `NDB_LOG_LEVEL` and `log_level`: `debug`, `info`, `warn`, `error` or `quiet`. See [Logs](#logs). |
 | `-log-format` | overrides `NDB_LOG_FORMAT` and `log_format`: `text` or `json`. |
 | `-version` | print the version and exit. |
@@ -89,6 +93,14 @@ An unknown key is an error at start (the file is read in strict mode). Sizes are
 | `log_format` | `text` (key=value) or `json` (one object per line). Default `text`. |
 | `log_body_max` | the largest body or document in a log line, in bytes. A longer one is cut and ends with `...[cut, N bytes]`. `0` logs no bodies. Default `2048`. |
 | `slow_ms` | a request that takes longer is a `warn` line. `0` turns it off. Default `1000`. |
+| `cors_origins` | browser origins that may call the daemon directly, such as `https://app.example.com` (scheme, host, optional port; no path). Default: none, so each request with an `Origin` header is `403 forbidden`. See [Security](security.md#browser-attacks-csrf-and-dns-rebinding). |
+| `allowed_hosts` | `Host` names that a TCP request may use when no token is configured, more than an IP, `localhost` and a name with no dot. Default: none. A `Host` that is not allowed is `403 forbidden` (DNS rebinding guard). |
+| `trust_proxy` | `true` takes the client IP of the token lockout from the last `X-Forwarded-For` hop. Set it only behind a proxy. Default `false`. |
+| `auth_failures` | failed token checks of one IP in `auth_window` before a lockout. `0` turns the lockout off. Default `10`. |
+| `auth_window` | the time in which the failures count. Default `1m`. |
+| `auth_lockout` | how long a locked-out IP gets `429 too_many_requests`. Default `5m`. |
+| `max_conns` | the most open TCP connections. Over it, a new connection waits. `0` = no limit (default). |
+| `max_watches` | the most open `_watch` streams. Over it: `429 too_many_requests`. `0` = no limit (default). |
 
 ### Document id
 
@@ -209,6 +221,8 @@ NDB_LOG_LEVEL=warn ndb serve
 The unix socket never asks for a token: file permissions guard it (`listen.unix_mode`, default `0660`). `POST /_backup` stays unix-only.
 
 The token is defense in depth. Keep the listener on a private address (for example WireGuard) as well. SDKs take a `token` option or `NDB_TOKEN`; see [clients.md](clients.md).
+
+Ten failed token checks from one IP in one minute lock that IP out for five minutes (`429 too_many_requests`). The browser guards (`cors_origins`, `allowed_hosts`), the lockout and the limits are on [Security](security.md).
 
 ```bash
 head -c 32 /dev/urandom | base64 > /etc/ndb/token

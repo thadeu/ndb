@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -72,7 +73,7 @@ func newAPIClient(rawURL string) (*apiClient, error) {
 		return nil, fmt.Errorf("url %q: want unix:///path, tcp://host:port or http://host:port", rawURL)
 	}
 
-	return &apiClient{base: "http://" + u.Host, token: token, hc: &http.Client{}, timeout: defaultCallTimeout}, nil
+	return &apiClient{base: "http://" + u.Host, token: token, hc: &http.Client{Transport: withUserAgent(http.DefaultTransport)}, timeout: defaultCallTimeout}, nil
 }
 
 func newUnixClient(sock, token string) *apiClient {
@@ -84,7 +85,7 @@ func newUnixClient(sock, token string) *apiClient {
 		},
 	}
 
-	return &apiClient{base: "http://ndb", token: token, hc: &http.Client{Transport: tr}, timeout: defaultCallTimeout}
+	return &apiClient{base: "http://ndb", token: token, hc: &http.Client{Transport: withUserAgent(tr)}, timeout: defaultCallTimeout}
 }
 
 // call sends one request. A status other than 200 is an *apiError.
@@ -235,3 +236,25 @@ func (c *apiClient) alive() bool {
 }
 
 var errNoDaemon = errors.New("no running daemon answers")
+
+// userAgent names the CLI in the requests it sends, as the SDKs do:
+// ndb-cli/<version> (<go version>; <os>/<arch>).
+func userAgent() string {
+	return fmt.Sprintf("ndb-cli/%s (%s; %s/%s)", version, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+}
+
+// agentTransport sets the User-Agent of every request of the CLI.
+type agentTransport struct {
+	next http.RoundTripper
+}
+
+func withUserAgent(next http.RoundTripper) http.RoundTripper {
+	return agentTransport{next: next}
+}
+
+func (t agentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	req.Header.Set("User-Agent", userAgent())
+
+	return t.next.RoundTrip(req)
+}

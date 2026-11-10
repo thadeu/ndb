@@ -29,6 +29,16 @@ With no config, the console offers `unix:///run/ndb/ndb.sock`. Add other daemons
 | `NDB_NAME` | `default` | Name of the fixed connection. |
 | `PORT` | `4321` | Listen port. |
 | `HOST` | `127.0.0.1` | Listen address (`0.0.0.0` in the image). |
+| `NDB_UI_ALLOWED_HOSTS` | | Host names the console answers for, besides IP addresses and `localhost`. A comma list, such as `ndb.example.com,*.internal` (`*.internal` is every name under `internal`). |
+
+## Protection
+
+The console has no login. It keeps other sites out of it in two ways:
+
+- **Host check (DNS rebinding).** A request whose `Host` is not an IP address, `localhost`, or a name in `NDB_UI_ALLOWED_HOSTS` gets `403`. A page on another site cannot point its own name at `127.0.0.1` and read the console. Behind a proxy, or with a name such as `ndb.example.com`, add that name to `NDB_UI_ALLOWED_HOSTS`. `/healthz` answers for any host.
+- **Origin check (CSRF).** A `POST`, `PUT`, `PATCH`, or `DELETE` whose `Origin` is not the console page itself gets `403`, also a JSON request, and also a request that the browser marks `Sec-Fetch-Site: cross-site`. The forms and the tab actions also need the `Origin` of the console page.
+
+These checks do not replace a login. **Put `ndb-ui` behind authentication (a VPN, an SSH tunnel, or a proxy with a login) when you expose it outside your machine.** `ndb-stack` (the daemon and the console in one image) is for development only: never use it in production.
 
 ## A daemon on another VM
 

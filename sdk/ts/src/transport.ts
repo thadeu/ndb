@@ -2,6 +2,7 @@ import { Readable } from 'node:stream'
 import { Pool, type Dispatcher } from 'undici'
 import { NdbError, makeError } from './errors.js'
 import { jsonRows } from './ndjson.js'
+import { userAgent } from './useragent.js'
 
 export type Method = 'GET' | 'POST' | 'PUT' | 'DELETE'
 
@@ -30,6 +31,9 @@ export interface ConnectOptions {
   // Goes before the name of every collection: "test1_" gives each parallel
   // test worker collections of its own (see clean in testing.ts).
   prefix?: string
+  // The token of the app (for example "myapp/1.2"). It goes after the
+  // User-Agent of the SDK, so the daemon can tell the apps apart.
+  userAgent?: string
 }
 
 // Bun has its own undici, whose Pool cannot dial a unix socket. On Bun the
@@ -42,6 +46,7 @@ export class Transport {
   private readonly socketPath: string | undefined
   private readonly token: string | undefined
   private readonly readyTimeout: number
+  private readonly userAgent: string | undefined
 
   // addr: unix:///path, tcp://host:port, or https://host[:port] (ndb behind
   // a TLS proxy such as Caddy; http:// works too). Default: env NDB_URL.
@@ -51,6 +56,7 @@ export class Transport {
 
     this.token = opts.token || process.env.NDB_TOKEN || undefined
     this.readyTimeout = opts.readyTimeout ?? defaultReadyTimeoutMs
+    this.userAgent = userAgent(opts.userAgent)
 
     if (url.protocol === 'unix:' && url.pathname !== '') {
       this.base = 'http://ndb'
@@ -139,6 +145,10 @@ export class Transport {
   // Rows come as NDJSON: the SDK reads them one by one (jsonRows).
   private headers(contentType = 'application/json'): Record<string, string> {
     const headers: Record<string, string> = { 'content-type': contentType, accept: 'application/x-ndjson' }
+
+    if (this.userAgent) {
+      headers['user-agent'] = this.userAgent
+    }
 
     if (this.token) {
       headers.authorization = `Bearer ${this.token}`

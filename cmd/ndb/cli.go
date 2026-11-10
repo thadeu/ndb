@@ -180,6 +180,10 @@ Daemon flags (ndb serve):
   -unix-mode MODE   permission of the socket, octal (default 0660)
   -tcp ADDR         TCP listener, e.g. 127.0.0.1:7070 ('' turns it off)
   -token-file FILE  bearer token the TCP listener requires
+  -cors-origin URL  browser origin that may call ndb (repeat it; default none)
+  -allowed-host H   Host name a TCP request with no token may use (repeat it)
+  -max-conns N      most open TCP connections (default 0 = no limit)
+  -max-watches N    most open _watch streams (default 0 = no limit)
   -log-level LEVEL  debug, info, warn, error or quiet (default NDB_LOG_LEVEL,
                     then log_level of ndb.yml, then info); PUT /_log changes it
   -log-format FMT   text or json (default NDB_LOG_FORMAT, then log_format, then text)

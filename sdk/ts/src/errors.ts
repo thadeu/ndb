@@ -50,6 +50,7 @@ export type ErrorCode =
   | 'pattern_too_wide'
   | 'not_supported'
   | 'forbidden'
+  | 'too_many_requests'
   | 'unknown_route'
   | 'method_not_allowed'
   | 'stopping'

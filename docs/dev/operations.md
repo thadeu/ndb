@@ -28,6 +28,7 @@ curl --unix-socket /run/ndb/ndb.sock http://ndb/_health
 | `ndb_tailer_lag_bytes{collection}` | gauge | direct mode: bytes not read yet |
 | `ndb_quarantined_total{collection}` | counter | distinct lines in the quarantine file (file and offset), not events |
 | `ndb_watch_subscribers{collection}` | gauge | open watch streams |
+| `ndb_watch_streams` | gauge | open `_watch` HTTP streams of the daemon (the count that `max_watches` limits) |
 | `ndb_index_build_progress{collection,field}` | gauge | 0 to 1 |
 | `ndb_wal_records_total`, `ndb_commit_seconds`, `ndb_fsync_seconds` | counter, histograms | engine-mode write path |
 | `ndb_blob_store_blobs`, `ndb_blob_store_bytes` | gauge | blob store size |

@@ -6,8 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Security
+
+- **CSRF and DNS rebinding on the TCP listener with no token.** A user install (`ndb serve` on a laptop) listens on `127.0.0.1:7070` with no token. Before this release, any web page open in a browser on the same machine could write, change and delete data there: a `POST` with `Content-Type: text/plain` needs no preflight, and ndb did not look at `Origin` (`_doc`, `_bulk`, `_update`, `_delete_by_query`, `_truncate?confirm=`, stream appends...). With DNS rebinding (a name that points to `127.0.0.1`), a page could also read all data, because ndb did not look at `Host`. Now a request with an `Origin` header, or with `Sec-Fetch-Site: cross-site` or `same-site`, is `403 forbidden` on every listener unless the origin is in `cors_origins`. On TCP with no token configured, the `Host` must be an IP, `localhost`, a name with no dot (a Compose service such as `ndb`) or a name in `allowed_hosts`, else `403 forbidden`. curl, the SDKs, the CLI and the console server send no `Origin` and work as before. A daemon with a token was not open to these attacks: a page cannot send the token. Upgrade every user install. See `docs/dev/security.md`.
+- **Token brute force.** `auth_failures` failed token checks (default 10) from one IP in `auth_window` (default `1m`) lock that IP out for `auth_lockout` (default `5m`): `429 too_many_requests` with `Retry-After`, a `warn` line `token lockout`. During the lockout the right token is refused too, so a guess cannot be tested. At most 10 000 IPs in memory; an IPv6 client counts by its `/64`. The unix socket has no lockout.
+
 ### Added
 
+- **Settings `cors_origins`, `allowed_hosts`, `trust_proxy`, `auth_failures`, `auth_window`, `auth_lockout`, `max_conns` and `max_watches`** in `ndb.yml`, and the flags `-cors-origin` and `-allowed-host` (repeat them), `-max-conns` and `-max-watches` (`docs/dev/configuration.md`). An origin of `cors_origins` gets `Access-Control-Allow-Origin`, `Vary: Origin` and a `204` preflight that allows `Authorization` and `Content-Type`. `trust_proxy: true` takes the client IP of the lockout from the last `X-Forwarded-For` hop. `max_conns` limits the open TCP connections (a new one waits; default no limit). `max_watches` limits the open `_watch` streams (`429 too_many_requests` before the stream starts; default no limit).
+- **Error code `too_many_requests` (429)**, with a constant in each SDK (Go `ndb.ErrTooManyRequests`, Ruby `Ndb::TooManyRequests`, TypeScript `'too_many_requests'`).
+- **Metric `ndb_watch_streams`**: the open `_watch` streams of the daemon.
+- **`user_agent` on the request log line**, so the line shows which SDK or tool sent the request (`ndb-go/…`, `ndb-ruby/…`, `ndb-ts/…`, `ndb-cli/…`).
+- **Page `docs/dev/security.md`**: the threat model, listeners, tokens, the browser guards, the lockout, TLS with a proxy, data at rest, debug logs, the images, the DoS limits and operator injection in apps.
 - **Image `ghcr.io/thadeu/ndb-stack`**: the daemon and the console in one image, for development (like `redis-stack`). `docker run -p 7070:7070 -p 4321:4321 ghcr.io/thadeu/ndb-stack` needs no other parameter: the daemon listens on the unix socket and on TCP `0.0.0.0:7070` with no token, and the console listens on `0.0.0.0:4321` and opens the local daemon. `NDB_TOKEN` sets a token on TCP. Data is in `/var/lib/ndb`. The image is built FROM `ghcr.io/thadeu/ndb` and `ghcr.io/thadeu/ndb-ui` of the same version (`deploy/docker/stack/`, job `ndb-stack` in `ghcr.yml`). Do not use it for a public server (`docs/dev/deploy/docker.md`, "ndb-stack (development)").
 
 ## [1.17.2] - 2026-11-10

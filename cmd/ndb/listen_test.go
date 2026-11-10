@@ -13,7 +13,7 @@ import (
 func TestListenAppliesUnixMode(t *testing.T) {
 	sock := filepath.Join(t.TempDir(), "ndb.sock")
 
-	ls, err := listen(config.Listen{Unix: sock, UnixMode: 0o660})
+	ls, err := listen(config.Listen{Unix: sock, UnixMode: 0o660}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

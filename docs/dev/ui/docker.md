@@ -1,8 +1,8 @@
 # Run the UI in Docker
 
-The image is `ghcr.io/thadeu/ndb-ui` (linux amd64 and arm64). It listens on `0.0.0.0:4321` inside the container, so publish the port on `127.0.0.1` only: the console has no login.
+The image is `ghcr.io/thadeu/ndb-ui` (linux amd64 and arm64). It listens on `0.0.0.0:4321` inside the container, so publish the port on `127.0.0.1` only: the console has no login. Expose it only behind authentication (a VPN, an SSH tunnel, or a proxy with a login). It answers only for IP addresses, `localhost`, and the names in `NDB_UI_ALLOWED_HOSTS` (for example `-e NDB_UI_ALLOWED_HOSTS=ndb.example.com` behind a proxy). See [Protection](install.md#protection).
 
-For development, `ghcr.io/thadeu/ndb-stack` has the daemon and the console in one image, with no parameters: `docker run -p 7070:7070 -p 4321:4321 ghcr.io/thadeu/ndb-stack`. See [ndb-stack (development)](../deploy/docker.md#ndb-stack-development).
+For development, `ghcr.io/thadeu/ndb-stack` has the daemon and the console in one image, with no parameters: `docker run -p 7070:7070 -p 4321:4321 ghcr.io/thadeu/ndb-stack`. See [ndb-stack (development)](../deploy/docker.md#ndb-stack-development). `ndb-stack` is for development only, never production.
 
 ## A daemon over TCP
 

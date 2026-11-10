@@ -43,7 +43,8 @@ The SDKs turn each code into a typed error: Go `ndb.ErrUnknownCollection` (`erro
 | `unknown_group` | 404 | The stream group does not exist. |
 | `group_exists` | 409 | A stream group create with a name that exists. |
 | `unauthorized` | 401 | A TCP request without a known bearer token (`-token-file` or `tokens:`). |
-| `forbidden` | 403 | A scoped token without the right for this route and collection; `POST /_backup` over TCP. |
+| `forbidden` | 403 | A scoped token without the right for this route and collection; `POST /_backup` over TCP; a browser request from an origin not in `cors_origins`; a TCP request with no token and a `Host` not allowed (see [Security](../security.md)). |
+| `too_many_requests` | 429 | The client IP failed the token check too many times (`auth_failures`), or `max_watches` streams are open. Wait for `Retry-After` seconds. |
 | `not_found` | 404 | No document (or blob) with this id. |
 | `unknown_collection` | 404 | The collection does not exist. |
 | `collection_exists` | 409 | A rename to a name that exists (without `replace`), or a restore `to` a name that exists. |

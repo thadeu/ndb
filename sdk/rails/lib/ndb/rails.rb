@@ -41,8 +41,21 @@ module Ndb
           token: configuration.token,
           timeout: configuration.timeout,
           pool_size: configuration.pool_size,
-          ready_timeout: configuration.ready_timeout
+          ready_timeout: configuration.ready_timeout,
+          user_agent: user_agent
         )
+      end
+
+      # The tokens that go after the User-Agent of the ndb gem: this gem,
+      # the Rails version when Rails is loaded, then the token of the app
+      # (config user_agent).
+      def user_agent
+        tokens = ["ndb-rails/#{VERSION}"]
+
+        tokens << "rails/#{::Rails.version}" if defined?(::Rails) && ::Rails.respond_to?(:version)
+        tokens << configuration.user_agent.to_s.strip
+
+        tokens.reject(&:empty?).join(" ")
       end
     end
   end

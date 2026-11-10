@@ -6,6 +6,7 @@ import { secureHeaders } from 'hono/secure-headers';
 import { type Connection, Connections, NAME } from './connections';
 import { type DiscoverOptions, DiscoverError, discover } from './discover';
 import { formatUptime } from './format';
+import { hostGuard, originGuard, parseAllowedHosts } from './guard';
 import { Ndb, NdbError, type Stats, target } from './ndb';
 import { type Env, readPrefix } from './prefix';
 
@@ -49,6 +50,9 @@ const MANIFEST = {
 
 export interface AppOptions {
   timeoutMs?: number;
+  // Host names the console answers for, besides IP addresses and localhost.
+  // Default: NDB_UI_ALLOWED_HOSTS.
+  allowedHosts?: string[];
   discover?: DiscoverOptions;
 }
 
@@ -85,6 +89,11 @@ export function createApp(connections: Connections, assets: Assets, options: App
     };
   }
 
+  const allowedHosts = options.allowedHosts ?? parseAllowedHosts(process.env.NDB_UI_ALLOWED_HOSTS);
+
+  // DNS rebinding: refuse a Host that is not an IP, localhost, or allowed.
+  app.use(hostGuard(allowedHosts));
+
   app.use(contextStorage());
   app.use(async (c, next) => {
     c.set('prefix', readPrefix(c.req.header('x-forwarded-prefix')));
@@ -96,6 +105,10 @@ export function createApp(connections: Connections, assets: Assets, options: App
   // Form posts must come from the console page itself. A mount in another
   // app runs with its session, so a form on another site must not reach it.
   app.use(csrf({ origin: (origin, c) => origin === pageOrigin(c) }));
+
+  // Any write (POST, PUT, PATCH, DELETE) with the Origin of another site is
+  // refused, whatever the content type and the route.
+  app.use(originGuard());
 
   // A POST to a tab route is a fetch or a form of the console page. Its
   // Origin must be the page itself, whatever the content type.
