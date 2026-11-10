@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **Image `ghcr.io/thadeu/ndb-stack`**: the daemon and the console in one image, for development (like `redis-stack`). `docker run -p 7070:7070 -p 4321:4321 ghcr.io/thadeu/ndb-stack` needs no other parameter: the daemon listens on the unix socket and on TCP `0.0.0.0:7070` with no token, and the console listens on `0.0.0.0:4321` and opens the local daemon. `NDB_TOKEN` sets a token on TCP. Data is in `/var/lib/ndb`. The image is built FROM `ghcr.io/thadeu/ndb` and `ghcr.io/thadeu/ndb-ui` of the same version (`deploy/docker/stack/`, job `ndb-stack` in `ghcr.yml`). Do not use it for a public server (`docs/dev/deploy/docker.md`, "ndb-stack (development)").
+
 ## [1.17.2] - 2026-11-10
 
 ## [1.17.1] - 2026-11-10

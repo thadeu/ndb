@@ -8,7 +8,7 @@ One tag `vX.Y.Z` releases everything. Version 0.1.0 is used in all packages.
 | Console binaries | GitHub Release (`ndb-ui-*`) | `release.yml` (after the daemon) |
 | Go SDK | tag `sdk/go/vX.Y.Z`, module `github.com/thadeu/ndb/sdk/go` | `release.yml` |
 | Go Redis adapter | tag `sdk/go/ndbredis/vX.Y.Z`, module `github.com/thadeu/ndb/sdk/go/ndbredis` (needs the Go SDK of the same release) | `release.yml` |
-| Images | `ghcr.io/thadeu/ndb`, `ghcr.io/thadeu/ndb-ui` (two jobs at the same time) | `ghcr.yml` |
+| Images | `ghcr.io/thadeu/ndb`, `ghcr.io/thadeu/ndb-ui` (two jobs at the same time), then `ghcr.io/thadeu/ndb-stack` (built FROM the two images of the same version) | `ghcr.yml` |
 | Gems | `ndb` (pushed first), then `ndb-rails` (depends on it) | `publish.yml` (job `gems`) |
 | npm | `@thadeu/ndb` | `publish.yml` (job `npm`, at the same time as `gems`) |
 | Docs site | Cloudflare Pages (project `ndb-docs`, via wrangler) | `docs.yml` (only when the site changes; run it by hand to show a new version at once) |

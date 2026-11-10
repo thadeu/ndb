@@ -2,6 +2,8 @@
 
 The image is `ghcr.io/thadeu/ndb-ui` (linux amd64 and arm64). It listens on `0.0.0.0:4321` inside the container, so publish the port on `127.0.0.1` only: the console has no login.
 
+For development, `ghcr.io/thadeu/ndb-stack` has the daemon and the console in one image, with no parameters: `docker run -p 7070:7070 -p 4321:4321 ghcr.io/thadeu/ndb-stack`. See [ndb-stack (development)](../deploy/docker.md#ndb-stack-development).
+
 ## A daemon over TCP
 
 ```bash
