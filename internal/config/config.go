@@ -108,7 +108,7 @@ type Config struct {
 	// (default 2048; 0 = no bodies). LogSlowMs is the duration of a slow
 	// request, a warn line (default 1000; 0 = off).
 	LogBodyMax int `yaml:"log_body_max"`
-	LogSlowMs  int `yaml:"log_slow_ms"`
+	LogSlowMs  int `yaml:"slow_ms"`
 }
 
 // Token is one bearer token of ndb.yml: a name, the file that holds the
@@ -324,7 +324,7 @@ func checkLog(cfg Config) error {
 	}
 
 	if cfg.LogSlowMs < 0 {
-		return fmt.Errorf("%w: log_slow_ms: %d is under 0", ErrInvalid, cfg.LogSlowMs)
+		return fmt.Errorf("%w: slow_ms: %d is under 0", ErrInvalid, cfg.LogSlowMs)
 	}
 
 	return nil

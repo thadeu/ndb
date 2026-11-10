@@ -154,7 +154,13 @@ func run(args []string) error {
 		}
 	}
 
-	return serve(ctx, cfg, token, setupLog(os.Stderr, logOpts))
+	// The log lines go out from one goroutine, in blocks: a debug log does
+	// not slow the requests. Close writes what waits.
+	out := logging.NewAsync(os.Stderr, 0)
+
+	defer out.Close()
+
+	return serve(ctx, cfg, token, setupLog(out, logOpts))
 }
 
 // readTokenFile returns the trimmed token. An empty file is an error: it
@@ -201,7 +207,7 @@ func serve(ctx context.Context, cfg config.Config, token string, lg *logging.Log
 		"log_level", logging.LevelName(lg.Level()),
 		"log_format", lg.Format(),
 		"log_body_max", lg.BodyMax(),
-		"log_slow_ms", lg.SlowMs(),
+		"slow_ms", lg.SlowMs(),
 	)
 
 	scoped, err := scopedTokens(cfg.Tokens)

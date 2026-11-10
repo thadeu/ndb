@@ -17,7 +17,7 @@ import (
 // LevelQuiet is above every level that ndb uses, so nothing is written.
 const LevelQuiet = slog.Level(12)
 
-// The defaults of log_level, log_format, log_body_max and log_slow_ms.
+// The defaults of log_level, log_format, log_body_max and slow_ms.
 const (
 	DefaultLevel   = "info"
 	DefaultFormat  = "text"
