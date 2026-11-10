@@ -452,12 +452,14 @@ e.ID        // "<ms>-<seq>"
 e.Time      // the ms of the ID, as time.Time
 e.Doc       // the T
 e.Deleted   // pending, but no longer in the stream (a trim or a delete)
+e.Err       // not nil when the doc does not decode into T
 e.Raw()     // the JSON from the daemon, with _id and _ts
 
 t := ndb.IDTime("1731160000000-0") // the zero time for a bad ID
 ```
 
 - When `Deleted` is true, `Doc` is the zero value.
+- When the doc does not decode into `T` (for example a text in an `int` field), `Err` has the cause, `Doc` is the zero value and `Raw()` has the doc. `Read`, `Claim`, `AutoClaim`, `Range`, `RevRange` and `Tail` give this entry with the other entries; they do not fail. A group read already made it pending, so ack it or send it to a dead letter. `Work` does this for you (see [Work](#work)).
 
 ### Create
 
@@ -523,6 +525,8 @@ last, err := orders.RevRange(ctx, "+", "-", 10)  // XREVRANGE, newest first
 
 - `Range(ctx, start, end, count)`: entries with an ID from `start` to `end`, both included. `"-"` and `"+"` are the lowest and the highest ID.
 - `"(id"` leaves that ID out, as in Redis: `orders.Range(ctx, "("+last, "+", 100)` gives the entries after `last`.
+- An ID with only the ms is `<ms>-0` as a start and `<ms>-<max seq>` as an end, as in Redis. So `"(5"` as a start leaves out `5-0` only, and `"(6"` as an end leaves out the last ID of ms 6 only.
+- A bad ID (not `<ms>` or `<ms>-<seq>` in digits, `-`, `+` or `"(id"`) returns `ErrInvalidStreamID`. The SDK checks it before it sends the request.
 - `RevRange` takes `end` first, then `start`, as `XREVRANGE` does.
 - `count` 0 uses the default limit of `_search`.
 
@@ -569,6 +573,8 @@ Fields of `ndb.Tail`:
 ```go
 n, err := orders.Delete(ctx, id) // XDEL: 1, or 0 when the entry is not there
 ```
+
+- An ID with only the ms is `<ms>-0`. A bad ID returns `ErrInvalidStreamID`.
 
 ### Groups
 
@@ -690,7 +696,7 @@ Fields of `ndb.PendingQuery`:
 
 | Field | Meaning |
 |---|---|
-| `Start`, `End` | The ID range. Default `"-"` and `"+"`. |
+| `Start`, `End` | The ID range. Default `"-"` and `"+"`. `"(id"` leaves that ID out, as in Redis 6.2. A bad ID returns `ErrInvalidStreamID`. |
 | `Count` | The most entries to give. Default 100. |
 | `Consumer` | Only the entries of this consumer. |
 | `Idle` | Only the entries idle for at least this long. |
@@ -786,12 +792,15 @@ Fields of `ndb.Work`:
 - The `Handler[T]` is `func(ctx context.Context, e ndb.Entry[T]) error`.
 - Delivery is at least once. Make the work safe to repeat.
 - Run many workers with different consumer names to share the work. The group must exist (`Ensure`).
-- A failed read does not stop `Work`. It goes to `OnError`, and `Work` tries again with a backoff from 100 ms to 5 s.
-- `OnError` gets the read errors, the handler errors, the claim and ack errors, and the poison messages.
+- A failed read does not stop `Work`, also the read of the own pending entries at the start, and also when the group does not exist. It goes to `OnError`, and `Work` tries again with a backoff from 100 ms to 5 s. Only the end of `ctx` stops `Work`.
+- An entry whose doc does not decode into `T` (`Entry.Err`) does not go to the handler. It counts as a handler failure: it goes to `OnError`, stays pending, and after `MaxDeliveries` goes to `DeadLetter` with its raw doc. The other entries of the same read go on as usual.
+- **Crash:** the read of the own pending entries at the start is one more delivery. An entry that already had `MaxDeliveries` deliveries without an ack (the process died in its handler, for example OOM or SIGKILL) goes to `DeadLetter` at the start, without the handler. So a poison entry that kills the process does not run forever.
+- **Shutdown:** when `ctx` ends and the handler returns an error, `Work` does not count it as a failure. The entry stays pending (no ack, no dead letter, no `OnError`), and the next run, or a claim, gets it again.
+- `OnError` gets the read errors, the handler and decode errors, the claim and ack errors, and the poison messages.
 
 ### DeadEntry and ErrPoison
 
-A poison message is an entry that fails on its `MaxDeliveries`-th delivery. At that failure, `Work` appends it to `DeadLetter` (when set), acks it, then sends an error that wraps `ndb.ErrPoison` to `OnError`. If the append to `DeadLetter` fails, the entry stays pending.
+A poison message is an entry that fails on its `MaxDeliveries`-th delivery. At that failure, `Work` appends it to `DeadLetter` (when set), acks it, then sends an error that wraps `ndb.ErrPoison` to `OnError`. If the append to `DeadLetter` fails, the entry stays pending. The append and the ack go also when `ctx` ended.
 
 ```go
 dead, err := ndb.StreamOf[ndb.DeadEntry](db, "orders-dead")
@@ -954,12 +963,12 @@ if err != nil && !strings.HasPrefix(err.Error(), "BUSYGROUP") {
 ### Differences from Redis
 
 - **Stream names.** A stream is an ndb collection: its name has the letters `a-z`, the digits, `_` and `-`, at most 64 characters, and starts with a letter or a digit. `orders:eu` and `Orders` are not valid names.
-- **Field names.** A name that starts with `_` is reserved (`_id`, `_ts`).
+- **Field names.** A name that starts with `_` is reserved (`_id`, `_ts`). `XAdd` with such a name returns an error that wraps `ndbredis.ErrNotSupported`, and appends nothing.
 - **Values keep their JSON type in ndb.** `XAdd` writes a Go string, `[]byte`, `time.Time` and `encoding.BinaryMarshaler` as a JSON string, and every other value as JSON: a number is a number, a `bool` is a boolean, a map or a slice is an object or an array. So the other SDKs and the queries of ndb see JSON types.
-- **Values come back as text**, as Redis gives them: `XMessage.Values` has a string for each field. A JSON string is its text; every other value is its JSON text (`"42"`, `"9.5"`, `` `{"name":"ana"}` ``); `null` is `""`. One difference: a `bool` comes back as `"true"` or `"false"`; go-redis sends it to Redis as `1` or `0`.
+- **Values come back as text**, as Redis gives them: `XMessage.Values` has a string for each field. A JSON string is its text; every other value is its JSON text (`"42"`, `"9.5"`, `` `{"name":"ana"}` ``); `null` is `""`. A float has no exponent, as go-redis sends it: `1e21` is `"1000000000000000000000"` and `1e-7` is `"0.0000001"`. One difference: a `bool` comes back as `"true"` or `"false"`; go-redis sends it to Redis as `1` or `0`.
 - **Text only.** A value is JSON, so bytes that are not UTF-8 text do not survive. Put binary data in a blob.
 - **A read without `Count`** gives at most 10 000 entries for each stream. Redis gives all of them. `XRange` without a count gives all of them (it reads page by page).
-- **`Block` on one stream only.** A read of many streams without `Block` sends one request for each stream, one after the other; it is not one atomic read.
+- **`Block` on one stream only.** A read of many streams without `Block` sends one request for each stream, one after the other; it is not one atomic read. `XReadGroup` first checks that the group exists on every stream, so a `NOGROUP` error delivers nothing, as in Redis.
 - **`Block: 0`** (wait with no limit, the zero value of go-redis) waits until the context ends. The wait is a sequence of requests of 30 seconds.
 - **`XRead` with `Block` on a stream that does not exist** looks for the stream every 100 ms.
 - **`XRead` with `+`** gives the last entry and never waits.

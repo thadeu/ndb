@@ -134,6 +134,8 @@ list for a stream (or a group) that does not exist.
   `a-z`, the digits, `_` and `-`, at most 64 characters, and starts with a
   letter or a digit. `orders:eu` and `Orders` are not valid names.
 - **Field names.** A name that starts with `_` is reserved (`_id`, `_ts`).
+  `XAdd` with such a name returns an error that wraps `ErrNotSupported`, and
+  appends nothing.
 - **Values keep their JSON type in ndb.** `XAdd` writes a Go string, `[]byte`,
   `time.Time` and `encoding.BinaryMarshaler` as a JSON string, and every other
   value as JSON: a number is a number, a `bool` is a boolean, a map or a slice
@@ -142,6 +144,8 @@ list for a stream (or a group) that does not exist.
 - **Values come back as text**, as Redis gives them: `XMessage.Values` has a
   string for each field. A JSON string is its text; every other value is its
   JSON text (`"42"`, `"9.5"`, `` `{"name":"ana"}` ``); `null` is `""`.
+  A float has no exponent, as go-redis sends it: `1e21` is
+  `"1000000000000000000000"` and `1e-7` is `"0.0000001"`.
   One difference: a `bool` comes back as `"true"` or `"false"`; go-redis sends
   it to Redis as `1` or `0`.
 - **Text only.** A value is JSON, so bytes that are not UTF-8 text do not
@@ -151,7 +155,8 @@ list for a stream (or a group) that does not exist.
   reads page by page).
 - **`Block` on one stream only.** A read of many streams without `Block`
   sends one request for each stream, one after the other; it is not one
-  atomic read.
+  atomic read. `XReadGroup` first checks that the group exists on every
+  stream, so a `NOGROUP` error delivers nothing, as in Redis.
 - **`Block: 0`** (wait with no limit, the zero value of go-redis) waits until
   the context ends. The wait is a sequence of requests of 30 seconds.
 - **`XRead` with `Block` on a stream that does not exist** looks for the

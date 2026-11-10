@@ -2,6 +2,9 @@ package ndbredis
 
 import (
 	"context"
+	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/redis/go-redis/v9"
 
@@ -78,11 +81,33 @@ func (c *Client) add(ctx context.Context, a *redis.XAddArgs) (string, error) {
 	return id, redisError(err)
 }
 
-// XDel deletes entries by ID and gives how many it deleted (XDEL).
+// XDel deletes entries by ID and gives how many it deleted (XDEL). As in
+// Redis, one bad ID deletes nothing and gives an error, but a stream that
+// does not exist gives 0.
 func (c *Client) XDel(ctx context.Context, stream string, ids ...string) *redis.IntCmd {
 	cmd := redis.NewIntCmd(ctx, "xdel", stream)
 	s := c.stream(stream)
 
+	if !slices.ContainsFunc(ids, func(id string) bool { return !validID(id) }) {
+		return c.del(ctx, cmd, s, ids)
+	}
+
+	_, err := s.Info(ctx)
+
+	switch {
+	case noStream(err):
+		cmd.SetVal(0)
+	case err != nil:
+		cmd.SetErr(redisError(err))
+	default:
+		cmd.SetErr(&replyError{text: textBadID, cause: ndb.ErrInvalidStreamID})
+	}
+
+	return cmd
+}
+
+// del deletes the entries one by one. Every ID is valid.
+func (c *Client) del(ctx context.Context, cmd *redis.IntCmd, s *ndb.Stream[doc], ids []string) *redis.IntCmd {
 	var deleted int64
 
 	for _, id := range ids {
@@ -293,4 +318,27 @@ func (c *Client) trim(ctx context.Context, key, mode string, t ndb.Trim) *redis.
 	cmd.SetVal(int64(n))
 
 	return cmd
+}
+
+// validID reports whether id is "<ms>" or "<ms>-<seq>", with decimal digits
+// only, as XDEL takes it.
+func validID(id string) bool {
+	ms, seq, hasSeq := strings.Cut(id, "-")
+
+	if !idPart(ms) {
+		return false
+	}
+
+	return !hasSeq || idPart(seq)
+}
+
+// idPart reports whether text is a uint64 of decimal digits only.
+func idPart(text string) bool {
+	if text == "" || strings.Trim(text, "0123456789") != "" {
+		return false
+	}
+
+	_, err := strconv.ParseUint(text, 10, 64)
+
+	return err == nil
 }

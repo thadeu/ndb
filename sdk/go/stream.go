@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -70,6 +71,12 @@ type Entry[T any] struct {
 	// Deleted: the entry was pending, but it is no longer in the stream (a
 	// trim or a delete). Doc is the zero value.
 	Deleted bool
+
+	// Err is not nil when the doc does not decode into T. Doc is then the
+	// zero value, and Raw has the doc. Read, Claim, Range and Tail give the
+	// entry with the other entries, not an error: a group read already
+	// made it pending, so ack it or send it to a dead letter.
+	Err error
 
 	raw json.RawMessage
 }
@@ -261,8 +268,9 @@ func (s *Stream[T]) Groups(ctx context.Context) ([]GroupInfo, error) {
 
 // Range returns up to count entries with an ID from start to end, both
 // included, in ID order (XRANGE). "-" and "+" are the lowest and the
-// highest ID; "(id" leaves that ID out. count 0 means the default of
-// _search.
+// highest ID; "(id" leaves that ID out. An ID with only the ms is
+// <ms>-0 as a start and <ms>-<max seq> as an end, as in Redis. count 0
+// means the default of _search. A bad ID gives ErrInvalidStreamID.
 func (s *Stream[T]) Range(ctx context.Context, start, end string, count int) ([]Entry[T], error) {
 	return s.rangeOf(ctx, start, end, count, 1)
 }
@@ -273,8 +281,17 @@ func (s *Stream[T]) RevRange(ctx context.Context, end, start string, count int) 
 }
 
 func (s *Stream[T]) rangeOf(ctx context.Context, start, end string, count, order int) ([]Entry[T], error) {
-	lowOp, low := rangeBound(start, "$gte", "$gt")
-	highOp, high := rangeBound(end, "$lte", "$lt")
+	lowOp, low, err := rangeBound(start, "$gte", "$gt", 0)
+
+	if err != nil {
+		return nil, err
+	}
+
+	highOp, high, err := rangeBound(end, "$lte", "$lt", math.MaxUint64)
+
+	if err != nil {
+		return nil, err
+	}
 
 	body := map[string]any{
 		"query": map[string]any{"_id": map[string]any{lowOp: low, highOp: high}},
@@ -288,14 +305,71 @@ func (s *Stream[T]) rangeOf(ctx context.Context, start, end string, count, order
 	return s.rows(ctx, "_search", body)
 }
 
-// rangeBound gives the operator and the ID of one end of a range: "(id"
-// leaves the ID out, as in Redis.
-func rangeBound(id, included, excluded string) (string, string) {
-	if rest, ok := strings.CutPrefix(id, "("); ok {
-		return excluded, rest
+// rangeBound gives the operator and the full ID of one end of a range:
+// "(id" leaves the ID out, as in Redis. An ID with only the ms gets seq as
+// its sequence: 0 for a start, the max for an end. So "(5" as a start
+// leaves out 5-0 only, and "(6" as an end leaves out 6-<max> only.
+func rangeBound(id, included, excluded string, seq uint64) (string, string, error) {
+	if id == "-" || id == "+" {
+		return included, id, nil
 	}
 
-	return included, id
+	op := included
+
+	if rest, ok := strings.CutPrefix(id, "("); ok {
+		op, id = excluded, rest
+	}
+
+	full, ok := fullID(id, seq)
+
+	if !ok {
+		return "", "", invalidID(id)
+	}
+
+	return op, full.String(), nil
+}
+
+// streamID is an entry ID: <ms>-<seq>.
+type streamID struct {
+	ms, seq uint64
+}
+
+func (id streamID) String() string {
+	return strconv.FormatUint(id.ms, 10) + "-" + strconv.FormatUint(id.seq, 10)
+}
+
+// fullID reads "<ms>-<seq>", or "<ms>" alone with seq as its sequence.
+func fullID(id string, seq uint64) (streamID, bool) {
+	msText, seqText, hasSeq := strings.Cut(id, "-")
+	ms, ok := digits(msText)
+
+	if !ok {
+		return streamID{}, false
+	}
+
+	if !hasSeq {
+		return streamID{ms, seq}, true
+	}
+
+	n, ok := digits(seqText)
+
+	return streamID{ms, n}, ok
+}
+
+// digits reads a number of decimal digits only: no sign, no space.
+func digits(text string) (uint64, bool) {
+	if text == "" || strings.Trim(text, "0123456789") != "" {
+		return 0, false
+	}
+
+	n, err := strconv.ParseUint(text, 10, 64)
+
+	return n, err == nil
+}
+
+// invalidID is the error of a bad entry ID, with the code of the daemon.
+func invalidID(id string) error {
+	return &Error{Code: ErrInvalidStreamID.Code, Message: fmt.Sprintf("%q is not an entry ID (<ms>-<seq>)", id)}
 }
 
 // Tail says what Stream.Tail gives.
@@ -331,8 +405,13 @@ func (s *Stream[T]) Tail(ctx context.Context, t Tail) ([]Entry[T], error) {
 }
 
 // Delete removes one entry by ID (XDEL) and returns 1, or 0 when it is not
-// there.
+// there. An ID with only the ms is <ms>-0. A bad ID gives
+// ErrInvalidStreamID.
 func (s *Stream[T]) Delete(ctx context.Context, id string) (int, error) {
+	if _, ok := fullID(id, 0); !ok {
+		return 0, invalidID(id)
+	}
+
 	var out struct {
 		Deleted int `json:"deleted"`
 	}
@@ -409,7 +488,9 @@ func (s *Stream[T]) rows(ctx context.Context, path string, body any) ([]Entry[T]
 	return out, nil
 }
 
-// entry decodes one entry: its _id and _deleted, then T.
+// entry decodes one entry: its _id and _deleted, then T. A doc that does
+// not decode into T sets Entry.Err; only a row that is not a JSON object
+// is an error.
 func (s *Stream[T]) entry(raw json.RawMessage) (Entry[T], error) {
 	var meta struct {
 		ID      string `json:"_id"`
@@ -427,7 +508,10 @@ func (s *Stream[T]) entry(raw json.RawMessage) (Entry[T], error) {
 	}
 
 	if err := s.decode(raw, &e.Doc); err != nil {
-		return Entry[T]{}, err
+		var zero T
+
+		e.Doc = zero
+		e.Err = fmt.Errorf("ndb: decode %s %s: %w", s.name, meta.ID, err)
 	}
 
 	return e, nil
@@ -660,14 +744,22 @@ type PendingEntry struct {
 }
 
 // PendingList returns pending entries, in ID order (XPENDING with a range).
+// Start and End take "(id" to leave that ID out, as in Redis 6.2. A bad ID
+// gives ErrInvalidStreamID.
 func (g *Group[T]) PendingList(ctx context.Context, q PendingQuery) ([]PendingEntry, error) {
-	if q.Start == "" {
-		q.Start = "-"
+	start, ok, err := pendingBound(q.Start, "-", 0)
+
+	if err != nil || !ok {
+		return []PendingEntry{}, err
 	}
 
-	if q.End == "" {
-		q.End = "+"
+	end, ok, err := pendingBound(q.End, "+", math.MaxUint64)
+
+	if err != nil || !ok {
+		return []PendingEntry{}, err
 	}
+
+	q.Start, q.End = start, end
 
 	if q.Count <= 0 {
 		q.Count = 100
@@ -675,9 +767,59 @@ func (g *Group[T]) PendingList(ctx context.Context, q PendingQuery) ([]PendingEn
 
 	var out []PendingEntry
 
-	err := g.s.call(ctx, http.MethodPost, g.path("pending"), pendingBody{PendingQuery: q, IdleMs: q.Idle.Milliseconds()}, &out)
+	err = g.s.call(ctx, http.MethodPost, g.path("pending"), pendingBody{PendingQuery: q, IdleMs: q.Idle.Milliseconds()}, &out)
 
 	return out, err
+}
+
+// pendingBound gives one end of a PendingList range as an ID that the
+// daemon takes. "(id" becomes the ID after it (a start, seq 0) or before
+// it (an end, seq max). ok is false when no ID is left: the list is empty.
+func pendingBound(id, empty string, seq uint64) (string, bool, error) {
+	if id == "" {
+		return empty, true, nil
+	}
+
+	if id == "-" || id == "+" {
+		return id, true, nil
+	}
+
+	rest, open := strings.CutPrefix(id, "(")
+	full, ok := fullID(rest, seq)
+
+	if !ok {
+		return "", false, invalidID(rest)
+	}
+
+	if !open {
+		return full.String(), true, nil
+	}
+
+	// A start: the ID after it.
+	if seq == 0 {
+		switch {
+		case full.seq < math.MaxUint64:
+			full.seq++
+		case full.ms < math.MaxUint64:
+			full = streamID{full.ms + 1, 0}
+		default:
+			return "", false, nil
+		}
+
+		return full.String(), true, nil
+	}
+
+	// An end: the ID before it.
+	switch {
+	case full.seq > 0:
+		full.seq--
+	case full.ms > 0:
+		full = streamID{full.ms - 1, math.MaxUint64}
+	default:
+		return "", false, nil
+	}
+
+	return full.String(), true, nil
 }
 
 // Claimed is the answer of Claim and AutoClaim.

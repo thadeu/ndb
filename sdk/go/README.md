@@ -370,8 +370,15 @@ err = g.Work(ctx, "worker-1", func(ctx context.Context, e ndb.Entry[Order]) erro
 })
 ```
 
-`Work` returns when `ctx` ends. Delivery is at least once: make the work safe
-to repeat. Run many workers with different consumer names to share the work.
+`Work` returns when `ctx` ends; a failed read goes to `OnError` and `Work`
+tries again. Delivery is at least once: make the work safe to repeat. Run many
+workers with different consumer names to share the work. An entry whose doc
+does not decode into `T` comes with `e.Err` set (and `e.Raw()`), not as an
+error of the read; `Work` counts it as a handler failure, so it goes to the
+dead letter after `MaxDeliveries`. A handler error while `ctx` ends (shutdown)
+leaves the entry pending: it is not a failure. An entry that had `MaxDeliveries`
+deliveries without an ack (it crashed the process) goes to the dead letter at
+the next start, without the handler.
 
 The calls one by one, when you need your own loop:
 
@@ -395,7 +402,9 @@ A blocked `Read` or `Tail` does not count against `WithMaxConns`.
 `Tail` reads without a group: it changes no group and no pending list. `After`
 is an ID (default `"0"`, the start) or `ndb.StartNew` (`$`): only the entries
 appended after the call starts. To read on, send the ID of the last entry as
-`After`. In `Range` and `RevRange`, `"(id"` leaves that ID out, as in Redis.
+`After`. In `Range`, `RevRange` and `PendingList`, `"(id"` leaves that ID out,
+as in Redis; an ID with only the ms is `<ms>-0` as a start and `<ms>-<max>` as
+an end. A bad ID returns `ndb.ErrInvalidStreamID`.
 
 ### The commands of go-redis
 

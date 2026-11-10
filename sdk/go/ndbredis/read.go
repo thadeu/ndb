@@ -3,6 +3,7 @@ package ndbredis
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -185,6 +186,14 @@ func (c *Client) readGroup(ctx context.Context, a *redis.XReadGroupArgs) ([]redi
 		return nil, notSupported("XREADGROUP with BLOCK on more than one stream")
 	}
 
+	// Many streams are many reads. Redis delivers nothing when one group
+	// is missing, so every group is checked before the first read.
+	if len(keys) > 1 {
+		if err := c.groupsExist(ctx, keys, a.Group); err != nil {
+			return nil, err
+		}
+	}
+
 	out := []redis.XStream{}
 
 	for i, key := range keys {
@@ -222,6 +231,24 @@ func (c *Client) readGroup(ctx context.Context, a *redis.XReadGroupArgs) ([]redi
 	}
 
 	return out, nil
+}
+
+// groupsExist gives NOGROUP for the first stream that has no group named
+// group, or that does not exist.
+func (c *Client) groupsExist(ctx context.Context, keys []string, group string) error {
+	for _, key := range keys {
+		groups, err := c.stream(key).Groups(ctx)
+
+		if err != nil {
+			return groupError(err, key, group)
+		}
+
+		if !slices.ContainsFunc(groups, func(g ndb.GroupInfo) bool { return g.Name == group }) {
+			return groupError(ndb.ErrUnknownGroup, key, group)
+		}
+	}
+
+	return nil
 }
 
 // split gives the keys and the IDs of a Streams list: the keys first, then

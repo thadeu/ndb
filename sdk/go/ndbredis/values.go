@@ -5,6 +5,9 @@ import (
 	"encoding"
 	"encoding/json"
 	"fmt"
+	"math"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -54,6 +57,12 @@ func fields(values any) (map[string]any, error) {
 		return nil, reply(fmt.Sprintf(textArgs, "xadd"))
 	}
 
+	for k := range out {
+		if strings.HasPrefix(k, "_") {
+			return nil, notSupported(fmt.Sprintf("XADD field %q: a name that starts with \"_\" is reserved (_id, _ts)", k))
+		}
+	}
+
 	for k, val := range out {
 		enc, err := fieldValue(val)
 
@@ -88,6 +97,10 @@ func fieldValue(v any) (any, error) {
 		return v.Format(time.RFC3339Nano), nil
 	case time.Duration:
 		return v.Nanoseconds(), nil
+	case float64:
+		return floatValue(v)
+	case float32:
+		return floatValue(float64(v))
 	case encoding.BinaryMarshaler:
 		b, err := v.MarshalBinary()
 
@@ -97,6 +110,16 @@ func fieldValue(v any) (any, error) {
 	raw, err := json.Marshal(v)
 
 	return json.RawMessage(raw), err
+}
+
+// floatValue writes a float as go-redis sends it: no exponent, so 1e21 is
+// 1000000000000000000000 and 1e-7 is 0.0000001. NaN and Inf are not JSON.
+func floatValue(f float64) (any, error) {
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return nil, fmt.Errorf("%v is not a JSON number", f)
+	}
+
+	return json.RawMessage(strconv.FormatFloat(f, 'f', -1, 64)), nil
 }
 
 // message makes the XMessage of an entry. Redis keeps text only: a JSON
@@ -147,6 +170,13 @@ func text(raw json.RawMessage) string {
 
 	if bytes.Equal(raw, []byte("null")) {
 		return ""
+	}
+
+	// A number with an exponent is the text of go-redis: no exponent.
+	if bytes.ContainsAny(raw, "eE") && len(raw) > 0 && (raw[0] == '-' || raw[0] >= '0' && raw[0] <= '9') {
+		if f, err := strconv.ParseFloat(string(raw), 64); err == nil {
+			return strconv.FormatFloat(f, 'f', -1, 64)
+		}
 	}
 
 	return string(raw)
