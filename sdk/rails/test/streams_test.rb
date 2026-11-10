@@ -62,6 +62,33 @@ class StreamsTest < Minitest::Test
     assert_empty options[:discard_on]
     assert_nil options[:max_len]
     assert_nil options[:retain]
+    assert_nil options[:retry]
+    assert_nil options[:max_age]
+  end
+
+  def test_the_retry_options_are_normalized
+    tiers = stream_class("orders", retry: [15, 1.minute, 10.minutes, 1.hour, 6.hours], max_age: 15.days).stream_options
+    proc_retry = ->(n) { n * 2 }
+    callable = stream_class("orders", retry: proc_retry, dead_letter: false).stream_options
+
+    assert_equal [15.0, 60.0, 600.0, 3600.0, 21_600.0, 21_600.0], (1..6).map { |n| tiers[:retry].call(n) }
+    assert_equal "15s, 1m, 10m, 1h, then 6h", tiers[:retry].to_s
+    assert_in_delta 1_296_000.0, tiers[:max_age]
+    assert_equal "orders_dead", tiers[:dead_letter], "max_age sends to the dead letter"
+    assert_same proc_retry, callable[:retry]
+    assert_equal "15s, 1m, 10m, 1h, then 6h; max age 15d", Ndb::Streams::Runner.retry_text(tiers)
+    assert_equal "after claim_idle (1m)", Ndb::Streams::Runner.retry_text(stream_class.stream_options)
+  end
+
+  def test_a_bad_retry_option_raises
+    klass = Class.new { include Ndb::Streams }
+
+    assert_raises(ArgumentError) { klass.stream :orders, retry: 15 }
+    assert_raises(ArgumentError) { klass.stream :orders, retry: [] }
+    assert_raises(ArgumentError) { klass.stream :orders, retry: ["15"] }
+    assert_raises(ArgumentError) { klass.stream :orders, retry: [-1] }
+    assert_raises(ArgumentError) { klass.stream :orders, max_age: 0 }
+    assert_raises(ArgumentError) { klass.stream :orders, max_age: "15d" }
   end
 
   def test_the_options_are_normalized

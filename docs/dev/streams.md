@@ -162,6 +162,86 @@ The loop of a worker with retries: steps 1 to 4 of [A worker](#a-worker),
 plus a due claim on each tick; on a failure, `nack` with the wait of this
 delivery instead of leaving the entry pending.
 
+### Delayed retry in the SDKs
+
+The worker of each SDK does this loop with two options: the retry schedule
+and a max age. The example is the post-call outbox of fsw-esl: try 1 waits
+15 s, tries 2 to 5 wait 1 min, 6 to 11 wait 10 min, 12 to 23 wait 1 h, then
+6 h, until the entry is 15 days old. An entry that always fails runs 81
+times; the 82nd delivery goes to the dead letter with the reason `max_age`.
+
+```go
+// Go
+g.Work(ctx, "jobs-1", postCall, ndb.Work{
+	Retry: ndb.TierSteps(
+		ndb.Step{Wait: 15 * time.Second, UpTo: 1},
+		ndb.Step{Wait: time.Minute, UpTo: 5},
+		ndb.Step{Wait: 10 * time.Minute, UpTo: 11},
+		ndb.Step{Wait: time.Hour, UpTo: 23},
+		ndb.Step{Wait: 6 * time.Hour},
+	),
+	MaxAge:     15 * 24 * time.Hour,
+	DeadLetter: "postcall_jobs_dead",
+})
+```
+
+```ruby
+# Ruby (seconds)
+group.work("jobs-1",
+  retry: Ndb::Stream.tiers(
+    { wait: 15, up_to: 1 }, { wait: 60, up_to: 5 }, { wait: 600, up_to: 11 },
+    { wait: 3600, up_to: 23 }, { wait: 21_600 }
+  ),
+  max_age: 15 * 86_400,
+  dead_letter: "postcall_jobs_dead") { |entry| post_call(entry.doc) }
+
+# Rails
+class PostCallJob
+  include Ndb::Streams
+
+  stream :postcall_jobs, group: :jobs, max_age: 15.days, retry: [
+    { wait: 15.seconds, up_to: 1 }, { wait: 1.minute, up_to: 5 },
+    { wait: 10.minutes, up_to: 11 }, { wait: 1.hour, up_to: 23 }, { wait: 6.hours }
+  ]
+
+  def perform(event) = PostCall.deliver(event[:call_id])
+end
+```
+
+```ts
+// TypeScript (milliseconds)
+const minute = 60_000
+const hour = 60 * minute
+
+await group.work('jobs-1', postCall, {
+  retry: tiers(
+    { waitMs: 15_000, upTo: 1 },
+    { waitMs: minute, upTo: 5 },
+    { waitMs: 10 * minute, upTo: 11 },
+    { waitMs: hour, upTo: 23 },
+    { waitMs: 6 * hour },
+  ),
+  maxAgeMs: 15 * 24 * hour,
+  deadLetter: 'postcall_jobs_dead',
+})
+```
+
+The rules are the same in the three SDKs:
+
+- A failed handler nacks the entry with the wait of its delivery count. A
+  plain list of waits (`[15, 60, 600]`) is one wait for each try; the last
+  one repeats.
+- An entry that fails on its `max_deliveries`-th delivery goes to the dead
+  letter (reason `max_deliveries`), not to a nack.
+- An entry older than the max age, by the time of its ID, goes to the dead
+  letter (reason `max_age`) without the handler. One that gets too old in
+  the handler and fails goes there at once.
+- A stop during the handler leaves the entry pending: no nack, no dead
+  letter.
+- The worker claims the due entries every `due_every` (1 s by default with
+  a retry schedule). The claim of idle entries skips the nacked entries
+  that still wait.
+
 ### ndb only
 
 These are not in Redis. An app that never uses them sees the behavior of

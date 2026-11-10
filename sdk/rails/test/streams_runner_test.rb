@@ -177,6 +177,41 @@ class StreamsRunnerTest < Minitest::Test
     assert seen.empty?
   end
 
+  # retry: and max_age: of `stream` go to the worker: a failed entry comes
+  # back after the wait, and an entry past max_age goes to the dead letter
+  # (reason max_age) without perform. The start logs the schedule.
+  def test_retry_and_max_age_through_stream
+    seen = Queue.new
+    writer = stream_class
+    consumer = stream_class(writer.stream_name, group: :billing, start: :all, retry: [0.3, 1.minute], max_age: 1.hour) do
+      define_method(:perform) do |event|
+        seen << [event[:n], event.deliveries, Process.clock_gettime(Process::CLOCK_MONOTONIC)]
+
+        raise IOError, "first try" if event.deliveries == 1
+      end
+    end
+
+    dead = stream_class("#{writer.stream_name}_dead")
+    old_ms = ((Time.now.to_f - 7200) * 1000).to_i
+
+    writer.ndb_stream.append({ n: 0 }, id: "#{old_ms}-1")
+
+    start_runner(due_every: 0.05)
+
+    writer.append(n: 1)
+
+    first, second = take(seen, 2)
+
+    assert_equal [[1, 1], [1, 2]], [first[0..1], second[0..1]]
+    assert_operator second[2] - first[2], :>=, 0.29
+
+    wait_until { dead.count == 1 && consumer.stream_group.pending["count"].zero? }
+
+    assert_equal [0, "max_age"], [dead.last[:doc]["n"], dead.last[:reason]]
+    assert seen.empty?
+    assert_match(/retry: 0\.3s, then 1m; max age 1h/, @log.string)
+  end
+
   def test_around_perform_wraps_perform_in_order_on_the_instance
     seen = Queue.new
     writer = stream_class

@@ -33,7 +33,9 @@ module Ndb
       # every class. consumer: the base of the consumer names (NDB_CONSUMER,
       # or the hostname). claim_every: seconds between two looks for idle
       # entries (the default of Ndb::Worker: claim_idle / 2, at least 1).
-      def initialize(only: nil, concurrency: nil, consumer: nil, block: BLOCK, claim_every: nil)
+      # due_every: seconds between two claims of the due retries (the
+      # default of Ndb::Worker: 1 with a retry schedule).
+      def initialize(only: nil, concurrency: nil, consumer: nil, block: BLOCK, claim_every: nil, due_every: nil)
         settings = Streams.settings
 
         @only = Array(only || settings["only"]).map { |entry| entry.respond_to?(:name) ? entry.name : entry.to_s }
@@ -41,6 +43,7 @@ module Ndb
         @consumer = consumer || self.class.consumer_base
         @block = block
         @claim_every = claim_every
+        @due_every = due_every
 
         @workers = []
         @threads = []
@@ -56,6 +59,21 @@ module Ndb
         name = env["NDB_CONSUMER"].to_s.strip
 
         name.empty? ? Socket.gethostname : name
+      end
+
+      # The retry schedule of a consumer in words, for the log:
+      # "15s, 1m, 10m, 1h, then 6h; max age 15d; max deliveries 5".
+      def self.retry_text(options)
+        schedule = options[:retry]
+        claim_idle = options[:claim_idle]
+
+        idle = claim_idle ? Ndb::Stream::Tiers.duration(claim_idle) : "off"
+
+        parts = [schedule ? Ndb::Stream::Tiers.describe(schedule) : "after claim_idle (#{idle})"]
+        parts << "max age #{Ndb::Stream::Tiers.duration(options[:max_age])}" if options[:max_age]
+        parts << "max deliveries #{options[:max_deliveries]}" if options[:max_deliveries]
+
+        parts.join("; ")
       end
 
       # The consumer classes this runner runs.
@@ -91,6 +109,7 @@ module Ndb
           threads.times { |index| @workers << worker(klass, index) }
 
           Streams.logger.info("ndb streams: #{klass.stream_label} reads #{klass.stream_name}/#{klass.stream_options[:group]} with #{threads} thread(s) as #{@consumer}")
+          Streams.logger.info("ndb streams: #{klass.stream_label} retry: #{self.class.retry_text(klass.stream_options)}")
         end
 
         @threads = @workers.map { |worker| spawn_thread(worker) }
@@ -229,6 +248,9 @@ module Ndb
           block: @block,
           claim_idle: options[:claim_idle],
           claim_every: @claim_every,
+          retry: options[:retry],
+          max_age: options[:max_age],
+          due_every: @due_every,
           max_deliveries: options[:max_deliveries],
           dead_letter: dead_letter,
           on_error: ->(error) { report(klass, error) }

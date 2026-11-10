@@ -20,6 +20,7 @@ module Ndb
       # Sets the stream of the class and its options:
       #
       #   stream :orders, group: :billing, concurrency: 2, max_deliveries: 5
+      #   stream :orders, group: :billing, retry: [15, 1.minute, 10.minutes], max_age: 15.days
       #   stream OrderEvent, group: :billing    # the stream of another class
       #
       # See Options::DEFAULTS for the options.
@@ -56,11 +57,12 @@ module Ndb
       end
 
       # Every option with its value. dead_letter is "<stream>_dead" when
-      # max_deliveries is set.
+      # max_deliveries or max_age is set.
       def stream_options
         options = Options::DEFAULTS.merge(@ndb_stream_config || {})
+        buries = options[:max_deliveries] || options[:max_age]
 
-        options[:dead_letter] = "#{stream_name}_dead" if options[:dead_letter].nil? && options[:max_deliveries]
+        options[:dead_letter] = "#{stream_name}_dead" if options[:dead_letter].nil? && buries
         options[:dead_letter] = nil if options[:dead_letter] == false
 
         options

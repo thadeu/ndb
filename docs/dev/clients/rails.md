@@ -560,8 +560,10 @@ stream group: :billing                # the name from the class name
 | `group:` | none | The consumer group. Required in a class with `perform`. |
 | `concurrency:` | `1` | The threads of this class in each `ndb streams` process. |
 | `max_deliveries:` | none (no limit) | After this many deliveries, the entry goes to the dead letter and is acked. |
-| `dead_letter:` | `"<stream>_dead"` when `max_deliveries` is set | The stream that gets the poison entries. `false`: no dead letter stream. |
+| `dead_letter:` | `"<stream>_dead"` when `max_deliveries` or `max_age` is set | The stream that gets the poison entries. `false`: no dead letter stream. |
 | `claim_idle:` | `1.minute` | An entry pending for this long is tried again. Seconds or a duration. |
+| `retry:` | none | The wait before the next try of a failed entry: an Array of seconds or durations (the last one repeats), or a callable `->(deliveries) { seconds }`. See [Delayed retry](#delayed-retry). |
+| `max_age:` | none | Seconds or a duration. An entry older than this (by the time of its ID) goes to the dead letter (reason `max_age`) and is acked, with no retry. |
 | `start:` | `:new` | Where a new group starts. `:new`: only the entries appended after the group is made. `:all`: from the start of the stream. |
 | `discard_on:` | `[]` | Exception classes. An error of these classes acks the entry without a retry. |
 | `max_len:` | none (keep everything) | Keep only the newest N entries. It is an exact trim on each append. |
@@ -692,23 +694,57 @@ stream :order_events,
 ```
 
 - **An error in `perform`** leaves the entry pending. The error goes to the log (`Rails.logger`), and the thread continues with the next entry. Any exception is an error here, also one that is not a `StandardError` (`NotImplementedError`, `SystemStackError`). Only `SignalException` (with `Interrupt`) and `SystemExit` go on and stop the thread.
-- **Retry.** A thread of the group claims the entries that are pending for `claim_idle` or longer, of any consumer, and runs them again. It looks for them every `claim_idle / 2` (at least 1 second). So a retry comes between `claim_idle` and 1.5 times `claim_idle` after the failure. There is no backoff and no delayed retry.
+- **Retry.** Without `retry:`, a thread of the group claims the entries that are pending for `claim_idle` or longer, of any consumer, and runs them again. It looks for them every `claim_idle / 2` (at least 1 second). So a retry comes between `claim_idle` and 1.5 times `claim_idle` after the failure. With `retry:`, the wait comes from the schedule (see [Delayed retry](#delayed-retry)).
 - **`discard_on`.** An error of one of these classes (or of a subclass) is a warning in the log, and the entry is acked. Nothing goes to the dead letter.
 - **`max_deliveries`.** An entry that fails on its `max_deliveries`-th delivery is poison. At that failure, the thread appends the entry to the dead letter stream, acks it and writes a warning. With `max_deliveries: 5`, `perform` runs 5 times at most.
-- **The dead letter** is the stream `<stream>_dead` (or the name in `dead_letter:`). Each entry of it is `{stream, group, id, deliveries, doc}`. With `dead_letter: false`, a poison entry is only acked and logged.
+- **The dead letter** is the stream `<stream>_dead` (or the name in `dead_letter:`). Each entry of it is `{stream, group, id, deliveries, reason, doc}`; `reason` is `"max_deliveries"` or `"max_age"`. With `dead_letter: false`, a poison entry is only acked and logged.
 - **After a restart**, each thread reads its own pending entries first. That read counts as one delivery, as in Redis.
 - **A crash in `perform`.** When `perform` stops the process (an out-of-memory kill, a segfault), the entry is not acked and gets no failure. With `max_deliveries`, the read of the pending entries after the restart sends an entry with more than `max_deliveries` deliveries to the dead letter, without `perform`. So a poison entry that crashes the process stops after `max_deliveries` runs.
 
 ```ruby
 Ndb::Rails.client.stream("order_events_dead").range.each do |entry|
-  entry.doc   # {"stream" => "order_events", "group" => "billing", "id" => "...", "deliveries" => 5, "doc" => {...}}
+  entry.doc   # {"stream" => "order_events", "group" => "billing", "id" => "...", "deliveries" => 5, "reason" => "max_deliveries", "doc" => {...}}
 end
 ```
 
 Limits:
 
-- Without `max_deliveries`, an entry that always fails is tried again with no end.
+- Without `max_deliveries` or `max_age`, an entry that always fails is tried again with no end.
 - The dead letter has no consumer of its own. Read it with the low-level client, or write a class with `stream :order_events_dead`.
+
+### Delayed retry
+
+ndb only (it uses `nack` of the daemon; see the Ruby client). The fsw-esl outbox schedule: try 1 waits 15 s, tries 2 to 5 wait 1 min, 6 to 11 wait 10 min, 12 to 23 wait 1 h, then 6 h, for at most 15 days:
+
+```ruby
+# app/streams/post_call_job.rb
+class PostCallJob
+  include Ndb::Streams
+
+  stream :postcall_jobs,
+    group: :jobs,
+    retry: [
+      { wait: 15.seconds, up_to: 1 },
+      { wait: 1.minute, up_to: 5 },
+      { wait: 10.minutes, up_to: 11 },
+      { wait: 1.hour, up_to: 23 },
+      { wait: 6.hours }
+    ],
+    max_age: 15.days
+
+  def perform(event)
+    PostCall.deliver(event[:call_id])
+  end
+end
+```
+
+- A failed `perform` gives the entry back to the group after the wait for its delivery count: 15 s after the first failure, 1 min after failures 2 to 5, and so on; 6 h after each failure from the 24th. An entry that always fails runs 81 times in 15 days. A plain list (`retry: [15.seconds, 1.minute, 6.hours]`) is one wait for each try, and the last one repeats. It does not come back before that wait, also after a restart, and any thread of the group takes it when it is due (in about 1 second).
+- `retry:` also takes a callable, `retry: ->(deliveries) { 2**deliveries }`, or `Ndb::Stream.tiers(...)` (with steps, see the Ruby client).
+- `max_age: 15.days`: an entry older than 15 days goes to `postcall_jobs_dead` with the reason `max_age`, without `perform`. An entry that fails when it is older than that goes there at once, with no more wait.
+- With `max_deliveries:` too, an entry that fails on its last delivery goes to the dead letter, not to a retry.
+- `discard_on:` still acks without a retry.
+- `bundle exec ndb streams` writes the schedule of each consumer to the log at the start: `PostCallJob retry: 15s x1, 1m x4, 10m x6, 1h x12, then 6h; max age 15d`. A consumer without `retry:` writes `retry: after claim_idle (1m)`.
+- **Inline mode** (`Ndb::Streams.inline!`) runs `perform` one time, in the caller's thread. A failure raises to the caller, as without `retry:`: the schedule and `max_age` do not apply inline.
 
 ### ApplicationStream
 

@@ -575,22 +575,60 @@ billing.ack(entries.map(&:id))       # an Array is fine too
 ```ruby
 billing.pending
 # => {"count" => 5, "lowest" => "...", "highest" => "...",
-#     "consumers" => [{"name" => "w1", "count" => 5}]}
+#     "consumers" => [{"name" => "w1", "count" => 4}], "waiting" => 1}
 ```
 
 - The pending list in short (`XPENDING`).
+- `"waiting"` (ndb only): the nacked entries whose retry time has not come. A nacked entry counts in `"count"`, and for no consumer in `"consumers"`.
 
 ### `group.pending_list`
 
 ```ruby
 billing.pending_list(idle: 60, count: 100)
-# => [{"_id" => "...", "consumer" => "w1", "idle_ms" => 61000, "deliveries" => 2}]
+# => [{"_id" => "...", "consumer" => "w1", "idle_ms" => 61000, "deliveries" => 2, "retry_at" => nil},
+#     {"_id" => "...", "consumer" => "", "idle_ms" => 3000, "deliveries" => 1, "retry_at" => 2026-11-10 14:01:00 UTC}]
 
 billing.pending_list(start: "-", stop: "+", consumer: "w1")
+billing.pending_list(due: false)   # the nacked entries that still wait
 ```
 
 - The pending entries in ID order (`XPENDING` with a range).
-- Keywords: `start:` (`"-"`), `stop:` (`"+"`), `count:` (100), `consumer:` (all), `idle:` (seconds: only the entries idle for at least this long).
+- Keywords: `start:` (`"-"`), `stop:` (`"+"`), `count:` (100), `consumer:` (all), `idle:` (seconds: only the entries idle for at least this long), `due:` (ndb only: `true` gives only the nacked entries whose retry time passed, `false` only the ones that still wait; `nil` gives all).
+- `"retry_at"` (ndb only) is the retry time of a nacked entry, as a `Time` (UTC), or `nil` when the entry is not nacked. A nacked entry has `"consumer" => ""`. The other fields are as the daemon sends them (`"idle_ms"` in milliseconds).
+
+### `group.nack`
+
+```ruby
+billing.nack("w1", entry.id, delay: 60)        # => 1
+billing.nack("w1", ids, delay: 0.5)            # an Array, a Float is fine
+billing.nack("w1", entry.id)                   # delay 0: due at once
+```
+
+- ndb only: Redis has no delayed retry. `nack(consumer, *ids, delay: 0)` gives the entries back to the group after `delay` seconds, for a retry. It returns how many it gave back.
+- Only the IDs pending **for this consumer** count; other IDs count 0, not an error. No ID sends nothing and returns 0.
+- The entry stays pending with no owner (`"consumer" => ""`) and a `"retry_at"`. Its delivery count does not change; the claim that takes it again adds 1.
+- No claim takes it before its retry time (also not `min_idle: 0` or `force: true`). After it, any consumer of the group takes it at once with [`group.claim_due`](#group-claim_due) or `group.claim`. The own pending read (`read(pending: true)`) never gives it, so a restarted worker does not take it early.
+- `delay` is at most 30 days; a negative or larger one raises `Ndb::InvalidQuery` (`invalid_request`).
+- `group.ack(id)` of a nacked entry removes it: so an app can cancel a retry.
+
+### `group.claim_due`
+
+```ruby
+cursor = "0-0"
+
+loop do
+  out = billing.claim_due("w2", cursor: cursor, count: 100)
+  out.entries.each { |e| handle(e) }
+
+  cursor = out.cursor
+
+  break if cursor == "0-0"
+end
+```
+
+- ndb only. `claim_due(consumer, cursor: "0-0", count: nil, just_ids: false)` scans only the nacked entries and moves the ones whose retry time passed to the consumer, in ID order. Each one gets one more delivery.
+- It does not read the entries in flight at live workers, so a worker can call it on a short tick (the worker does, every `due_every`).
+- It returns an `Ndb::Claimed`, as [`group.auto_claim`](#group-auto_claim): `entries`, `deleted` (nacked IDs whose entry was trimmed) and `cursor`.
 
 ### `group.claim`
 
@@ -673,6 +711,9 @@ The options and their defaults:
 | `max_deliveries:` | `nil` (no limit) | an entry delivered this many times is poison |
 | `dead_letter:` | `nil` | the stream name that gets the poison entries |
 | `on_error:` | `nil` | a callable that gets the errors that do not stop the worker |
+| `retry:` | `nil` | ndb only. The wait before the next try of a failed entry: an Array of seconds (`[15, 60, 600]`, the last one repeats) or a callable `->(deliveries) { seconds }`. See [Delayed retry](#delayed-retry). `nil`: a failed entry stays pending until `claim_idle` |
+| `max_age:` | `nil` | ndb only. Seconds. An entry older than this (by the time of its ID) goes to `dead_letter` with the reason `"max_age"` and is acked, with no retry |
+| `due_every:` | `1` with `retry:`, else off | seconds between two claims of the due retries (`group.claim_due`) |
 
 ### `Worker#run`
 
@@ -684,8 +725,9 @@ The loop:
 
 1. It reads its own pending entries first (the ones it took before a restart and did not ack), and does the work on them. With `max_deliveries`, an entry whose delivery count (with this read) is above `max_deliveries` goes to `dead_letter` without the block: the process stopped in the block that many times (a crash). Its dead letter entry has `deliveries` = the count - 1.
 2. It reads new entries, and waits up to `block` for them.
-3. It acks the entries that the block did without a raise.
-4. Every `claim_every`, it claims the entries idle for `claim_idle`, and sends the poison ones to `dead_letter`.
+3. It acks the entries that the block did without a raise, and nacks the failed ones with the wait of `retry:`.
+4. Every `due_every`, it claims the nacked entries whose wait passed (`claim_due`), and does the work on them.
+5. Every `claim_every`, it claims the entries idle for `claim_idle` (a scan: the nacked entries that still wait do not fill it), and sends the poison ones to `dead_letter`.
 
 - A failed read goes to `on_error`. The loop waits (backoff from 0.1 s up to 5 s) and reads again. This is also true for the first read of the own pending entries (the daemon is down at the start).
 - A group or a stream that does not exist is a failed read too: `on_error` gets `Ndb::UnknownGroup` (or `Ndb::UnknownCollection`), and the worker reads again after the backoff. So a worker that starts before its group (deploy order) waits for it, and starts the work when the group is made. Only `stop` ends the worker.
@@ -713,17 +755,68 @@ billing.work("w1", stop: -> { done }, count: 100, max_deliveries: 5) { |entry| c
 - The same loop as `worker(...).run` in one call, in this thread. It takes the options of `worker`.
 - `stop:` is a callable. The loop ends when it returns true (it is checked about every 50 ms, and the loop ends after the current read). Without `stop:`, the loop never ends: use `worker` and `Worker#stop` instead.
 
+### Delayed retry
+
+ndb only. With `retry:`, a failed entry is not left pending for `claim_idle`: the worker nacks it with the wait for its delivery count, and the entry comes back after that wait, not before. While it waits it has no owner, so a restart does not take it early, and any worker of the group takes it when it is due.
+
+The schedule of the fsw-esl outbox: try 1 waits 15 s, tries 2 to 5 wait 1 min, 6 to 11 wait 10 min, 12 to 23 wait 1 h, then 6 h, until the entry is 15 days old:
+
+```ruby
+billing.work(
+  "w1",
+  retry: Ndb::Stream.tiers(
+    { wait: 15, up_to: 1 },      # try 1: 15 s
+    { wait: 60, up_to: 5 },      # tries 2 to 5: 1 min
+    { wait: 600, up_to: 11 },    # tries 6 to 11: 10 min
+    { wait: 3600, up_to: 23 },   # tries 12 to 23: 1 h
+    { wait: 21_600 }             # then 6 h
+  ),
+  max_age: 15 * 86_400,
+  dead_letter: "postcall_jobs_dead",
+  on_error: ->(error) { warn error.message }
+) { |entry| post_call(entry.doc) }
+```
+
+- The wait after the failure on delivery n is the wait of the first step with `n <= up_to`; after the last `up_to`, the last wait repeats. With this schedule, an entry that always fails runs 81 times, and the 82nd delivery is past 15 days: it goes to the dead letter with reason `"max_age"`.
+- A plain Array is one wait for each try: `retry: [15, 60, 600, 3600, 21_600]` waits 15 s after try 1, 1 min after try 2, and 6 h after each try from the fifth (the last wait repeats).
+- An entry that fails on its `max_deliveries`-th delivery goes to the dead letter, it is not nacked.
+- With `max_age:`, an entry older than `max_age` goes to the dead letter (reason `"max_age"`) without the block. An entry that fails when it is older than `max_age` goes there at once too, it is not nacked.
+- A failed nack (ndb is down) leaves the entry pending: `claim_idle` takes it.
+- A block that raises after `worker.stop` is not a failure: the entry stays pending for the next run, with no nack.
+- The precision is about `due_every` (1 s).
+
+### `Ndb::Stream.tiers`
+
+```ruby
+Ndb::Stream.tiers(15, 60, 600, 3600, 21_600)   # what retry: [15, 60, ...] makes
+
+Ndb::Stream.tiers(                             # steps: a wait for a range of tries
+  { wait: 15, up_to: 1 },                      # try 1
+  { wait: 60, up_to: 5 },                      # tries 2 to 5
+  { wait: 600, up_to: 11 },                    # tries 6 to 11
+  { wait: 3600, up_to: 23 },                   # tries 12 to 23
+  { wait: 21_600 }                             # then 6 h
+)
+```
+
+- It returns an `Ndb::Stream::Tiers`: a callable (`tiers.call(deliveries)` gives the wait in seconds) for `retry:`.
+- Waits are seconds (a Float is fine), from 0 to 30 days. Each `up_to:` is greater than the one before; only the last step can have no `up_to:`. After the last bound, the last wait repeats.
+- `tiers.to_s` is the schedule in words: `"15s, 1m, 10m, 1h, then 6h"` or `"15s x1, 1m x4, 10m x6, 1h x12, then 6h"`.
+- A bad wait or step raises `ArgumentError`.
+
 ### Dead letter and poison
 
 ```ruby
 dead = db.stream("orders_dead")
 dead.range.each do |e|
-  e.doc   # => {"stream" => "orders", "group" => "billing", "id" => "...", "deliveries" => 5, "doc" => {...}}
+  e.doc   # => {"stream" => "orders", "group" => "billing", "id" => "...", "deliveries" => 5,
+          #     "reason" => "max_deliveries", "doc" => {...}}
 end
 ```
 
-- An entry that fails on its `max_deliveries`-th delivery is poison. At that failure, the worker appends `{stream, group, id, deliveries, doc}` to the `dead_letter` stream (when set), acks the entry, and gives an `Ndb::PoisonMessage` to `on_error`.
-- `Ndb::PoisonMessage` has `entry`, `deliveries` and the code `poison_message`. The worker does not raise it.
+- An entry that fails on its `max_deliveries`-th delivery is poison. At that failure, the worker appends `{stream, group, id, deliveries, reason, doc}` to the `dead_letter` stream (when set), acks the entry, and gives an `Ndb::PoisonMessage` to `on_error`.
+- `reason` is `"max_deliveries"`, or `"max_age"` for an entry older than `max_age:`.
+- `Ndb::PoisonMessage` has `entry`, `deliveries`, `reason` and the code `poison_message`. The worker does not raise it.
 - Without `dead_letter:`, a poison entry is only acked and reported.
 
 ### Stream errors
