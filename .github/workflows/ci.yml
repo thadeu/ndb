@@ -24,8 +24,8 @@ permissions:
 # only once). Two releases do not mix: release.yml, ghcr.yml and
 # publish.yml run one at a time, in order.
 concurrency:
-  group: ${{ startsWith(github.event.head_commit.message, 'release: ') && format('ci-release-{0}', github.sha) || format('ci-{0}', github.ref) }}
-  cancel-in-progress: ${{ !startsWith(github.event.head_commit.message, 'release: ') }}
+  group: "${{ startsWith(github.event.head_commit.message, 'release: ') && format('ci-release-{0}', github.sha) || format('ci-{0}', github.ref) }}"
+  cancel-in-progress: "${{ !startsWith(github.event.head_commit.message, 'release: ') }}"
 
 jobs:
   go:
