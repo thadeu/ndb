@@ -9,6 +9,8 @@
 
 **The API of Elasticsearch. The filters of MongoDB. One Go binary.**
 
+**Docs: [ndb.clowk.in](https://ndb.clowk.in)** · for AI agents: [llms.txt](https://ndb.clowk.in/llms.txt)
+
 ndb takes the routes developers know from Elasticsearch (`POST /logs/_search`, `_count`, `_bulk`, `_update_by_query`, index patterns like `logs-2026-*`, date math like `now-7d/d`) and the query language they know from MongoDB (`$in`, `$gte`, `$regex`, `$elemMatch`, `$inc`, `$group`), and runs them on plain NDJSON. No JVM, no cluster, no schema: one daemon on a unix socket (and optional TCP with a bearer token). Go, Ruby, Rails and TypeScript SDKs speak the same API, so the same query gives the same result in every language and from `curl`.
 
 ```bash
@@ -134,6 +136,8 @@ A hosted version is planned for later. See [docs/dev/ui.md](docs/dev/ui.md).
 
 ## Documentation
 
+The full docs are at **[ndb.clowk.in](https://ndb.clowk.in)**, with search, and a [`llms.txt`](https://ndb.clowk.in/llms.txt) for AI agents. The same pages are in this repo:
+
 - [docs/dev/architecture.md](docs/dev/architecture.md): Components and data flow.
 - [docs/dev/query.md](docs/dev/query.md): find, filters, update and delete by filter, pagination.
 - [docs/dev/aggregate.md](docs/dev/aggregate.md): the aggregate pipeline.
@@ -148,7 +152,7 @@ A hosted version is planned for later. See [docs/dev/ui.md](docs/dev/ui.md).
 - [docs/dev/deployment.md](docs/dev/deployment.md): choose a setup: Linux (systemd), Docker, Single VM, Cross-VM, Voodu.
 - [docs/dev/development.md](docs/dev/development.md): Tests and release.
 - [docs/dev/releasing.md](docs/dev/releasing.md): Release checklist.
-- [.plans/ndb-v1.md](.plans/ndb-v1.md): The design plan.
+- [docs/dev/security.md](docs/dev/security.md): what to configure before you expose ndb (tokens, CORS, TLS, data at rest).
 
 ## Contributing
 

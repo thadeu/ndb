@@ -1,7 +1,7 @@
 # Milestones
 
 Epics and milestones to build ndb, from the core to the clients.
-Source of truth for the design: [`../ndb-v1.md`](../ndb-v1.md).
+The design is in the docs: [ndb.clowk.in](https://ndb.clowk.in) (pages in `docs/dev/`). The first design plan, `ndb-v1.md`, is in the git history.
 Deferred ideas: [`../backlog/`](../backlog/).
 
 ## Rules
