@@ -121,7 +121,7 @@ describe('stream', () => {
 
     const list = await g.pendingList({ consumer: 'w1' })
 
-    expect(list).toEqual([expect.objectContaining({ id: ids[1], consumer: 'w1', deliveries: 1 })])
+    expect(list).toEqual([expect.objectContaining({ id: ids[1], consumer: 'w1', deliveries: 2 })])
 
     const claimed = await g.claim('w2', 0, [ids[1]!])
 

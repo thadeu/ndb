@@ -519,7 +519,7 @@ billing.read("w1", no_ack: true, fields: %w[order])
 - By default it gives new entries (`>` in Redis). Each one becomes pending for this consumer.
 - `count:` is the most entries (the daemon default is 10, at most 10 000).
 - `block:` is in seconds (a Float is fine). With no new entry, the read waits up to this long. The read timeout of that request is `block` + 5 seconds, or the client `timeout` when it is longer.
-- `pending: true` gives its own pending entries with an ID greater than `after:` (default `"0"`). Their delivery count does not change. A deleted entry comes with `deleted?` true. `block:` does not apply.
+- `pending: true` gives its own pending entries with an ID greater than `after:` (default `"0"`). Each one counts as a new delivery (delivery count + 1), as in Redis. A deleted entry comes with `deleted?` true. `block:` does not apply.
 - `no_ack: true` does not add the entries to the pending list (`NOACK`): at most once.
 - `fields:` gives only these fields (and `_id`).
 - A group that does not exist raises `Ndb::UnknownGroup`.

@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- Streams: a pending read of a group (`"pending": true`, `XREADGROUP ... 0`) counts as a delivery, as in Redis: delivery count + 1 and a new delivery time. A deleted entry does not change. Before, the count stayed the same, and the Redis parity test failed.
+
 ## [1.15.0] - 2026-11-09
 
 ### Added

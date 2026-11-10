@@ -1350,7 +1350,50 @@ func (s *Service) readPending(ctx context.Context, st *stream, g string, o ReadO
 		rows = append(rows, json.RawMessage(`{"_id":"`+k+`","_deleted":true}`))
 	}
 
+	if err := s.redeliver(st, g, o.Consumer, keys, found, now); err != nil {
+		return nil, err
+	}
+
 	return rows, nil
+}
+
+// redeliver counts a pending read as a delivery, as Redis does: each entry
+// given again gets delivery count + 1 and a new delivery time. A deleted
+// entry does not change.
+func (s *Service) redeliver(st *stream, g, consumer string, keys []string, found map[string]json.RawMessage, now int64) error {
+	if len(found) == 0 {
+		return nil
+	}
+
+	return st.st.Update(func(tx *bolt.Tx) error {
+		b, err := groupBucket(tx, g)
+		if err != nil {
+			return errGroup(g)
+		}
+
+		pel := b.Bucket(bPEL)
+
+		for _, k := range keys {
+			if _, ok := found[k]; !ok {
+				continue
+			}
+
+			p, ok := getPending(pel, []byte(k))
+
+			if !ok || p.Consumer != consumer {
+				continue
+			}
+
+			p.Deliveries++
+			p.Delivered = now
+
+			if err := putPending(pel, k, p); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
 }
 
 // Ack removes the IDs from the PEL of g and gives how many were pending.

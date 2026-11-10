@@ -224,8 +224,8 @@ Redis: `XREADGROUP`.
   `last_delivered_id`, in ID order. Each one goes into the PEL of this
   consumer with a delivery count of 1, and `last_delivered_id` moves.
 - `pending: true` (`0` in Redis): the entries of this consumer's PEL, with
-  an ID greater than `after` (default `0`). Their delivery count does not
-  change. An entry deleted from the stream comes as `{"_id": "...",
+  an ID greater than `after` (default `0`). Each one counts as a new
+  delivery, as in Redis: delivery count + 1 and a new delivery time. An entry deleted from the stream comes as `{"_id": "...",
   "_deleted": true}`.
 - `count`: the most entries to give (default 10, at most 10 000).
 - `block_ms`: with no new entry, wait up to this long for one (`BLOCK`). `0`

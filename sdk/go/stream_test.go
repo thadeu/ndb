@@ -184,7 +184,8 @@ func TestStreamGroupReadAckPendingClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(list) != 1 || list[0].ID != ids[1] || list[0].Deliveries != 1 {
+	// The pending read above counts as a delivery, as in Redis.
+	if len(list) != 1 || list[0].ID != ids[1] || list[0].Deliveries != 2 {
 		t.Fatalf("pending list = %+v", list)
 	}
 

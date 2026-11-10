@@ -89,7 +89,7 @@ class StreamTest < Minitest::Test
     list = group.pending_list(consumer: "w1")
 
     assert_equal [ids[1]], list.map { |p| p["_id"] }
-    assert_equal 1, list.first["deliveries"]
+    assert_equal 2, list.first["deliveries"] # the pending read counts, as in Redis
 
     claimed = group.claim("w2", ids[1])
 
