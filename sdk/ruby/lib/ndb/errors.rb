@@ -107,6 +107,10 @@ module Ndb
   # an append ID not greater than the last one.
   class StreamError < Error; end
   class NotAStream < StreamError; end
+
+  # A write route of every collection on a stream: add entries with append,
+  # delete them one by one or with a trim.
+  class StreamAppendOnly < StreamError; end
   class InvalidStreamID < StreamError; end
   class StreamIDTooSmall < StreamError; end
 
@@ -171,6 +175,7 @@ module Ndb
     "stopping" => Closed,
     "internal" => Internal,
     "not_a_stream" => NotAStream,
+    "stream_append_only" => StreamAppendOnly,
     "invalid_stream_id" => InvalidStreamID,
     "stream_id_too_small" => StreamIDTooSmall,
     "unknown_group" => UnknownGroup,

@@ -54,6 +54,7 @@ export type ErrorCode =
   | 'stopping'
   | 'internal'
   | 'not_a_stream'
+  | 'stream_append_only'
   | 'invalid_stream_id'
   | 'stream_id_too_small'
   | 'unknown_group'
@@ -107,6 +108,10 @@ export class LookupError extends NdbError {}
 // A stream route on a collection that is not a stream (not_a_stream).
 export class NotAStreamError extends NdbError {}
 
+// A write route of every collection on a stream (stream_append_only): add
+// entries with append, delete them one by one or with a trim.
+export class StreamAppendOnlyError extends NdbError {}
+
 // A bad entry ID (invalid_stream_id), or an append ID that is not greater
 // than the last one (stream_id_too_small).
 export class StreamIdError extends NdbError {}
@@ -145,6 +150,7 @@ const subclasses: Record<string, typeof NdbError> = {
   lookup_unindexed: LookupError,
   lookup_too_large: LookupError,
   not_a_stream: NotAStreamError,
+  stream_append_only: StreamAppendOnlyError,
   invalid_stream_id: StreamIdError,
   stream_id_too_small: StreamIdError,
   unknown_group: UnknownGroupError,

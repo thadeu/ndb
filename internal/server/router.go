@@ -144,26 +144,25 @@ func methodNotAllowed(w http.ResponseWriter, routes []route) {
 // maxSegments is the longest path: /{s}/_streams/groups/{g}/consumers/{c}.
 const maxSegments = 6
 
-// matchStreams matches the routes under /{s}/_streams: the segment after
-// "groups" is the group and the one after "consumers" is the consumer, so
-// the key of /{s}/_streams/groups/g/consumers/c is
-// "_streams/groups/{}/consumers/{}".
+// matchStreams matches the routes under /{s}/_streams by position: rest is
+// "_streams", "groups", the group, "consumers", the consumer. So the key of
+// /{s}/_streams/groups/g/consumers/c is "_streams/groups/{}/consumers/{}",
+// and a group or consumer may have any name ("groups", "read", ...).
 func (rt *router) matchStreams(r *http.Request, rest []string) ([]route, bool) {
 	parts := make([]string, len(rest))
 
-	for i, seg := range rest {
-		parts[i] = seg
+	copy(parts, rest)
 
-		switch {
-		case i > 0 && rest[i-1] == "groups":
-			parts[i] = "{}"
+	if len(rest) > 2 && rest[1] == "groups" {
+		parts[2] = "{}"
 
-			r.SetPathValue("group", seg)
-		case i > 0 && rest[i-1] == "consumers":
-			parts[i] = "{}"
+		r.SetPathValue("group", rest[2])
+	}
 
-			r.SetPathValue("consumer", seg)
-		}
+	if len(rest) > 4 && rest[1] == "groups" && rest[3] == "consumers" {
+		parts[4] = "{}"
+
+		r.SetPathValue("consumer", rest[4])
 	}
 
 	key := strings.Join(parts, "/")

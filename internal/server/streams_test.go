@@ -403,3 +403,40 @@ func TestStreamTailBlocksUntilAnAppend(t *testing.T) {
 		t.Fatal("the blocked read did not end after the append")
 	}
 }
+
+// The write routes of every collection are refused on a stream: they would
+// add rows with an ID the groups cannot read.
+func TestStreamRefusesTheWritesOfACollection(t *testing.T) {
+	_, h := newHandler(t)
+
+	expectStatus(t, call(h, "POST", "/jobs/_streams/append", `{"doc":{"n":1}}`), http.StatusCreated)
+
+	writes := []struct{ method, path, body string }{
+		{"POST", "/jobs/_doc", `{"n":2}`},
+		{"POST", "/jobs/_bulk", `{"docs":[{"n":2}]}`},
+		{"POST", "/jobs/_update_by_query", `{"query":{},"update":{"$set":{"n":3}}}`},
+		{"POST", "/jobs/_delete_by_query", `{"query":{}}`},
+		{"POST", "/jobs/_update/1-0", `{"update":{"$set":{"n":3}}}`},
+		{"POST", "/jobs/_expire/1-0", `{"in":"1h"}`},
+		{"POST", "/jobs/_persist/1-0", ``},
+	}
+
+	for _, w := range writes {
+		rec := call(h, w.method, w.path, w.body)
+
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "stream_append_only") {
+			t.Errorf("%s %s: %d %s", w.method, w.path, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+// A group or a consumer may have the name of a route segment.
+func TestStreamGroupNamedLikeASegment(t *testing.T) {
+	_, h := newHandler(t)
+
+	for _, g := range []string{"groups", "consumers", "read", "pending"} {
+		expectStatus(t, call(h, "PUT", "/jobs/_streams/groups/"+g, `{"start":"0"}`), http.StatusCreated)
+		expectStatus(t, call(h, "POST", "/jobs/_streams/groups/"+g+"/read", `{"consumer":"groups"}`), http.StatusOK)
+		expectStatus(t, call(h, "PUT", "/jobs/_streams/groups/"+g+"/consumers/consumers", ``), http.StatusOK)
+	}
+}

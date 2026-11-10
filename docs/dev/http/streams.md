@@ -333,6 +333,7 @@ With a scan (`XAUTOCLAIM`), instead of `ids`:
 | Code | HTTP | Meaning |
 |---|---|---|
 | `not_a_stream` | 400 | A `_streams` route, or `"stream": true`, on a collection that is not a stream. |
+| `stream_append_only` | 400 | `POST /{s}/_doc`, `_bulk`, `_update`, `_update_by_query`, `_delete_by_query`, `_expire` or `_persist` on a stream. An entry is added only by an append, never changes, and is deleted with `DELETE /{s}/_doc/{id}` or a trim. |
 | `invalid_stream_id` | 400 | An ID that is not `<ms>-<seq>`, a special value where it is not allowed, or `0-0` in an append. |
 | `stream_id_too_small` | 400 | An append with an ID that is not greater than the last one. |
 | `unknown_group` | 404 | The group does not exist. |

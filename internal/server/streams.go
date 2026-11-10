@@ -309,6 +309,24 @@ func unpadRows(rows []json.RawMessage) []json.RawMessage {
 
 // ---- the routes of every collection, on a stream
 
+// notOnStream refuses a write route of every collection on a stream: an
+// entry is added only by an append (it makes the ID and moves the groups),
+// it never changes, and it is deleted one by one (DELETE /{s}/_doc/{id})
+// or by a trim.
+func notOnStream(fn handler) handler {
+	return func(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+		name := r.PathValue("coll")
+
+		if isStream(db, name) {
+			writeError(w, &apiError{status: http.StatusBadRequest, code: "stream_append_only", msg: name + " is a stream: add entries with _streams/append, delete them with DELETE _doc/{id} or _streams/trim"})
+
+			return
+		}
+
+		fn(w, r, db)
+	}
+}
+
 // isStream tells whether name is a stream.
 func isStream(db *engine.DB, name string) bool {
 	def, ok := db.Definition(name)
