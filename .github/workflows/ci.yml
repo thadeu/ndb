@@ -1,4 +1,4 @@
-name: CI
+name: ci
 
 # The one place with tests: every push to main and every pull request.
 # scripts/release.sh waits for this run on the release commit before it
