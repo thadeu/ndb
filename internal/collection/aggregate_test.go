@@ -117,6 +117,10 @@ var aggPipelines = []string{
 }
 
 func TestAggregateEnginesAgree(t *testing.T) {
+	if testing.Short() {
+		t.Skip("heavy: it runs without -short (make test), not in CI")
+	}
+
 	mem := openAgg(t, false)
 	seg := openAgg(t, true)
 
@@ -181,6 +185,10 @@ func TestAggregateColumnPathReadsNoMoreThanItNeeds(t *testing.T) {
 }
 
 func TestAggregateGroupLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("heavy: it runs without -short (make test), not in CI")
+	}
+
 	for _, seal := range []bool{false, true} {
 		c := openAgg(t, seal)
 

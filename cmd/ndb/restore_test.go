@@ -242,6 +242,10 @@ func restoreFrom(t *testing.T, stdin io.Reader, args ...string) (string, error) 
 
 // Every way to take a backup, restored into an empty dir, gives the same data.
 func TestBackupRestoreRoundTrip(t *testing.T) {
+	if testing.Short() {
+		t.Skip("heavy: it runs without -short (make test), not in CI")
+	}
+
 	for _, online := range []bool{false, true} {
 		for _, gz := range []bool{false, true} {
 			for _, toStdout := range []bool{false, true} {

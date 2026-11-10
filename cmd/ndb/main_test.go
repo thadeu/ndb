@@ -229,6 +229,10 @@ func TestDaemonStopsGracefullyOnSIGTERM(t *testing.T) {
 // TestDaemonRecoversAfterSIGKILL kills the writer at random times. After each
 // kill, a restart must hold every write that was acked.
 func TestDaemonRecoversAfterSIGKILL(t *testing.T) {
+	if testing.Short() {
+		t.Skip("heavy: it runs without -short (make test), not in CI")
+	}
+
 	dir := t.TempDir()
 	sock := sockPath(t)
 

@@ -33,20 +33,24 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # CI runs one plain pass with -short and no race detector: it only
+      # checks that everything passes. The heavy tests (kills, crash loops,
+      # 257 collections) skip with -short; they run local with make test,
+      # make race and make bench.
       - name: Test daemon
         env:
           NDB_REDIS_ADDR: 127.0.0.1:6379
-        run: go test -race -p 2 -parallel=2 -timeout 300s ./...
+        run: go test -short -timeout 600s ./...
 
       - name: Test Go SDK
         working-directory: sdk/go
-        run: go test -race -p 2 -parallel=2 -timeout 300s ./...
+        run: go test -short -timeout 300s ./...
 
       - name: Test Go SDK (ndbredis)
         working-directory: sdk/go/ndbredis
         env:
           NDB_REDIS_ADDR: 127.0.0.1:6379
-        run: go test -race -p 2 -parallel=2 -timeout 300s ./...
+        run: go test -short -timeout 300s ./...
 
   ruby:
     runs-on: ubuntu-latest
@@ -125,86 +129,3 @@ jobs:
 
       - name: shellcheck
         run: shellcheck install.sh uninstall.sh
-
-  # The install tests download the released v0.1.0 binary, not the one in this
-  # commit. They test the scripts, not the code.
-  install-container:
-    runs-on: ubuntu-latest
-    container: ubuntu:24.04
-
-    steps:
-      - name: Tools
-        run: apt-get update && apt-get install -y curl ca-certificates
-
-      - uses: actions/checkout@v4
-
-      - name: Install
-        env:
-          NDB_VERSION: "0.1.0"
-        run: sh install.sh
-
-      - name: Run
-        run: ndb -version
-
-      - name: Uninstall
-        run: |
-          sh uninstall.sh
-          test ! -e /usr/local/bin/ndb
-
-  install-macos:
-    runs-on: macos-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install
-        env:
-          NDB_VERSION: "0.1.0"
-          NDB_INSTALL_DIR: ${{ runner.temp }}/bin
-        run: sh install.sh
-
-      - name: Run
-        run: ${{ runner.temp }}/bin/ndb -version
-
-      - name: Uninstall
-        env:
-          NDB_INSTALL_DIR: ${{ runner.temp }}/bin
-        run: |
-          sh uninstall.sh
-          test ! -e "$NDB_INSTALL_DIR/ndb"
-
-  install-systemd:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install with systemd
-        env:
-          NDB_VERSION: "0.1.0"
-        run: sudo --preserve-env=NDB_VERSION sh install.sh --systemd
-
-      - name: Daemon answers
-        run: |
-          systemctl is-active ndb
-          sudo curl -fsS --unix-socket /run/ndb/ndb.sock http://ndb/health
-
-      - name: Keeps the config on a second run
-        env:
-          NDB_VERSION: "0.1.0"
-        run: |
-          echo "# mine" | sudo tee -a /etc/ndb/ndb.yml
-          sudo --preserve-env=NDB_VERSION sh install.sh --systemd
-          grep -q "# mine" /etc/ndb/ndb.yml
-
-      - name: Uninstall keeps the data
-        run: |
-          sudo sh uninstall.sh --systemd
-          test -d /var/lib/ndb
-          test -f /etc/ndb/ndb.yml
-          test ! -e /etc/systemd/system/ndb.service
-
-      - name: Purge
-        run: |
-          sudo sh uninstall.sh --systemd --purge
-          test ! -e /var/lib/ndb

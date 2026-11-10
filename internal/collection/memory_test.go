@@ -69,6 +69,10 @@ func heap() int64 {
 // The write buffer is one budget for every collection of a daemon: over it,
 // the largest memtable is sealed, even when each one is under SealBytes.
 func TestSharedWriteBufferSealsTheLargestMemtable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("heavy: it runs without -short (make test), not in CI")
+	}
+
 	shared := collection.NewShared(64 << 10)
 	cfg := collection.Config{Shared: shared, SealBytes: 1 << 40, SealTick: 10 * time.Millisecond}
 

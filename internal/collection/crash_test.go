@@ -45,6 +45,10 @@ func counterChild() {
 }
 
 func TestAckedUpdatesSurviveKills(t *testing.T) {
+	if testing.Short() {
+		t.Skip("heavy: it runs without -short (make test), not in CI")
+	}
+
 	dir := t.TempDir()
 
 	crashtest.Run(t, crashtest.Config{
