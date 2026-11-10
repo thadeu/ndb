@@ -38,7 +38,7 @@ concurrency:
 
 jobs:
   release:
-    name: binaries and Go tags
+    name: ndb binaries, GitHub Release, Go tags
     runs-on: ubuntu-latest
 
     steps:
@@ -88,6 +88,7 @@ jobs:
           done
 
   console:
+    name: ndb-ui test and binaries
     needs: release
     runs-on: ubuntu-latest
 
