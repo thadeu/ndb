@@ -11,6 +11,7 @@ import (
 
 	"github.com/thadeu/ndb/internal/engine"
 	"github.com/thadeu/ndb/internal/feed"
+	"github.com/thadeu/ndb/internal/streams"
 )
 
 const (
@@ -75,14 +76,24 @@ func (s *Server) watch(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		req.Query = nil
 	}
 
-	stream, err := db.WatchWhere(name, req.Consumer, req.From, req.Query)
+	stream := isStream(db, name)
+
+	if stream && req.Query != nil {
+		if req.Query, err = streams.PadFilter(req.Query); err != nil {
+			writeError(w, err)
+
+			return
+		}
+	}
+
+	events, err := db.WatchWhere(name, req.Consumer, req.From, req.Query)
 	if err != nil {
 		writeError(w, err)
 
 		return
 	}
 
-	defer stream.Close()
+	defer events.Close()
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
@@ -92,7 +103,7 @@ func (s *Server) watch(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.WriteHeader(http.StatusOK)
 
-	s.pump(ctx, w, stream, req.Limit)
+	s.pump(ctx, w, events, req.Limit, stream)
 }
 
 func validateWatch(req watchReq) error {
@@ -111,8 +122,10 @@ func validateWatch(req watchReq) error {
 }
 
 // pump writes the events of stream until the client leaves or the stream
-// ends. After heartbeat of silence it writes a heartbeat line.
-func (s *Server) pump(ctx context.Context, w http.ResponseWriter, stream feed.Stream, limit int) {
+// ends. After heartbeat of silence it writes a heartbeat line. On a stream
+// collection (unpad), the _id of an event is <ms>-<seq>, not the padded
+// _id on disk.
+func (s *Server) pump(ctx context.Context, w http.ResponseWriter, stream feed.Stream, limit int, unpad bool) {
 	line := lineWriter{w: w, rc: http.NewResponseController(w), enc: json.NewEncoder(w)}
 
 	if !line.flush() {
@@ -136,6 +149,10 @@ func (s *Server) pump(ctx context.Context, w http.ResponseWriter, stream feed.St
 			line.fail(ctx, err)
 
 			return
+		}
+
+		if unpad {
+			ev = unpadEvent(ev)
 		}
 
 		if !line.write(ev) {

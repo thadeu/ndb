@@ -37,6 +37,10 @@ func (s *Server) lookupWith(split func([]byte) ([]byte, []lookup.Spec, []string,
 			if err := s.mayAlso(r, name, accessRead); err != nil {
 				return collection.Page{}, err
 			}
+
+			if isStream(db, name) {
+				return collection.Page{}, badRequest("lookup cannot read the stream %s: read its entries with _search", name)
+			}
 		}
 
 		page, err := run(ctx, rest)

@@ -114,8 +114,10 @@ func redisCode(err error) string {
 	msg := err.Error()
 
 	switch {
-	case strings.Contains(msg, "equal or smaller"):
+	case strings.Contains(msg, "equal or smaller"), strings.Contains(msg, "exhausted the last possible ID"):
 		return "stream_id_too_small"
+	case strings.Contains(msg, "LIMIT cannot be used without"), strings.Contains(msg, "LIMIT argument must be"):
+		return "invalid_request"
 	case strings.Contains(msg, "greater than 0-0"), strings.Contains(msg, "Invalid stream ID"):
 		return "invalid_stream_id"
 	case strings.HasPrefix(msg, "BUSYGROUP"):
@@ -150,13 +152,28 @@ func redisStep(r *redis, s string, step streamStep) (any, error) {
 
 		return map[string]any{"_id": id}, err
 	case "trim":
-		if v, ok := b["max_len"]; ok {
-			n, err := r.do("XTRIM", s, "MAXLEN", text(v, ""))
+		args := []string{"XTRIM", s, "MINID"}
+		at := text(b["min_id"], "")
 
-			return map[string]any{"deleted": n}, err
+		if v, ok := b["max_len"]; ok {
+			args[2], at = "MAXLEN", text(v, "")
 		}
 
-		n, err := r.do("XTRIM", s, "MINID", text(b["min_id"], ""))
+		if b["approx"] == true {
+			args = append(args, "~")
+		}
+
+		args = append(args, at)
+
+		if v, ok := b["limit"]; ok {
+			args = append(args, "LIMIT", text(v, ""))
+		}
+
+		n, err := r.do(args...)
+
+		return map[string]any{"deleted": n}, err
+	case "delete":
+		n, err := r.do("XDEL", s, step.ID)
 
 		return map[string]any{"deleted": n}, err
 	case "info":

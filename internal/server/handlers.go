@@ -79,6 +79,12 @@ func (s *Server) find(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 
 // findPattern is _search over every collection of a pattern (logs-2026-*).
 func (s *Server) findPattern(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+	if err := noStreamIn(db, r.PathValue("coll")); err != nil {
+		writeError(w, err)
+
+		return
+	}
+
 	s.read(w, r, db, &s.metrics.find, s.withLookup(r, db, func(ctx context.Context, body []byte) (collection.Page, error) {
 		return db.FindPattern(ctx, r.PathValue("coll"), body)
 	}))
@@ -94,11 +100,23 @@ func (s *Server) aggregate(w http.ResponseWriter, r *http.Request, db *engine.DB
 		return
 	}
 
-	s.read(w, r, db, &s.metrics.aggregate, s.withLookupStages(r, db, col.Aggregate))
+	run := col.Aggregate
+
+	if isStream(db, r.PathValue("coll")) {
+		run = streamAggregate(run)
+	}
+
+	s.read(w, r, db, &s.metrics.aggregate, s.withLookupStages(r, db, run))
 }
 
 // aggregatePattern is aggregate over every collection of a pattern.
 func (s *Server) aggregatePattern(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+	if err := noStreamIn(db, r.PathValue("coll")); err != nil {
+		writeError(w, err)
+
+		return
+	}
+
 	s.read(w, r, db, &s.metrics.aggregate, s.withLookupStages(r, db, func(ctx context.Context, body []byte) (collection.Page, error) {
 		return db.AggregatePattern(ctx, r.PathValue("coll"), body)
 	}))
@@ -153,6 +171,12 @@ func (s *Server) countDocs(w http.ResponseWriter, r *http.Request, db *engine.DB
 
 // countPattern is _count over every collection of a pattern.
 func (s *Server) countPattern(w http.ResponseWriter, r *http.Request, db *engine.DB) {
+	if err := noStreamIn(db, r.PathValue("coll")); err != nil {
+		writeError(w, err)
+
+		return
+	}
+
 	s.runCount(w, r, db, func(ctx context.Context, body []byte) (collection.Page, error) {
 		return db.FindPattern(ctx, r.PathValue("coll"), body)
 	})

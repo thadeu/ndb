@@ -4,11 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"os"
-	"path/filepath"
 
 	"github.com/thadeu/ndb/internal/collection"
 	"github.com/thadeu/ndb/internal/engine"
+	"github.com/thadeu/ndb/internal/feed"
 	"github.com/thadeu/ndb/internal/streams"
 )
 
@@ -351,6 +350,56 @@ func streamFind(run func(context.Context, []byte) (collection.Page, error)) func
 	}
 }
 
+// streamAggregate wraps an aggregate of a stream: the _id values of the
+// $match stages that see the entries are padded, and the _id of the output
+// rows are given back as <ms>-<seq>.
+func streamAggregate(run func(context.Context, []byte) (collection.Page, error)) func(context.Context, []byte) (collection.Page, error) {
+	return func(ctx context.Context, body []byte) (collection.Page, error) {
+		padded, err := streams.PadPipeline(body)
+		if err != nil {
+			return collection.Page{}, err
+		}
+
+		page, err := run(ctx, padded)
+
+		page.Rows = unpadRows(page.Rows)
+
+		return page, err
+	}
+}
+
+// noStreamIn refuses a read over a pattern that matches a stream: the _id
+// of a stream entry is padded on disk, and one query cannot be right for
+// both a stream and a collection.
+func noStreamIn(db *engine.DB, pattern string) error {
+	names, err := db.Match(pattern)
+
+	if err != nil {
+		return err
+	}
+
+	for _, name := range names {
+		if isStream(db, name) {
+			return badRequest("the pattern %s matches the stream %s: read a stream by its name", pattern, name)
+		}
+	}
+
+	return nil
+}
+
+// unpadEvent gives a watch event of a stream with its _id as <ms>-<seq>.
+func unpadEvent(ev feed.Event) feed.Event {
+	if id, ok := streams.FromKey(ev.ID); ok {
+		ev.ID = id.String()
+	}
+
+	if ev.Doc != nil {
+		ev.Doc = streams.Unpad(ev.Doc)
+	}
+
+	return ev
+}
+
 // streamDocID is the _id on disk of the id of a /_doc route on a stream.
 func streamDocID(id string) string {
 	parsed, err := streams.Parse(id, 0)
@@ -359,15 +408,4 @@ func streamDocID(id string) string {
 	}
 
 	return parsed.Key()
-}
-
-// afterTruncate deletes the group store of a stream that was truncated: a
-// truncated stream has no groups.
-func (s *Server) afterTruncate(db *engine.DB, name string) {
-	col, err := db.Get(name)
-	if err != nil {
-		return
-	}
-
-	_ = os.Remove(filepath.Join(col.Dir(), streams.StoreFile))
 }

@@ -73,6 +73,10 @@ Redis: `XADD`.
 - `id`: `*` (default), `<ms>-*` or `<ms>-<seq>`. An ID that is not greater
   than the last one: `400 stream_id_too_small`. `0-0`: `400
   invalid_stream_id`.
+- After the highest ID (`18446744073709551615-18446744073709551615`) no
+  entry can come: every append is `400 stream_id_too_small` ("the stream has
+  exhausted the last possible ID", as in Redis). `<ms>-*` when the last ID
+  is `<ms>-18446744073709551615` is `400 stream_id_too_small` too.
 - `trim`: optional, as in `trim` below, run after the append.
 - `no_create: true`: do not make the stream (`NOMKSTREAM`); a stream that
   does not exist is `404 unknown_collection`.
@@ -95,7 +99,10 @@ Redis: `XTRIM`.
   Redis): the stream keeps up to 1 023 more entries than asked, never fewer.
   A stream trimmed on every append then deletes once per block, not once per
   append. Default `false` (exact).
-- `limit`: with `approx`, delete at most this many entries.
+- `limit`: with `approx`, delete at most this many entries, for `max_len`
+  and for `min_id`. `0` (default) is no limit. `limit` without `approx` is
+  `400 invalid_request`, as `LIMIT` without `~` in Redis; a negative `limit`
+  too.
 - A trim does not change the groups: a pending entry that the trim deleted
   stays in the PEL, and `claim` gives its ID in `deleted`.
 
@@ -137,7 +144,11 @@ no group and no PEL, so it is a read for a scoped token.
   ID when the request starts, so only later entries come.
 - `count`: the most entries to give (default 10, at most 10 000).
 - `block_ms`: with no entry, wait up to this long for an append (`BLOCK`).
-  `0` answers at once (the default). An empty answer is `[]`.
+  `0` answers at once (the default). An empty answer is `[]`. A stream that
+  does not exist is waited for too, as `XREAD BLOCK` on a missing key: the
+  first append makes it and the read gives its entries (`after` `$` is
+  `0-0` then). The server looks for the new stream every 50 ms. With no
+  `block_ms`, a missing stream is `404 unknown_collection`.
 - `fields`: give only these fields (and `_id`).
 - To read on, send the last `_id` of the answer as `after`. Do not send `$`
   again: an entry appended between two requests would be lost.
@@ -154,6 +165,25 @@ These are the routes of every collection, on the stream:
 | `XLEN s` | `POST /{s}/_count` (or `length` above) |
 | `XDEL s id` | `DELETE /{s}/_doc/{id}` |
 | `XREAD STREAMS s id` | `POST /{s}/_streams/read` (above), or `_search` with `{"_id":{"$gt":"id"}}` and `sort` on `_id` |
+
+On disk, the `_id` of an entry has both numbers padded to 20 digits, so
+that the text order is the ID order. The read routes hide it:
+
+- `_search`, `_count` and `GET /{s}/_doc/{id}` take and give `<ms>-<seq>`.
+- `_aggregate` takes `<ms>-<seq>` in the `$match` stages that see the
+  entries: the ones before the first stage that changes the documents
+  (`$group`, `$project`, ...; `$sort`, `$skip` and `$limit` do not). After
+  such a stage, `_id` is not an entry ID and is not changed. The output
+  rows give `<ms>-<seq>`.
+- `_watch` takes `<ms>-<seq>` in its `query`, and an event gives
+  `<ms>-<seq>` in `_id` and in `doc`.
+- A pattern route (`/{pattern}/_search`, `_count`, `_aggregate`) whose
+  pattern matches a stream is `400 invalid_request`: one query cannot be
+  right for the padded `_id` of a stream and the `_id` of a collection. Read
+  a stream by its name.
+- A `lookup` (or a `$lookup` stage) into a stream is `400
+  invalid_request`. A lookup from a stream into a collection works: it sees
+  the `_id` as `<ms>-<seq>`.
 
 ## Groups
 
@@ -178,7 +208,9 @@ Redis: `XGROUP CREATE`.
 ```
 
 - `start`: `$` (only new entries, default), `0` (every entry) or an ID.
-- `entries_read`: optional, for the lag (`ENTRIESREAD`).
+- `entries_read`: optional, for the lag (`ENTRIESREAD`). Without it, the
+  `entries_read` of the group is `null` (unknown), whatever `start` is, as
+  in Redis 7; the lag is then an estimate (see `GET` below).
 - The stream is made if it does not exist (`MKSTREAM` is the default);
   `no_create: true` turns it off.
 - A group that exists: `409 group_exists`.
@@ -219,8 +251,20 @@ Redis: `XINFO GROUPS`.
 [{ "name": "workers", "consumers": 3, "pending": 12, "last_delivered_id": "1731163600000-4", "entries_read": 129988, "lag": 12 }]
 ```
 
-`lag` is `null` when it cannot be known (after a trim or a delete in the
-part the group did not read, as in Redis).
+`entries_read` and `lag` follow Redis 7 (`XINFO GROUPS`):
+
+- With a known `entries_read` and no entry deleted one by one (`DELETE
+  /{s}/_doc/{id}`) at or after `last_delivered_id`, `lag` is
+  `entries_added - entries_read`.
+- Else the lag is an estimate from `last_delivered_id`: `0` at the last
+  ID; the entries left (`length`) when it is before the first entry, so
+  after a trim of entries the group did not read; `null` when it cannot be
+  known (between the first and the last entry with a deleted entry ahead,
+  or after the last ID).
+- A read updates `entries_read` one by one while it is known and no
+  deleted entry is ahead; else it takes the estimate, which may be `null`
+  until the group reads the last entry. A stream with no entry ever has lag
+  `0`.
 
 ### `GET /{s}/_streams/groups/{g}/consumers`
 
@@ -335,7 +379,7 @@ With a scan (`XAUTOCLAIM`), instead of `ids`:
 | `not_a_stream` | 400 | A `_streams` route, or `"stream": true`, on a collection that is not a stream. |
 | `stream_append_only` | 400 | `POST /{s}/_doc`, `_bulk`, `_update`, `_update_by_query`, `_delete_by_query`, `_expire` or `_persist` on a stream. An entry is added only by an append, never changes, and is deleted with `DELETE /{s}/_doc/{id}` or a trim. |
 | `invalid_stream_id` | 400 | An ID that is not `<ms>-<seq>`, a special value where it is not allowed, or `0-0` in an append. |
-| `stream_id_too_small` | 400 | An append with an ID that is not greater than the last one. |
+| `stream_id_too_small` | 400 | An append with an ID that is not greater than the last one, or any append after the highest ID. |
 | `unknown_group` | 404 | The group does not exist. |
 | `group_exists` | 409 | A group create with a name that exists. |
 

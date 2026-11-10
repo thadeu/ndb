@@ -1,0 +1,73 @@
+{
+  "name": "limit is for an approximate trim only, and is not negative",
+  "stream": "orders",
+  "steps": [
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-1"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-1"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "1-2"
+      },
+      "expect": {
+        "body": {
+          "_id": "1-2"
+        }
+      }
+    },
+    {
+      "op": "trim",
+      "body": {
+        "min_id": "1-2",
+        "limit": 10
+      },
+      "expect": {
+        "error": "invalid_request"
+      }
+    },
+    {
+      "op": "trim",
+      "body": {
+        "max_len": 0,
+        "limit": 10
+      },
+      "expect": {
+        "error": "invalid_request"
+      }
+    },
+    {
+      "op": "trim",
+      "body": {
+        "max_len": 0,
+        "approx": true,
+        "limit": -1
+      },
+      "expect": {
+        "error": "invalid_request"
+      }
+    },
+    {
+      "op": "count",
+      "expect": {
+        "body": {
+          "count": 2
+        }
+      }
+    }
+  ]
+}

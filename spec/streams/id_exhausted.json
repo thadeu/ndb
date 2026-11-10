@@ -1,0 +1,96 @@
+{
+  "name": "no entry comes after the highest ID; <ms>-* after <ms>-<max> is too small",
+  "stream": "orders",
+  "steps": [
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "5-18446744073709551615"
+      },
+      "expect": {
+        "body": {
+          "_id": "5-18446744073709551615"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "5-*"
+      },
+      "expect": {
+        "error": "stream_id_too_small"
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "6-0"
+      },
+      "expect": {
+        "body": {
+          "_id": "6-0"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "18446744073709551615-18446744073709551615"
+      },
+      "expect": {
+        "body": {
+          "_id": "18446744073709551615-18446744073709551615"
+        }
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        }
+      },
+      "expect": {
+        "error": "stream_id_too_small"
+      }
+    },
+    {
+      "op": "append",
+      "body": {
+        "doc": {
+          "n": 1
+        },
+        "id": "18446744073709551615-*"
+      },
+      "expect": {
+        "error": "stream_id_too_small"
+      }
+    },
+    {
+      "op": "info",
+      "expect": {
+        "body": {
+          "length": 3,
+          "first_id": "5-18446744073709551615",
+          "last_id": "18446744073709551615-18446744073709551615",
+          "entries_added": 3,
+          "max_deleted_id": "0-0",
+          "groups": 0
+        }
+      }
+    }
+  ]
+}

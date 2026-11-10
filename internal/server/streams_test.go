@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -438,5 +439,220 @@ func TestStreamGroupNamedLikeASegment(t *testing.T) {
 		expectStatus(t, call(h, "PUT", "/jobs/_streams/groups/"+g, `{"start":"0"}`), http.StatusCreated)
 		expectStatus(t, call(h, "POST", "/jobs/_streams/groups/"+g+"/read", `{"consumer":"groups"}`), http.StatusOK)
 		expectStatus(t, call(h, "PUT", "/jobs/_streams/groups/"+g+"/consumers/consumers", ``), http.StatusOK)
+	}
+}
+
+// A truncate that runs while requests use the stream leaves no group: no
+// request opens the old group store while the truncate holds the stream.
+// The requests in flight never fail with an internal error.
+func TestStreamTruncateDuringRequestsKeepsNoGroup(t *testing.T) {
+	_, h := newHandler(t)
+
+	for round := range 30 {
+		expectStatus(t, call(h, "POST", "/jobs/_streams/append", `{"doc":{"n":1}}`), http.StatusCreated)
+
+		if rec := call(h, "PUT", "/jobs/_streams/groups/g", `{"start":"0"}`); rec.Code != http.StatusCreated && rec.Code != http.StatusConflict {
+			t.Fatalf("round %d: create group: %d %s", round, rec.Code, rec.Body.String())
+		}
+
+		var (
+			stop   atomic.Bool
+			wg     sync.WaitGroup
+			failed atomic.Value
+		)
+
+		requests := []struct{ method, path, body string }{
+			{"GET", "/jobs/_streams/groups", ""},
+			{"POST", "/jobs/_streams/append", `{"doc":{"n":2}}`},
+			{"POST", "/jobs/_streams/groups/g/ack", `{"ids":["1-0"]}`},
+		}
+
+		for _, req := range requests {
+			wg.Add(1)
+
+			go func() {
+				defer wg.Done()
+
+				for !stop.Load() {
+					if rec := call(h, req.method, req.path, req.body); rec.Code >= 500 {
+						failed.Store(req.path + ": " + rec.Body.String())
+					}
+				}
+			}()
+		}
+
+		expectStatus(t, call(h, "POST", "/jobs/_truncate?confirm=jobs", ""), http.StatusOK)
+
+		stop.Store(true)
+		wg.Wait()
+
+		if msg := failed.Load(); msg != nil {
+			t.Fatalf("round %d: a request failed during the truncate: %v", round, msg)
+		}
+
+		if body := call(h, "GET", "/jobs/_streams/groups", "").Body.String(); strings.Contains(body, `"name":"g"`) {
+			t.Fatalf("round %d: group g survived the truncate: %s", round, body)
+		}
+	}
+}
+
+// A trim by min_id keeps to limit, as a trim by max_len does; limit needs
+// approx, as LIMIT needs ~ in Redis.
+func TestStreamMinIDTrimKeepsToTheLimit(t *testing.T) {
+	_, h := newHandler(t)
+
+	docs := strings.Repeat(`{"n":1},`, 3000)
+
+	expectStatus(t, call(h, "POST", "/jobs/_streams/append", `{"docs":[`+strings.TrimSuffix(docs, ",")+`]}`), http.StatusCreated)
+
+	var res struct {
+		Deleted int `json:"deleted"`
+	}
+
+	jsonOf(t, call(h, "POST", "/jobs/_streams/trim", `{"min_id":"+","approx":true,"limit":10}`).Body.String(), &res)
+
+	if res.Deleted != 10 {
+		t.Fatalf("min_id trim with limit 10 deleted %d", res.Deleted)
+	}
+
+	if got := errorCode(t, call(h, "POST", "/jobs/_streams/trim", `{"min_id":"+","limit":10}`)); got != "invalid_request" {
+		t.Fatalf("limit without approx: %s", got)
+	}
+
+	jsonOf(t, call(h, "POST", "/jobs/_streams/trim", `{"min_id":"+","approx":true}`).Body.String(), &res)
+
+	if res.Deleted != 2048 {
+		t.Fatalf("approx min_id trim of 2990 entries deleted %d, want 2048 (two blocks)", res.Deleted)
+	}
+}
+
+// _aggregate on a stream matches and gives the entry ID <ms>-<seq>. A
+// pattern that matches a stream and a lookup into a stream are refused:
+// the _id on disk is padded.
+func TestStreamAggregateAndPatternReads(t *testing.T) {
+	_, h := newHandler(t)
+
+	for _, id := range []string{"5-1", "5-2", "6-0"} {
+		expectStatus(t, call(h, "POST", "/jobs/_streams/append", `{"doc":{"n":1},"id":"`+id+`"}`), http.StatusCreated)
+	}
+
+	rec := call(h, "POST", "/jobs/_aggregate", `{"pipeline":[{"$match":{"_id":"5-1"}}]}`)
+
+	if body := strings.TrimSpace(rec.Body.String()); rec.Code != http.StatusOK || !strings.HasPrefix(body, `{"_id":"5-1"`) || strings.Count(body, "\n") != 0 {
+		t.Fatalf("$match on 5-1: %d %q", rec.Code, body)
+	}
+
+	rec = call(h, "POST", "/jobs/_aggregate", `{"pipeline":[{"$sort":{"_id":-1}},{"$match":{"_id":{"$gt":"5"}}},{"$limit":5}]}`)
+
+	if body := rec.Body.String(); strings.Count(body, "\n") != 1 || !strings.Contains(body, `"_id":"6-0"`) {
+		t.Fatalf("$match on _id $gt 5 (all of ms 5): %q", body)
+	}
+
+	rec = call(h, "POST", "/jobs/_aggregate", `{"pipeline":[{"$group":{"_id":"$n","count":{"$sum":1}}},{"$match":{"_id":1}}]}`)
+
+	if body := rec.Body.String(); !strings.Contains(body, `"count":3`) {
+		t.Fatalf("$match after $group is on the group key: %d %q", rec.Code, body)
+	}
+
+	expectStatus(t, call(h, "POST", "/jobs-old/_doc", `{"n":1}`), http.StatusOK)
+
+	for _, path := range []string{"/jobs*/_search", "/jobs*/_count", "/jobs*/_aggregate"} {
+		body := `{}`
+
+		if strings.HasSuffix(path, "_aggregate") {
+			body = `{"pipeline":[{"$match":{}}]}`
+		}
+
+		if got := errorCode(t, call(h, "POST", path, body)); got != "invalid_request" {
+			t.Fatalf("%s over a stream: %s", path, got)
+		}
+	}
+
+	expectStatus(t, call(h, "POST", "/orders/_doc", `{"job_id":"5-1"}`), http.StatusOK)
+
+	if got := errorCode(t, call(h, "POST", "/orders/_search", `{"lookup":{"job":{"belongs_to":"jobs","fk":"job_id"}}}`)); got != "invalid_request" {
+		t.Fatalf("lookup into a stream: %s", got)
+	}
+}
+
+// A watch of a stream gives the entry ID <ms>-<seq>, and its query matches
+// it.
+func TestStreamWatchGivesTheEntryID(t *testing.T) {
+	env := newWatchEnv(t, t.TempDir(), time.Minute)
+
+	for _, id := range []string{"5-1", "5-2"} {
+		resp := env.post(context.Background(), "/jobs/_streams/append", `{"doc":{"n":1},"id":"`+id+`"}`)
+
+		resp.Body.Close()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	defer cancel()
+
+	lines, resp := env.watch(ctx, "jobs", `{"consumer":"w","from":"beginning","query":{"_id":"5-2"}}`)
+
+	defer resp.Body.Close()
+
+	ev := lines.next()
+	doc, _ := ev["doc"].(map[string]any)
+
+	if ev["_id"] != "5-2" || doc["_id"] != "5-2" {
+		t.Fatalf("watch event: %v", ev)
+	}
+}
+
+// A pending read after the highest ID gives nothing: the ID after it does
+// not wrap to 0-0.
+func TestStreamPendingAfterTheHighestID(t *testing.T) {
+	_, h := newHandler(t)
+
+	expectStatus(t, call(h, "POST", "/jobs/_streams/append", `{"doc":{"n":1},"id":"5-1"}`), http.StatusCreated)
+	expectStatus(t, call(h, "PUT", "/jobs/_streams/groups/g", `{"start":"0"}`), http.StatusCreated)
+	expectStatus(t, call(h, "POST", "/jobs/_streams/groups/g/read", `{"consumer":"c"}`), http.StatusOK)
+
+	rec := call(h, "POST", "/jobs/_streams/groups/g/read", `{"consumer":"c","pending":true,"after":"18446744073709551615-18446744073709551615"}`)
+
+	expectStatus(t, rec, http.StatusOK)
+
+	if rec.Body.Len() != 0 {
+		t.Fatalf("pending after the highest ID: %q", rec.Body.String())
+	}
+}
+
+// A read without a group, with block_ms, on a stream that does not exist
+// waits for it (XREAD BLOCK on a missing key); with no append it ends at
+// the deadline with no rows.
+func TestStreamTailBlocksOnAMissingStream(t *testing.T) {
+	_, h := newHandler(t)
+
+	began := time.Now()
+	rec := call(h, "POST", "/nope/_streams/read", `{"after":"$","block_ms":200}`)
+
+	expectStatus(t, rec, http.StatusOK)
+
+	if rec.Body.Len() != 0 || time.Since(began) < 200*time.Millisecond {
+		t.Fatalf("body %q after %s", rec.Body.String(), time.Since(began))
+	}
+
+	expectStatus(t, call(h, "POST", "/nope/_streams/read", `{"after":"$"}`), http.StatusNotFound)
+
+	got := make(chan string, 1)
+
+	go func() {
+		got <- call(h, "POST", "/jobs/_streams/read", `{"after":"$","block_ms":5000}`).Body.String()
+	}()
+
+	time.Sleep(150 * time.Millisecond)
+
+	expectStatus(t, call(h, "POST", "/jobs/_streams/append", `{"doc":{"n":7}}`), http.StatusCreated)
+
+	select {
+	case body := <-got:
+		if !strings.Contains(body, `"n":7`) {
+			t.Fatalf("the blocked read gave %q", body)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("the blocked read did not end after the stream was made")
 	}
 }

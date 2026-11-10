@@ -7,7 +7,9 @@ stays pending, and another worker can claim it.
 
 Use it as a durable work queue or event log that you can also search: a
 stream is a collection, so `_search`, `_count` and `_aggregate` read it with
-the [filters](query.md#filters).
+the [filters](query.md#filters). A pattern route that matches a stream, and
+a lookup into a stream, are refused: see
+[Read, count and delete entries](http/streams.md#read-count-and-delete-entries).
 
 The wire contract is on [Stream routes](http/streams.md); this page is how
 to use them.
@@ -136,14 +138,25 @@ await group.work('worker-1', async (entry) => {
   entries went to which consumer, with one fsync, before the answer. Read in
   batches (`count`) so one fsync covers many entries; `no_ack` writes
   nothing (at most once).
-- Streams do not use `_watch`: a worker pulls entries; `block_ms` is a
-  request that waits until an append wakes it.
+- Workers do not use `_watch`: a worker pulls entries; `block_ms` is a
+  request that waits until an append wakes it. `_watch` works on a stream
+  (its events give the entry ID), for a change feed.
+
+## Truncate, drop and rename
+
+A truncate, a drop or a rename of a stream holds the stream while the
+engine changes its dir: a stream request that comes in that time waits for
+the end, then sees the new state. A truncate deletes the groups. An append,
+a read or an ack that was in flight finishes before, or runs again after on
+the new state (an ack after a truncate is then `404 unknown_group`); it
+never fails with an internal error.
 
 ## Trim and retention
 
 - `trim` with `max_len` or `min_id`, or `trim` in the append. `approx: true`
   deletes whole blocks of 1 024 entries only: with a trim on every append,
-  it deletes once per block instead of once per append.
+  it deletes once per block instead of once per append. `limit` (with
+  `approx` only, as in Redis) caps the deletes of one trim.
 - `retention` of the stream deletes old entries by time (`_ts`), as for any
   collection.
 - A trim does not change the groups: the PEL keeps the IDs of deleted
@@ -157,8 +170,8 @@ await group.work('worker-1', async (entry) => {
 - `ndb_stream_entries_added_total{stream}`: every entry ever appended.
 - `ndb_stream_group_pending{stream,group}`: entries delivered and not acked.
 - `ndb_stream_group_lag{stream,group}`: entries not delivered to the group
-  yet (left out when it cannot be known, after a trim in the part the group
-  did not read).
+  yet, the `lag` of `GET /{s}/_streams/groups` (Redis 7 rules: exact, or an
+  estimate after a trim or a delete; left out when it cannot be known).
 
 ## Redis command map
 
