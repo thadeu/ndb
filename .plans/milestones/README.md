@@ -41,9 +41,10 @@ docs in `docs/dev/` describe what they built.
 | M16 | Disk first | bounded memory at any data size (1.1.0; direct mode 1.2.0) | done |
 | M19 | Lean at rest | one scheduler for the periodic work (1.7.0), idle collections closed (1.8.0): no CPU, files or reserve at rest | done |
 | M18 | Lookup | `lookup` in `_search` (belongs_to, has_many, has_one), `$lookup` at the end of `_aggregate`, SDKs, Rails `includes` | done |
-| [M22](m22-sdk-poc-fsw-esl.md) | SDK fixes from the fsw-esl POC | an error constant per server code, Go connection pool, test clean in Go and TS (before M20) | not started |
-| [M20](m20-streams.md) | Streams | Redis Streams parity under `/{s}/_streams/...`: append, consumer groups, per message ack, pending, claim; durable | not started |
-| M21 | Streams SDK | stream API in the Go, Ruby, Rails and TS clients, and a Redis-compatible adapter for an app factory | not started |
+| M22 | SDK fixes from the fsw-esl POC | an error constant per server code, Go connection pool, test clean in Go and TS | done |
+| M20 | Streams | Redis Streams parity under `/{s}/_streams/...`: append, consumer groups, per message ack, pending, claim; durable | done |
+| M21 | Streams SDK | stream API and the group worker in the Go, Ruby and TS clients | done |
+| [M23](m23-rails-streams.md) | Streams in Rails and the Redis commands | `include Ndb::Streams`, `ndb streams`, the Redis Streams commands in Ruby, Go (`ndbredis`) and TS (ioredis, node-redis) | done (to merge) |
 | M17 | PITR and rename | restore a collection to an instant of the last day; rename to put it in place (1.2.3; at/to 1.2.4) | done |
 
 ## Next (after 0.1.2)
