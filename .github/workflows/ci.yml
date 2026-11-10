@@ -1,5 +1,9 @@
 name: CI
 
+# The one place with tests: every push to main and every pull request.
+# scripts/release.sh waits for this run on the release commit before it
+# pushes the tag, so release.yml and publish.yml do not test again.
+
 on:
   push:
     branches: [main]
@@ -53,12 +57,8 @@ jobs:
         run: go test -short -timeout 300s ./...
 
   ruby:
+    name: ruby (ndb, ndb-rails)
     runs-on: ubuntu-latest
-
-    strategy:
-      fail-fast: false
-      matrix:
-        gem: [ruby, rails]
 
     steps:
       - uses: actions/checkout@v4
@@ -71,10 +71,20 @@ jobs:
         with:
           ruby-version: "3.4"
           bundler-cache: true
-          working-directory: sdk/${{ matrix.gem }}
+          working-directory: sdk/ruby
 
-      - name: Test sdk/${{ matrix.gem }}
-        working-directory: sdk/${{ matrix.gem }}
+      - name: Test ndb
+        working-directory: sdk/ruby
+        run: bundle exec rake test
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+          working-directory: sdk/rails
+
+      - name: Test ndb-rails
+        working-directory: sdk/rails
         run: bundle exec rake test
 
   ts:

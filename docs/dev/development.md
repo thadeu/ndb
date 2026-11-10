@@ -81,12 +81,12 @@ A push to `main` that changes `docs/`, `docs-site/` or `brand/` deploys it to Cl
 
 ## Release
 
-Push a tag `vX.Y.Z`. The full checklist is in [releasing.md](releasing.md).
+`make tag patch|minor|major` pushes the release commit, waits for its CI run and then pushes the tag `vX.Y.Z`. The full checklist is in [releasing.md](releasing.md). The tests run only in CI.
 
-- `release.yml` runs the tests, builds the static binaries with the version in `-ldflags "-X main.version=..."`, makes tar.gz files and `checksums.txt`, and creates the GitHub release with generated notes.
-- `release.yml` also pushes the Go submodule tag `sdk/go/vX.Y.Z`.
-- `publish-npm.yml` publishes `@thadeu/ndb`; `publish-gem.yml` publishes `ndb`, then `ndb-rails`.
-- `image.yml` builds the multi-arch image and pushes `ghcr.io/<owner>/ndb`.
+- `release.yml` builds the static binaries with the version in `-ldflags "-X main.version=..."`, makes tar.gz files and `checksums.txt`, and creates the GitHub release with generated notes.
+- `release.yml` also builds the console binaries and pushes the tags of the Go modules, `sdk/go/vX.Y.Z` and `sdk/go/ndbredis/vX.Y.Z`.
+- `publish.yml` publishes the SDK packages at the same time: the gems `ndb`, then `ndb-rails` (job `gems`), and `@thadeu/ndb` (job `npm`).
+- `ghcr.yml` builds and pushes the images at the same time: `ghcr.io/<owner>/ndb` (multi-arch) and `ghcr.io/<owner>/ndb-ui`.
 
 `ndb -version` prints the version. Locally: `make dist VERSION=0.1.0`.
 

@@ -86,7 +86,7 @@ docs-build:
 # Release: make tag patch|minor|major (or make tg patch). Bumps the SDKs and
 # CHANGELOG.md, commits "Release X.Y.Z", tags vX.Y.Z, and asks before the
 # push. With make's --dry-run (-n) or DRY=1, it only shows the next version.
-# YES=1 pushes without asking.
+# YES=1 pushes without asking. NO_WAIT=1 pushes the tag without waiting for CI.
 # The + runs the script even under --dry-run. See scripts/release.sh.
 # The short flags of make are the first word of MAKEFLAGS ("n" for -n), read
 # before --silent is added: its own n must not look like a dry run.
@@ -102,6 +102,6 @@ endif
 endif
 
 tag:
-	+@scripts/release.sh $(or $(BUMP),patch) $(RELEASE_DRY) $(if $(YES),--yes)
+	+@scripts/release.sh $(or $(BUMP),patch) $(RELEASE_DRY) $(if $(YES),--yes) $(if $(NO_WAIT),--no-wait)
 
 tg: tag
