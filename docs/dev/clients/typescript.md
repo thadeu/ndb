@@ -541,20 +541,22 @@ const n = await g.ack(...entries.map((e) => e.id))
 
 ```ts
 const sum = await g.pending()
-// { count, lowest, highest, consumers: [{ name, count }] }
+// { count, lowest, highest, consumers: [{ name, count }], waiting }
 ```
 
 - The pending list in short (`XPENDING`). `lowest` and `highest` are `null` when the list is empty.
+- `waiting` (ndb only): the nacked entries whose retry time has not come. A nacked entry counts in `count`, and for no consumer in `consumers`.
 
 ### pendingList
 
 ```ts
 const idle = await g.pendingList({ idleMs: 60_000, count: 100 })
-// [{ id, consumer, idleMs, deliveries }]
+// [{ id, consumer, idleMs, deliveries, retryAt }]
 ```
 
 - Pending entries, in ID order (`XPENDING` with a range).
-- Options: `start` and `end` (default `'-'` and `'+'`), `count` (default 100), `consumer` (only its entries), `idleMs` (only the entries idle for at least this long).
+- Options: `start` and `end` (default `'-'` and `'+'`), `count` (default 100), `consumer` (only its entries), `idleMs` (only the entries idle for at least this long), `due` (ndb only: `true` gives only the nacked entries whose retry time passed, `false` only the ones that still wait).
+- `retryAt` (ndb only): a `Date` when the entry is nacked (it is due again at that time), else `null`. A nacked entry has `consumer: ''`.
 
 ### claim
 
@@ -582,6 +584,37 @@ do {
 
 - `autoClaim(consumer, minIdleMs, cursor = '0-0', count?)`: scans the pending list from `cursor` and moves up to `count` idle entries to `consumer` (`XAUTOCLAIM`).
 - `cursor` in the answer is where the next call starts. It is `'0-0'` when the scan is complete.
+
+### nack
+
+```ts
+const n = await g.nack('w1', [entry.id], 60_000) // back in 1 min
+```
+
+- ndb only: Redis has no delayed retry. `nack(consumer, ids, delayMs)` gives the entries back to the group after `delayMs`, for a retry. Returns how many it nacked.
+- Only the IDs pending **for this consumer** count; other IDs count 0, not an error. With no ID, it sends nothing and returns 0.
+- The entry stays in the pending list with no owner (`consumer: ''`) and a `retryAt`. Its delivery count does not change; the claim that takes it again adds 1.
+- `delayMs`: 0 makes the entry due at once. At most 30 days: a larger or negative value is a `400` (`NdbError` with code `invalid_request`).
+- While it waits, a nacked entry is in no pending read (`read` with `pending: true`), so a restarted worker does not take it early, and no claim takes it. When it is due, any consumer of the group takes it with `claimDue` (or `claim`, at once, whatever `minIdleMs`).
+- An `ack` of a nacked entry removes it: this cancels the retry.
+
+### claimDue
+
+```ts
+let cursor = '0-0'
+
+do {
+  const res = await g.claimDue('w2', { cursor, count: 100 })
+
+  await work(res.entries)
+
+  cursor = res.cursor
+} while (cursor !== '0-0')
+```
+
+- ndb only. `claimDue(consumer, { cursor, count, justIds })`: scans the nacked entries from `cursor` (default `'0-0'`) and moves up to `count` due ones (their retry time passed) to `consumer`, in ID order. Each one gets one more delivery. The answer is `{ cursor, entries, deleted }`, as `autoClaim`.
+- It looks only at the nacked entries, not at the entries in flight at live workers, so a worker can call it on a short tick. `work` does it every `dueEveryMs`.
+- With `justIds: true`, the answer is `{ cursor, ids, deleted }` and the delivery count does not change.
 
 ### work
 
@@ -616,10 +649,11 @@ await g.work('worker-1', async (entry, signal) => {
 2. Reads new entries, and waits up to `blockMs` for them.
 3. Acks each entry that the handler did without an error, in one call.
 4. Every `claimEveryMs`, claims the entries of any consumer of the group that are idle for `claimIdleMs`, and tries them again.
+5. With `retry`, nacks each entry that failed, with the wait of its try, and every `dueEveryMs` claims the nacked entries that are due (`claimDue`).
 
 Notes:
 
-- The handler is `(entry, signal) => unknown`. When it resolves, the entry is acked. When it throws, the entry stays pending, and `onError` gets the error.
+- The handler is `(entry, signal) => unknown`. When it resolves, the entry is acked. When it throws, the entry stays pending (or is nacked, with `retry`), and `onError` gets the error.
 - A throw after the signal aborted is a stop, not a failure: the entry stays pending for the next start. `onError` does not get it, and the entry does not go to the dead letter.
 - Make the group with `ensure()`. A read that fails goes to `onError`, and the worker reads again after a backoff (100 ms, doubled up to 5 s). This is also true for a group or a stream that does not exist (`UnknownGroupError`, `NotFoundError`, as the `cause` of the reported error): a worker that starts before its group (deploy order) waits for it. Only the abort of the signal ends the worker.
 - Options and defaults:
@@ -629,15 +663,61 @@ Notes:
   - `claimEveryMs`: default `claimIdleMs / 2`, at least 1000.
   - `maxDeliveries`: default 0 (no limit).
   - `deadLetter`: the stream name for poison messages. Default none.
+  - `retry`: the wait (ms) before a failed entry comes back. A function `(deliveries) => ms` (see [tiers](#tiers)), or an array of waits (`[15_000, 60_000]`: the wait of try n is the n-th one, the last one repeats). Default none: a failed entry stays pending until `claimIdleMs`.
+  - `maxAgeMs`: an entry older than this, by the time of its ID, is not tried again. Default 0 (no limit).
+  - `dueEveryMs`: how often the worker claims the due nacked entries. Default 1000 with `retry`; without `retry`, the due claim runs only when you set it. A negative value turns it off.
   - `onError`: gets the errors that do not stop the worker: a failed read (the worker then waits, from 100 ms up to 5 s), a handler error, a failed ack or claim, and a `PoisonError`. An error that `onError` throws is ignored: the worker and its acks go on.
   - `signal`: an `AbortSignal` that stops the worker. Without it, the worker runs forever.
 - Stop: abort the signal. The abort also ends a blocked read. The acks of the work that is done are still sent.
-- Poison message: an entry that fails on its `maxDeliveries`-th delivery. At that failure, when `deadLetter` is set, the worker appends a `DeadEntry` to that stream: `{ stream, group, id, deliveries, doc }`. Then it acks the entry, and `onError` gets a `PoisonError` (with `id` and `deliveries`). Without `deadLetter`, the entry is only acked and reported.
+- Poison message: an entry that fails on its `maxDeliveries`-th delivery. At that failure, when `deadLetter` is set, the worker appends a `DeadEntry` to that stream: `{ stream, group, id, deliveries, reason, doc }`. Then it acks the entry, and `onError` gets a `PoisonError` (with `id`, `deliveries` and `reason`). Without `deadLetter`, the entry is only acked and reported. `reason` is `'max_deliveries'` here.
+- Delayed retry: with `retry`, an entry that fails is nacked with `retry(deliveries)` (`deliveries` is 1 for the first try), clamped to 0 to 30 days. It has no owner while it waits: a restart of the worker does not take it early, and any worker of the group takes it when it is due, within about `dueEveryMs`. An entry that fails on its `maxDeliveries`-th delivery goes to the dead letter, not to a nack. A `retry` that throws is reported, and the entry stays pending.
+- Max age: an entry older than `maxAgeMs` goes to the dead letter with `reason: 'max_age'` and is acked, with no retry. The worker checks it before the handler, and again after a failure (no wait for a try that is too old to run).
 - An own pending entry at start with more than `maxDeliveries` deliveries was left by a process that stopped in the handler (a crash, a kill). The worker sends it to the dead letter without the handler, so a poison entry that kills the process does not run forever.
 - A `deleted` entry (trimmed or deleted while pending) is acked without the handler.
 - Delivery is at least once. Make the work safe to repeat.
 - To share the work, run many workers with different consumer names in the same group.
 - See [The worker in the SDKs](../streams.md#the-worker-in-the-sdks).
+
+### tiers
+
+```ts
+import { tiers } from '@thadeu/ndb'
+
+tiers(15_000, 60_000, 600_000) // try 1: 15 s, try 2: 1 min, then 10 min
+```
+
+- `tiers(...steps)` gives a function for `retry`: the wait after a failed try, by its delivery count. A number is the wait of one try. A step `{ waitMs, upTo }` holds for every try up to `upTo`, after the steps before it; a step with no `upTo` is the last one. After the last step, its wait repeats.
+- An array in `retry` is the same as `tiers(...array)`.
+
+The post-call outbox of fsw-esl: try 1 waits 15 s, tries 2 to 5 wait 1 min, 6 to 11 wait 10 min, 12 to 23 wait 1 h, then 6 h until the entry is 15 days old:
+
+```ts
+import { PoisonError, tiers } from '@thadeu/ndb'
+
+const minute = 60_000
+const hour = 60 * minute
+
+await jobs.group('postcall').work('worker-1', async (entry, signal) => {
+  await postCall(entry.doc, signal) // resolves: ack; throws: nack with the wait of its try
+}, {
+  retry: tiers(
+    { waitMs: 15_000, upTo: 1 },
+    { waitMs: minute, upTo: 5 },
+    { waitMs: 10 * minute, upTo: 11 },
+    { waitMs: hour, upTo: 23 },
+    { waitMs: 6 * hour },
+  ),
+  maxAgeMs: 15 * 24 * hour,
+  deadLetter: 'postcall_dead',
+  onError: (err) => {
+    if (err instanceof PoisonError) console.warn('dead', err.id, err.reason)
+    else console.error(err)
+  },
+  signal: controller.signal,
+})
+```
+
+With the five waits one try each (`retry: [15_000, 60_000, 600_000, 3_600_000, 21_600_000]`), try 5 and later wait 6 h.
 
 ### Stream errors
 

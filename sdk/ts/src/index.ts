@@ -11,6 +11,8 @@ export { Stream, Group, idTime, startAll, startNew } from './stream.js'
 export type {
   AppendOptions,
   Claimed,
+  ClaimedIds,
+  ClaimDueOptions,
   ConsumerInfo,
   Doc,
   Entry,
@@ -23,4 +25,4 @@ export type {
   StreamReadOptions,
   TrimOptions,
 } from './stream.js'
-export { PoisonError, type DeadEntry, type Handler, type WorkOptions } from './stream-worker.js'
+export { PoisonError, tiers, type DeadEntry, type DeadReason, type Handler, type TierStep, type WorkOptions } from './stream-worker.js'

@@ -337,6 +337,28 @@ await g.work('worker-1', async (e, signal) => {
 
 `work` resolves when the signal aborts; the abort also ends a blocked read. Delivery is at least once: make the work safe to repeat. Run many workers with different consumer names to share the work. A deleted entry is acked without the handler. Defaults: `count` 10, `blockMs` 5000, `claimIdleMs` 60000 (negative turns the claim off), `claimEveryMs` `claimIdleMs / 2` (at least 1000). A handler that throws after the abort leaves its entry pending: it is not reported and not buried. A failed read goes to `onError` and is tried again after a backoff (100 ms, doubled up to 5 s), also when the group or the stream does not exist yet: a worker that starts before its group waits for it. Only the abort ends `work`. An error that `onError` throws is ignored.
 
+Delayed retry (ndb only). With `retry`, an entry whose handler fails is nacked: it comes back after the wait of its try, with no owner while it waits (a restarted worker does not take it early; any worker of the group takes it when it is due, within about `dueEveryMs`, default 1000). `retry` is `(deliveries) => ms` or an array of waits (the last one repeats); `tiers` builds the function, with steps `{ waitMs, upTo }`. An entry older than `maxAgeMs` (by its ID time) goes to the dead letter with `reason: 'max_age'` and is acked, with no retry. An entry that fails on its `maxDeliveries`-th delivery still goes to the dead letter (`reason: 'max_deliveries'`), not to a nack. The fsw-esl schedule (15 s, 1 min, 10 min, 1 h, 6 h, for 15 days):
+
+```ts
+import { tiers } from '@thadeu/ndb'
+
+const minute = 60_000
+const hour = 60 * minute
+
+await g.work('worker-1', handler, {
+  retry: tiers(
+    { waitMs: 15_000, upTo: 1 },
+    { waitMs: minute, upTo: 5 },
+    { waitMs: 10 * minute, upTo: 11 },
+    { waitMs: hour, upTo: 23 },
+    { waitMs: 6 * hour },
+  ),
+  maxAgeMs: 15 * 24 * hour,
+  deadLetter: 'orders_dead',
+  signal: controller.signal,
+})
+```
+
 The calls one by one, when you need your own loop:
 
 | Redis | TypeScript |
@@ -345,8 +367,9 @@ The calls one by one, when you need your own loop:
 | `XREADGROUP ... >` | `g.read('w1', { count: 100, blockMs: 5000, signal })` |
 | `XREADGROUP ... 0` | `g.read('w1', { pending: true })` |
 | `XACK` | `g.ack(...ids)` |
-| `XPENDING` | `g.pending()` / `g.pendingList({ idleMs: 60_000 })` |
+| `XPENDING` | `g.pending()` / `g.pendingList({ idleMs: 60_000 })`; ndb only: `waiting`, `retryAt`, `{ due: true }` |
 | `XCLAIM` / `XAUTOCLAIM` | `g.claim('w2', 60_000, ids)` / `g.autoClaim('w2', 60_000, '0-0', 100)` |
+| ndb only (no Redis command) | `g.nack('w1', ids, 60_000)` (back in 1 min) / `g.claimDue('w2', { cursor: '0-0', count: 100 })` |
 | `XGROUP SETID` / `DESTROY` | `g.setId(id)` / `g.destroy()` |
 | `XGROUP CREATECONSUMER` / `DELCONSUMER` | `g.createConsumer('w1')` / `g.deleteConsumer('w1')` |
 | `XREAD` (no group) | `orders.read({ after: id, count: 100, blockMs: 5000, signal })`; `after: '$'` gives only later entries |
