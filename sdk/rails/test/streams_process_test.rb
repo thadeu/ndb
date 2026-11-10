@@ -118,14 +118,19 @@ class StreamsProcessTest < Minitest::Test
       File.symlink(EXE, File.join(dir, "ndb"))
       FileUtils.chmod(0o755, File.join(stubs, "ndb"))
       fake_daemon(shell, "ndb")
+
+      # The native binary is the daemon that the tests build (a system tool
+      # such as /bin/echo is not the same on every runner). In shims it must
+      # be skipped; in real it is the daemon.
       File.symlink(native("false"), File.join(shims, "ndb"))
-      File.symlink(native("echo"), File.join(real, "ndb"))
+      File.symlink(TestDaemon.binary, File.join(real, "ndb"))
 
       path = [dir, stubs, shell, shims, real, File.dirname(Gem.ruby), "/usr/bin", "/bin"].join(File::PATH_SEPARATOR)
-      out, _, status = ndb(%w[-h], dir, "PATH" => path, "NDB_BIN" => nil)
+      out, err, status = ndb(%w[-h], dir, "PATH" => path, "NDB_BIN" => nil)
 
-      assert status.success?
-      assert_equal "-h\n", out
+      assert status.success?, "exit #{status.exitstatus}: #{err}"
+      # The daemon prints its help on stderr.
+      assert_includes out + err, "ndb serve"
     end
   end
 
