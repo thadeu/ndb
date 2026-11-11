@@ -80,6 +80,7 @@ var (
 	ErrNotSupported      = &Error{Code: "not_supported"}
 	ErrLocked            = &Error{Code: "locked"}
 	ErrLockExpired       = &Error{Code: "lock_expired"}
+	ErrTxConflict        = &Error{Code: "tx_conflict"}
 	ErrForbidden         = &Error{Code: "forbidden"}
 	ErrTooManyRequests   = &Error{Code: "too_many_requests"}
 	ErrUnknownRoute      = &Error{Code: "unknown_route"}

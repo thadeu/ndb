@@ -17,9 +17,11 @@ const (
 	maxLockTTL      = 5 * time.Minute
 	defaultLockWait = 10 * time.Second
 	maxLockWait     = time.Minute
+	maxLockIDs      = 100
 )
 
 type lockReq struct {
+	IDs  []string        `json:"ids"`
 	TTL  json.RawMessage `json:"ttl"`
 	Wait json.RawMessage `json:"wait"`
 }
@@ -28,8 +30,9 @@ type unlockReq struct {
 	Token string `json:"token"`
 }
 
-// lock is POST /{coll}/_lock/{id}: {"ttl", "wait"}. It answers the token,
-// when the lock expires, and the document as it is now.
+// lock is POST /{coll}/_lock/{id}: {"ttl", "wait"}, and POST /{coll}/_lock:
+// {"ids", "ttl", "wait"} for a set. It answers the token, when the lock
+// expires, and the document (the documents of a set) as it is now.
 func (s *Server) lock(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
 
@@ -41,6 +44,19 @@ func (s *Server) lock(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	}
 
 	if err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	id := r.PathValue("id")
+	ids := []string{id}
+
+	if id == "" {
+		ids = req.IDs
+	}
+
+	if err := checkLockIDs(ids); err != nil {
 		writeError(w, err)
 
 		return
@@ -67,17 +83,44 @@ func (s *Server) lock(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
-	held, err := col.Lock(r.Context(), r.PathValue("id"), ttl, wait)
+	held, err := col.Lock(r.Context(), ids, ttl, wait)
 	if err != nil {
 		writeError(w, err)
 
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"token": held.Token, "expires_at": held.Expires.UTC().Format(time.RFC3339Nano), "doc": held.Doc})
+	out := map[string]any{"token": held.Token, "expires_at": held.Expires.UTC().Format(time.RFC3339Nano)}
+
+	if id != "" {
+		out["doc"] = held.Docs[0]
+	} else {
+		out["docs"] = held.Docs
+	}
+
+	writeJSON(w, http.StatusOK, out)
 }
 
-// unlock is POST /{coll}/_unlock/{id}: {"token"}.
+func checkLockIDs(ids []string) error {
+	if len(ids) == 0 {
+		return badRequest("lock needs ids")
+	}
+
+	if len(ids) > maxLockIDs {
+		return badRequest("lock takes up to %d ids", maxLockIDs)
+	}
+
+	for _, id := range ids {
+		if id == "" {
+			return badRequest("an id of ids is empty")
+		}
+	}
+
+	return nil
+}
+
+// unlock is POST /{coll}/_unlock/{id}: {"token"}, and POST /{coll}/_unlock:
+// {"token"} for every lock of the token.
 func (s *Server) unlock(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
 
@@ -101,6 +144,19 @@ func (s *Server) unlock(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	col, err := db.Get(name)
 	if err != nil {
 		writeError(w, err)
+
+		return
+	}
+
+	if r.PathValue("id") == "" {
+		n, err := col.UnlockToken(req.Token)
+		if err != nil {
+			writeError(w, err)
+
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]int{"unlocked": n})
 
 		return
 	}

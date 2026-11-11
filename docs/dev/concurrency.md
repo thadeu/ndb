@@ -153,4 +153,5 @@ A lock ends by itself after its `ttl` (30 s by default), so a process that dies 
 - **A counter or a balance with one operator:** no version and no lock. `$inc` is atomic (`increment!` in Rails), and a condition in the query makes it a guarded write: `{"query":{"balance_cents":{"$gte":500}},"update":{"$inc":{"balance_cents":-500}}}`.
 - **A change that depends on what you read:** the version. In Rails it is there on every save. Add `with_retry` when a conflict should try again and not fail.
 - **Code with an effect outside ndb:** `lock`.
-- **A change of two documents as one step:** ndb has no transaction across documents. Make the fact one document (an invoice with its items), or write one document and let [watch](watch.md) update the rest.
+- **A change of many documents of one collection as one step** (a transfer between two accounts): [`POST /{coll}/_tx`](http/documents.md#post-coll-tx), all or nothing, with the locks of [`_lock`](http/documents.md#post-coll-lock) and their `ttl` as the time limit. The SDK methods come in a later release.
+- **A change of two collections as one step:** ndb has no transaction across collections. Make the fact one document (an invoice with its items), or write one document and let [watch](watch.md) update the rest.

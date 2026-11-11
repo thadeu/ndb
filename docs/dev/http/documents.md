@@ -320,6 +320,74 @@ await payments.lock('p1', (p) => { p.status = 'refunded' }, { ttl: '30s' })
 
 :::
 
+## `POST /{coll}/_lock`
+
+Takes the locks of a set of documents, all under one token, or none of them. **Body:** `{"ids", "ttl", "wait"}`; `ttl` and `wait` as for `_lock/{id}`; up to 100 ids (a repeated id counts once). **Answer:** `{"token","expires_at","docs"}`, the documents in the order of `ids`, each with `_v`.
+
+- When another caller holds one of the ids, ndb takes none of them and waits (`wait`), then `423 locked`. A caller never holds part of a set, so two callers that lock the same documents in a different order never wait for each other.
+- A missing id is `404 not_found`, and nothing is locked.
+- The token writes every document of the set (`?lock=<token>`, or in `locks` of `_tx`), and `_unlock` with the token releases them all. `_unlock/{id}` with the token of a set releases the whole set.
+
+**Errors:** as for `_lock/{id}`; `400 invalid_request` for no ids, an empty id or more than 100; `400 not_supported` on the logical name of a partitioned collection (lock in one partition).
+
+```bash
+curl --unix-socket /run/ndb/ndb.sock http://ndb/accounts/_lock -d '{"ids":["a1","a2"],"ttl":"10s"}'
+# {"token":"9c1e...","expires_at":"...","docs":[{"_id":"a1","balance":100,"_v":4},{"_id":"a2","balance":0,"_v":2}]}
+```
+
+## `POST /{coll}/_unlock`
+
+Releases every lock of a token. **Body:** `{"token"}`. **Answer:** `{"unlocked": n}`, the number of documents it held. **Errors:** `409 lock_expired` (the token holds nothing), `400 invalid_request`.
+
+## `POST /{coll}/_tx`
+
+Writes a list of inserts, updates and deletes of one collection in one step: all of them, or none. They are one WAL record, so a crash never leaves part of them.
+
+| Body key | Type | Meaning |
+|---|---|---|
+| `ops` | array | the writes, in order; an op sees the ops before it |
+| `locks` | string[] | the tokens the transaction holds (of `_lock` or `_lock/{id}`) |
+| `unlock` | bool | release the locks of `locks` after the call, whether it committed or not |
+
+Each op:
+
+| `op` | Keys | Answer |
+|---|---|---|
+| `insert` | `doc` (an `_id`, or one is made) | `{"_id","_v"}` |
+| `update` | `id`, `update` (operators), `query` (a guard, such as `{"_v": 7}`) | `{"_id","_v"}` |
+| `delete` | `id`, `query` (a guard) | `{"_id","deleted":1}` |
+
+**Answer:** `{"results": [...]}`, one per op, in order.
+
+**Rules:**
+
+- An op that fails fails the transaction, and nothing is written. The error message starts with `op <index>`.
+- An `update` or a `delete` that matches nothing (no such document, or its `query` does not match) is `409 tx_conflict`. Outside a transaction that is `matched: 0`; here it stops the rest.
+- Every token in `locks` must still hold its lock: a lock that expired is `409 lock_expired` for the whole transaction. So the `ttl` of the locks is the time limit of the transaction.
+- A document locked by a caller whose token is not in `locks` makes the transaction wait for that lock, as a plain write does.
+- The writes are normal writes: each one is a new `_v` and a [watch](../watch.md) event.
+- One collection per transaction. On a partitioned collection, call one partition (`400 not_supported` on the logical name).
+
+**Errors:** `409 tx_conflict`, `409 duplicate_id`, `409 unique_violation`, `409 lock_expired`, `400 invalid_request` (no ops, an unknown `op`, an `update` or `delete` without `id`), the errors of the operators (`400 unknown_operator`, `400 invalid_field`...), `413 line_too_large` (the transaction is one record), `404 unknown_collection`, `409 direct_collection`.
+
+```bash
+# A transfer: lock both accounts, check, write, release.
+curl --unix-socket /run/ndb/ndb.sock http://ndb/accounts/_lock -d '{"ids":["a1","a2"],"ttl":"5s"}'
+
+curl --unix-socket /run/ndb/ndb.sock http://ndb/accounts/_tx -d '{
+  "ops": [
+    {"op":"update","id":"a1","update":{"$inc":{"balance":-50}}},
+    {"op":"update","id":"a2","update":{"$inc":{"balance":50}}},
+    {"op":"insert","doc":{"_id":"t1","kind":"transfer","from":"a1","to":"a2","amount":50}}
+  ],
+  "locks":["9c1e..."],
+  "unlock":true
+}'
+# {"results":[{"_id":"a1","_v":5},{"_id":"a2","_v":3},{"_id":"t1","_v":1}]}
+```
+
+The SDK methods for transactions come in a later release.
+
 ## `POST /{coll}/_unlock/{id}`
 
 Releases a lock. **Body:** `{"token"}`. **Answer:** `{"unlocked":true}`. **Errors:** `409 lock_expired` (the token holds no lock on this document), `400 invalid_request` (no token), `404 unknown_collection`. The SDKs call it at the end of `lock`.

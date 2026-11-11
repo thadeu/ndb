@@ -11,6 +11,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -70,22 +72,25 @@ type Lease struct {
 	Expires time.Time
 }
 
-type held struct {
+// lease is one token: the ids it holds share its expiry and its end.
+type lease struct {
 	token   string
 	expires time.Time
 	done    chan struct{}
+	keys    []string
 }
 
 // Table is the locks of one daemon, by collection and _id.
 type Table struct {
-	mu   sync.Mutex
-	held map[string]*held
-	n    atomic.Int64
-	now  func() time.Time
+	mu     sync.Mutex
+	held   map[string]*lease
+	leases map[string]*lease
+	n      atomic.Int64
+	now    func() time.Time
 }
 
 func New() *Table {
-	return &Table{held: map[string]*held{}, now: time.Now}
+	return &Table{held: map[string]*lease{}, leases: map[string]*lease{}, now: time.Now}
 }
 
 // Any tells if the table holds a lock (expired ones count until they are
@@ -116,6 +121,14 @@ func (s Scope) Any() bool {
 
 // TryAcquire locks id for ttl, or returns *Busy.
 func (s Scope) TryAcquire(id string, ttl time.Duration) (Lease, error) {
+	return s.TryAcquireSet([]string{id}, ttl)
+}
+
+// TryAcquireSet locks every id for ttl under one token, or none of them:
+// when one is held by another caller it returns *Busy for that id. A caller
+// that waits for a whole set never holds part of it, so two sets never wait
+// for each other.
+func (s Scope) TryAcquireSet(ids []string, ttl time.Duration) (Lease, error) {
 	t := s.t
 
 	if t == nil {
@@ -125,20 +138,38 @@ func (s Scope) TryAcquire(id string, ttl time.Duration) (Lease, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if cur := t.active(s.key(id)); cur != nil {
-		return Lease{}, &Busy{ID: id, done: cur.done, until: cur.expires}
+	keys := make([]string, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+
+	for _, id := range ids {
+		k := s.key(id)
+
+		if seen[k] {
+			continue
+		}
+
+		if cur := t.active(k); cur != nil {
+			return Lease{}, &Busy{ID: id, done: cur.done, until: cur.expires}
+		}
+
+		seen[k] = true
+		keys = append(keys, k)
 	}
 
-	h := &held{token: newToken(), expires: t.now().Add(ttl), done: make(chan struct{})}
+	l := &lease{token: newToken(), expires: t.now().Add(ttl), done: make(chan struct{}), keys: keys}
 
-	t.held[s.key(id)] = h
+	for _, k := range keys {
+		t.held[k] = l
+	}
+
+	t.leases[l.token] = l
 	t.n.Add(1)
 
-	return Lease{Token: h.token, Expires: h.expires}, nil
+	return Lease{Token: l.token, Expires: l.expires}, nil
 }
 
-// Release ends the lease of token on id. A token that holds no lock on id
-// is ErrExpired.
+// Release ends the lease of token, which must hold id. A token that holds
+// no lock on id is ErrExpired. A token of a set releases the whole set.
 func (s Scope) Release(id, token string) error {
 	t := s.t
 
@@ -154,9 +185,38 @@ func (s Scope) Release(id, token string) error {
 		return ErrExpired
 	}
 
-	t.drop(s.key(id), cur)
+	t.drop(cur)
 
 	return nil
+}
+
+// ReleaseToken ends the lease of token and gives how many ids it held. A
+// token that holds no lock in this collection is ErrExpired.
+func (s Scope) ReleaseToken(token string) (int, error) {
+	t := s.t
+
+	if t == nil {
+		return 0, ErrExpired
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	l := s.live(token)
+	if l == nil {
+		return 0, ErrExpired
+	}
+
+	t.drop(l)
+
+	return len(l.keys), nil
+}
+
+// ReleaseAll ends the leases of tokens; a token that holds none is skipped.
+func (s Scope) ReleaseAll(tokens []string) {
+	for _, token := range tokens {
+		_, _ = s.ReleaseToken(token)
+	}
 }
 
 // Check tells if a write of id may go on. Without a token it may when no
@@ -185,16 +245,51 @@ func (s Scope) Check(id, token string) error {
 	return nil
 }
 
-// active is the live lock of key; an expired one is removed. The caller
+// CheckTx tells if a transaction that holds tokens may write ids. Every
+// token must still hold a lock in this collection (ErrExpired otherwise):
+// the ttl of a lock is the time limit of the transaction. An id held by a
+// lease that is not one of tokens is *Busy.
+func (s Scope) CheckTx(ids, tokens []string) error {
+	if s.t == nil {
+		if len(tokens) > 0 {
+			return ErrExpired
+		}
+
+		return nil
+	}
+
+	t := s.t
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	for _, token := range tokens {
+		if s.live(token) == nil {
+			return ErrExpired
+		}
+	}
+
+	for _, id := range ids {
+		cur := t.active(s.key(id))
+
+		if cur != nil && !slices.Contains(tokens, cur.token) {
+			return &Busy{ID: id, done: cur.done, until: cur.expires}
+		}
+	}
+
+	return nil
+}
+
+// active is the live lease of key; an expired one is removed. The caller
 // holds mu.
-func (t *Table) active(key string) *held {
+func (t *Table) active(key string) *lease {
 	cur := t.held[key]
 	if cur == nil {
 		return nil
 	}
 
 	if !t.now().Before(cur.expires) {
-		t.drop(key, cur)
+		t.drop(cur)
 
 		return nil
 	}
@@ -202,10 +297,35 @@ func (t *Table) active(key string) *held {
 	return cur
 }
 
-func (t *Table) drop(key string, h *held) {
-	delete(t.held, key)
+// live is the lease of token when it holds a lock in this collection and
+// has not expired. The caller holds mu.
+func (s Scope) live(token string) *lease {
+	t := s.t
+	l := t.leases[token]
+
+	if l == nil || len(l.keys) == 0 || !strings.HasPrefix(l.keys[0], s.name+"\x00") {
+		return nil
+	}
+
+	if !t.now().Before(l.expires) {
+		t.drop(l)
+
+		return nil
+	}
+
+	return l
+}
+
+func (t *Table) drop(l *lease) {
+	for _, k := range l.keys {
+		if t.held[k] == l {
+			delete(t.held, k)
+		}
+	}
+
+	delete(t.leases, l.token)
 	t.n.Add(-1)
-	close(h.done)
+	close(l.done)
 }
 
 func newToken() string {
