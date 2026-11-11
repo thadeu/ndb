@@ -7,13 +7,7 @@ each one has the reason, so the talk does not start from zero.
 
 ## 1. Transactions across collections
 
-A write is atomic inside one collection (one WAL line). Nothing joins two
-collections: invoice + payment + balance is not one step. The proposal was
-an optimistic commit (`POST /_tx` with the writes and the `_v` of what was
-read, a global `tx.log` for the commit record, replay drops a tx without
-it). Left for later: it needs a real design, with rollback for any error
-in the block and not only for a crash. Until then: one document per
-business fact, and `watch` as an outbox.
+Planned: [M25](../milestones/m25-transactions.md).
 
 ## 2. Decimal type
 
