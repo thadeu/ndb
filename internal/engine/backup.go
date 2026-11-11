@@ -108,6 +108,7 @@ func (db *DB) Backup(ctx context.Context, w io.Writer, opts backup.Options) erro
 	}
 
 	src := backup.Source{
+		Settings:  db.settings.All(),
 		Streams:   streams,
 		Defs:      defs,
 		Cursors:   entries,
@@ -185,7 +186,7 @@ func Offline(dataDir string, w io.Writer, opts backup.Options) error {
 		return fmt.Errorf("backup: data dir %s does not exist", dataDir)
 	}
 
-	db, err := Open(config.Config{DataDir: dataDir, AllowImplicit: true}, slog.New(slog.DiscardHandler))
+	db, err := Open(config.Config{DataDir: dataDir, AllowImplicit: true, EncryptionKey: os.Getenv("NDB_ENCRYPTION_KEY")}, slog.New(slog.DiscardHandler))
 	if err != nil {
 		return err
 	}

@@ -188,7 +188,7 @@ func dataEntries(dataDir string) ([]string, error) {
 // verifyStage opens the staged copy as a daemon would: recovery replays the
 // WAL and rebuilds segments and indexes. A corrupt backup fails here.
 func verifyStage(stage string) (string, error) {
-	cfg := config.Config{DataDir: stage, AllowImplicit: true}
+	cfg := config.Config{DataDir: stage, AllowImplicit: true, EncryptionKey: os.Getenv("NDB_ENCRYPTION_KEY")}
 
 	db, err := engine.Open(cfg, slog.New(slog.DiscardHandler))
 	if err != nil {

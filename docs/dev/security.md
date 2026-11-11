@@ -96,8 +96,28 @@ ndb writes plain files: the WAL is NDJSON, the segments are Parquet, the blobs a
 
 - Keep the data dir owned by the `ndb` user with mode `0750` or less.
 - Use disk encryption (LUKS, an encrypted cloud volume) when the data is sensitive.
-- Encrypt the backups before you copy them off the host (for example `age` or `gpg`), and limit who can read them.
+- Encrypt the backups before you copy them off the host (for example `age` or `gpg`), and limit who can read them. A backup holds the [encryption key](#the-encryption-key) unless it comes from the env.
 - A token file must have mode `0600`.
+
+## The encryption key
+
+Each data dir has one encryption key of 32 bytes. Encrypted fields will use it (the next release); today it is made and kept, so every data dir has the same key from its first start. At start the daemon takes, in this order:
+
+1. `NDB_ENCRYPTION_KEY`: 64 hex characters (`openssl rand -hex 32`). It is not written to the data dir; only its fingerprint is, so a later start with no env, or with another key, stops with an error instead of reading nothing.
+2. The key kept in the data dir, in `_system/settings.wal` (mode `0600`).
+3. None: the daemon makes one, keeps it, and logs a `warn` line once.
+
+`GET /_cluster/settings` shows the key masked (`e5af****…****edff`) and where it came from. No answer and no log line has the whole key.
+
+What protects what:
+
+| Leak | The key kept in the data dir (default) | The key in `NDB_ENCRYPTION_KEY` |
+|---|---|---|
+| a backup file | **not protected**: a backup holds the settings, the key with them | protected |
+| a copy of the data dir or of the disk | **not protected** | protected |
+| the memory of the daemon | not protected | not protected |
+
+So the default makes a restore need nothing. To keep the key out of the files, give it in `NDB_ENCRYPTION_KEY` from a secret store, and keep a copy of it: a backup of a data dir with an env key can only be restored with the same key.
 
 ## Logs
 

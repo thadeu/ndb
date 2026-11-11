@@ -4,6 +4,7 @@
 // Layout, one JSON object per line:
 //
 //	{"ndb_backup":1,"version":"...","created_at":"...","collections":["users"]}
+//	{"_section":"settings","key":"log.level","value":"debug"}
 //	{"_section":"catalog","name":"users","definition":{...}}
 //	{"_section":"cursor","collection":"users","consumer":"mailer","pos":"e1.3"}
 //	{"_section":"wal","collection":"users"}
@@ -35,8 +36,10 @@ import (
 	"hash"
 	"hash/crc32"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"time"
 
@@ -46,6 +49,7 @@ import (
 	"github.com/thadeu/ndb/internal/cursors"
 	"github.com/thadeu/ndb/internal/fs"
 	"github.com/thadeu/ndb/internal/segment"
+	"github.com/thadeu/ndb/internal/settings"
 	"github.com/thadeu/ndb/internal/wal"
 )
 
@@ -74,6 +78,10 @@ type Mark struct {
 
 // Source is what Write saves.
 type Source struct {
+	// Settings are the settings of the data dir (internal/settings), the
+	// encryption key with them.
+	Settings map[string]json.RawMessage
+
 	Defs    []catalog.Def
 	Cursors []cursors.Entry
 
@@ -154,6 +162,12 @@ type header struct {
 	Collections []string `json:"collections"`
 }
 
+type settingsLine struct {
+	Section string          `json:"_section"`
+	Key     string          `json:"key"`
+	Value   json.RawMessage `json:"value"`
+}
+
 type catalogLine struct {
 	Section    string      `json:"_section"`
 	Name       string      `json:"name"`
@@ -221,6 +235,12 @@ func Write(w io.Writer, src Source, opts Options) error {
 	})
 	if err != nil {
 		return err
+	}
+
+	for _, key := range slices.Sorted(maps.Keys(src.Settings)) {
+		if err := lw.section(settingsLine{Section: "settings", Key: key, Value: src.Settings[key]}); err != nil {
+			return err
+		}
 	}
 
 	for _, d := range src.Defs {
@@ -564,9 +584,10 @@ func openInput(r io.Reader) (io.Reader, error) {
 }
 
 type extractor struct {
-	stage string
-	crc   hash.Hash32
-	lines int
+	stage    string
+	settings *settings.Store
+	crc      hash.Hash32
+	lines    int
 
 	names map[string]bool
 	seen  map[string]bool
@@ -752,6 +773,8 @@ func (x *extractor) section(sec string, line []byte) error {
 	}
 
 	switch sec {
+	case "settings":
+		return x.settingsLine(line)
 	case "catalog":
 		return x.catalogLine(line)
 	case "cursor":
@@ -767,6 +790,27 @@ func (x *extractor) section(sec string, line []byte) error {
 	}
 
 	return fmt.Errorf("line %d: unknown section %q", x.lines, sec)
+}
+
+// settingsLine writes one setting of the backup to the settings of the
+// stage.
+func (x *extractor) settingsLine(line []byte) error {
+	var sl settingsLine
+
+	if err := json.Unmarshal(line, &sl); err != nil || sl.Key == "" {
+		return fmt.Errorf("line %d: a settings line needs a key and a value", x.lines)
+	}
+
+	if x.settings == nil {
+		st, err := settings.Open(x.stage)
+		if err != nil {
+			return err
+		}
+
+		x.settings = st
+	}
+
+	return x.settings.Set(map[string]json.RawMessage{sl.Key: sl.Value})
 }
 
 func (x *extractor) catalogLine(line []byte) error {

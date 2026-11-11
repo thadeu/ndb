@@ -48,3 +48,37 @@ func TestLogOptionsPrecedence(t *testing.T) {
 		t.Fatal("a bad -log-format: want an error")
 	}
 }
+
+func TestLogSourcesFollowTheOrderOfTheFlags(t *testing.T) {
+	noEnv := func(string) string { return "" }
+	env := func(k string) string {
+		if k == "NDB_LOG_LEVEL" {
+			return "debug"
+		}
+
+		return ""
+	}
+
+	yml := config.Config{InFile: map[string]bool{"log_level": true, "slow_ms": true}}
+
+	cases := []struct {
+		cfg   config.Config
+		env   func(string) string
+		flag  bool
+		level string
+		slow  string
+	}{
+		{config.Config{}, noEnv, false, "", ""},
+		{yml, noEnv, false, "yml", "yml"},
+		{yml, env, false, "env", "yml"},
+		{yml, env, true, "flag", "yml"},
+	}
+
+	for i, c := range cases {
+		got := logSources(c.cfg, c.env, c.flag)
+
+		if got["level"] != c.level || got["slow_ms"] != c.slow || got["body_max"] != "" {
+			t.Errorf("case %d: %v", i, got)
+		}
+	}
+}

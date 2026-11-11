@@ -50,6 +50,9 @@ type Server struct {
 	// log is the logger of the request lines (logs.go).
 	log *logging.Logger
 
+	// logSrc is where each log setting came from (settings.go).
+	logSrc logSources
+
 	// sec are the browser guards and the limits (guard.go, limit.go).
 	// fails counts the failed token checks by IP; watches is the count of
 	// open _watch streams.
@@ -143,6 +146,7 @@ func (s *Server) routes() http.Handler {
 			"_blobs":       {{"POST", s.ready(s.putBlob)}},
 			"_blobs/{}":    {{"GET", s.ready(s.getBlob)}},
 			"_log":         {{"GET", s.getLog}, {"PUT", s.putLog}},
+			"_cluster/{}":  {{"GET", s.ready(s.getSettings)}, {"PUT", s.ready(s.putSettings)}},
 		},
 		coll: map[string][]route{
 			"": {
