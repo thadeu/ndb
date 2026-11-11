@@ -166,7 +166,8 @@ Call.where(status: "retry").destroy_all  # loads and destroys each record with i
 
   payment.with_lock { |p| ... }            # the same, on a loaded record (it is read again)
 
-  # Without a block: the lock ends at the first save or destroy, or at unlock!.
+  # Without a block: the lock ends at the first save or destroy (also when it
+  # raises), or at unlock!. A save that returns false keeps it.
   payment = Payment.lock.find("p1")
   payment.update!(status: "refunded")      # written with the lock, then released
 

@@ -107,6 +107,44 @@ class LockTest < Minitest::Test
     assert_raises(ArgumentError) { @payment.lock.find("p1", "p2") }
   end
 
+  def test_an_exception_in_a_save_releases_the_lock
+    strict = model do
+      attribute :status, :string
+
+      validates :status, presence: true
+      before_save { raise "callback failed" if status == "boom" }
+    end
+
+    strict.create!(_id: "s1", status: "new")
+
+    record = strict.lock.find("s1")
+
+    assert_raises(Ndb::RecordInvalid) { record.update!(status: nil) }
+    refute_predicate record, :locked?
+
+    record = strict.lock(wait: 0).find("s1")
+
+    assert_raises(RuntimeError) { record.update(status: "boom") }
+    refute_predicate record, :locked?
+
+    record = strict.lock(wait: 0).find("s1")
+
+    refute record.update(status: nil)
+    assert_predicate record, :locked?
+
+    record.update!(status: "ok")
+
+    refute_predicate record, :locked?
+    assert_equal "ok", strict.lock(wait: 0).find("s1").unlock!.status
+  end
+
+  def test_an_exception_inside_a_block_keeps_the_lock_until_the_block_ends
+    @payment.find("p1").with_lock do |p|
+      assert_raises(ActiveModel::UnknownAttributeError) { p.update!(nope: 1) }
+      assert_predicate p, :locked?
+    end
+  end
+
   def test_a_save_after_the_ttl_is_refused
     payment = @payment.lock(ttl: 0.1).find("p1")
 

@@ -10,8 +10,8 @@ module Ndb
   #
   # - at the end of the block: `Account.lock.find(id) { |a| ... }` and
   #   `account.with_lock { |a| ... }`;
-  # - without a block, at the first save or destroy of the record, or at
-  #   `unlock!`;
+  # - without a block, at the first save or destroy of the record (also
+  #   when it raises), or at `unlock!`;
   # - after ttl in any case (default 30 s), so a process that dies holds
   #   nothing. A save after the ttl raises Ndb::LockExpired.
   #
@@ -94,7 +94,26 @@ module Ndb
       unlock!
     end
 
+    # A save or destroy that raises ends a lock held without a block, as an
+    # exception ends a transaction in ActiveRecord. A save that returns false
+    # (not valid) keeps it: fix the record and save again, or unlock!.
+    %i[save save! update update! destroy destroy! delete increment! decrement!].each do |name|
+      define_method(name) do |*args, **options, &block|
+        super(*args, **options, &block)
+      rescue StandardError
+        release_after_error
+
+        raise
+      end
+    end
+
     private
+
+    def release_after_error
+      unlock! if @lock_token && !@lock_scoped
+    rescue Error
+      @lock_token = nil
+    end
 
     def hold!(token)
       @lock_token = token
