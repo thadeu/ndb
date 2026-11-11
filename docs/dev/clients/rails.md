@@ -491,6 +491,7 @@ Call.group(:status).count            # => {"answered" => 2, "failed" => 1}
 Call.group(:status).sum(:duration)
 Call.group(:status, :caller).count   # keys are arrays
 Order.where(status: "paid").unwind(:items).group("items.sku").sum("items.qty")   # one row per element of items ($unwind)
+Order.unwind(:items).count           # the elements, not the orders; unwind is for the aggregates only
 Call.where(status: "answered").average(:duration)
 Call.minimum(:duration)
 Call.maximum(:duration)

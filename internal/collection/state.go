@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/thadeu/ndb/internal/index"
+	"github.com/thadeu/ndb/internal/jsondoc"
 	"github.com/thadeu/ndb/internal/segment"
 	"github.com/thadeu/ndb/internal/wal"
 )
@@ -254,23 +255,7 @@ func uniqueKey(doc json.RawMessage, path string) (string, bool) {
 }
 
 func getPath(m map[string]any, path string) (any, bool) {
-	parts := strings.Split(path, ".")
-
-	var cur any = m
-
-	for _, p := range parts {
-		obj, ok := cur.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-
-		cur, ok = obj[p]
-		if !ok {
-			return nil, false
-		}
-	}
-
-	return cur, true
+	return jsondoc.Lookup(m, strings.Split(path, "."))
 }
 
 // view is one transaction's look at head: its own changes first, then head.

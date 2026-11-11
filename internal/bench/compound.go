@@ -3,9 +3,7 @@ package bench
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"math/rand/v2"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -137,35 +135,17 @@ func compoundProbes() []probe {
 }
 
 // timedExamined is timed with the plan and the documents examined of each
-// read, from its headers.
+// read, from the headers of one more call ("" when the route gives none).
 func timedExamined(d *daemon, part string, probes []probe) []string {
 	lines := timed(d, part, probes)
 
 	for i, p := range probes {
-		plan, examined := d.planOf(p)
+		_, _, head, _ := d.do(p.method, p.path, []byte(p.body))
 
-		if plan != "" {
-			lines[i] = strings.TrimSuffix(lines[i], " |") + fmt.Sprintf("; %s, %s examined |", plan, examined)
+		if plan := head.Get("X-Ndb-Plan"); plan != "" {
+			lines[i] = strings.TrimSuffix(lines[i], " |") + fmt.Sprintf("; %s, %s examined |", plan, head.Get("X-Ndb-Examined"))
 		}
 	}
 
 	return lines
-}
-
-// planOf runs p once and gives its plan and the documents it examined,
-// from the answer headers ("" when the route gives none).
-func (d *daemon) planOf(p probe) (plan, examined string) {
-	req, _ := http.NewRequest(p.method, "http://ndb"+p.path, strings.NewReader(p.body))
-	req.Header.Set("Accept", "application/x-ndjson")
-
-	resp, err := d.http.Do(req)
-	if err != nil {
-		return "", ""
-	}
-
-	defer resp.Body.Close()
-
-	_, _ = io.Copy(io.Discard, resp.Body)
-
-	return resp.Header.Get("X-Ndb-Plan"), resp.Header.Get("X-Ndb-Examined")
 }

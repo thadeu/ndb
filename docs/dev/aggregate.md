@@ -138,8 +138,8 @@ The long form has two options:
 {"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": true, "includeArrayIndex": "i"}}
 ```
 
-- `preserveNullAndEmptyArrays` keeps a document with no element as one row.
-- `includeArrayIndex` names a top-level field that gets the place of the element, from 0 (`null` when the value is not an array).
+- `preserveNullAndEmptyArrays` keeps a document with no element as one row. In the row of an empty array the field is left out, so a group by it puts that row with the missing and `null` ones.
+- `includeArrayIndex` names a top-level field (not `_id`) that gets the place of the element, from 0 (`null` when the value is not an array).
 
 Notes:
 

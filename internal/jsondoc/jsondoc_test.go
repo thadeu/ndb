@@ -106,3 +106,30 @@ func BenchmarkPickTwoFields(b *testing.B) {
 		_, _ = jsondoc.Pick(raw, []string{"ts", "type"})
 	}
 }
+
+func TestLookupFollowsObjectsOnly(t *testing.T) {
+	doc := map[string]any{
+		"a":    map[string]any{"b": map[string]any{"c": "deep"}, "n": nil},
+		"list": []any{map[string]any{"x": 1}},
+		"s":    "text",
+	}
+
+	cases := []struct {
+		path []string
+		want any
+		ok   bool
+	}{
+		{[]string{"a", "b", "c"}, "deep", true},
+		{[]string{"a", "n"}, nil, true},
+		{[]string{"s"}, "text", true},
+		{[]string{"a", "nope"}, nil, false},
+		{[]string{"s", "x"}, nil, false},
+		{[]string{"list", "x"}, nil, false},
+	}
+
+	for _, c := range cases {
+		if got, ok := jsondoc.Lookup(doc, c.path); ok != c.ok || got != c.want {
+			t.Errorf("Lookup(%v) = %v, %v; want %v, %v", c.path, got, ok, c.want, c.ok)
+		}
+	}
+}

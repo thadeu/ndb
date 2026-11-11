@@ -4,14 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/thadeu/ndb/internal/catalog"
-	"github.com/thadeu/ndb/internal/collection"
-	"github.com/thadeu/ndb/internal/fs"
 )
 
 // The rows of an $unwind pipeline must be the ones a script gets when it
@@ -20,10 +17,7 @@ func TestUnwindGivesTheRowsOfAHandExpansion(t *testing.T) {
 	r := rand.New(rand.NewPCG(26, 2))
 	root := t.TempDir()
 
-	c, err := collection.Open(collection.Config{Dir: filepath.Join(root, "wal"), Data: root, FS: fs.OS{}, Def: catalog.Def{Name: "orders", Indexes: []string{"status"}}, CompactMin: 1 << 20})
-	if err != nil {
-		t.Fatal(err)
-	}
+	c := openData(t, root, catalog.Def{Name: "orders", Indexes: []string{"status"}})
 
 	defer c.Close()
 

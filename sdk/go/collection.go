@@ -579,7 +579,7 @@ type CollOption func(*schema) error
 //	ndb.Collection[Order](db, "orders", ndb.Index("account_id", "created_at"), ndb.Index("items.sku"))
 func Index(fields ...string) CollOption {
 	return func(s *schema) error {
-		name, err := compoundName("Index", fields)
+		name, err := indexName("Index", fields)
 		s.indexes = append(s.indexes, name)
 
 		return err
@@ -591,14 +591,14 @@ func Index(fields ...string) CollOption {
 // misses one of the fields is not checked.
 func Unique(fields ...string) CollOption {
 	return func(s *schema) error {
-		name, err := compoundName("Unique", fields)
+		name, err := indexName("Unique", fields)
 		s.unique = append(s.unique, name)
 
 		return err
 	}
 }
 
-func compoundName(option string, fields []string) (string, error) {
+func indexName(option string, fields []string) (string, error) {
 	if len(fields) < 1 || len(fields) > 4 || slices.Contains(fields, "") {
 		return "", fmt.Errorf("ndb: %s takes 1 to 4 field names", option)
 	}

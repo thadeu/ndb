@@ -458,6 +458,13 @@ func (d *daemon) phase() func() int64 {
 }
 
 func (d *daemon) call(method, path string, body []byte) (int, []byte, time.Duration) {
+	code, out, _, took := d.do(method, path, body)
+
+	return code, out, took
+}
+
+// do is call with the headers of the answer (nil when the request failed).
+func (d *daemon) do(method, path string, body []byte) (int, []byte, http.Header, time.Duration) {
 	req, _ := http.NewRequest(method, "http://ndb"+path, bytes.NewReader(body))
 	req.Header.Set("Accept", "application/x-ndjson")
 
@@ -465,14 +472,14 @@ func (d *daemon) call(method, path string, body []byte) (int, []byte, time.Durat
 
 	resp, err := d.http.Do(req)
 	if err != nil {
-		return 0, []byte(err.Error()), time.Since(start)
+		return 0, []byte(err.Error()), nil, time.Since(start)
 	}
 
 	defer resp.Body.Close()
 
 	b, _ := io.ReadAll(resp.Body)
 
-	return resp.StatusCode, b, time.Since(start)
+	return resp.StatusCode, b, resp.Header, time.Since(start)
 }
 
 func (d *daemon) must(method, path, body string) []byte {

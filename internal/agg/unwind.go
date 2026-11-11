@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/thadeu/ndb/internal/jsondoc"
 	"github.com/thadeu/ndb/internal/query"
 )
 
@@ -16,8 +17,8 @@ import (
 //	{"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": true, "includeArrayIndex": "i"}}
 //
 // As in MongoDB: a document where the path is missing, null or an empty
-// array gives no row (one row, with the path left as it is, with
-// preserveNullAndEmptyArrays); a value that is not an array gives one row
+// array gives no row (with preserveNullAndEmptyArrays: one row, where an
+// empty array is left out); a value that is not an array gives one row
 // with it. includeArrayIndex names a field that gets the place of the
 // element (null when the value is not an array).
 //
@@ -65,8 +66,8 @@ func compileUnwind(arg json.RawMessage) (*unwind, error) {
 		return nil, invalid(`$unwind: the path must be "$" and a field, such as "$items"`)
 	}
 
-	if strings.HasPrefix(long.Index, "$") || strings.Contains(long.Index, ".") {
-		return nil, invalid("$unwind: includeArrayIndex is the name of a top-level field, with no $")
+	if strings.HasPrefix(long.Index, "$") || strings.Contains(long.Index, ".") || long.Index == "_id" {
+		return nil, invalid("$unwind: includeArrayIndex is the name of a top-level field, with no $, and not _id")
 	}
 
 	return &unwind{path: strings.Split(name, "."), preserve: long.Preserve, index: long.Index}, nil
@@ -117,7 +118,7 @@ func (p *Pipeline) UnwindPaths() []string {
 // not changed.
 func (p *Pipeline) Expand(m map[string]any, add func(vals []query.Value, elem int) error) error {
 	u := p.unwind
-	val, ok := lookup(m, u.path)
+	val, ok := jsondoc.Lookup(m, u.path)
 	arr, isArr := val.([]any)
 
 	emit := func(row map[string]any, elem int) error {
@@ -134,7 +135,19 @@ func (p *Pipeline) Expand(m map[string]any, add func(vals []query.Value, elem in
 			return nil
 		}
 
-		return emit(u.withIndex(m, nil), 0)
+		row := m
+
+		// As MongoDB does, the kept row of an empty array has no field: a
+		// group by it puts the row with the missing and null ones.
+		if isArr {
+			var leaf map[string]any
+
+			row, leaf = unwindCopy(m, u.path)
+
+			delete(leaf, u.path[len(u.path)-1])
+		}
+
+		return emit(u.withIndex(row, nil), 0)
 	case !isArr:
 		return emit(u.withIndex(m, nil), 0)
 	}
@@ -169,24 +182,6 @@ func (u *unwind) withIndex(m map[string]any, v any) map[string]any {
 	row[u.index] = v
 
 	return row
-}
-
-// lookup follows path through objects only.
-func lookup(m map[string]any, path []string) (any, bool) {
-	var cur any = m
-
-	for _, key := range path {
-		obj, ok := cur.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-
-		if cur, ok = obj[key]; !ok {
-			return nil, false
-		}
-	}
-
-	return cur, true
 }
 
 // unwindCopy copies m and the objects on path, so the last key can be set

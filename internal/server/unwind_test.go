@@ -1,43 +1,9 @@
 package server_test
 
 import (
-	"encoding/json"
 	"net/http"
-	"slices"
-	"strings"
 	"testing"
 )
-
-// aggOf runs a pipeline and gives its rows as canonical JSON, in order.
-func aggOf(t *testing.T, h http.Handler, coll, pipeline string) []string {
-	t.Helper()
-
-	rec := call(h, "POST", "/"+coll+"/_aggregate", `{"pipeline":`+pipeline+`,"limit":1000}`)
-	expectStatus(t, rec, http.StatusOK)
-
-	var out []string
-
-	for line := range strings.Lines(rec.Body.String()) {
-		var m map[string]any
-
-		if err := json.Unmarshal([]byte(line), &m); err != nil {
-			t.Fatalf("row %q: %v", line, err)
-		}
-
-		b, _ := json.Marshal(m)
-		out = append(out, string(b))
-	}
-
-	return out
-}
-
-func expectRows(t *testing.T, got []string, want ...string) {
-	t.Helper()
-
-	if !slices.Equal(got, want) {
-		t.Fatalf("rows\n got %v\nwant %v", got, want)
-	}
-}
 
 func seedOrders(t *testing.T, h http.Handler) {
 	t.Helper()
@@ -91,6 +57,14 @@ func TestUnwindOptionsAndAMatchOnTheElements(t *testing.T) {
 	// o4, o5, o6 (empty, missing, null) and o7 (not an array) have no index.
 	expectRows(t, got, `{"_id":null,"n":4}`, `{"_id":0,"n":4}`, `{"_id":1,"n":2}`)
 
+	// A kept row of an empty array has no field, as the missing and null ones.
+	got = aggOf(t, h, "orders", `[
+		{"$match":{"_id":{"$in":["o4","o5","o6"]}}},
+		{"$unwind":{"path":"$items","preserveNullAndEmptyArrays":true}},
+		{"$group":{"_id":"$items","n":{"$count":{}}}}]`)
+
+	expectRows(t, got, `{"_id":null,"n":3}`)
+
 	got = aggOf(t, h, "orders", `[
 		{"$unwind":"$items"},
 		{"$match":{"items.qty":{"$gte":2}}},
@@ -122,6 +96,7 @@ func TestUnwindErrors(t *testing.T) {
 		"empty path":       `[{"$unwind":"$"},` + group + `]`,
 		"unknown option":   `[{"$unwind":{"path":"$items","nope":1}},` + group + `]`,
 		"index not a name": `[{"$unwind":{"path":"$items","includeArrayIndex":"$i"}},` + group + `]`,
+		"index is the id":  `[{"$unwind":{"path":"$items","includeArrayIndex":"_id"}},` + group + `]`,
 		"not a string":     `[{"$unwind":3},` + group + `]`,
 	} {
 		rec := call(h, "POST", "/orders/_aggregate", `{"pipeline":`+pipeline+`}`)
