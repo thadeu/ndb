@@ -58,45 +58,66 @@ module Ndb
 
     # Applies the write operators to the document with this _id (atomic).
     # guard adds conditions on the same document, such as { _v: 7 }.
-    def update(id, ops, guard: nil, upsert: false, expire_in: nil)
+    def update(id, ops, guard: nil, upsert: false, expire_in: nil, lock: nil)
       ready!
-      client.update(name, id, ops, guard: guard, upsert: upsert, expire_in: expire_in)
+      client.update(name, id, ops, guard: guard, upsert: upsert, expire_in: expire_in, lock: lock)
     end
 
     LOCK_SKIP = %w[_id _v _coll].freeze
 
-    # Reads the document with this _id, yields it, and writes the fields the
-    # block changed (set, or deleted), guarded by the version it read
-    # (optimistic lock). When another write came first, it reads the
-    # document again and yields again, up to retries times; then it raises
-    # StaleObjectError. An exception in the block stops it and nothing is
-    # written. A missing document raises NotFound. Returns the document as
-    # written.
+    # The optimistic lock with the retry done for you. Reads the document
+    # with this _id, yields it, and writes the fields the block changed (set,
+    # or deleted), guarded by the version it read. When another write came
+    # first, it reads the document again and yields again, up to retries
+    # times; then it raises StaleObjectError. So the block can run more than
+    # once: when it has an effect outside ndb, use lock. An exception in the
+    # block stops it and nothing is written. A missing document raises
+    # NotFound. Returns the document as written.
     #
-    #   wallets.with_lock("w1") do |w|
+    #   wallets.with_retry("w1") do |w|
     #     raise InsufficientFunds if w["balance_cents"] < 500
     #
     #     w["balance_cents"] -= 500
     #   end
-    def with_lock(id, retries: 5)
+    def with_retry(id, retries: 5, &block)
       retries = [retries, 1].max
 
       retries.times do |attempt|
         sleep((attempt * 5 + rand(10)) / 1000.0) if attempt.positive?
 
         doc = get(id) or raise NotFound.new("#{name} #{id}", code: "not_found", status: 404)
-        before = Marshal.load(Marshal.dump(doc))
+        written = change(id, doc, guard: { _v: doc["_v"] }, &block)
 
-        yield doc
-
-        ops = lock_changes(before, doc)
-        return doc if ops.empty?
-
-        result = update(id, ops, guard: { _v: before["_v"] })
-        return result["doc"] if result["matched"].positive?
+        return written if written
       end
 
       raise StaleObjectError.new("#{name} #{id} changed on every try", code: "stale_object", status: 409)
+    end
+
+    # The pessimistic lock. Takes the lock of the document, yields it, writes
+    # the fields the block changed, and releases the lock. While the block
+    # runs, no other caller holds the lock and no other write changes the
+    # document: another lock waits (wait, then Locked) and a plain write
+    # waits for the release. So the block runs once: use it when the block
+    # has an effect outside ndb (a payment, an email). An exception in the
+    # block writes nothing and releases the lock. A lock held for longer
+    # than ttl is gone: the write raises LockExpired. See Client#lock.
+    #
+    #   payments.lock("p1") do |p|
+    #     next if p["status"] == "refunded"
+    #
+    #     Gateway.refund(p["charge_id"])
+    #     p["status"] = "refunded"
+    #   end
+    def lock(id, ttl: nil, wait: nil, &block)
+      ready!
+      held = client.lock(name, id, ttl: ttl, wait: wait)
+
+      begin
+        change(id, held["doc"], lock: held["token"], &block) or raise NotFound.new("#{name} #{id}", code: "not_found", status: 404)
+      ensure
+        release(id, held["token"])
+      end
     end
 
     # The atomic update by query: the first match, or every match with many.
@@ -219,6 +240,30 @@ module Ndb
     end
 
     private
+
+    # Yields doc and writes the top-level fields the block changed, in one
+    # update with options (a guard, or the token of a lock). Returns the
+    # document as written (doc when nothing changed), or nil when the update
+    # matched nothing.
+    def change(id, doc, **options)
+      before = Marshal.load(Marshal.dump(doc))
+
+      yield doc
+
+      ops = lock_changes(before, doc)
+      return doc if ops.empty?
+
+      result = update(id, ops, **options)
+
+      result["doc"] if result["matched"].positive?
+    end
+
+    # A lock that cannot be released ends with its ttl.
+    def release(id, token)
+      client.unlock(name, id, token)
+    rescue Error
+      nil
+    end
 
     # The $set and $unset of the top-level fields that differ.
     def lock_changes(before, after)

@@ -1,185 +1,127 @@
 package ndb
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"math/rand/v2"
+	"errors"
 	"net/http"
-	"reflect"
+	"net/url"
 	"time"
 )
 
-// ErrStaleObject is the error of WithLock when every try lost the race: the
-// document changed between the read and the write each time.
-var ErrStaleObject = &Error{Code: "stale_object", Message: "the document changed on every try"}
-
-const defaultLockRetries = 5
-
-// LockOption changes WithLock.
+// LockOption changes Lock.
 type LockOption func(*lockOptions)
 
 type lockOptions struct {
-	retries int
+	ttl  *float64
+	wait *float64
 }
 
-// LockRetries sets how many times WithLock tries (default 5).
-func LockRetries(n int) LockOption {
+// LockTTL is how long the daemon keeps the lock when it is not released
+// (default 30 s, up to 5 min). Set it over the longest time fn can take.
+func LockTTL(d time.Duration) LockOption {
 	return func(o *lockOptions) {
-		o.retries = max(n, 1)
+		secs := d.Seconds()
+		o.ttl = &secs
 	}
 }
 
-// WithLock reads the document with this _id, calls fn with it, and writes
-// the fields that fn changed, guarded by the version it read (optimistic
-// lock). When another write came first, it reads the document again and
-// calls fn again, up to LockRetries times; then it returns ErrStaleObject.
-// An error from fn stops it and nothing is written. A missing document is
-// ErrNotFound. It returns the document as written.
+// LockWait is how long Lock waits for another holder (default 10 s, up to
+// 1 min). Zero does not wait: a held document is ErrLocked at once.
+func LockWait(d time.Duration) LockOption {
+	return func(o *lockOptions) {
+		secs := d.Seconds()
+		o.wait = &secs
+	}
+}
+
+// Lock takes the pessimistic lock of the document with this _id
+// (POST /{coll}/_lock/{id}), calls fn with the document, writes the fields
+// that fn changed, and releases the lock. While fn runs, no other caller
+// holds the lock and no other write changes the document: another Lock
+// waits (LockWait, then ErrLocked), and a plain write waits for the release.
+// So fn runs once: use Lock when fn has an effect outside ndb (a payment, an
+// email). When fn only changes the document, WithRetry is cheaper.
 //
-//	w, err := wallets.WithLock(ctx, "w1", func(w *Wallet) error {
-//		if w.Balance < 500 {
-//			return ErrInsufficientFunds
+// An error from fn writes nothing and releases the lock. A lock that fn
+// held for longer than LockTTL is gone: the write is refused with
+// ErrLockExpired. A missing document is ErrNotFound.
+//
+//	p, err := payments.Lock(ctx, "p1", func(p *Payment) error {
+//		if p.Status == "refunded" {
+//			return nil
 //		}
 //
-//		w.Balance -= 500
+//		if err := gateway.Refund(p.ChargeID); err != nil {
+//			return err
+//		}
+//
+//		p.Status = "refunded"
 //
 //		return nil
 //	})
-func (c *Coll[T]) WithLock(ctx context.Context, id string, fn func(doc *T) error, opts ...LockOption) (T, error) {
-	o := lockOptions{retries: defaultLockRetries}
+func (c *Coll[T]) Lock(ctx context.Context, id string, fn func(doc *T) error, opts ...LockOption) (T, error) {
+	var (
+		o    lockOptions
+		zero T
+	)
 
 	for _, opt := range opts {
 		opt(&o)
 	}
 
-	var zero T
-
-	for try := range o.retries {
-		if try > 0 {
-			if err := lockBackoff(ctx, try); err != nil {
-				return zero, err
-			}
-		}
-
-		doc, written, err := c.lockOnce(ctx, id, fn)
-		if err != nil || written {
-			return doc, err
-		}
+	body, err := json.Marshal(map[string]*float64{"ttl": o.ttl, "wait": o.wait})
+	if err != nil {
+		return zero, err
 	}
 
-	return zero, ErrStaleObject
+	var held struct {
+		Token string          `json:"token"`
+		Doc   json.RawMessage `json:"doc"`
+	}
+
+	if err := c.call(ctx, http.MethodPost, docPath("_lock", id), body, &held); err != nil {
+		return zero, err
+	}
+
+	defer c.unlock(id, held.Token)
+
+	doc, err := c.decode(held.Doc)
+	if err != nil {
+		return zero, err
+	}
+
+	out, err := c.change(ctx, id, doc, fn, heldBy(held.Token))
+	if errors.Is(err, errUnmatched) {
+		return zero, ErrNotFound
+	}
+
+	return out, err
 }
 
-// lockOnce is one try: read, fn, guarded write. written is false when the
-// guard failed (another write came first).
-func (c *Coll[T]) lockOnce(ctx context.Context, id string, fn func(doc *T) error) (T, bool, error) {
-	var zero T
+// unlock releases the lock. It runs after ctx may be done, so it has its
+// own short deadline; a lock that it cannot release ends with its ttl.
+func (c *Coll[T]) unlock(id, token string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	var raw json.RawMessage
+	body, _ := json.Marshal(map[string]string{"token": token})
 
-	if err := c.call(ctx, http.MethodGet, docPath("_doc", id), nil, &raw); err != nil {
-		return zero, false, err
-	}
-
-	var head struct {
-		V uint64 `json:"_v"`
-	}
-
-	if err := json.Unmarshal(raw, &head); err != nil {
-		return zero, false, err
-	}
-
-	doc, err := c.decode(raw)
-	if err != nil {
-		return zero, false, err
-	}
-
-	before, err := c.fields(doc)
-	if err != nil {
-		return zero, false, err
-	}
-
-	if err := fn(&doc); err != nil {
-		return zero, false, err
-	}
-
-	after, err := c.fields(doc)
-	if err != nil {
-		return zero, false, err
-	}
-
-	ops := changes(before, after)
-	if len(ops) == 0 {
-		return doc, true, nil
-	}
-
-	res, err := c.Update(ctx, id, ops, Guard(Eq("_v", head.V)))
-	if err != nil || res.Matched == 0 {
-		return zero, false, err
-	}
-
-	return *res.Doc, true, nil
+	_ = c.call(ctx, http.MethodPost, docPath("_unlock", id), body, nil)
 }
 
-// fields is the document as the daemon would store it, by top-level field.
-// Numbers stay json.Number, so a big integer is written back exactly.
-func (c *Coll[T]) fields(doc T) (map[string]any, error) {
-	raw, err := c.schema.encode(doc)
-	if err != nil {
-		return nil, err
+// heldBy sends an Update as the holder of a lock (?lock=<token>).
+func heldBy(token string) Option {
+	return func(o *options) {
+		o.lock = token
 	}
-
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-
-	var m map[string]any
-
-	return m, dec.Decode(&m)
 }
 
-// changes are the $set and $unset of the top-level fields that differ.
-func changes(before, after map[string]any) Ops {
-	set, unset := map[string]any{}, map[string]any{}
-
-	for k, v := range after {
-		if k == "_id" {
-			continue
-		}
-
-		if old, ok := before[k]; !ok || !reflect.DeepEqual(old, v) {
-			set[k] = v
-		}
+// lockQuery is "?lock=<token>" for the write of a holder, or "".
+func lockQuery(token string) string {
+	if token == "" {
+		return ""
 	}
 
-	for k := range before {
-		if _, ok := after[k]; !ok && k != "_id" {
-			unset[k] = ""
-		}
-	}
-
-	ops := Ops{}
-
-	if len(set) > 0 {
-		ops["$set"] = set
-	}
-
-	if len(unset) > 0 {
-		ops["$unset"] = unset
-	}
-
-	return ops
-}
-
-// lockBackoff waits a few ms with jitter, longer on each try, so racing
-// writers do not collide again at once.
-func lockBackoff(ctx context.Context, try int) error {
-	d := time.Duration(try*5+rand.IntN(10)) * time.Millisecond
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(d):
-		return nil
-	}
+	return "?lock=" + url.QueryEscape(token)
 }

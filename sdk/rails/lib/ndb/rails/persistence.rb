@@ -195,19 +195,20 @@ module Ndb
       add_to!(attribute, -by)
     end
 
-    # Reads the document again, yields the record, and saves it, guarded by
-    # the version it read (optimistic lock). When another write came first,
-    # it reads the document again and yields again, up to retries times; then
-    # it raises Ndb::StaleObjectError. An exception in the block stops it and
-    # nothing is written. Returns the record. Like ActiveRecord with_lock,
-    # without a database lock: nothing waits.
+    # The optimistic lock with the retry done for you. Reads the document
+    # again, yields the record, and saves it, guarded by the version it read.
+    # When another write came first (Ndb::StaleObjectError), it reads the
+    # document again and yields again, up to retries times; then it raises
+    # the error. So the block can run more than once: when it has an effect
+    # outside ndb, use with_lock. An exception in the block stops it and
+    # nothing is written. Returns the record. Nothing waits on the daemon.
     #
-    #   payment.with_lock do |p|
-    #     next if p.status == "paid"
+    #   wallet.with_retry do |w|
+    #     raise InsufficientFunds if w.balance_cents < 500
     #
-    #     p.status = "paid"
+    #     w.balance_cents -= 500
     #   end
-    def with_lock(retries: 5)
+    def with_retry(retries: 5)
       retries = [retries, 1].max
 
       retries.times do |attempt|
@@ -271,9 +272,11 @@ module Ndb
     end
 
     def delete_record
-      deleted = self.class.ndb_delete(record_filter)["deleted"]
+      deleted = holding { self.class.ndb_delete(record_filter, **lock_options) }["deleted"]
 
       raise StaleObjectError.new("#{self.class.name} #{id} changed or was deleted", code: "stale_object") if deleted.zero?
+
+      written_with_lock
     end
 
     def add_to!(attribute, by)
@@ -282,7 +285,7 @@ module Ndb
       raise RecordNotSaved, "Cannot update a record that is not saved" unless persisted?
       raise ArgumentError, "#{name} is not an attribute of #{self.class.name}" unless self.class.attribute_names.include?(name)
 
-      result = self.class.ndb_update({ self.class.primary_key => id }, { "$inc" => { name => by } })
+      result = holding { self.class.ndb_update({ self.class.primary_key => id }, { "$inc" => { name => by } }, **lock_options) }
 
       raise NotFound.new("#{self.class.name} #{id} was deleted", code: "not_found") if result["matched"].zero?
 
@@ -338,7 +341,7 @@ module Ndb
         set, unset = changed_fields
 
         unless set.empty? && unset.empty? && @expire_in.nil?
-          result = self.class.ndb_update(record_filter, update_ops(set, unset), expire_in: @expire_in)
+          result = holding { self.class.ndb_update(record_filter, update_ops(set, unset), expire_in: @expire_in, **lock_options) }
 
           raise StaleObjectError.new("#{self.class.name} #{id} changed or was deleted", code: "stale_object") if result["matched"].zero?
 
@@ -346,6 +349,7 @@ module Ndb
         end
 
         changes_applied
+        written_with_lock
 
         true
       end

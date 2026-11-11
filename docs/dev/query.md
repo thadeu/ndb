@@ -467,9 +467,9 @@ curl ... /calls/_update_by_query -d '{"query":{"status":"failed"},"update":{"$se
 
 That is the body of `POST /{coll}/_update/c1`; the SDKs call it a guard (`Guard(Eq("_v", 7))`, `guard: { _v: 7 }`).
 
-#### with_lock: read, change, write, retry
+#### with_retry: read, change, write, retry
 
-Every SDK has `with_lock` (`WithLock` in Go, `withLock` in TypeScript). It does the guard for you:
+Every SDK has `with_retry` (`WithRetry` in Go, `withRetry` in TypeScript). It does the guard for you:
 
 1. It reads the document and its `_v`.
 2. It calls your function with the document. Change the fields there.
@@ -478,11 +478,13 @@ Every SDK has `with_lock` (`WithLock` in Go, `withLock` in TypeScript). It does 
 
 An error in your function stops it, and nothing is written. When your function changes nothing, nothing is written. Nothing waits: there is no lock on the daemon, so a client that dies holds nothing. Use it when the new value depends on a decision in your code. When one operator does the job, use a [conditional update](#update-by-query): it is one call, with no retry.
 
+Your function can run more than one time. When it has an effect outside ndb (a refund, an email), use a [lock](#lock-one-holder-at-a-time).
+
 **1. Debit a balance from two requests at the same time.** The second request reads the new balance and debits again, so both debits land.
 
 ```ruby
 # Rails
-Wallet.find("w1").with_lock do |w|
+Wallet.find("w1").with_retry do |w|
   raise InsufficientFunds if w.balance_cents < 500
 
   w.balance_cents -= 500
@@ -491,7 +493,7 @@ end
 
 ```go
 // Go
-w, err := wallets.WithLock(ctx, "w1", func(w *Wallet) error {
+w, err := wallets.WithRetry(ctx, "w1", func(w *Wallet) error {
 	if w.Balance < 500 {
 		return ErrInsufficientFunds
 	}
@@ -513,7 +515,7 @@ curl ... /wallets/_update/w1 -d '{"query":{"balance_cents":{"$gte":500}},"update
 
 ```ruby
 # Rails
-Payment.find(event.payment_id).with_lock do |p|
+Payment.find(event.payment_id).with_retry do |p|
   next if p.status == "paid"
 
   p.status = "paid"
@@ -523,7 +525,7 @@ end
 
 ```ts
 // TypeScript
-await payments.withLock(event.paymentId, (p) => {
+await payments.withRetry(event.paymentId, (p) => {
   if (p.status === 'paid') return
 
   p.status = 'paid'
@@ -535,7 +537,7 @@ await payments.withLock(event.paymentId, (p) => {
 
 ```go
 // Go
-_, err := accounts.WithLock(ctx, "acc_1", func(a *Account) error {
+_, err := accounts.WithRetry(ctx, "acc_1", func(a *Account) error {
 	if a.Seats >= a.MaxSeats {
 		return ErrSeatLimit
 	}
@@ -548,12 +550,78 @@ _, err := accounts.WithLock(ctx, "acc_1", func(a *Account) error {
 
 ```ruby
 # Ruby (plain client): documents are hashes
-accounts.with_lock("acc_1") do |a|
+accounts.with_retry("acc_1") do |a|
   raise SeatLimit if a["seats"] >= a["max_seats"]
 
   a["seats"] += 1
 end
 ```
+
+### Lock: one holder at a time
+
+A lock gives one caller the document, like `SELECT ... FOR UPDATE`. Until the lock is released, no other caller takes it and no other write changes the document. The code between the lock and the release runs one time. Use it when that code has an effect outside ndb that must not happen twice:
+
+```ruby
+# Rails. A second request waits at lock.find, then sees "refunded".
+Payment.lock.find("p1") do |p|
+  next if p.status == "refunded"
+
+  Gateway.refund(p.charge_id)
+  p.update!(status: "refunded")
+end
+```
+
+```go
+// Go
+_, err := payments.Lock(ctx, "p1", func(p *Payment) error {
+	if p.Status == "refunded" {
+		return nil
+	}
+
+	if err := gateway.Refund(p.ChargeID); err != nil {
+		return err
+	}
+
+	p.Status = "refunded"
+
+	return nil
+})
+```
+
+```ts
+// TypeScript
+await payments.lock('p1', async (p) => {
+  if (p.status === 'refunded') return
+
+  await gateway.refund(p.charge_id)
+  p.status = 'refunded'
+})
+```
+
+```ruby
+# Ruby (plain client)
+payments.lock("p1") do |p|
+  next if p["status"] == "refunded"
+
+  Gateway.refund(p["charge_id"])
+  p["status"] = "refunded"
+end
+```
+
+How it works ([`POST /{coll}/_lock/{id}`](http/documents.md#post-coll-lock-id)):
+
+- The daemon gives a token and the document in one step. The SDK writes with the token and releases the lock at the end, also when your code fails. In Go, TypeScript and plain Ruby the fields that your function changed are written for you; an error writes nothing.
+- Another lock of the same document waits (`wait`, default 10 s), then fails with `locked`.
+- A write of the document from any other place waits for the release, then runs. Reads do not wait.
+- The lock has a `ttl` (default 30 s, up to 5 minutes). A process that dies holds the lock only until then. Set `ttl` over the longest time your code can take: after it, the write is refused with `lock_expired`, but the effect outside ndb is done. For that case, also give the outside call an idempotency key when it takes one.
+- ndb has no transaction: a lock is one document. Do not take two locks in a different order in two places (they can wait for each other until `wait` ends).
+
+| | `with_retry` | `lock` |
+|---|---|---|
+| Your code runs | one or more times | one time |
+| Other writers | never wait | wait for the release |
+| Calls to the daemon | read + write (again on a conflict) | lock + write + unlock |
+| Use it when | the code only changes the document | the code has an effect outside ndb |
 
 ### Upsert
 

@@ -173,7 +173,7 @@ type UpdateResult[T any] struct {
 func (c *Coll[T]) Update(ctx context.Context, id string, ops Ops, opts ...Option) (UpdateResult[T], error) {
 	o := newOptions(opts)
 
-	return c.runUpdate(ctx, docPath("_update", id), Filter{doc: o.guard}, ops, o, false)
+	return c.runUpdate(ctx, docPath("_update", id)+lockQuery(o.lock), Filter{doc: o.guard}, ops, o, false)
 }
 
 // UpdateBy is the atomic update by query (POST /{coll}/_update_by_query):
@@ -427,6 +427,7 @@ type options struct {
 	upsert   bool
 	expireIn ttlSecs
 	guard    map[string]any
+	lock     string
 }
 
 // ttlSecs is a duration in seconds for the wire. Zero is omitted.

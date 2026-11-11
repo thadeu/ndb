@@ -131,14 +131,14 @@ func (c *Collection) update(ctx context.Context, top map[string]any, opts Update
 	}
 
 	for {
-		_, _, err = c.w.Commit(ctx, req)
+		_, _, err = c.commit(ctx, req)
 
 		if errors.Is(err, errNoWrite) {
 			break
 		}
 
 		if err != nil {
-			return UpdateResult{}, err
+			return UpdateResult{}, manyLocked(err, opts.Many)
 		}
 
 		if !opts.Many || req.cur.done() {
@@ -185,14 +185,14 @@ func (c *Collection) deleteTop(ctx context.Context, top map[string]any, many boo
 	deleted := 0
 
 	for {
-		_, ops, err := c.w.Commit(ctx, req)
+		_, ops, err := c.commit(ctx, req)
 
 		if errors.Is(err, errNoWrite) {
 			return deleted, nil
 		}
 
 		if err != nil {
-			return deleted, err
+			return deleted, manyLocked(err, many)
 		}
 
 		deleted += len(ops)

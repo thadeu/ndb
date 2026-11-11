@@ -172,9 +172,20 @@ export interface UpdateResult<F extends Fields = Fields> {
   doc?: Row<F>
 }
 
-export interface LockOptions {
-  // How many times withLock tries (default 5).
+export interface RetryOptions {
+  // How many times withRetry tries (default 5).
   retries?: number
+}
+
+export interface LockOptions {
+  // How long the daemon keeps the lock when it is not released: seconds, or
+  // a duration such as "30s" (default 30 s, up to 5 min). Set it over the
+  // longest time the function can take.
+  ttl?: Duration
+
+  // How long to wait for another holder (default 10 s, up to 1 min). 0 does
+  // not wait: a held document is LockedError at once.
+  wait?: Duration
 }
 
 export interface DeleteResult {

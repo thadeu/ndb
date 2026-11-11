@@ -89,14 +89,27 @@ const row = await calls.get('c1')
 const res = await calls.update('c1', { $set: { status: 'done' }, $unset: { duration: true } }, { guard: { _v: row!._v } })
 // res: { matched, modified, doc } (doc is the new row with _v)
 
-// withLock does the read, the guard and the retry: change the row in the
+// withRetry does the read, the guard and the retry: change the row in the
 // function, and the changed fields are written with the _v guard. On a
 // conflict it reads again and calls the function again (5 tries,
-// { retries }), then throws StaleObjectError. A throw in the function writes nothing.
-await calls.withLock('c1', (call) => {
+// { retries }), then throws StaleObjectError. A throw in the function writes
+// nothing. The function can run more than once.
+await calls.withRetry('c1', (call) => {
   if (call.status === 'done') return
 
   call.status = 'done'
+})
+
+// lock is the pessimistic lock: one holder at a time, so the function runs
+// once. Use it when the function has an effect outside ndb. Another lock
+// waits ({ wait }, then LockedError); a plain write waits for the release.
+// { ttl } (default 30 s) must cover the function: after it the write throws
+// LockExpiredError.
+await calls.lock('c1', async (call) => {
+  if (call.status === 'billed') return
+
+  await billing.charge(call._id)
+  call.status = 'billed'
 })
 
 // Atomic update by query. A guarded decrement: exactly one of two racing calls wins.

@@ -135,10 +135,31 @@ module Ndb
     #
     # Operators: $set, $setOnInsert, $unset, $inc, $push, $pull, $min, $max
     # (dot paths work). upsert: true creates the document with this _id.
-    def update(coll, id, ops, guard: nil, upsert: false, expire_in: nil)
+    #
+    # lock: the token of a lock on the document (see lock): the write of
+    # its holder. update_by, delete and delete_by take it too.
+    def update(coll, id, ops, guard: nil, upsert: false, expire_in: nil, lock: nil)
       body = write_body(update: check_ops(ops), query: guard && Conditions.equality(guard), upsert: upsert, expire_in: expire_in)
 
-      json(request("POST", doc_path(coll, "_update", id), body))
+      json(request("POST", held(doc_path(coll, "_update", id), lock), body))
+    end
+
+    # POST /{coll}/_lock/{id}: the pessimistic lock of a document. Until
+    # unlock, or ttl (seconds or "30s"; default 30 s, up to 5 min), only a
+    # write with the token changes the document; a write without it waits.
+    # When another caller holds the lock, the call waits up to wait (default
+    # 10 s, up to 1 min; 0 does not wait), then raises Locked. Returns
+    # {"token", "expires_at", "doc"}. A missing document raises NotFound.
+    def lock(coll, id, ttl: nil, wait: nil)
+      timeout = wait.is_a?(Numeric) ? [self.timeout, wait + 5].max : nil
+
+      json(request("POST", doc_path(coll, "_lock", id), write_body(ttl: ttl, wait: wait), timeout: timeout))
+    end
+
+    # POST /{coll}/_unlock/{id}: releases the lock of token. A token that
+    # holds no lock (expired, released) raises LockExpired.
+    def unlock(coll, id, token)
+      json(request("POST", doc_path(coll, "_unlock", id), { token: token }))
     end
 
     # POST /{coll}/_update_by_query: the atomic update by query. The daemon
@@ -147,21 +168,21 @@ module Ndb
     # many: true updates every match and needs _id or an indexed field in
     # the query. upsert: true creates the document from the equality fields
     # of the query when nothing matches.
-    def update_by(coll, query, ops, many: false, upsert: false, expire_in: nil)
+    def update_by(coll, query, ops, many: false, upsert: false, expire_in: nil, lock: nil)
       body = write_body(query: Conditions.equality(query), update: check_ops(ops), many: many, upsert: upsert, expire_in: expire_in)
 
-      json(post(coll, "_update_by_query", body))
+      json(post(coll, held("_update_by_query", lock), body))
     end
 
     # DELETE /{coll}/_doc/{id}: {"deleted" => 0 | 1}.
-    def delete(coll, id)
-      json(request("DELETE", doc_path(coll, "_doc", id), nil))
+    def delete(coll, id, lock: nil)
+      json(request("DELETE", held(doc_path(coll, "_doc", id), lock), nil))
     end
 
     # POST /{coll}/_delete_by_query: the first match, or every match with
     # many: true (same rule as update_by). {"deleted" => n}
-    def delete_by(coll, query, many: false)
-      json(post(coll, "_delete_by_query", write_body(query: Conditions.equality(query), many: many)))
+    def delete_by(coll, query, many: false, lock: nil)
+      json(post(coll, held("_delete_by_query", lock), write_body(query: Conditions.equality(query), many: many)))
     end
 
     # Makes a document expire, like EXPIRE in Redis: in: seconds or "30m", or
@@ -342,6 +363,11 @@ module Ndb
 
     def path(coll)
       "/#{escape(coll)}"
+    end
+
+    # target as the write of the holder of a lock (?lock=<token>).
+    def held(target, token)
+      token ? "#{target}?lock=#{escape(token)}" : target
     end
 
     def escape(segment)

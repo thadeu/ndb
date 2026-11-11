@@ -168,63 +168,31 @@ func (c *Collection) Aggregate(ctx context.Context, body []byte) (collection.Pag
 }
 
 func (c *Collection) Insert(ctx context.Context, docs ...[]byte) ([]collection.Result, error) {
-	if err := c.enter(); err != nil {
-		return nil, err
-	}
-
-	defer c.leave()
-
-	if c.eng == nil {
-		return nil, ErrDirect
-	}
-
-	return c.eng.Insert(ctx, docs...)
+	return write(ctx, c, func(eng *collection.Collection) ([]collection.Result, error) {
+		return eng.Insert(ctx, docs...)
+	})
 }
 
 // Update is the atomic update by filter, see collection.Update.
 func (c *Collection) Update(ctx context.Context, body []byte, opts collection.UpdateOpts) (collection.UpdateResult, error) {
-	if err := c.enter(); err != nil {
-		return collection.UpdateResult{}, err
-	}
-
-	defer c.leave()
-
-	if c.eng == nil {
-		return collection.UpdateResult{}, ErrDirect
-	}
-
-	return c.eng.Update(ctx, body, opts)
+	return write(ctx, c, func(eng *collection.Collection) (collection.UpdateResult, error) {
+		return eng.Update(ctx, body, opts)
+	})
 }
 
 // UpdateID is the atomic update of one document by _id, see
 // collection.UpdateID.
 func (c *Collection) UpdateID(ctx context.Context, id string, body []byte, opts collection.UpdateOpts) (collection.UpdateResult, error) {
-	if err := c.enter(); err != nil {
-		return collection.UpdateResult{}, err
-	}
-
-	defer c.leave()
-
-	if c.eng == nil {
-		return collection.UpdateResult{}, ErrDirect
-	}
-
-	return c.eng.UpdateID(ctx, id, body, opts)
+	return write(ctx, c, func(eng *collection.Collection) (collection.UpdateResult, error) {
+		return eng.UpdateID(ctx, id, body, opts)
+	})
 }
 
 // DeleteID removes one document by _id and returns how many (0 or 1).
 func (c *Collection) DeleteID(ctx context.Context, id string) (int, error) {
-	if err := c.enter(); err != nil {
-		return 0, err
-	}
-
-	defer c.leave()
-
-	if c.eng == nil {
-		return 0, ErrDirect
-	}
-
-	return c.eng.DeleteID(ctx, id)
+	return write(ctx, c, func(eng *collection.Collection) (int, error) {
+		return eng.DeleteID(ctx, id)
+	})
 }
 
 // Get returns one document by _id with its "_v", in both write modes.
@@ -244,64 +212,41 @@ func (c *Collection) Get(id string) (collection.Doc, bool) {
 
 // InsertIn is Insert with every document expiring in d from now.
 func (c *Collection) InsertIn(ctx context.Context, d time.Duration, docs ...[]byte) ([]collection.Result, error) {
-	if err := c.enter(); err != nil {
-		return nil, err
-	}
-
-	defer c.leave()
-
-	if c.eng == nil {
-		return nil, ErrDirect
-	}
-
-	return c.eng.InsertIn(ctx, d, docs...)
+	return write(ctx, c, func(eng *collection.Collection) ([]collection.Result, error) {
+		return eng.InsertIn(ctx, d, docs...)
+	})
 }
 
 // Upsert inserts docs, or merges each one whose _id exists into the stored
 // document, in one transaction. d > 0 sets their expiry. See
 // collection.Upsert.
 func (c *Collection) Upsert(ctx context.Context, d time.Duration, docs ...[]byte) ([]collection.Result, error) {
-	if err := c.enter(); err != nil {
-		return nil, err
-	}
-
-	defer c.leave()
-
-	if c.eng == nil {
-		return nil, ErrDirect
-	}
-
-	return c.eng.Upsert(ctx, d, docs...)
+	return write(ctx, c, func(eng *collection.Collection) ([]collection.Result, error) {
+		return eng.Upsert(ctx, d, docs...)
+	})
 }
 
 // Expire sets the expiry of a document (EXPIRE).
 func (c *Collection) Expire(ctx context.Context, id string, e collection.Expiry) (uint64, time.Time, error) {
-	if err := c.enter(); err != nil {
-		return 0, time.Time{}, err
+	type expiry struct {
+		v  uint64
+		at time.Time
 	}
 
-	defer c.leave()
+	out, err := write(ctx, c, func(eng *collection.Collection) (expiry, error) {
+		v, at, err := eng.Expire(ctx, id, e)
 
-	if c.eng == nil {
-		return 0, time.Time{}, ErrDirect
-	}
+		return expiry{v: v, at: at}, err
+	})
 
-	return c.eng.Expire(ctx, id, e)
+	return out.v, out.at, err
 }
 
 // Persist removes the expiry of a document (PERSIST).
 func (c *Collection) Persist(ctx context.Context, id string) (uint64, error) {
-	if err := c.enter(); err != nil {
-		return 0, err
-	}
-
-	defer c.leave()
-
-	if c.eng == nil {
-		return 0, ErrDirect
-	}
-
-	return c.eng.Persist(ctx, id)
+	return write(ctx, c, func(eng *collection.Collection) (uint64, error) {
+		return eng.Persist(ctx, id)
+	})
 }
 
 // TTL is the remaining life of a document. Direct mode is ErrNotSupported.
@@ -321,17 +266,9 @@ func (c *Collection) TTL(id string) (collection.TTLInfo, error) {
 
 // Delete removes the documents that the filter matches, and returns how many.
 func (c *Collection) Delete(ctx context.Context, body []byte, many bool) (int, error) {
-	if err := c.enter(); err != nil {
-		return 0, err
-	}
-
-	defer c.leave()
-
-	if c.eng == nil {
-		return 0, ErrDirect
-	}
-
-	return c.eng.Delete(ctx, body, many)
+	return write(ctx, c, func(eng *collection.Collection) (int, error) {
+		return eng.Delete(ctx, body, many)
+	})
 }
 
 // Seal writes the memtable of an engine-mode collection to a segment now.

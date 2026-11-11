@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest'
-import { NotFoundError, StaleObjectError } from '../src/index.js'
+import { LockExpiredError, LockedError, NotFoundError } from '../src/index.js'
 import { collName, unixDb } from './helpers.js'
 
 const db = unixDb()
@@ -7,94 +7,70 @@ const db = unixDb()
 afterAll(() => db.close())
 
 function wallets() {
-  return db.collection(collName(), {
-    fields: {
-      balance_cents: { type: 'number' },
-      note: { type: 'string', optional: true },
-    },
-  })
+  return db.collection(collName(), { fields: { balance_cents: { type: 'number' } } })
 }
 
-describe('withLock', () => {
-  it('reads again and calls the function again after a conflict', async () => {
-    const w = wallets()
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
-    await w.insert({ _id: 'w1', balance_cents: 1000, note: 'x' })
-
-    let calls = 0
-
-    const doc = await w.withLock('w1', async (wallet) => {
-      calls++
-
-      if (calls === 1) await w.update('w1', { $inc: { balance_cents: -300 } })
-
-      wallet.balance_cents -= 500
-      delete wallet.note
-    })
-
-    expect(calls).toBe(2)
-    expect(doc.balance_cents).toBe(200)
-    expect(doc.note).toBeUndefined()
-
-    const stored = await w.get('w1')
-
-    expect(stored?.balance_cents).toBe(200)
-    expect(stored?.note).toBeUndefined()
-  })
-
-  it('lands every concurrent debit', async () => {
+describe('lock', () => {
+  it('runs one holder at a time, each once', async () => {
     const w = wallets()
 
     await w.insert({ _id: 'w1', balance_cents: 1000 })
 
-    const debit = () => w.withLock('w1', (wallet) => {
+    let inside = 0
+    let worst = 0
+    let calls = 0
+
+    const debit = () => w.lock('w1', async (wallet) => {
+      worst = Math.max(worst, ++inside)
+      calls++
+
+      await pause(5)
+
       wallet.balance_cents -= 100
-    }, { retries: 20 })
+      inside--
+    })
 
     await Promise.all([debit(), debit(), debit(), debit(), debit()])
 
+    expect(worst).toBe(1)
+    expect(calls).toBe(5)
     expect((await w.get('w1'))?.balance_cents).toBe(500)
   })
 
-  it('stops on an error of the function and writes nothing', async () => {
+  it('writes nothing and releases the lock when the function throws', async () => {
     const w = wallets()
 
     await w.insert({ _id: 'w1', balance_cents: 100 })
 
-    const debit = w.withLock('w1', (wallet) => {
-      if (wallet.balance_cents < 500) throw new Error('insufficient funds')
+    const failed = w.lock('w1', async (wallet) => {
+      wallet.balance_cents = 0
 
-      wallet.balance_cents -= 500
+      await expect(w.lock('w1', () => {}, { wait: 0 })).rejects.toBeInstanceOf(LockedError)
+
+      throw new Error('insufficient funds')
     })
 
-    await expect(debit).rejects.toThrow('insufficient funds')
-    expect((await w.get('w1'))?._v).toBe(1)
-    await expect(w.withLock('nope', () => {})).rejects.toBeInstanceOf(NotFoundError)
+    await expect(failed).rejects.toThrow('insufficient funds')
+    expect((await w.get('w1'))?.balance_cents).toBe(100)
+
+    await w.lock('w1', () => {}, { wait: 0 })
+    await expect(w.lock('nope', () => {})).rejects.toBeInstanceOf(NotFoundError)
   })
 
-  it('gives up with StaleObjectError after its retries', async () => {
+  it('refuses the write of a lock that expired', async () => {
     const w = wallets()
 
     await w.insert({ _id: 'w1', balance_cents: 100 })
 
-    let calls = 0
+    const late = w.lock('w1', async (wallet) => {
+      await pause(150)
 
-    const lost = w.withLock('w1', async (wallet) => {
-      calls++
-      await w.update('w1', { $inc: { balance_cents: 1 } })
-      wallet.balance_cents = 0
-    }, { retries: 3 })
+      wallet.balance_cents = 1
+    }, { ttl: 0.1 })
 
-    await expect(lost).rejects.toBeInstanceOf(StaleObjectError)
-    expect(calls).toBe(3)
-  })
-
-  it('writes nothing when the function changes nothing', async () => {
-    const w = wallets()
-
-    await w.insert({ _id: 'w1', balance_cents: 100 })
-    await w.withLock('w1', () => {})
-
-    expect((await w.get('w1'))?._v).toBe(1)
+    await expect(late).rejects.toBeInstanceOf(LockExpiredError)
+    expect((await w.get('w1'))?.balance_cents).toBe(100)
   })
 })

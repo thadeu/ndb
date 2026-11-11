@@ -4,60 +4,12 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
-type Wallet struct {
-	ID      string `ndb:"_id"`
-	Balance int    `ndb:"balance_cents"`
-	Note    string `ndb:"note"`
-}
-
-func TestWithLockRetriesAConflict(t *testing.T) {
-	ctx := context.Background()
-	db := openTest(t, daemon.unix)
-
-	col, err := Collection[Wallet](db, newColl())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := col.Insert(ctx, Wallet{ID: "w1", Balance: 1000, Note: "x"}); err != nil {
-		t.Fatal(err)
-	}
-
-	calls := 0
-
-	got, err := col.WithLock(ctx, "w1", func(w *Wallet) error {
-		calls++
-
-		if calls == 1 {
-			if _, err := col.Update(ctx, "w1", Ops{"$inc": {"balance_cents": -300}}); err != nil {
-				return err
-			}
-		}
-
-		w.Balance -= 500
-		w.Note = ""
-
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if calls != 2 || got.Balance != 200 || got.Note != "" {
-		t.Fatalf("calls %d, wallet %+v; want 2 calls and 200 without note", calls, got)
-	}
-
-	stored, _ := col.Get(ctx, "w1")
-
-	if stored.Balance != 200 || stored.Note != "" {
-		t.Fatalf("stored %+v, want 200 without note", stored)
-	}
-}
-
-func TestWithLockConcurrentDebitsAllLand(t *testing.T) {
+func TestLockRunsOneHolderAtATime(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, daemon.unix)
 
@@ -70,15 +22,29 @@ func TestWithLockConcurrentDebitsAllLand(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var wg sync.WaitGroup
+	var (
+		wg     sync.WaitGroup
+		inside atomic.Int32
+		calls  atomic.Int32
+	)
 
 	for range 5 {
 		wg.Go(func() {
-			if _, err := col.WithLock(ctx, "w1", func(w *Wallet) error {
+			_, err := col.Lock(ctx, "w1", func(w *Wallet) error {
+				if inside.Add(1) != 1 {
+					t.Error("two holders at once")
+				}
+
+				calls.Add(1)
+				time.Sleep(5 * time.Millisecond)
+
 				w.Balance -= 100
 
+				inside.Add(-1)
+
 				return nil
-			}, LockRetries(20)); err != nil {
+			})
+			if err != nil {
 				t.Error(err)
 			}
 		})
@@ -88,12 +54,12 @@ func TestWithLockConcurrentDebitsAllLand(t *testing.T) {
 
 	stored, _ := col.Get(ctx, "w1")
 
-	if stored.Balance != 500 {
-		t.Fatalf("balance %d, want 500", stored.Balance)
+	if stored.Balance != 500 || calls.Load() != 5 {
+		t.Fatalf("balance %d after %d calls; want 500 after 5 (each runs once)", stored.Balance, calls.Load())
 	}
 }
 
-func TestWithLockStopsOnTheCallbackError(t *testing.T) {
+func TestLockErrors(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, daemon.unix)
 
@@ -108,83 +74,39 @@ func TestWithLockStopsOnTheCallbackError(t *testing.T) {
 
 	errFunds := errors.New("insufficient funds")
 
-	_, err = col.WithLock(ctx, "w1", func(w *Wallet) error {
-		if w.Balance < 500 {
-			return errFunds
+	_, err = col.Lock(ctx, "w1", func(w *Wallet) error {
+		w.Balance = 0
+
+		if _, err := col.Lock(ctx, "w1", func(*Wallet) error { return nil }, LockWait(0)); !errors.Is(err, ErrLocked) {
+			t.Errorf("a second lock with no wait: %v, want ErrLocked", err)
 		}
 
-		w.Balance -= 500
-
-		return nil
+		return errFunds
 	})
 	if !errors.Is(err, errFunds) {
 		t.Fatalf("err %v, want the callback error", err)
 	}
 
-	if _, err := col.WithLock(ctx, "nope", func(*Wallet) error { return nil }); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("missing doc: err %v, want ErrNotFound", err)
-	}
-}
-
-func TestWithLockGivesUpAfterItsRetries(t *testing.T) {
-	ctx := context.Background()
-	db := openTest(t, daemon.unix)
-
-	col, err := Collection[Wallet](db, newColl())
-	if err != nil {
-		t.Fatal(err)
+	if stored, _ := col.Get(ctx, "w1"); stored.Balance != 100 {
+		t.Fatalf("balance %d, want 100 (nothing written)", stored.Balance)
 	}
 
-	if _, err := col.Insert(ctx, Wallet{ID: "w1", Balance: 100}); err != nil {
-		t.Fatal(err)
+	if _, err := col.Lock(ctx, "w1", func(*Wallet) error { return nil }, LockWait(0)); err != nil {
+		t.Fatalf("the lock was not released after the error: %v", err)
 	}
 
-	calls := 0
+	if _, err := col.Lock(ctx, "nope", func(*Wallet) error { return nil }); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing doc: %v, want ErrNotFound", err)
+	}
 
-	_, err = col.WithLock(ctx, "w1", func(w *Wallet) error {
-		calls++
+	_, err = col.Lock(ctx, "w1", func(w *Wallet) error {
+		time.Sleep(150 * time.Millisecond)
 
-		if _, err := col.Update(ctx, "w1", Ops{"$inc": {"balance_cents": 1}}); err != nil {
-			return err
-		}
-
-		w.Balance = 0
+		w.Balance = 1
 
 		return nil
-	}, LockRetries(3))
-	if !errors.Is(err, ErrStaleObject) {
-		t.Fatalf("err %v, want ErrStaleObject", err)
-	}
-
-	if calls != 3 {
-		t.Fatalf("calls %d, want 3", calls)
-	}
-}
-
-func TestWithLockWithoutChangesDoesNotWrite(t *testing.T) {
-	ctx := context.Background()
-	db := openTest(t, daemon.unix)
-
-	col, err := Collection[Wallet](db, newColl())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := col.Insert(ctx, Wallet{ID: "w1", Balance: 100}); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := col.WithLock(ctx, "w1", func(*Wallet) error { return nil }); err != nil {
-		t.Fatal(err)
-	}
-
-	var raw map[string]any
-
-	if err := col.call(ctx, "GET", "_doc/w1", nil, &raw); err != nil {
-		t.Fatal(err)
-	}
-
-	if raw["_v"] != float64(1) {
-		t.Fatalf("_v %v, want 1 (no write)", raw["_v"])
+	}, LockTTL(100*time.Millisecond))
+	if !errors.Is(err, ErrLockExpired) {
+		t.Fatalf("a write after the ttl: %v, want ErrLockExpired", err)
 	}
 }

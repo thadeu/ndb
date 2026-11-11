@@ -25,10 +25,17 @@ module Ndb
   class Unauthorized < Error; end
   class NotFound < Error; end
 
-  # with_lock lost the race on every try, or a model save or destroy matched
-  # nothing: the document changed or was deleted since it was read (its "_v"
-  # guard did not match).
+  # with_retry lost the race on every try, or a model save or destroy
+  # matched nothing: the document changed or was deleted since it was read
+  # (its "_v" guard did not match).
   class StaleObjectError < Error; end
+
+  # Another caller holds the lock of the document, and the wait is over.
+  class Locked < Error; end
+
+  # The token holds no lock on the document (it expired or was released):
+  # the write is refused.
+  class LockExpired < Error; end
   class UnknownCollection < Error; end
   class UniqueViolation < Error; end
   class CatalogConflict < Error; end
@@ -147,6 +154,8 @@ module Ndb
     "history_truncated" => HistoryTruncated,
     "ttl_not_enabled" => TtlNotEnabled,
     "ttl_derived" => TtlDerived,
+    "locked" => Locked,
+    "lock_expired" => LockExpired,
     "unknown_operator" => UnknownOperator,
     "no_update" => NoUpdate,
     "conflicting_update" => ConflictingUpdate,

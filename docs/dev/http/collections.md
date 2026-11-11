@@ -335,7 +335,7 @@ You call the logical name, and ndb picks the partitions:
 |---|---|
 | `_doc`, `_bulk` (and upsert) | each document goes to the partition of its time field, created at first use with the definition of the logical collection. A document without the time field (an RFC 3339 string) is `400 invalid_doc`. The `_id` is unique over all live partitions: an `_id` that another partition holds is `409 duplicate_id`; with `upsert`, the document merges into that partition, also when its time field is of another period. |
 | `_search`, `_count`, `_aggregate` | read every live partition, like a [collection pattern](queries.md#collection-patterns); each row has `_coll` |
-| `_doc/{id}`, `_update/{id}`, `_expire/{id}`, `_persist/{id}`, `_ttl/{id}` | go to the partition that holds the id (newest first). An upsert of a new id goes to the partition of the time field of its operators, or of now. |
+| `_doc/{id}`, `_update/{id}`, `_expire/{id}`, `_persist/{id}`, `_ttl/{id}`, `_lock/{id}`, `_unlock/{id}` | go to the partition that holds the id (newest first). An upsert of a new id goes to the partition of the time field of its operators, or of now. |
 | `_update_by_query`, `_delete_by_query` | run on every live partition, newest first; without `many`, stop at the first partition that matched |
 | `PUT /{coll}`, `_indexes/{field}` | change the logical definition and every partition: all keys (`indexes`, `unique`, `ttl`, `expires_field`, `durability`, `max_line_size`, `blob_threshold`, `pitr`, ...) |
 | `GET /{coll}` | the definition and the partitions; `_stats`: rows and stats of each partition |

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/thadeu/ndb/internal/engine"
+	"github.com/thadeu/ndb/internal/locks"
 	"github.com/thadeu/ndb/internal/logging"
 	"github.com/thadeu/ndb/internal/streams"
 )
@@ -163,6 +164,8 @@ func (s *Server) routes() http.Handler {
 			"_update/{}":       {{"POST", s.ready(notOnStream(s.updateID))}},
 			"_expire/{}":       {{"POST", s.ready(notOnStream(s.expire))}},
 			"_persist/{}":      {{"POST", s.ready(notOnStream(s.persist))}},
+			"_lock/{}":         {{"POST", s.ready(notOnStream(s.lock))}},
+			"_unlock/{}":       {{"POST", s.ready(notOnStream(s.unlock))}},
 			"_ttl/{}":          {{"GET", s.ready(s.ttl)}},
 			"_search":          {{"POST", s.readyOr(s.find, s.findPattern)}},
 			"_count":           {{"POST", s.readyOr(s.countDocs, s.countPattern)}},
@@ -201,6 +204,11 @@ func (s *Server) readyOr(one, many handler) http.HandlerFunc {
 		}
 
 		fn := one
+
+		// ?lock=<token>: the write of the holder of a lock (lock.go).
+		if token := r.URL.Query().Get("lock"); token != "" {
+			r = r.WithContext(locks.WithToken(r.Context(), token))
+		}
 
 		if engine.IsPattern(r.PathValue("coll")) {
 			fn = many

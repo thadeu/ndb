@@ -102,13 +102,25 @@ calls.update("c1", { "$set" => { status: "done" }, "$unset" => { caller: true } 
 
 calls.update("c1", { "$set" => { duration: 50 } }, guard: { _v: 2 })   # only if the version is still 2
 
-# with_lock: read, yield, write the changed fields with the _v guard; on a
+# with_retry: read, yield, write the changed fields with the _v guard; on a
 # conflict read again and yield again (5 tries, retries:), then
-# Ndb::StaleObjectError. An exception in the block writes nothing.
-calls.with_lock("c1") do |call|
+# Ndb::StaleObjectError. An exception in the block writes nothing. The block
+# can run more than once.
+calls.with_retry("c1") do |call|
   next if call["status"] == "done"
 
   call["status"] = "done"
+end
+
+# lock: the pessimistic lock. One holder at a time, so the block runs once:
+# use it when the block has an effect outside ndb. Another lock waits (wait:,
+# then Ndb::Locked); a plain write waits for the release. ttl: (default 30 s)
+# must cover the block: after it the write raises Ndb::LockExpired.
+calls.lock("c1") do |call|
+  next if call["status"] == "billed"
+
+  Billing.charge(call["_id"])
+  call["status"] = "billed"
 end
 calls.update("c9", { "$inc" => { hits: 1 } }, upsert: true)            # create c9 when missing
 

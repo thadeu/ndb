@@ -5,71 +5,76 @@ require "test_helper"
 class LockTest < Minitest::Test
   def setup
     @wallets = client.collection(NdbTestHelpers.next_name)
-  end
-
-  def test_reads_again_after_a_conflict
-    @wallets.insert(_id: "w1", balance_cents: 1000, note: "x")
-    calls = 0
-
-    doc = @wallets.with_lock("w1") do |w|
-      calls += 1
-      @wallets.update("w1", { "$inc" => { balance_cents: -300 } }) if calls == 1
-
-      w["balance_cents"] -= 500
-      w.delete("note")
-    end
-
-    assert_equal 2, calls
-    assert_equal 200, doc["balance_cents"]
-    refute doc.key?("note")
-    assert_equal 200, @wallets.get("w1")["balance_cents"]
-  end
-
-  def test_concurrent_debits_all_land
     @wallets.insert(_id: "w1", balance_cents: 1000)
+  end
+
+  def test_one_holder_at_a_time_each_once
+    inside = 0
+    worst = 0
+    calls = 0
+    mutex = Mutex.new
 
     5.times.map do
-      Thread.new { @wallets.with_lock("w1", retries: 20) { |w| w["balance_cents"] -= 100 } }
+      Thread.new do
+        @wallets.lock("w1") do |w|
+          mutex.synchronize { worst = [worst, inside += 1].max and calls += 1 }
+          sleep 0.005
+
+          w["balance_cents"] -= 100
+          mutex.synchronize { inside -= 1 }
+        end
+      end
     end.each(&:join)
 
+    assert_equal 1, worst
+    assert_equal 5, calls
     assert_equal 500, @wallets.get("w1")["balance_cents"]
   end
 
-  def test_an_error_in_the_block_writes_nothing
-    @wallets.insert(_id: "w1", balance_cents: 100)
-
+  def test_an_exception_writes_nothing_and_releases
     error = assert_raises(RuntimeError) do
-      @wallets.with_lock("w1") do |w|
-        raise "insufficient funds" if w["balance_cents"] < 500
+      @wallets.lock("w1") do |w|
+        w["balance_cents"] = 0
 
-        w["balance_cents"] -= 500
+        assert_raises(Ndb::Locked) { @wallets.lock("w1", wait: 0) { nil } }
+
+        raise "insufficient funds"
       end
     end
 
     assert_equal "insufficient funds", error.message
-    assert_equal 1, @wallets.get("w1")["_v"]
-    assert_raises(Ndb::NotFound) { @wallets.with_lock("nope") { nil } }
+    assert_equal 1000, @wallets.get("w1")["balance_cents"]
+
+    @wallets.lock("w1", wait: 0) { nil }
+
+    assert_raises(Ndb::NotFound) { @wallets.lock("nope") { nil } }
   end
 
-  def test_gives_up_with_stale_object_error
-    @wallets.insert(_id: "w1", balance_cents: 100)
-    calls = 0
+  def test_a_write_without_the_token_waits
+    held = client.lock(@wallets.name, "w1")
+    done = false
+    writer = Thread.new { @wallets.update("w1", { "$inc" => { balance_cents: 1 } }) and done = true }
 
-    assert_raises(Ndb::StaleObjectError) do
-      @wallets.with_lock("w1", retries: 3) do |w|
-        calls += 1
-        @wallets.update("w1", { "$inc" => { balance_cents: 1 } })
-        w["balance_cents"] = 0
+    sleep 0.05
+
+    refute done
+
+    @wallets.update("w1", { "$inc" => { balance_cents: 10 } }, lock: held["token"])
+    client.unlock(@wallets.name, "w1", held["token"])
+    writer.join
+
+    assert_equal 1011, @wallets.get("w1")["balance_cents"]
+  end
+
+  def test_an_expired_lock_refuses_the_write
+    assert_raises(Ndb::LockExpired) do
+      @wallets.lock("w1", ttl: 0.1) do |w|
+        sleep 0.15
+
+        w["balance_cents"] = 1
       end
     end
 
-    assert_equal 3, calls
-  end
-
-  def test_no_change_no_write
-    @wallets.insert(_id: "w1", balance_cents: 100)
-    @wallets.with_lock("w1") { nil }
-
-    assert_equal 1, @wallets.get("w1")["_v"]
+    assert_equal 1000, @wallets.get("w1")["balance_cents"]
   end
 end

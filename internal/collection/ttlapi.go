@@ -112,7 +112,7 @@ func (c *Collection) Expire(ctx context.Context, id string, e Expiry) (uint64, t
 		return 0, time.Time{}, errf("invalid_request", "expire needs a positive duration or a time")
 	}
 
-	_, ops, err := c.w.Commit(ctx, setExpiryReq{id: id, at: at})
+	_, ops, err := c.commit(ctx, setExpiryReq{id: id, at: at})
 	if err != nil {
 		return 0, time.Time{}, err
 	}
@@ -126,7 +126,7 @@ func (c *Collection) Persist(ctx context.Context, id string) (uint64, error) {
 		return 0, err
 	}
 
-	_, ops, err := c.w.Commit(ctx, setExpiryReq{id: id, persist: true})
+	_, ops, err := c.commit(ctx, setExpiryReq{id: id, persist: true})
 	if err != nil {
 		return 0, err
 	}

@@ -62,6 +62,8 @@ export type ErrorCode =
   | 'unknown_group'
   | 'group_exists'
   | 'invalid_update'
+  | 'locked'
+  | 'lock_expired'
   | 'stale_object'
   | 'http_status'
   | (string & {})
@@ -125,9 +127,16 @@ export class UnknownGroupError extends NdbError {}
 // A group create with a name that exists (group_exists).
 export class GroupExistsError extends NdbError {}
 
-// withLock lost the race on every try: the document changed between the read
-// and the write each time.
+// withRetry lost the race on every try: the document changed between the
+// read and the write each time.
 export class StaleObjectError extends NdbError {}
+
+// Another caller holds the lock of the document, and the wait is over.
+export class LockedError extends NdbError {}
+
+// The token holds no lock on the document (it expired or was released): the
+// write is refused.
+export class LockExpiredError extends NdbError {}
 
 const subclasses: Record<string, typeof NdbError> = {
   unauthorized: UnauthorizedError,
@@ -144,6 +153,8 @@ const subclasses: Record<string, typeof NdbError> = {
   history_truncated: HistoryTruncatedError,
   ttl_not_enabled: TtlError,
   ttl_derived: TtlError,
+  locked: LockedError,
+  lock_expired: LockExpiredError,
   unknown_operator: InvalidUpdateError,
   no_update: InvalidUpdateError,
   conflicting_update: InvalidUpdateError,

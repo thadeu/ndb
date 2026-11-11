@@ -25,6 +25,7 @@ import (
 	"github.com/thadeu/ndb/internal/cursors"
 	"github.com/thadeu/ndb/internal/fs"
 	"github.com/thadeu/ndb/internal/lock"
+	"github.com/thadeu/ndb/internal/locks"
 	"github.com/thadeu/ndb/internal/metrics"
 	"github.com/thadeu/ndb/internal/tailer"
 	"github.com/thadeu/ndb/internal/writer"
@@ -63,6 +64,9 @@ type DB struct {
 	// shared is the write buffer budget and the heavy work slot that every
 	// collection of the daemon shares.
 	shared *collection.Shared
+
+	// locks is the pessimistic locks of the documents, in memory.
+	locks *locks.Table
 
 	// mu guards cols and closed. Opening a collection (recovery) runs
 	// under it. After Close, closed is true and no collection opens again.
@@ -145,6 +149,7 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		cancel:     cancel,
 		groupLimit: cfg.GroupLimit,
 		shared:     collection.NewShared(cfg.WriteBuffer),
+		locks:      locks.New(),
 		cols:       map[string]*Collection{},
 		pitr:       pitrDefault(cfg),
 		idleClose:  idleCloseOf(cfg),
@@ -466,6 +471,7 @@ func (db *DB) openEngine(def catalog.Def, dir string, wm *metrics.Writer) (*Coll
 		Blobs:      db.blobs,
 		Observer:   wm,
 		OnCompact:  db.compacted,
+		Locks:      db.locks.Scope(def.Name),
 
 		Cursors:        func() ([]string, error) { return db.cursors.List(def.Name) },
 		WALSegmentSize: walSegmentSize,

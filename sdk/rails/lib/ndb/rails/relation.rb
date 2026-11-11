@@ -56,6 +56,15 @@ module Ndb
       with(limit: count)
     end
 
+    # Makes find, find_by and first take the pessimistic lock of the record
+    # they return, like ActiveRecord lock: `Account.lock.find(id)`. With a
+    # block, the record is yielded and the lock ends with the block; without
+    # one, it ends at the first save or destroy, or at unlock!. See
+    # Ndb::Locking. ttl and wait: see Ndb::Client#lock.
+    def lock(ttl: nil, wait: nil)
+      with(lock: { ttl: ttl, wait: wait }.compact)
+    end
+
     # Loads associations with the rows, in the same call (the daemon
     # lookup): includes(:customer, items: :product).
     def includes(*names)
@@ -194,7 +203,8 @@ module Ndb
     # With no order, the order is the primary key (as ActiveRecord does),
     # so first and last are the two ends of one order. The daemon gives
     # only count rows (limit), not the whole relation.
-    def first(count = nil)
+    def first(count = nil, &block)
+      return lock_found(with(lock: nil).first, &block) if values[:lock] && count.nil?
       return count ? records.first(count) : records.first if loaded?
 
       found = by_key.limit(count || 1).to_a
@@ -222,9 +232,10 @@ module Ndb
       with(order: sort)
     end
 
-    def find(*ids)
+    def find(*ids, &block)
       ids = ids.flatten
 
+      return lock_one(ids, &block) if values[:lock]
       return find_one(ids.first) if ids.size == 1 && !ids.first.is_a?(Array)
 
       found = where(klass.primary_key => ids).to_a
@@ -233,12 +244,12 @@ module Ndb
       found
     end
 
-    def find_by(attrs)
-      where(attrs).first
+    def find_by(attrs, &block)
+      where(attrs).first(&block)
     end
 
-    def find_by!(attrs)
-      find_by(attrs) || raise(NotFound.new("Couldn't find #{klass.name}", code: "not_found"))
+    def find_by!(attrs, &block)
+      find_by(attrs, &block) || raise(NotFound.new("Couldn't find #{klass.name}", code: "not_found"))
     end
 
     def exists?
@@ -350,6 +361,28 @@ module Ndb
       out["limit"] = values[:limit] if values[:limit]
 
       out
+    end
+
+    # find of a relation with lock: one id, locked by the daemon and read in
+    # the same step.
+    def lock_one(ids, &block)
+      raise ArgumentError, "lock.find takes one id" unless ids.size == 1
+
+      held = klass.ndb_lock(ids.first, **values[:lock])
+      record = klass.instantiate_locked(held)
+
+      block ? record.scoped_lock { yield record } : record
+    rescue NotFound
+      raise NotFound.new("Couldn't find #{klass.name} with #{klass.primary_key}=#{ids.first}", code: "not_found")
+    end
+
+    # A record that a query found, locked and read again (nil stays nil).
+    def lock_found(record, &block)
+      return nil unless record
+
+      record.lock!(**values[:lock])
+
+      block ? record.scoped_lock { yield record } : record
     end
 
     def find_one(id)

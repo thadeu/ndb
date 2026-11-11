@@ -26,6 +26,7 @@ import (
 	"github.com/thadeu/ndb/internal/blob"
 	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/fs"
+	"github.com/thadeu/ndb/internal/locks"
 	"github.com/thadeu/ndb/internal/recovery"
 	"github.com/thadeu/ndb/internal/wal"
 	"github.com/thadeu/ndb/internal/writer"
@@ -74,6 +75,10 @@ type Config struct {
 	// bytes (default 256 MiB). Over it the aggregate fails with
 	// group_limit_exceeded.
 	GroupLimit int64
+
+	// Locks is the pessimistic locks of the collection (lock.go). The zero
+	// value holds none.
+	Locks locks.Scope
 
 	// DocCache is the number of decoded documents that find by id keeps
 	// (default 1024). A negative value turns the cache off.
@@ -155,6 +160,9 @@ type Collection struct {
 
 	blobs *blob.Store
 
+	// locks is the pessimistic locks of the documents (lock.go).
+	locks locks.Scope
+
 	// walKeep is Def.WALRetention (0 = keep every WAL file). walDir, walFS,
 	// maxLine and cursors are what TruncateWAL needs.
 	walKeep time.Duration
@@ -222,6 +230,7 @@ func Open(cfg Config) (*Collection, error) {
 		docs:        newDocCache(cfg.DocCache),
 		blobs:       cfg.Blobs,
 		shared:      cfg.Shared,
+		locks:       cfg.Locks,
 	}
 
 	c.feed = &engineFeed{fs: cfg.FS, dir: cfg.Dir, buf: cfg.WatchBuffer}
@@ -430,7 +439,7 @@ func (c *Collection) insert(ctx context.Context, req insertReq) ([]Result, error
 		return nil, err
 	}
 
-	_, ops, err := c.w.Commit(ctx, req)
+	_, ops, err := c.commit(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -478,6 +487,11 @@ func (c *Collection) prepare(req any) (writer.Prepared, error) {
 		err error
 	)
 
+	held, isHeld := req.(guarded)
+	if isHeld {
+		req = held.req
+	}
+
 	switch r := req.(type) {
 	case checkReq:
 		ops, err = c.prepareInsert(v, r.insertReq)
@@ -499,12 +513,18 @@ func (c *Collection) prepare(req any) (writer.Prepared, error) {
 		ops, err = c.prepareExpire(v, r)
 	case setExpiryReq:
 		ops, err = c.prepareSetExpiry(v, r)
+	case lockReq:
+		err = c.prepareLock(v, r)
 	default:
 		err = errf("internal", "unknown request %T", req)
 	}
 
 	if err == nil {
 		err = c.checkSize(ops, false)
+	}
+
+	if err == nil && isHeld {
+		err = c.checkLocks(ops, held.token)
 	}
 
 	if err != nil {

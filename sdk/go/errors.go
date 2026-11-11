@@ -78,6 +78,8 @@ var (
 	ErrPatternReadOnly   = &Error{Code: "pattern_read_only"}
 	ErrPatternTooWide    = &Error{Code: "pattern_too_wide"}
 	ErrNotSupported      = &Error{Code: "not_supported"}
+	ErrLocked            = &Error{Code: "locked"}
+	ErrLockExpired       = &Error{Code: "lock_expired"}
 	ErrForbidden         = &Error{Code: "forbidden"}
 	ErrTooManyRequests   = &Error{Code: "too_many_requests"}
 	ErrUnknownRoute      = &Error{Code: "unknown_route"}

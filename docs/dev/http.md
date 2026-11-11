@@ -8,7 +8,7 @@ The routes have pages by group:
 |---|---|
 | [System](http/system.md) | `/_health`, `/_metrics`, `/_collections`, `/_stats`, `/_size`, `/_backup`, `/_restore`, `/_pitr`, `/_blobs`, `/_log` |
 | [Collections](http/collections.md) | `PUT`, `GET`, `DELETE /{coll}`, `_truncate`, `_rename`, `_restore`, `_pitr`, `_indexes`, `_stats`, `_compact`, `_quarantine` |
-| [Documents](http/documents.md) | `_doc`, `_bulk`, `_update/{id}`, `_expire`, `_persist`, `_ttl` |
+| [Documents](http/documents.md) | `_doc`, `_bulk`, `_update/{id}`, `_expire`, `_persist`, `_ttl`, `_lock`, `_unlock` |
 | [Queries](http/queries.md) | `_search`, `_count`, `_aggregate`, `_update_by_query`, `_delete_by_query`, patterns |
 | [Watch](http/watch.md) | `_watch`, `_ack` |
 | [Streams](http/streams.md) | `_streams`, `append`, `trim`, `groups`, `read`, `ack`, `nack`, `pending`, `claim` (Redis Streams; `nack` is ndb only) |
@@ -62,6 +62,8 @@ The query language (operators, date math, `$elemMatch`) is on [Query](query.md),
 | POST | `/{coll}/_expire/{id}` | [Documents](http/documents.md#post-coll-expire-id) |
 | POST | `/{coll}/_persist/{id}` | [Documents](http/documents.md#post-coll-persist-id) |
 | GET | `/{coll}/_ttl/{id}` | [Documents](http/documents.md#get-coll-ttl-id) |
+| POST | `/{coll}/_lock/{id}` | [Documents](http/documents.md#post-coll-lock-id) |
+| POST | `/{coll}/_unlock/{id}` | [Documents](http/documents.md#post-coll-unlock-id) |
 | POST | `/{coll}/_search` | [Queries](http/queries.md#post-coll-search) |
 | POST | `/{coll}/_count` | [Queries](http/queries.md#post-coll-count) |
 | POST | `/{coll}/_aggregate` | [Queries](http/queries.md#post-coll-aggregate) |
@@ -163,6 +165,7 @@ See [Pagination](query.md#pagination).
 - **Read your writes:** a read that starts after a write was acked sees it.
 - **One write is atomic:** a `_doc`, a `_bulk` (all or nothing), an `_update/{id}`. A `many` update or delete is atomic per WAL record (about half of `max_line_size` of documents), not as a whole.
 - **Update and delete by query** match and write in one step, against the newest state: two concurrent updates never interleave. A guard in `query` (`{"_v": 7}`, `{"qty": {"$gte": 1}}`) makes a conditional write.
+- **A lock** (`_lock/{id}`) gives one caller the document: until it is released or expires, only a write with its token changes the document, and the other writes wait. See [Locks](query.md#lock-one-holder-at-a-time).
 - **Collection patterns** read each collection at its own point in time; there is no snapshot over many collections.
 
 ## Readiness and retries

@@ -132,7 +132,7 @@ func required(method string, segs []string) (string, access) {
 		}
 
 		return coll, accessWrite
-	case "_bulk", "_update", "_expire", "_persist", "_update_by_query", "_delete_by_query", "_ack":
+	case "_bulk", "_update", "_expire", "_persist", "_lock", "_unlock", "_update_by_query", "_delete_by_query", "_ack":
 		return coll, accessWrite
 	case "_streams":
 		return coll, streamAccess(method, segs)

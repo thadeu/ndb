@@ -43,6 +43,8 @@ func (s *Server) partitionRoutes() map[string]partitionHandler {
 		"POST _update/{}":       s.byID(s.updateID, true),
 		"POST _expire/{}":       s.byID(s.expire, false),
 		"POST _persist/{}":      s.byID(s.persist, false),
+		"POST _lock/{}":         s.byID(s.lock, false),
+		"POST _unlock/{}":       s.byID(s.unlock, false),
 		"GET _ttl/{}":           s.byID(s.ttl, false),
 		"POST _update_by_query": s.partUpdateBy,
 		"POST _delete_by_query": s.partDeleteBy,

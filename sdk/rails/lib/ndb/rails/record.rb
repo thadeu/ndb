@@ -10,6 +10,7 @@ module Ndb
     include ActiveModel::Dirty
     include ActiveModel::Serializers::JSON
     include Persistence
+    include Locking
     include Associations
 
     extend ActiveSupport::DescendantsTracker
@@ -24,7 +25,7 @@ module Ndb
 
     class << self
       QUERY_METHODS = %i[
-        where where_raw order limit offset page after group includes find find_by find_by! first last count pluck exists?
+        where where_raw order limit offset page after group includes lock find find_by find_by! first last count pluck exists?
         find_each in_batches sum average minimum maximum to_a each destroy_all delete_all to_ndb
       ].freeze
 

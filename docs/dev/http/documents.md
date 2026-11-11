@@ -267,6 +267,63 @@ await sessions.persist('s1')
 
 :::
 
+## `POST /{coll}/_lock/{id}`
+
+Takes the pessimistic lock of a document and answers the document as it is now. Until the lock is released or expires, only a write that carries its token changes the document. The guide is [Locks](../query.md#lock-one-holder-at-a-time).
+
+| Body key | Type | Default | Meaning |
+|---|---|---|---|
+| `ttl` | duration | `"30s"` | the lock ends by itself after this time (`"30s"`, or seconds); more than 0, up to 5 minutes |
+| `wait` | duration | `"10s"` | how long to wait when another caller holds the lock; up to 1 minute; `0` does not wait |
+
+The body is optional.
+
+**Answer:** `{"token","expires_at","doc"}`. `doc` has `_v`. The lock and the read are one step: no write comes between them.
+
+**While the lock is held:**
+
+- A write of the document with `?lock=<token>` in the URL goes on: `_update/{id}`, `_update_by_query`, `DELETE _doc/{id}`, `_delete_by_query`, `_bulk`, `_expire`, `_persist`.
+- A write of the document without the token waits for the lock to end, then runs. It waits at most the `ttl` of the lock.
+- A `many` write that meets the locked document stops with `423 locked`. The documents before it are written (see [atomicity](../http.md#consistency)).
+- Reads are not blocked.
+- A write with a token that holds no lock on the document is `409 lock_expired`, and nothing is written. So a holder that lost its lock (it took longer than `ttl`) never writes as if it still had it.
+
+The locks are in memory. A daemon that restarts holds no lock, and a token of before is `lock_expired`. The expiry of documents (TTL) does not look at locks.
+
+**Errors:** `423 locked` (held by another caller after `wait`), `404 not_found`, `400 invalid_request` (`ttl` or `wait` out of range), `404 unknown_collection`, `409 direct_collection`, `400 stream_append_only`.
+
+::: code-group
+
+```bash [curl]
+curl --unix-socket /run/ndb/ndb.sock http://ndb/payments/_lock/p1 -d '{"ttl":"30s"}'
+# {"token":"5f0c...","expires_at":"2026-11-11T10:00:30Z","doc":{"_id":"p1","status":"paid","_v":3}}
+
+curl --unix-socket /run/ndb/ndb.sock "http://ndb/payments/_update/p1?lock=5f0c..." -d '{"update":{"$set":{"status":"refunded"}}}'
+curl --unix-socket /run/ndb/ndb.sock http://ndb/payments/_unlock/p1 -d '{"token":"5f0c..."}'
+```
+
+```go [Go]
+p, err := payments.Lock(ctx, "p1", func(p *Payment) error {
+	p.Status = "refunded"
+
+	return nil
+}, ndb.LockTTL(30*time.Second))
+```
+
+```ruby [Ruby]
+payments.lock("p1", ttl: "30s") { |p| p["status"] = "refunded" }
+```
+
+```ts [TypeScript]
+await payments.lock('p1', (p) => { p.status = 'refunded' }, { ttl: '30s' })
+```
+
+:::
+
+## `POST /{coll}/_unlock/{id}`
+
+Releases a lock. **Body:** `{"token"}`. **Answer:** `{"unlocked":true}`. **Errors:** `409 lock_expired` (the token holds no lock on this document), `400 invalid_request` (no token), `404 unknown_collection`. The SDKs call it at the end of `lock`.
+
 ## `GET /{coll}/_ttl/{id}`
 
 The time left of a document. **Answer:** `{"_id","ttl","expires_at"}`: `ttl` is the whole seconds left, rounded up, also for an expiry centuries away; a document that never expires has `"ttl": -1` and `"expires_at": null`. With `ttl` + `time` in the definition the expiry comes from the time field. A definition cannot have both `ttl` and `expires_field` (`400 catalog_invalid`).

@@ -14,6 +14,7 @@ import type {
   InsertOptions,
   LockOptions,
   PitrInfo,
+  RetryOptions,
   Row,
   Schema,
   SearchBody,
@@ -104,8 +105,10 @@ export class Collection<F extends Fields> {
   // (POST /{coll}/_update/{id}). guard adds conditions on the same document,
   // such as { _v: 7 }: matched is 0 when it fails. Matching nothing is not an
   // error.
-  async update(id: string, ops: UpdateOps<F>, opts: UpdateOptions<F> = {}): Promise<UpdateResult<F>> {
-    const out = await this.send<UpdateAnswer>('POST', docPath('_update', id), {
+  async update(id: string, ops: UpdateOps<F>, opts: UpdateOptions<F> & { lock?: string } = {}): Promise<UpdateResult<F>> {
+    const held = opts.lock ? `?lock=${encodeURIComponent(opts.lock)}` : ''
+
+    const out = await this.send<UpdateAnswer>('POST', docPath('_update', id) + held, {
       query: opts.guard === undefined ? undefined : toWhere(opts.guard),
       update: checkOps(ops),
       upsert: opts.upsert,
@@ -115,13 +118,15 @@ export class Collection<F extends Fields> {
     return this.updated(out)
   }
 
-  // Reads the document with this _id, calls fn with it, and writes the fields
-  // that fn changed (set, or deleted), guarded by the version it read
-  // (optimistic lock). When another write came first, it reads the document
-  // again and calls fn again, up to retries times (default 5); then it throws
-  // StaleObjectError. An error from fn stops it and nothing is written. A
-  // missing document is NotFoundError. It returns the document as written.
-  async withLock(id: string, fn: (doc: Row<F>) => void | Promise<void>, opts: LockOptions = {}): Promise<Row<F>> {
+  // The optimistic lock with the retry done for you. Reads the document with
+  // this _id, calls fn with it, and writes the fields that fn changed (set,
+  // or deleted), guarded by the version it read. When another write came
+  // first, it reads the document again and calls fn again, up to retries
+  // times (default 5); then it throws StaleObjectError. So fn can run more
+  // than once: when it has an effect outside ndb, use lock. An error from fn
+  // stops it and nothing is written. A missing document is NotFoundError. It
+  // returns the document as written.
+  async withRetry(id: string, fn: (doc: Row<F>) => void | Promise<void>, opts: RetryOptions = {}): Promise<Row<F>> {
     const retries = Math.max(opts.retries ?? 5, 1)
 
     for (let attempt = 0; attempt < retries; attempt++) {
@@ -131,20 +136,56 @@ export class Collection<F extends Fields> {
 
       if (doc === null) throw new NotFoundError('not_found', `${this.name} ${id}`, 404)
 
-      const before = structuredClone(doc)
+      const written = await this.change(id, doc, fn, { guard: { _v: doc._v } as Filter<F> })
 
-      await fn(doc)
-
-      const ops = changes(before, doc)
-
-      if (ops === null) return doc
-
-      const res = await this.update(id, ops as UpdateOps<F>, { guard: { _v: before._v } as Filter<F> })
-
-      if (res.matched > 0 && res.doc) return res.doc
+      if (written) return written
     }
 
     throw new StaleObjectError('stale_object', `${this.name} ${id} changed on every try`, 409)
+  }
+
+  // The pessimistic lock (POST /{coll}/_lock/{id}). Takes the lock of the
+  // document, calls fn with it, writes the fields that fn changed, and
+  // releases the lock. While fn runs, no other caller holds the lock and no
+  // other write changes the document: another lock waits (wait, default
+  // 10 s, then LockedError) and a plain write waits for the release. So fn
+  // runs once: use it when fn has an effect outside ndb (a payment, an
+  // email). An error from fn writes nothing and releases the lock. A lock
+  // held for longer than ttl (default 30 s) is gone: the write throws
+  // LockExpiredError. A missing document is NotFoundError.
+  async lock(id: string, fn: (doc: Row<F>) => void | Promise<void>, opts: LockOptions = {}): Promise<Row<F>> {
+    const held = await this.send<{ token: string; doc: Record<string, unknown> }>('POST', docPath('_lock', id), {
+      ttl: opts.ttl,
+      wait: opts.wait,
+    })
+
+    try {
+      const written = await this.change(id, this.decode(held.doc) as Row<F>, fn, { lock: held.token })
+
+      if (written === null) throw new NotFoundError('not_found', `${this.name} ${id}`, 404)
+
+      return written
+    } finally {
+      await this.send('POST', docPath('_unlock', id), { token: held.token }).catch(() => undefined)
+    }
+  }
+
+  // Calls fn with doc and writes the top-level fields that fn changed, in
+  // one update with opts (a guard, or the token of a lock). It returns the
+  // document as written (doc when fn changed nothing), or null when the
+  // update matched nothing.
+  private async change(id: string, doc: Row<F>, fn: (doc: Row<F>) => void | Promise<void>, opts: UpdateOptions<F> & { lock?: string }): Promise<Row<F> | null> {
+    const before = structuredClone(doc)
+
+    await fn(doc)
+
+    const ops = changes(before, doc)
+
+    if (ops === null) return doc
+
+    const res = await this.update(id, ops as UpdateOps<F>, opts)
+
+    return res.matched > 0 && res.doc ? res.doc : null
   }
 
   // The atomic update by query (POST /{coll}/_update_by_query): the daemon
