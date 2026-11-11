@@ -69,16 +69,16 @@ func (c *Collection) byCompound(conds []query.Cond) (source, bool) {
 		return source{}, false
 	}
 
-	src := c.byRanges(best.s, best.ranges(best.lower))
+	src := c.byRanges(best.s, best.ranges(best.lower), false)
 
 	// A range of two sides is two reads, and a document must be in both: an
 	// array matches when one element passes each condition, and they need
 	// not be the same element, so one read between the two bounds would
 	// miss it.
 	if best.lower != nil && best.upper != nil {
-		src = bothSources(src, c.byRanges(best.s, best.ranges(best.upper)))
+		src = bothSources(src, c.byRanges(best.s, best.ranges(best.upper), false))
 	} else if best.upper != nil {
-		src = c.byRanges(best.s, best.ranges(best.upper))
+		src = c.byRanges(best.s, best.ranges(best.upper), false)
 	}
 
 	src.plan = "index:" + best.s.field
