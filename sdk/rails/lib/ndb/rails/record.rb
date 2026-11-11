@@ -11,6 +11,7 @@ module Ndb
     include ActiveModel::Serializers::JSON
     include Persistence
     include Locking
+    include Transactions
     include Associations
 
     extend ActiveSupport::DescendantsTracker

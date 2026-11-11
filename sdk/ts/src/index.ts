@@ -1,5 +1,5 @@
 export { connect, Ndb } from './ndb.js'
-export { Collection } from './collection.js'
+export { Collection, Rollback, Tx } from './collection.js'
 export { newId } from './id.js'
 export { VERSION } from './version.js'
 export { clean, cleanAll, UnsafeCleanError, type CleanOptions } from './testing.js'

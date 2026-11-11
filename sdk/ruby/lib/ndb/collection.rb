@@ -63,8 +63,6 @@ module Ndb
       client.update(name, id, ops, guard: guard, upsert: upsert, expire_in: expire_in, lock: lock)
     end
 
-    LOCK_SKIP = %w[_id _v _coll].freeze
-
     # The optimistic lock with the retry done for you. Reads the document
     # with this _id, yields it, and writes the fields the block changed (set,
     # or deleted), guarded by the version it read. When another write came
@@ -118,6 +116,67 @@ module Ndb
       ensure
         release(id, held["token"])
       end
+    end
+
+    # A transaction of this collection. With lock: (ids), it first locks
+    # those documents, all of them or none, and yields them by _id, read
+    # under the lock. The block records the writes with tx.insert, tx.update
+    # and tx.delete; they are written when the block ends, all of them or
+    # none, and the locks are released.
+    #
+    # An exception in the block writes nothing and goes on; Ndb::Rollback
+    # writes nothing and the call returns nil. A refused commit writes
+    # nothing: TxConflict when an update or a delete matches nothing (a
+    # missing document, or a stale "_v"), LockExpired when the locks
+    # outlived ttl (default 30 s: the time limit of the transaction). wait is
+    # how long to wait for a document that another caller holds (then
+    # Locked). Reads inside the block see the stored data, not its writes.
+    #
+    #   accounts.transaction(lock: %w[a1 a2], ttl: 5) do |tx, docs|
+    #     raise Ndb::Rollback if docs["a1"]["balance"] < amount
+    #
+    #     docs["a1"]["balance"] -= amount
+    #     docs["a2"]["balance"] += amount
+    #
+    #     tx.update(docs["a1"])
+    #     tx.update(docs["a2"])
+    #   end
+    def transaction(lock: [], ttl: nil, wait: nil)
+      ready!
+
+      tx = Transaction.new
+      docs = {}
+      tokens = []
+
+      unless lock.empty?
+        held = client.lock_set(name, lock, ttl: ttl, wait: wait)
+        tokens << held["token"]
+
+        held["docs"].each do |doc|
+          docs[doc["_id"]] = doc
+          tx.locked(doc)
+        end
+      end
+
+      begin
+        yield tx, docs
+      rescue Rollback
+        release_set(tokens)
+
+        return nil
+      rescue Exception # rubocop:disable Lint/RescueException
+        release_set(tokens)
+
+        raise
+      end
+
+      if tx.ops.empty?
+        release_set(tokens)
+
+        return nil
+      end
+
+      client.tx(name, tx.ops, locks: tokens, unlock: true)
     end
 
     # The atomic update by query: the first match, or every match with many.
@@ -265,16 +324,16 @@ module Ndb
       nil
     end
 
-    # The $set and $unset of the top-level fields that differ.
-    def lock_changes(before, after)
-      set = after.reject { |k, v| LOCK_SKIP.include?(k) || before.key?(k) && before[k] == v }
-      unset = (before.keys - after.keys - LOCK_SKIP).to_h { |k| [k, ""] }
-
-      ops = {}
-      ops["$set"] = set unless set.empty?
-      ops["$unset"] = unset unless unset.empty?
-      ops
+    def release_set(tokens)
+      tokens.each do |token|
+        client.unlock_set(name, token)
+      rescue Error
+        nil
+      end
     end
+
+    # The $set and $unset of the top-level fields that differ.
+    def lock_changes(before, after) = Transaction.changes(before, after)
   end
 
   # An immutable search on a collection: every step returns a new Query.

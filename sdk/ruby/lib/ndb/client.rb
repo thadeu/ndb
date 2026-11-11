@@ -156,6 +156,31 @@ module Ndb
       json(request("POST", doc_path(coll, "_lock", id), write_body(ttl: ttl, wait: wait), timeout: timeout))
     end
 
+    # POST /{coll}/_lock: the locks of a set of documents, all under one
+    # token, or none of them (no deadlock between two sets). ttl and wait as
+    # for lock; up to 100 ids. Returns {"token", "expires_at", "docs"}.
+    def lock_set(coll, ids, ttl: nil, wait: nil)
+      timeout = wait.is_a?(Numeric) ? [self.timeout, wait + 5].max : nil
+
+      json(request("POST", "#{path(coll)}/_lock", write_body(ids: ids, ttl: ttl, wait: wait), timeout: timeout))
+    end
+
+    # POST /{coll}/_unlock: releases every lock of token. Returns
+    # {"unlocked" => n}; a token that holds nothing raises LockExpired.
+    def unlock_set(coll, token)
+      json(request("POST", "#{path(coll)}/_unlock", { token: token }))
+    end
+
+    # POST /{coll}/_tx: inserts, updates and deletes of one collection in one
+    # step, all of them or none. ops: [{op: "insert", doc:}, {op: "update",
+    # id:, update:, query:}, {op: "delete", id:, query:}]. locks: the tokens
+    # the transaction holds; unlock: true releases them after the call.
+    # Returns {"results" => [...]}. An update or a delete that matches
+    # nothing raises TxConflict.
+    def tx(coll, ops, locks: [], unlock: false)
+      json(request("POST", "#{path(coll)}/_tx", write_body(ops: ops, locks: locks, unlock: unlock)))
+    end
+
     # POST /{coll}/_unlock/{id}: releases the lock of token. A token that
     # holds no lock (expired, released) raises LockExpired.
     def unlock(coll, id, token)

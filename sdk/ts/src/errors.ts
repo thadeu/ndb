@@ -64,6 +64,7 @@ export type ErrorCode =
   | 'invalid_update'
   | 'locked'
   | 'lock_expired'
+  | 'tx_conflict'
   | 'stale_object'
   | 'http_status'
   | (string & {})
@@ -138,6 +139,10 @@ export class LockedError extends NdbError {}
 // write is refused.
 export class LockExpiredError extends NdbError {}
 
+// An update or a delete of a transaction matched nothing (no such document,
+// or its guard does not match): nothing of the transaction was written.
+export class TxConflictError extends NdbError {}
+
 const subclasses: Record<string, typeof NdbError> = {
   unauthorized: UnauthorizedError,
   not_found: NotFoundError,
@@ -155,6 +160,7 @@ const subclasses: Record<string, typeof NdbError> = {
   ttl_derived: TtlError,
   locked: LockedError,
   lock_expired: LockExpiredError,
+  tx_conflict: TxConflictError,
   unknown_operator: InvalidUpdateError,
   no_update: InvalidUpdateError,
   conflicting_update: InvalidUpdateError,

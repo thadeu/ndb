@@ -4,7 +4,7 @@ The gem `ndb-rails`: an ActiveModel layer with `Ndb::Record`, and [streams](#str
 
 The source and the same guide are in [`sdk/rails`](https://github.com/thadeu/ndb/tree/main/sdk/rails).
 
-> **Optimistic by default.** Every model is optimistic with no setup: each save sends the version (`_v`) the record was read with, as `lock_version` does in ActiveRecord, without the column. Use `with_retry` to try again after a conflict, and `lock` when the code must run once. See [Concurrency](../concurrency.md).
+> **Optimistic locking by default, pessimistic locking when you ask.** Every model uses optimistic locking with no setup: each save sends the version (`_v`) the record was read with, as `lock_version` does in ActiveRecord, without the column. Use `with_retry` to try again after a conflict. For pessimistic locking, `Model.lock.find(id)`, `lock!` and `with_lock` work as in ActiveRecord. See [Concurrency](../concurrency.md).
 
 ## Install
 
@@ -155,7 +155,7 @@ Call.where(status: "retry").destroy_all  # loads and destroys each record with i
   end
   ```
 
-- `lock` is the pessimistic lock, with the names of ActiveRecord. One request holds the record; another `lock` of it waits (`wait:`, default 10 s, then `Ndb::Locked`), and a write from any other place waits for the release. So the code runs once: use it when the code has an effect outside ndb. See [Lock](../query.md#lock-one-holder-at-a-time).
+- `lock` is pessimistic locking, with the names of ActiveRecord. One request holds the record; another `lock` of it waits (`wait:`, default 10 s, then `Ndb::Locked`), and a write from any other place waits for the release. So the code runs once: use it when the code has an effect outside ndb. See [Lock](../query.md#pessimistic-locking-one-holder-at-a-time).
 
   ```ruby
   # With a block: the lock ends with the block, also on an exception.
@@ -178,7 +178,17 @@ Call.where(status: "retry").destroy_all  # loads and destroys each record with i
   Payment.lock(ttl: 2.minutes.to_i, wait: 0).find_by(charge_id: "ch_1")
   ```
 
-  ActiveRecord releases a lock at the end of its transaction. ndb has no transaction, so prefer the block. Every lock also ends after `ttl:` (default 30 s): a process that dies holds nothing, and a save after it raises `Ndb::LockExpired` (the record then holds no lock, and its next save is a plain save). `lock.find` takes one id; `lock.find_by` and `lock.first` find the record, then lock it and read it again.
+  Outside a transaction, prefer the block. Every lock also ends after `ttl:` (default 30 s): a process that dies holds nothing, and a save after it raises `Ndb::LockExpired` (the record then holds no lock, and its next save is a plain save). `lock.find` takes one id; `lock.find_by` and `lock.first` find the record, then lock it and read it again.
+- `Model.transaction { }` writes everything of the block in one step, all or none: `save`, `update`, `create`, `destroy`, `increment!` and `decrement!` run their validations and callbacks, but are sent together at the end of the block. An exception writes nothing; `raise Ndb::Rollback` stops the block with no error (it returns `nil`). `lock: [records or ids]` with `ttl:` and `wait:` takes every lock in one call (no deadlock), and `lock!` inside the block joins it. One collection per block (`Ndb::TransactionError` otherwise). See [transaction](../concurrency.md#_4-transaction-many-writes-all-or-none).
+
+  ```ruby
+  Account.transaction(lock: [from, to], ttl: 5) do
+    raise Ndb::Rollback if from.balance < amount
+
+    from.update!(balance: from.balance - amount)
+    to.update!(balance: to.balance + amount)
+  end
+  ```
 - `find_or_create_by` is atomic. It checks validations and runs the `save` and `create` callbacks, then sends one upsert: the attributes you pass are the filter, and the other attributes go in `$setOnInsert`, so a writer that created the document first is never overwritten and you get that document. An invalid record is returned unsaved (the `!` form raises `Ndb::RecordInvalid`). Only the attributes you pass must be equality values.
 - `delete_all` and `destroy_all` on a model without a `where` are refused by the daemon (`Ndb::EmptyFilter`); `delete_all` needs the id or an indexed field in the `where`. To empty the whole collection, use `Call.truncate!`.
 - `Call.truncate!` removes every document, with no callbacks, and keeps the definition and indexes. `Call.drop!` removes the collection, its definition and its watch consumers; the next use of the model declares it again. Both take the same time for 10 or 10 million documents, and watch consumers get one `"truncate"` event.

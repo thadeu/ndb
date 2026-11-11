@@ -36,6 +36,10 @@ module Ndb
   # The token holds no lock on the document (it expired or was released):
   # the write is refused.
   class LockExpired < Error; end
+
+  # An update or a delete of a transaction matched nothing (no such
+  # document, or its guard does not match): nothing of it was written.
+  class TxConflict < Error; end
   class UnknownCollection < Error; end
   class UniqueViolation < Error; end
   class CatalogConflict < Error; end
@@ -156,6 +160,7 @@ module Ndb
     "ttl_derived" => TtlDerived,
     "locked" => Locked,
     "lock_expired" => LockExpired,
+    "tx_conflict" => TxConflict,
     "unknown_operator" => UnknownOperator,
     "no_update" => NoUpdate,
     "conflicting_update" => ConflictingUpdate,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/thadeu/ndb/internal/locks"
@@ -24,15 +25,16 @@ import (
 // exception: its earlier records are written, so it stops with "locked".
 // The expiry sweep (TTL) does not look at locks.
 
-// Locked is a held lock and the document as it is now, with "_v".
+// Locked is a held lock and the documents as they are now, with "_v", in
+// the order of the ids.
 type Locked struct {
 	Token   string
 	Expires time.Time
-	Doc     json.RawMessage
+	Docs    []json.RawMessage
 }
 
 type lockReq struct {
-	id  string
+	ids []string
 	ttl time.Duration
 	out *Locked
 }
@@ -44,12 +46,13 @@ type guarded struct {
 	token string
 }
 
-// Lock takes the lock of a visible document for ttl. A document that
-// another caller holds is *locks.Busy; a missing one is not_found.
-func (c *Collection) Lock(ctx context.Context, id string, ttl time.Duration) (Locked, error) {
+// Lock takes the locks of the visible documents ids for ttl, all under one
+// token, or none of them. An id that another caller holds is *locks.Busy;
+// a missing one is not_found.
+func (c *Collection) Lock(ctx context.Context, ids []string, ttl time.Duration) (Locked, error) {
 	out := &Locked{}
 
-	_, _, err := c.w.Commit(ctx, lockReq{id: id, ttl: ttl, out: out})
+	_, _, err := c.w.Commit(ctx, lockReq{ids: ids, ttl: ttl, out: out})
 	if errors.Is(err, errNoWrite) {
 		return *out, nil
 	}
@@ -57,33 +60,40 @@ func (c *Collection) Lock(ctx context.Context, id string, ttl time.Duration) (Lo
 	return Locked{}, err
 }
 
-// Unlock releases the lock that token holds on id.
-func (c *Collection) Unlock(id, token string) error {
-	return c.locks.Release(id, token)
-}
-
 // prepareLock runs in the writer goroutine. It writes nothing.
 func (c *Collection) prepareLock(v *view, r lockReq) error {
-	cur, err := current(v, r.id)
+	ids := make([]string, 0, len(r.ids))
+	docs := make([]json.RawMessage, 0, len(r.ids))
+
+	for _, id := range r.ids {
+		if slices.Contains(ids, id) {
+			continue
+		}
+
+		cur, err := current(v, id)
+		if err != nil {
+			return err
+		}
+
+		raw, err := cur.raw()
+		if err != nil {
+			return err
+		}
+
+		if !c.visible(raw) {
+			return errf("not_found", "%s", id)
+		}
+
+		ids = append(ids, id)
+		docs = append(docs, withVersion(raw, cur.v))
+	}
+
+	lease, err := c.locks.TryAcquireSet(ids, r.ttl)
 	if err != nil {
 		return err
 	}
 
-	raw, err := cur.raw()
-	if err != nil {
-		return err
-	}
-
-	if !c.visible(raw) {
-		return errf("not_found", "%s", r.id)
-	}
-
-	lease, err := c.locks.TryAcquire(r.id, r.ttl)
-	if err != nil {
-		return err
-	}
-
-	*r.out = Locked{Token: lease.Token, Expires: lease.Expires, Doc: withVersion(raw, cur.v)}
+	*r.out = Locked{Token: lease.Token, Expires: lease.Expires, Docs: docs}
 
 	return errNoWrite
 }

@@ -137,6 +137,19 @@ call, err = calls.Lock(ctx, "c1", func(c *Call) error {
 	return nil
 })
 
+// Tx is a transaction of the collection: the writes of fn go in one step,
+// all or none. With ids, they are locked first (all or none) and given to
+// fn. An error from fn writes nothing; ErrRollback writes nothing and Tx
+// returns nil. A stale or missing document fails it with ErrTxConflict.
+err = calls.Tx(ctx, []string{"c1", "c2"}, func(tx *ndb.Tx[Call], docs map[string]*Call) error {
+	docs["c1"].Status = "merged"
+	tx.Update(docs["c1"])
+	tx.Delete("c2")
+	tx.Insert(Call{ID: "c3", Status: "new", Caller: "+5511999990003", At: time.Now()})
+
+	return nil
+}, ndb.LockTTL(5*time.Second))
+
 // Atomic update by query: exactly one of two racing calls wins.
 upd, err = calls.UpdateBy(ctx,
 	ndb.And(ndb.Eq("_id", "c1"), ndb.Gte("duration", 1)),

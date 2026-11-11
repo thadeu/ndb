@@ -272,6 +272,12 @@ module Ndb
     end
 
     def delete_record
+      if (tx = current_transaction)
+        tx.delete(self)
+
+        return
+      end
+
       deleted = holding { self.class.ndb_delete(record_filter, **lock_options) }["deleted"]
 
       raise StaleObjectError.new("#{self.class.name} #{id} changed or was deleted", code: "stale_object") if deleted.zero?
@@ -284,6 +290,14 @@ module Ndb
 
       raise RecordNotSaved, "Cannot update a record that is not saved" unless persisted?
       raise ArgumentError, "#{name} is not an attribute of #{self.class.name}" unless self.class.attribute_names.include?(name)
+
+      if (tx = current_transaction)
+        tx.update(self, { "$inc" => { name => by } })
+        public_send("#{name}=", (public_send(name) || 0) + by)
+        clear_attribute_changes([name])
+
+        return self
+      end
 
       result = holding { self.class.ndb_update({ self.class.primary_key => id }, { "$inc" => { name => by } }, **lock_options) }
 
@@ -327,6 +341,16 @@ module Ndb
 
     def create_record
       run_callbacks(:create) do
+        if (tx = current_transaction)
+          raise ArgumentError, "expire_in is not supported inside a transaction" if @expire_in
+
+          self.id ||= Ndb.new_id
+          tx.insert(self, insert_document)
+          loaded!(nil)
+
+          next true
+        end
+
         result = self.class.ndb_insert(insert_document, expire_in: @expire_in)
 
         self.id = result["_id"] if id.nil?
@@ -340,7 +364,11 @@ module Ndb
       run_callbacks(:update) do
         set, unset = changed_fields
 
-        unless set.empty? && unset.empty? && @expire_in.nil?
+        if (tx = current_transaction)
+          raise ArgumentError, "expire_in is not supported inside a transaction" if @expire_in
+
+          tx.update(self, update_ops(set, unset)) unless set.empty? && unset.empty?
+        elsif !(set.empty? && unset.empty? && @expire_in.nil?)
           result = holding { self.class.ndb_update(record_filter, update_ops(set, unset), expire_in: @expire_in, **lock_options) }
 
           raise StaleObjectError.new("#{self.class.name} #{id} changed or was deleted", code: "stale_object") if result["matched"].zero?

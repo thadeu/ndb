@@ -49,15 +49,16 @@ func writeOnce[T any](c *Collection, fn func(eng *collection.Collection) (T, err
 	return fn(c.eng)
 }
 
-// Lock takes the pessimistic lock of a document for ttl and returns it with
-// the document. When another caller holds it, Lock waits up to wait for
-// that lease to end; then it is *locks.Busy ("locked").
-func (c *Collection) Lock(ctx context.Context, id string, ttl, wait time.Duration) (collection.Locked, error) {
+// Lock takes the pessimistic locks of the documents ids for ttl, all under
+// one token, and returns them with the documents. When another caller holds
+// one of them, Lock takes none and waits up to wait for that lease to end;
+// then it is *locks.Busy ("locked").
+func (c *Collection) Lock(ctx context.Context, ids []string, ttl, wait time.Duration) (collection.Locked, error) {
 	deadline := time.Now().Add(wait)
 
 	for {
 		out, err := writeOnce(c, func(eng *collection.Collection) (collection.Locked, error) {
-			return eng.Lock(ctx, id, ttl)
+			return eng.Lock(ctx, ids, ttl)
 		})
 
 		var busy *locks.Busy
@@ -79,6 +80,29 @@ func (c *Collection) Lock(ctx context.Context, id string, ttl, wait time.Duratio
 			return collection.Locked{}, ctx.Err()
 		}
 	}
+}
+
+// Tx writes ops in one WAL record, as the holder of tokens (see
+// collection.Tx). It waits, as a plain write does, for a document that
+// another caller holds. With unlock, the locks of tokens are released after
+// the call, whether it committed or not.
+func (c *Collection) Tx(ctx context.Context, ops []collection.TxOp, tokens []string, unlock bool) ([]collection.TxResult, error) {
+	if unlock {
+		defer c.db.locks.Scope(c.name).ReleaseAll(tokens)
+	}
+
+	return write(ctx, c, func(eng *collection.Collection) ([]collection.TxResult, error) {
+		return eng.Tx(ctx, ops, tokens)
+	})
+}
+
+// UnlockToken releases every lock of token and gives how many ids it held.
+func (c *Collection) UnlockToken(token string) (int, error) {
+	if !c.engine() {
+		return 0, ErrDirect
+	}
+
+	return c.db.locks.Scope(c.name).ReleaseToken(token)
 }
 
 // Unlock releases the lock that token holds on id (locks.ErrExpired when it
