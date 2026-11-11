@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.20.1] - 2026-11-11
+
 ### Added
 
 - **The `ndb` image has a health check** (`ndb health`, every 5 s). A daemon that is alive but does not answer made a container that Docker showed as `Up`; it is now `unhealthy` after 15 s, and Compose can wait for the daemon with `condition: service_healthy` with no check of its own. The docs have a new section, "Crash, hang and restart": a daemon that ends stops the container (use a restart policy; recovery needs no step by hand), and plain Docker does not restart an unhealthy container (use an orchestrator or a monitor).
@@ -674,7 +676,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.20.0...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.20.1...HEAD
+[1.20.1]: https://github.com/thadeu/ndb/compare/v1.20.0...v1.20.1
 [1.20.0]: https://github.com/thadeu/ndb/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/thadeu/ndb/compare/v1.18.2...v1.19.0
 [1.18.2]: https://github.com/thadeu/ndb/compare/v1.18.1...v1.18.2
