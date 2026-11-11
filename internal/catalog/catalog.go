@@ -14,6 +14,8 @@ import (
 	"time"
 
 	bolt "go.etcd.io/bbolt"
+
+	"github.com/thadeu/ndb/internal/index"
 )
 
 var (
@@ -585,6 +587,18 @@ var PartitionPeriods = []string{"day", "week", "month", "year"}
 
 var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
+// badIndexName is the error of the first name that is not a field or a
+// compound index ("account_id,created_at", see index.CheckName).
+func badIndexName(names []string) error {
+	for _, name := range names {
+		if err := index.CheckName(name); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // validateDecl checks one declaration on its own.
 func validateDecl(d Def) error {
 	switch {
@@ -600,6 +614,10 @@ func validateDecl(d Def) error {
 		return fmt.Errorf("%w: max_line_size must be at most 16 MiB", ErrInvalid)
 	case slices.Contains(d.Indexes, "") || slices.Contains(d.Unique, ""):
 		return fmt.Errorf("%w: empty index field", ErrInvalid)
+	case badIndexName(d.Indexes) != nil:
+		return fmt.Errorf("%w: %v", ErrInvalid, badIndexName(d.Indexes))
+	case badIndexName(d.Unique) != nil:
+		return fmt.Errorf("%w: %v", ErrInvalid, badIndexName(d.Unique))
 	case d.PartitionBy != "" && !slices.Contains(PartitionPeriods, d.PartitionBy):
 		return fmt.Errorf("%w: partition_by must be day, week, month or year", ErrInvalid)
 	case d.PartitionBy != "" && len(d.Name) > 53:

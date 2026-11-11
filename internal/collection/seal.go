@@ -221,7 +221,7 @@ func (c *Collection) declaredFields() []indexField {
 	out := make([]indexField, 0, len(c.def.Indexes))
 
 	for _, f := range c.def.Indexes {
-		out = append(out, indexField{name: f, isTime: f == c.def.Time})
+		out = append(out, indexField{name: f, time: c.def.Time})
 	}
 
 	return out
@@ -790,7 +790,7 @@ func (c *Collection) rebuildMemIndexes() {
 		}
 
 		for _, s := range c.rd.idx {
-			for _, k := range index.Keys(m, s.field, s.isTime) {
+			for _, k := range index.DocKeys(m, s.field, s.time) {
 				s.mem.Add(k, id)
 			}
 		}

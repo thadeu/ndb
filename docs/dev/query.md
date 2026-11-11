@@ -185,7 +185,7 @@ const rows = await orders
 | `fields` | keep these fields of the related documents. |
 | `lookup` | the lookups of the related documents. Two levels at most. |
 
-- **The other side must be indexed:** `_id`, or a field in its `indexes`. Else `400 lookup_unindexed` with the `_indexes` route to call. (The Rails associations create that index.)
+- **The other side must be indexed:** `_id`, a field in its `indexes`, or the first field of a compound index. Else `400 lookup_unindexed` with the `_indexes` route to call. (The Rails associations create that index.)
 - **Cost:** a `belongs_to` is one query for every key of the page (`$in`). A `has_many` or `has_one` is one query for each row, with its own `limit`, four at a time. Keep pages small and `limit` set.
 - **Limits:** one answer attaches 10 000 documents at most, else `422 lookup_too_large`.
 - **A foreign key that is an array** (`"tags": ["A","B"]`) matches each element; a `belongs_to` then gives an array.
@@ -230,6 +230,32 @@ Rules:
 - Unknown operators are `invalid_query`.
 - Time: for the collection `time` field, RFC 3339 strings are compared as instants, so offsets do not matter. A string that starts with `now` is [date math](#date-math).
 - Cross-type order (sort, cursors, indexes): `missing < null < number < string < time < object < array < bool`.
+
+### Indexes
+
+An index makes a filter read only the documents that can match, not the whole collection. Declare one in `indexes` of the collection ([Collections](http/collections.md)), or add it later with `PUT /{coll}/_indexes/{field}`. The `X-Ndb-Plan` header of an answer names the index that was used (`index:status`), or `scan`.
+
+An index of **one field** (`"status"`) serves `$eq`, `$in` and the range operators (`$gt`, `$gte`, `$lt`, `$lte`) on that field.
+
+A **compound index** has 2 to 4 fields, written with commas: `"account_id,created_at"`. The order of the fields matters. It serves a filter that has:
+
+1. equality (or `$in`) on its first fields, from the first one;
+2. then, at most, a range on the next field.
+
+| Filter | With `"account_id,created_at"` |
+|---|---|
+| `account_id = x` and `created_at >= t` | uses it: both fields |
+| `account_id = x` and `created_at = t` | uses it: both fields |
+| `account_id = x` | uses it: the first field (an index of `account_id` alone is not needed) |
+| `account_id in [x, y]` and `created_at < t` | uses it |
+| `created_at >= t` | does not use it: the first field is not in the filter |
+
+- A condition on a field that the index does not hold is tested on each document the index gives, so the answer is always the same as with no index.
+- An array field gives one entry per element, as in an index of one field.
+- The index does not order the rows: a `sort` still reads the documents that the filter keeps. So put in the index the fields that cut the most.
+- A compound **unique** key (`"unique": ["account_id,email"]`) allows one live document per tuple of values: an email is unique inside an account. A document where one of the fields is missing or `null` is not checked.
+
+On 300 000 documents of 300 accounts, `account_id = x and amount >= 100 and amount < 200` reads 1003 documents in 36 ms with an index of `account_id`, and 5 documents in 1 ms with `"account_id,amount"`.
 
 ### Regular expressions
 

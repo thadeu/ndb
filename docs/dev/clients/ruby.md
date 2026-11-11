@@ -81,6 +81,7 @@ calls = db.collection("calls",
                       time: "at")      # also: expires_field:, ttl:, durability:...
 ```
 
+- An entry of `indexes` or `unique` that is an Array is a [compound index](../query.md#indexes): `indexes: ["status", %w[caller at]]`, `unique: [%w[account_id email]]` (the same as `"caller,at"`).
 - `collection` sends nothing. The first call on it declares the collection (`PUT /calls`) with this definition, once per handle. The keys are on [PUT /{coll}](../http/collections.md#put-coll).
 - Every collection has the primary key `_id`. You can send your own (any non-empty string), or leave it out: the daemon makes a UUIDv7 (`Ndb.new_id` makes the same kind of id on the client). For a natural key such as an email, keep `_id` and declare that field in `unique:`.
 - A different definition for an existing collection raises `Ndb::CatalogConflict`.

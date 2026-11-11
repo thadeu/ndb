@@ -92,13 +92,16 @@ type IndexInfo struct {
 	Total int
 }
 
+// secondary is one index: of one field, or compound (field is then the
+// fields with commas, see index.DocKeys). time is the time field of the
+// collection.
 type secondary struct {
-	field  string
-	isTime bool
-	mem    *index.Mem
-	ready  bool
-	done   int
-	total  int
+	field string
+	time  string
+	mem   *index.Mem
+	ready bool
+	done  int
+	total int
 }
 
 type snapshot struct {
@@ -213,13 +216,13 @@ func (c *Collection) applyDurable(op wal.Op, tx uint64) {
 
 	for _, s := range c.rd.idx {
 		if oldDoc != nil {
-			for _, k := range index.Keys(oldDoc, s.field, s.isTime) {
+			for _, k := range index.DocKeys(oldDoc, s.field, s.time) {
 				s.mem.Remove(k, op.ID)
 			}
 		}
 
 		if curDoc != nil {
-			for _, k := range index.Keys(curDoc, s.field, s.isTime) {
+			for _, k := range index.DocKeys(curDoc, s.field, s.time) {
 				s.mem.Add(k, op.ID)
 			}
 		}
@@ -258,8 +261,8 @@ func (c *Collection) decodeEntry(e *entry) map[string]any {
 // none. Until it is ready, queries scan; writes already keep it up to date.
 // The id field needs no index.
 func (c *Collection) EnsureIndex(field string) error {
-	if field == "" {
-		return errf("invalid_index", "empty field")
+	if err := index.CheckName(field); err != nil {
+		return errf("invalid_index", "%v", err)
 	}
 
 	if field == idField {
@@ -280,7 +283,7 @@ func (c *Collection) EnsureIndex(field string) error {
 		return errf("closed", "collection is closed")
 	}
 
-	s := &secondary{field: field, isTime: field == c.def.Time, mem: index.NewMem()}
+	s := &secondary{field: field, time: c.def.Time, mem: index.NewMem()}
 	items := make([]cand, 0, len(c.durable.docs))
 
 	for id, e := range c.durable.docs {
@@ -345,7 +348,7 @@ func (c *Collection) build(s *secondary, items []cand, segs []*segRef) {
 
 		for i, it := range chunk {
 			if m := c.decodeEntry(it.e); m != nil {
-				keys[i] = index.Keys(m, s.field, s.isTime)
+				keys[i] = index.DocKeys(m, s.field, s.time)
 			}
 		}
 
@@ -365,7 +368,7 @@ func (c *Collection) build(s *secondary, items []cand, segs []*segRef) {
 		c.mu.Unlock()
 	}
 
-	f := indexField{name: s.field, isTime: s.isTime}
+	f := indexField{name: s.field, time: s.time}
 
 	for _, r := range segs {
 		if c.buildStopped() {
@@ -423,7 +426,7 @@ func (c *Collection) buildIndexFile(r *segRef, f indexField) error {
 		}
 
 		if m, err := query.Decode(raw); err == nil {
-			for _, k := range index.Keys(m, f.name, f.isTime) {
+			for _, k := range index.DocKeys(m, f.name, f.time) {
 				entries = append(entries, segment.KeyEntry{Key: k, Row: row})
 			}
 		}
@@ -754,6 +757,10 @@ func (c *Collection) indexedSource(conds []query.Cond) (source, bool) {
 		return source{plan: "id", cands: out}, true
 	}
 
+	if src, ok := c.byCompound(conds); ok {
+		return src, true
+	}
+
 	for _, pass := range []func(string) bool{isPoint, isRange} {
 		for _, cd := range conds {
 			s := c.rd.idx[cd.Path]
@@ -837,8 +844,6 @@ func (c *Collection) byID(conds []query.Cond) ([]cand, bool) {
 // are live. A segment with no key file for the field is scanned whole. A
 // range condition is narrowed with the opposite bound on the same field.
 func (c *Collection) byIndex(s *secondary, cd query.Cond, conds []query.Cond) source {
-	var src source
-
 	ranges := make([]index.Range, len(cd.Vals))
 
 	for i, v := range cd.Vals {
@@ -848,6 +853,14 @@ func (c *Collection) byIndex(s *secondary, cd query.Cond, conds []query.Cond) so
 			ranges[i] = narrow(index.Cmp(cd.Op, v), cd, conds)
 		}
 	}
+
+	return c.byRanges(s, ranges)
+}
+
+// byRanges is the documents of the index s whose key is in one of ranges:
+// the memtable ones, and for each segment its live rows with such a key.
+func (c *Collection) byRanges(s *secondary, ranges []index.Range) source {
+	var src source
 
 	seen := map[string]struct{}{}
 

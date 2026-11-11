@@ -117,7 +117,7 @@ Every collection has `_id`, the primary key. It is not configurable.
 |---|---|
 | `write` | `engine` (default): only ndb writes, through its WAL. `direct`: apps append to the files in `path`; ndb only reads. |
 | `path` | glob of source files. Direct mode only. `**` is allowed. A relative glob such as `./logs/*.ndjson` starts at the folder of `ndb.yml`, not at the folder where you start the daemon. |
-| `unique` | fields whose value can belong to one live document only (a natural key such as `email` or `call_id`). Dot paths allowed. A duplicate is `409 unique_violation`. |
+| `unique` | fields whose value can belong to one live document only (a natural key such as `email` or `call_id`). Dot paths allowed. A duplicate is `409 unique_violation`. An entry with commas is a compound key: `account_id,email` allows one document per pair. |
 | `time` | time field. Used for zone maps, `$dateTrunc`, TTL and retention. |
 | `indexes` | fields with a secondary index (dot paths allowed). |
 | `durability` | `strict` or `relaxed`. Engine mode only. See below. |

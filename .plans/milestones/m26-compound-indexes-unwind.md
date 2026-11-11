@@ -1,6 +1,6 @@
 # M26 — Compound indexes and `$unwind`
 
-Status: not started · Depends on: nothing · Docs: `docs/dev/query.md`, `docs/dev/aggregate.md`
+Status: in progress (Part A: E26.1 to E26.3 done; E26.6 and Part B not started) · Depends on: nothing · Docs: `docs/dev/query.md`, `docs/dev/aggregate.md`
 
 Two gaps of the query side that a SaaS meets first. They do not depend on
 each other: Part A and Part B can ship in separate releases.
@@ -37,21 +37,38 @@ field name has no comma today, so no existing definition changes meaning.
 **Key.** `index.Encode` is order-preserving and prefix-free. The key of a
 compound index is the encodings of its fields, one after the other, then
 the id. So the bytes sort as the tuple sorts, and the memtable B-tree and
-the segment index files (`.ids`) hold it with no new structure. A field
-that is missing in a document is encoded as missing, as in a single-field
-index (to confirm in the code when E26.1 starts).
+the segment index files hold it with no new structure.
 
-**Planner.** A compound index `(a, b, c)` serves a query when:
+Found in the code when E26.1 started, and built so:
 
-- its first fields have equality (`a = x`, or `a = x and b = y`);
-- then at most one field has a range or an `$in` (`b >= t`);
-- and the `sort` is on the next field of the key (`a = x`, sort by `b`):
-  the index gives the rows in order, so a top-N stops after N entries. A
-  descending sort walks the index backwards (`Index` gets `Descend`).
+- An index of one field has one key per array element (a filter matches
+  when one element matches). A compound index does the same: two array
+  fields give every pair, up to 1024 keys per document; over that, the
+  document gets one overflow key that every read of the index takes as a
+  candidate. So the answer is always the one of a scan.
+- A missing field is encoded as missing (it sorts first), so a read by the
+  first fields finds the document. A document with no first field has no
+  key.
+- A range of two sides (`b > 1 and b <= 2`) is two reads of the index and
+  the documents in both: with an array, the two conditions can match on
+  two different elements.
 
-The planner picks the index that binds the most fields; `explain` names
-it. A query on `b` alone does not use `(a, b)` (no skip scan). The single
-index of `a` is not needed when `(a, b)` exists: the prefix serves it.
+**Planner.** A compound index `(a, b, c)` serves a query when its first
+fields have equality or `$in` (up to 64 combinations), then at most one
+field has a range. The planner picks the index that binds the most fields
+(`X-Ndb-Plan: index:a,b`). With equality on the first field only, it is
+used when that field has no index of its own. A query on `b` alone does
+not use `(a, b)` (no skip scan). The documents the index gives are tested
+with the whole filter.
+
+**Not built: rows in the order of the index.** The plan was a top-N that
+stops after N entries (`a = x`, sort by `b`). The indexes of ndb give a set
+of candidate rows per segment (a bitset), not an ordered stream, so this
+needs a merge of ordered reads over the memtable and every segment, with
+the live bits and the array rule above. It is E26.6, on its own. Measured
+without it (300 000 documents, 300 accounts, 1000 per account): the 20
+newest of one account with no range reads the 1003 documents of the
+account, 50 ms; with a range that keeps 150 of them, 18 ms.
 
 **Unique.** A compound unique key refuses a second live document with the
 same tuple (`409 unique_violation`, the message names the fields). A
@@ -65,7 +82,7 @@ that misses the field of a single unique key.
 fields as many keys (an array is one value, as today), partial and text
 indexes, an index on an expression.
 
-### Decisions to confirm
+### Decisions (confirmed)
 
 1. The declaration is a string with commas (`"a,b"`), not a JSON array
    (`["a","b"]`). It keeps `indexes` an array of strings in every answer
@@ -77,26 +94,31 @@ indexes, an index on an expression.
 
 ### Epics
 
-#### E26.1 Daemon: the index
-- [ ] tests first: order of the tuple across types; a prefix read; equality + range; top-N by the next field, both directions, stops early (`explain`); the same answers as a scan on random data (property test)
-- [ ] `catalog`: parse and validate the name (2 to 4 fields, no repeat, no empty); merge rules; `PUT` and `DELETE _indexes/{a,b}`
-- [ ] `index`: the tuple key; `Descend`
-- [ ] `collection`: maintain it in the memtable and in the segment index files (seal, compaction, rebuild); build it on a collection with data (`building` then `ready`)
-- [ ] planner: choose it for `_search`, `_count`, `_update_by_query`, `_delete_by_query`, `$match` and lookups; `explain`
+#### E26.1 Daemon: the index (done)
+- [x] tests first: order of the tuple across types; arrays, missing fields and the overflow key; plans and documents examined for equality, range, `$in`, prefix; the same answers as a scan for 2400 random queries (memtable, segments, an index built later, after updates and deletes)
+- [x] `catalog`: validate the name (2 to 4 fields, no repeat, no empty, no `_id`); `PUT` and `DELETE _indexes/{a,b}`
+- [x] `index`: the tuple key, `PrefixRange`, `TupleCmp`
+- [x] `collection`: the memtable and the segment index files hold it (seal, compaction, build on a collection with data)
+- [x] planner: `byCompound` for `_search`, `_count`, `_update_by_query`, `_delete_by_query`, `$match` and lookups
 
-#### E26.2 Daemon: compound unique
-- [ ] tests first: the violation on insert, bulk, update, upsert and `_tx`; added later on data with a duplicate tuple (the `PUT` is refused); recovery rebuilds it; a `kill -9` loop
-- [ ] `state`: the owner map by tuple; the on-disk unique file
+#### E26.2 Daemon: compound unique (done)
+- [x] tests first: the violation on insert, bulk, update and `_tx`; a missing or `null` field is not checked; the tuple is freed by an update and a delete; after a restart; in segments; added later on data with a duplicate tuple (refused)
+- [x] `uniqueKey` gives the tuple
 
-#### E26.3 SDKs and docs
-- [ ] Go (a collection option, the struct tags stay for one field), Ruby (`indexes: ["a,b"]` already passes), Rails (`index [:account_id, :created_at]`, `unique:`; `has_many` with an order uses it), TypeScript (schema option)
-- [ ] `spec/cases`: queries whose answer must not change with the index
-- [ ] `docs/dev/query.md` (which queries an index serves), `http/collections.md`, `configuration.md`, client pages, `llms-agents.md`, CHANGELOG
-- [ ] `make bench`: the 20 newest documents of one account among 2 million (budget to set after the first measure; today it reads the whole account)
+#### E26.3 SDKs and docs (done, but the bench check)
+- [x] Go `ndb.Index(...)` and `ndb.Unique(...)`, Ruby (arrays or `"a,b"`), Rails `index :a, :b` and `unique: true`, TypeScript `indexes` and `unique` in the schema
+- [ ] `spec/cases`: not done (the cases have no way to declare a compound index and wait for it; each layer has its own tests)
+- [x] `docs/dev/query.md` (Indexes), `http/collections.md`, `configuration.md`, client pages, `llms-agents.md`, CHANGELOG
+- [ ] `make bench`: a check for a compound read on the loaded collection (not added; measured by hand, see the CHANGELOG)
+
+#### E26.6 Rows in the order of the index (not started)
+- [ ] an ordered read of the memtable index and of each segment index file, merged, with the live bits; both directions
+- [ ] used when the filter binds the first fields by equality, the sort is on the next field, and no document of the range has an array there
+- [ ] `explain`: the entries read; a bench check for the 20 newest of one account
 
 ### Exit criteria
 
-- The query of the Goal reads 20 index entries (`explain`), at any size of the account.
+- The query of the Goal uses the index for its filter (done). Reading only 20 entries is E26.6.
 - `make bench`: every check PASS; the write budgets unchanged with one compound index on the loaded collection (one more key per write).
 
 ## Part B — `$unwind`
@@ -139,7 +161,7 @@ Group by the elements of an array. Today a document with
 **Out of scope:** two `$unwind` in one pipeline, `$unwind` after `$group`,
 `$unwind` with no `$group`, `$facet`, `$bucket`, window functions.
 
-### Decisions to confirm
+### Decisions (confirmed)
 
 1. One `$unwind` per pipeline, and only with `$group`.
 2. The MongoDB rules for missing, `null`, empty and non-array values.
