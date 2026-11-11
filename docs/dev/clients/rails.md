@@ -4,7 +4,7 @@ The gem `ndb-rails`: an ActiveModel layer with `Ndb::Record`, and [streams](#str
 
 The source and the same guide are in [`sdk/rails`](https://github.com/thadeu/ndb/tree/main/sdk/rails).
 
-> **Optimistic by default.** Every model is optimistic with no setup: each save sends the version (`_v`) the record was read with, as `lock_version` does in ActiveRecord, without the column. Use `with_retry` to try again after a conflict, and `lock` when the code must run once. See [Concurrency](../concurrency.md).
+> **Optimistic locking by default, pessimistic locking when you ask.** Every model uses optimistic locking with no setup: each save sends the version (`_v`) the record was read with, as `lock_version` does in ActiveRecord, without the column. Use `with_retry` to try again after a conflict. For pessimistic locking, `Model.lock.find(id)`, `lock!` and `with_lock` work as in ActiveRecord. See [Concurrency](../concurrency.md).
 
 ## Install
 
@@ -155,7 +155,7 @@ Call.where(status: "retry").destroy_all  # loads and destroys each record with i
   end
   ```
 
-- `lock` is the pessimistic lock, with the names of ActiveRecord. One request holds the record; another `lock` of it waits (`wait:`, default 10 s, then `Ndb::Locked`), and a write from any other place waits for the release. So the code runs once: use it when the code has an effect outside ndb. See [Lock](../query.md#lock-one-holder-at-a-time).
+- `lock` is pessimistic locking, with the names of ActiveRecord. One request holds the record; another `lock` of it waits (`wait:`, default 10 s, then `Ndb::Locked`), and a write from any other place waits for the release. So the code runs once: use it when the code has an effect outside ndb. See [Lock](../query.md#pessimistic-locking-one-holder-at-a-time).
 
   ```ruby
   # With a block: the lock ends with the block, also on an exception.

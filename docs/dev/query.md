@@ -457,9 +457,9 @@ curl ... /calls/_update_by_query -d '{"query":{"status":"failed"},"update":{"$se
 # {"matched":3,"modified":3}
 ```
 
-### Optimistic concurrency
+### Optimistic locking
 
-ndb is optimistic by default; the overview with the three levels is on [Concurrency](concurrency.md).
+ndb uses optimistic locking by default; the overview of optimistic locking, pessimistic locking and transactions is on [Concurrency](concurrency.md).
 
 `_v` in the query is the version of the document. Read with `versions: true`, then write with that `_v`. `matched: 0` means somebody else wrote first.
 
@@ -480,7 +480,7 @@ Every SDK has `with_retry` (`WithRetry` in Go, `withRetry` in TypeScript). It do
 
 An error in your function stops it, and nothing is written. When your function changes nothing, nothing is written. Nothing waits: there is no lock on the daemon, so a client that dies holds nothing. Use it when the new value depends on a decision in your code. When one operator does the job, use a [conditional update](#update-by-query): it is one call, with no retry.
 
-Your function can run more than one time. When it has an effect outside ndb (a refund, an email), use a [lock](#lock-one-holder-at-a-time).
+Your function can run more than one time. When it has an effect outside ndb (a refund, an email), use a [lock](#pessimistic-locking-one-holder-at-a-time).
 
 **1. Debit a balance from two requests at the same time.** The second request reads the new balance and debits again, so both debits land.
 
@@ -559,7 +559,7 @@ accounts.with_retry("acc_1") do |a|
 end
 ```
 
-### Lock: one holder at a time
+### Pessimistic locking: one holder at a time
 
 A lock gives one caller the document, like `SELECT ... FOR UPDATE`. Until the lock is released, no other caller takes it and no other write changes the document. The code between the lock and the release runs one time. Use it when that code has an effect outside ndb that must not happen twice:
 

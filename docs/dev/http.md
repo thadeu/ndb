@@ -168,7 +168,7 @@ See [Pagination](query.md#pagination).
 - **Read your writes:** a read that starts after a write was acked sees it.
 - **One write is atomic:** a `_doc`, a `_bulk` (all or nothing), an `_update/{id}`, a `_tx` (inserts, updates and deletes of one collection, all or nothing). A `many` update or delete is atomic per WAL record (about half of `max_line_size` of documents), not as a whole.
 - **Update and delete by query** match and write in one step, against the newest state: two concurrent updates never interleave. A guard in `query` (`{"_v": 7}`, `{"qty": {"$gte": 1}}`) makes a conditional write.
-- **A lock** (`_lock/{id}`) gives one caller the document: until it is released or expires, only a write with its token changes the document, and the other writes wait. See [Locks](query.md#lock-one-holder-at-a-time).
+- **A lock** (`_lock/{id}`) gives one caller the document: until it is released or expires, only a write with its token changes the document, and the other writes wait. See [Locks](query.md#pessimistic-locking-one-holder-at-a-time).
 - **Collection patterns** read each collection at its own point in time; there is no snapshot over many collections.
 
 ## Readiness and retries

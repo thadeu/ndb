@@ -269,7 +269,7 @@ await sessions.persist('s1')
 
 ## `POST /{coll}/_lock/{id}`
 
-Takes the pessimistic lock of a document and answers the document as it is now. Until the lock is released or expires, only a write that carries its token changes the document. The guide is [Locks](../query.md#lock-one-holder-at-a-time).
+Takes the pessimistic lock of a document and answers the document as it is now. Until the lock is released or expires, only a write that carries its token changes the document. The guide is [Locks](../query.md#pessimistic-locking-one-holder-at-a-time).
 
 | Body key | Type | Default | Meaning |
 |---|---|---|---|

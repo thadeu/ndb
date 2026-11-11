@@ -641,7 +641,7 @@ billing.nack("w1", entry.id)                   # delay 0: due at once
 - ndb only: Redis has no delayed retry. `nack(consumer, *ids, delay: 0)` gives the entries back to the group after `delay` seconds, for a retry. It returns how many it gave back.
 - Only the IDs pending **for this consumer** count; other IDs count 0, not an error. No ID sends nothing and returns 0.
 - The entry stays pending with no owner (`"consumer" => ""`) and a `"retry_at"`. Its delivery count does not change; the claim that takes it again adds 1.
-- No claim takes it before its retry time (also not `min_idle: 0` or `force: true`). After it, any consumer of the group takes it at once with [`group.claim_due`](#group-claim_due) or `group.claim`. The own pending read (`read(pending: true)`) never gives it, so a restarted worker does not take it early.
+- No claim takes it before its retry time (also not `min_idle: 0` or `force: true`). After it, any consumer of the group takes it at once with [`group.claim_due`](#group-claim-due) or `group.claim`. The own pending read (`read(pending: true)`) never gives it, so a restarted worker does not take it early.
 - `delay` is at most 30 days; a negative or larger one raises `Ndb::InvalidQuery` (`invalid_request`).
 - `group.ack(id)` of a nacked entry removes it: so an app can cancel a retry.
 
@@ -662,7 +662,7 @@ end
 
 - ndb only. `claim_due(consumer, cursor: "0-0", count: nil, just_ids: false)` scans only the nacked entries and moves the ones whose retry time passed to the consumer, in ID order. Each one gets one more delivery.
 - It does not read the entries in flight at live workers, so a worker can call it on a short tick (the worker does, every `due_every`).
-- It returns an `Ndb::Claimed`, as [`group.auto_claim`](#group-auto_claim): `entries`, `deleted` (nacked IDs whose entry was trimmed) and `cursor`.
+- It returns an `Ndb::Claimed`, as [`group.auto_claim`](#group-auto-claim): `entries`, `deleted` (nacked IDs whose entry was trimmed) and `cursor`.
 
 ### `group.claim`
 
