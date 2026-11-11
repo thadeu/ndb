@@ -66,6 +66,10 @@ type Options struct {
 	// kill -9), on a daemon of its own.
 	Streams bool
 
+	// Compound: compound indexes and $unwind on orders with items, on a
+	// daemon of its own.
+	Compound bool
+
 	// Concurrent: clients that read at the same time (1, 3 and 10).
 	Concurrent bool
 
@@ -101,7 +105,7 @@ type Options struct {
 }
 
 func (o Options) all() bool {
-	return !o.Stress && !o.Query && !o.Aggs && !o.Lookup && !o.Idle && !o.Concurrent && !o.Direct && !o.Streams
+	return !o.Stress && !o.Query && !o.Aggs && !o.Lookup && !o.Idle && !o.Concurrent && !o.Direct && !o.Streams && !o.Compound
 }
 
 // reads tells whether a part needs the loaded calls.
@@ -154,6 +158,10 @@ func (o Options) plan(reuse bool) []planned {
 
 	if o.Direct {
 		steps = append(steps, directPlan(o.DirectRows)...)
+	}
+
+	if o.Compound || o.all() {
+		steps = append(steps, compoundPlan()...)
 	}
 
 	if o.Streams || o.all() {
@@ -309,6 +317,11 @@ func Run(o Options, w io.Writer) (err error) {
 	if o.Direct {
 		report = append(report, "| **direct mode** (NDJSON files the app writes) | |")
 		report = append(report, direct(dir, o.DirectRows)...)
+	}
+
+	if o.Compound || o.all() {
+		report = append(report, "| **compound indexes and $unwind** (median of 5, min–max; plan, documents examined) | |")
+		report = append(report, compoundPart(dir)...)
 	}
 
 	if o.Streams || o.all() {

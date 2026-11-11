@@ -177,16 +177,18 @@ module Ndb
         @ttl || (superclass.respond_to?(:ttl) ? superclass.ttl : nil)
       end
 
-      # A compound index on 2 to 4 attributes, in this order: it serves a
-      # where with equality on the first attributes and a range on the next
-      # one. With unique: true it is a unique key instead (one live document
-      # per tuple of values; Ndb::RecordNotUnique). One attribute: `index:
-      # true` or `unique: true` on the attribute.
+      # An index on 1 to 4 attributes or paths. With one it is `index: true`
+      # as a call, for a path that is not an attribute ("items.sku"). With
+      # more it is a compound index, in this order: it serves a where with
+      # equality on the first attributes and a range on the next one. With
+      # unique: true it is a unique key instead (one live document per value
+      # or tuple of values; Ndb::RecordNotUnique).
       #
       #   index :account_id, :created_at
       #   index :account_id, :email, unique: true
+      #   index "items.sku"
       def index(*names, unique: false)
-        raise ArgumentError, "index takes 2 to 4 attributes (one attribute: index: true on it)" unless (2..4).cover?(names.size)
+        raise ArgumentError, "index takes 1 to 4 attributes" unless (1..4).cover?(names.size)
 
         (unique ? own_unique : own_indexed) << names.join(",")
       end

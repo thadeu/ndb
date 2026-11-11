@@ -11,9 +11,10 @@ class CompoundTest < Minitest::Test
 
       index :acc, :n
       index :acc, :email, unique: true
+      index "items.sku"
     end
 
-    assert_equal ["acc,n"], member.collection_definition["indexes"]
+    assert_equal ["acc,n", "items.sku"], member.collection_definition["indexes"]
     assert_equal ["acc,email"], member.collection_definition["unique"]
 
     member.create!(_id: "m1", acc: "a", email: "x@x", n: 1)
@@ -21,6 +22,7 @@ class CompoundTest < Minitest::Test
 
     assert_raises(Ndb::RecordNotUnique) { member.create!(_id: "m3", acc: "a", email: "x@x") }
     assert_equal ["m1"], member.where(acc: "a", n: 1..5).map(&:id)
-    assert_raises(ArgumentError) { member.index :acc }
+    assert_raises(ArgumentError) { member.index }
+    assert_raises(ArgumentError) { member.index :a, :b, :c, :d, :e }
   end
 end

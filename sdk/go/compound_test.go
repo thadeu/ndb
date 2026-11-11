@@ -40,7 +40,26 @@ func TestCompoundIndexAndUniqueOptions(t *testing.T) {
 		t.Fatalf("indexes %v, err %v", indexes, err)
 	}
 
-	if _, err := Collection[Member](db, newColl(), Index("acc")); err == nil {
-		t.Fatal("Index with one field was accepted (use the index tag)")
+	one, err := Collection[Member](db, newColl(), Index("items.sku"), Unique("email"))
+	if err != nil {
+		t.Fatalf("Index and Unique with one field: %v", err)
+	}
+
+	if _, err := one.Insert(ctx, Member{ID: "m1", Email: "x@x"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := one.Insert(ctx, Member{ID: "m2", Email: "x@x"}); !errors.Is(err, ErrUniqueViolation) {
+		t.Fatalf("err %v, want ErrUniqueViolation", err)
+	}
+
+	if indexes, err := one.EnsureIndex(ctx, "n"); err != nil || !slices.Contains(indexes, "items.sku") {
+		t.Fatalf("indexes %v, err %v", indexes, err)
+	}
+
+	for _, bad := range []CollOption{Index(), Index("a", "b", "c", "d", "e"), Unique("a", "")} {
+		if _, err := Collection[Member](db, newColl(), bad); err == nil {
+			t.Fatal("a bad Index or Unique option was accepted")
+		}
 	}
 }

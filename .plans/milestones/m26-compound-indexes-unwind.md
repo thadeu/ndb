@@ -105,11 +105,11 @@ indexes, an index on an expression.
 - [x] tests first: the violation on insert, bulk, update and `_tx`; a missing or `null` field is not checked; the tuple is freed by an update and a delete; after a restart; in segments; added later on data with a duplicate tuple (refused)
 - [x] `uniqueKey` gives the tuple
 
-#### E26.3 SDKs and docs (done, but the bench check)
+#### E26.3 SDKs and docs (done)
 - [x] Go `ndb.Index(...)` and `ndb.Unique(...)`, Ruby (arrays or `"a,b"`), Rails `index :a, :b` and `unique: true`, TypeScript `indexes` and `unique` in the schema
 - [ ] `spec/cases`: not done (the cases have no way to declare a compound index and wait for it; each layer has its own tests)
 - [x] `docs/dev/query.md` (Indexes), `http/collections.md`, `configuration.md`, client pages, `llms-agents.md`, CHANGELOG
-- [ ] `make bench`: a check for a compound read on the loaded collection (not added; measured by hand, see the CHANGELOG)
+- [x] `make bench`: the part `-compound` (60 000 orders of 60 accounts with items): the same reads with an index of the account and then with compound indexes, each with its plan and the documents examined; budget `compound.worst` 66 ms (60 ms, about 3x the measure, plus 10% for a burst)
 
 #### E26.6 Rows in the order of the index (not started)
 - [ ] an ordered read of the memtable index and of each segment index file, merged, with the live bits; both directions
@@ -174,10 +174,10 @@ Group by the elements of an array. Today a document with
 - [x] patterns and partitioned collections: the same answer as one collection
 - [ ] `spec/cases/aggregate`: not done (each layer has its own tests)
 
-#### E26.5 SDKs and docs (done, but the bench check)
+#### E26.5 SDKs and docs (done)
 - [x] Go `UnwindStage`; Rails `unwind(:items)` on a relation; Ruby and TypeScript pass the stage in the pipeline (tested)
 - [x] `docs/dev/aggregate.md` (pipeline shape, stages, `$unwind`), `http/queries.md`, Rails page, `llms-agents.md`, CHANGELOG
-- [ ] `make bench`: an aggregation with `$unwind` (not added)
+- [x] `make bench`: two aggregations with `$unwind` in the part `-compound`, under the same budget
 
 Built so: the array is read from the document (a raw fetch for each matched
 row of a segment), not from a column. It is correct and simple; a column

@@ -73,7 +73,7 @@ calls, err := ndb.Collection[Call](db, "calls")
 | `version` | The field receives `_v`, the document version, on every read. It is never sent on a write. |
 
 - The primary key is the field named `_id` (`ndb:"_id"` or `json:"_id"`). If it is empty on insert, it is not sent and the daemon makes a UUIDv7. For a natural key (email, SKU) keep `_id` and add `unique` to that field. `ndb.NewID()` makes the same kind of id on the client.
-- A compound index or unique key is an option of `Collection`, with the fields in order: `ndb.Collection[Call](db, "calls", ndb.Index("caller", "at"), ndb.Unique("account_id", "email"))`. See [Indexes](../query.md#indexes).
+- `ndb.Index(...)` and `ndb.Unique(...)` are options of `Collection`, for 1 to 4 fields in order: a compound index or unique key (`ndb.Index("caller", "at")`, `ndb.Unique("account_id", "email")`), or one path that is not a field of the struct (`ndb.Index("items.sku")`). See [Indexes](../query.md#indexes).
 - A field without an `ndb` tag uses its `json` name, or its Go name. `ndb:"-"` or `json:"-"` skips a field.
 - Only one `time` and `expires` field are allowed. An unknown option is an error (the old `id` option too).
 - `Collection` sends nothing. The first call on the collection sends `ensure_collection` (`PUT /calls`) once per name on one `*DB`. A name with `*` (a [pattern](#collection-patterns)) never declares. A definition that disagrees with the stored one (time, ttl) returns `ErrCatalogConflict`.
