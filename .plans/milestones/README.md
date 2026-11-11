@@ -46,7 +46,7 @@ docs in `docs/dev/` describe what they built.
 | M21 | Streams SDK | stream API and the group worker in the Go, Ruby and TS clients | done |
 | M23 | Streams in Rails and the Redis commands | `include Ndb::Streams`, `ndb streams`, the Redis Streams commands in Ruby, Go (`ndbredis`) and TS (ioredis, node-redis) | done |
 | M24 | Streams: delayed retry | `nack` with `delay_ms`, `RetryAt` in the PEL, `Work.Retry` tiers + `MaxAge` in the SDKs (fsw-esl outbox off RabbitMQ) | done |
-| [M25](m25-transactions.md) | Transactions (one collection) | a block of creates, updates and deletes on one collection is one step: `POST /{coll}/_tx` with N locks, `Model.transaction` and `Ndb::Rollback`; many collections kept as a later design | not started |
+| [M25](m25-transactions.md) | Transactions (one collection) | a block of creates, updates and deletes on one collection is one step, with a time limit: `POST /{coll}/_lock` and `_unlock` for a set of documents, `POST /{coll}/_tx`; `Model.transaction(lock:, ttl:)` and `Ndb::Rollback`, and the same in Go, TypeScript and Ruby; many collections kept as a later design | not started |
 | M17 | PITR and rename | restore a collection to an instant of the last day; rename to put it in place (1.2.3; at/to 1.2.4) | done |
 
 ## Next (after 0.1.2)

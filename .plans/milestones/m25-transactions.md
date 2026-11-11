@@ -36,6 +36,80 @@ Account.transaction do
 end
 ```
 
+### Two ways to write it
+
+Both end in the same commit. Pick by taste.
+
+**1. Locks declared with the block** (two requests for any number of
+documents, and no lock order to remember):
+
+```ruby
+Account.transaction(lock: [from, to], ttl: 5, wait: 2) do
+  raise Ndb::Rollback if from.balance < amount
+
+  from.update!(balance: from.balance - amount)
+  to.update!(balance: to.balance + amount)
+end
+```
+
+**2. Locks taken inside the block**, as in ActiveRecord (the example
+above: one request per `lock!`, and the caller sorts the records to avoid
+a deadlock).
+
+`ttl` is the time limit of the transaction: the commit carries the lock
+tokens, so a lock that expired before the commit refuses all of it
+(`lock_expired`) and nothing is written. `wait` is how long to wait for a
+document that another caller holds. Only the writes are undone: an effect
+outside ndb made inside the block (a call to a gateway) is not.
+
+The other clients have the same two ways (names are a proposal):
+
+```go
+err := accounts.Tx(ctx, []string{"a1", "a2"}, func(tx *ndb.Tx[Account], docs map[string]*Account) error {
+	from, to := docs["a1"], docs["a2"]
+
+	if from.Balance < amount {
+		return ndb.ErrRollback
+	}
+
+	from.Balance -= amount
+	to.Balance += amount
+
+	tx.Update(from)
+	tx.Update(to)
+
+	return nil
+}, ndb.LockTTL(5*time.Second))
+```
+
+```ts
+await accounts.transaction(['a1', 'a2'], (tx, { a1, a2 }) => {
+  if (a1.balance < amount) throw new Rollback()
+
+  a1.balance -= amount
+  a2.balance += amount
+
+  tx.update(a1)
+  tx.update(a2)
+}, { ttl: 5 })
+```
+
+```ruby
+accounts.transaction(lock: %w[a1 a2], ttl: 5) do |tx, docs|
+  raise Ndb::Rollback if docs["a1"]["balance"] < amount
+
+  docs["a1"]["balance"] -= amount
+  docs["a2"]["balance"] += amount
+
+  tx.update(docs["a1"])
+  tx.update(docs["a2"])
+end
+```
+
+With no ids (`accounts.Tx(ctx, nil, fn)`, `transaction { |tx| }`), the
+block takes no lock: it is an atomic batch of creates, updates and
+deletes, each update with its own `_v` guard if it wants one.
+
 A block that writes a record of another collection is refused with a clear
 error (`Ndb::TransactionError`), before anything is sent.
 
@@ -52,6 +126,31 @@ Proposed; the maintainer has not answered them yet.
    the commit, at the end of the block.
 
 ## Design
+
+### Three new routes
+
+| Route | Body | Answer |
+|---|---|---|
+| `POST /{coll}/_lock` | `{"ids": [...], "ttl", "wait"}` | `{"token", "expires_at", "docs": [...]}` |
+| `POST /{coll}/_unlock` | `{"token"}` | `{"unlocked": n}` |
+| `POST /{coll}/_tx` | `{"ops": [...], "locks": [...], "unlock"}` | `{"results": [...]}` |
+
+`_lock` and `_unlock` with no id in the path are the many-document forms
+of `_lock/{id}` and `_unlock/{id}`, which stay as they are.
+
+- **`_lock`** takes the locks of all the ids or of none, in one step of
+  the writer, and gives the documents as they are then (with `_v`). One
+  token holds the whole set. When any id is held by another caller it
+  takes nothing and waits (`wait`), then `423 locked`. So two callers can
+  never hold half of each other's set: no deadlock. A missing id is
+  `404 not_found` and nothing is locked. Limit: 100 ids.
+- **`_unlock`** releases every lock of the token: the rollback of a block
+  is one request.
+- **`_tx`** is the commit, below. With the token of a set in `locks` and
+  `"unlock": true`, the commit and the release are one request.
+
+So a transaction with declared locks is two requests: `_lock`, then `_tx`
+(or `_unlock` on a rollback).
 ### Client side: the block only collects
 
 Inside the block, `create`, `update`, `destroy` (and `save`) check the
@@ -79,7 +178,7 @@ A read inside the block sees the stored data, not the writes of the block
     {"op": "insert", "doc": {"_id": "a3", "balance": 0}},
     {"op": "delete", "id": "a9"}
   ],
-  "locks": [{"id": "a1", "token": "…"}, {"id": "a2", "token": "…"}],
+  "locks": ["<token of the set>", "<token of a lock! inside the block>"],
   "unlock": true
 }
 ```
@@ -89,7 +188,9 @@ A read inside the block sees the stored data, not the writes of the block
   the whole transaction: `409 tx_conflict`, with the index of the op.
   Other errors keep their codes (`unique_violation`, `duplicate_id`,
   `lock_expired`, `invalid_doc`), also with the index.
-- `locks`: the N tokens. Each op on a locked document needs its token here.
+- `locks`: the tokens the transaction holds: the one of a set (`_lock`), and
+  one per `lock!` inside the block. An op on a locked document needs the
+  token that holds it here.
   `"unlock": true` releases them after the commit.
 - A document locked by another caller: the transaction waits, as a plain
   write does.
@@ -104,14 +205,17 @@ recovery.
 
 ## Epics
 
-### E25.1 Daemon: `POST /{coll}/_tx`
-- [ ] tests: mixed insert + update + delete in one record; any failing op writes nothing; N lock tokens; `unlock`; waits for a foreign lock; the index of the failing op; a `kill -9` loop (the record is whole or absent)
-- [ ] `collection`: a request of mixed ops in `prepare`
-- [ ] `server`: the route, scope (write), errors, the partitioned case (one partition per transaction, else `not_supported`), docs, error table
+### E25.1 Daemon: the three routes
+- [ ] tests for `_lock` (many): all or none; the documents of that instant; one token for the set; a held id waits, then `locked`; two callers with crossed sets never deadlock; a missing id locks nothing; the ttl ends every lock of the set
+- [ ] tests for `_unlock` (many): every lock of the token; a stale token is `lock_expired`
+- [ ] tests for `_tx`: mixed insert + update + delete in one record; any failing op writes nothing; several tokens; `unlock`; an expired token refuses all; waits for a foreign lock; the index of the failing op; a `kill -9` loop (the record is whole or absent)
+- [ ] `locks`: a token that holds many ids; release by token
+- [ ] `collection`: the lock of a set and a request of mixed ops in `prepare`
+- [ ] `server`: the routes, scope (write), errors, the partitioned case (one partition per transaction, else `not_supported`), docs, error table
 
 ### E25.2 SDKs
-- [ ] Rails: `Model.transaction { }`, the writes collected, `Ndb::Rollback`, locks released at the end, another collection refused, the callback order of decision 3
-- [ ] Go `coll.Tx(ctx, fn)`, TypeScript `coll.transaction(fn)`, Ruby `coll.transaction { |tx| }`: `tx.insert / update / delete`
+- [ ] Rails: `Model.transaction { }` and `Model.transaction(lock:, ttl:, wait:) { }`, the writes collected, `Ndb::Rollback`, `lock!` inside the block joins the transaction, locks released at the end, another collection refused, the callback order of decision 3
+- [ ] Go `coll.Tx(ctx, ids, fn)`, TypeScript `coll.transaction(ids, fn)`, Ruby `coll.transaction(lock:) { |tx, docs| }`: `tx.insert / update / delete`, the rollback error, `ttl` and `wait`
 - [ ] a shared case file in `spec/` for the commit and the refusals
 
 ### E25.3 Docs
