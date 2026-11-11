@@ -7,7 +7,7 @@ each one has the reason, so the talk does not start from zero.
 
 ## 1. Transactions across collections
 
-Planned: [M25](../milestones/m25-transactions.md).
+One collection is planned: [M25](../milestones/m25-transactions.md). Many collections (a commit log and a redo at recovery) is high risk and waits for a real case; its design is at the end of M25.
 
 ## 2. Decimal type
 

@@ -1,11 +1,28 @@
-# M25 — Transactions
+# M25 — Transactions (one collection)
 
 Status: not started · Depends on: locks (done) · Docs: `docs/dev/concurrency.md`
 
+## Scope (decided)
+
+This milestone is the transaction of **one collection**. It is low risk:
+many ops in one WAL record are atomic today, also after a crash, so
+recovery and the file formats do not change, and a daemon that does not
+use it is not touched.
+
+The transaction of **many collections** is not in this milestone. It needs
+a commit log and a redo at recovery, and a bug there can hurt every user.
+Its design is kept at the end of this file ("Later"). It comes back when a
+real case needs it and one document + `watch` does not solve it.
+
+For reference: MongoDB had no multi-document transaction from 2009 to 4.0
+(2018), and has it only on a replica set. Redis `MULTI`/`EXEC` has no
+rollback (a command that fails does not undo the others). `_tx` on one
+collection is all or nothing.
+
 ## Goal
 
-A block of writes (create, update, delete) on one or many collections is
-one step: all of them are written, or none. A failed block writes nothing
+A block of writes (create, update, delete) on one collection is one step:
+all of them are written, or none. A failed block writes nothing
 (rollback). It holds after a `kill -9` at any point.
 
 ```ruby
@@ -16,18 +33,31 @@ Account.transaction do
 
   from.update!(balance: from.balance - amount)
   to.update!(balance: to.balance + amount)
-  Transfer.create!(from: from.id, to: to.id, amount: amount)   # another collection
 end
 ```
 
-## Design
+A block that writes a record of another collection is refused with a clear
+error (`Ndb::TransactionError`), before anything is sent.
 
+## Decisions to confirm before the code
+
+Proposed; the maintainer has not answered them yet.
+
+1. A read inside the block sees the stored data, not the writes of the
+   block (the objects in memory have the new values).
+2. An `update` of the transaction that matches nothing (its guard failed,
+   or no such id) fails the whole transaction (`409 tx_conflict`). Outside
+   a transaction it is `matched: 0`.
+3. Rails: `before_*` callbacks run at `update!`; `after_save` runs after
+   the commit, at the end of the block.
+
+## Design
 ### Client side: the block only collects
 
 Inside the block, `create`, `update`, `destroy` (and `save`) check the
 record (validations, callbacks before the write) and change the object in
 memory. They send nothing. At the end of the block the SDK sends every
-write in one request, `POST /_tx`. So:
+write in one request, `POST /{coll}/_tx`. So:
 
 - any exception in the block: nothing was sent, the locks are released,
   the exception goes on to the caller;
@@ -39,17 +69,17 @@ write in one request, `POST /_tx`. So:
 A read inside the block sees the stored data, not the writes of the block
 (the objects in memory have the new values).
 
-### `POST /_tx`
+### `POST /{coll}/_tx`
 
 ```json
 {
   "ops": [
-    {"coll": "accounts", "op": "update", "id": "a1", "query": {"_v": 7}, "update": {"$set": {"balance": 50}}},
-    {"coll": "accounts", "op": "update", "id": "a2", "update": {"$inc": {"balance": 50}}},
-    {"coll": "transfers", "op": "insert", "doc": {"_id": "t1", "from": "a1", "to": "a2", "amount": 50}},
-    {"coll": "sessions", "op": "delete", "id": "s9"}
+    {"op": "update", "id": "a1", "query": {"_v": 7}, "update": {"$set": {"balance": 50}}},
+    {"op": "update", "id": "a2", "update": {"$inc": {"balance": 50}}},
+    {"op": "insert", "doc": {"_id": "a3", "balance": 0}},
+    {"op": "delete", "id": "a9"}
   ],
-  "locks": [{"coll": "accounts", "id": "a1", "token": "…"}, {"coll": "accounts", "id": "a2", "token": "…"}],
+  "locks": [{"id": "a1", "token": "…"}, {"id": "a2", "token": "…"}],
   "unlock": true
 }
 ```
@@ -66,12 +96,45 @@ A read inside the block sees the stored data, not the writes of the block
 - Limits: engine collections only (no direct, no stream, no pattern); the
   body under `max_line_size`; one partition per op, as `_bulk`.
 
-### One collection: one WAL line
+### One WAL line
 
-All ops on one collection become one WAL record (`ops` already holds many
-puts and dels). That is atomic today, also after a crash. No new file.
+All ops become one WAL record (`ops` already holds many puts and dels).
+That is atomic today, also after a crash. No new file, no change in
+recovery.
 
-### Many collections: an intent log, then redo
+## Epics
+
+### E25.1 Daemon: `POST /{coll}/_tx`
+- [ ] tests: mixed insert + update + delete in one record; any failing op writes nothing; N lock tokens; `unlock`; waits for a foreign lock; the index of the failing op; a `kill -9` loop (the record is whole or absent)
+- [ ] `collection`: a request of mixed ops in `prepare`
+- [ ] `server`: the route, scope (write), errors, the partitioned case (one partition per transaction, else `not_supported`), docs, error table
+
+### E25.2 SDKs
+- [ ] Rails: `Model.transaction { }`, the writes collected, `Ndb::Rollback`, locks released at the end, another collection refused, the callback order of decision 3
+- [ ] Go `coll.Tx(ctx, fn)`, TypeScript `coll.transaction(fn)`, Ruby `coll.transaction { |tx| }`: `tx.insert / update / delete`
+- [ ] a shared case file in `spec/` for the commit and the refusals
+
+### E25.3 Docs
+- [ ] `docs/dev/concurrency.md` (level 4: transaction, and its limit of one collection), `http/documents.md`, client pages, `llms-agents.md`, CHANGELOG
+
+## Exit criteria
+
+- The transfer example passes in Rails, and a raise at each line leaves no change.
+- `make bench`: every check PASS; `live write p99` budget unchanged (a write outside a transaction is not slower).
+
+## Out of scope
+
+- Many collections (see "Later").
+- Reads inside the transaction that see its own writes.
+- Direct collections, streams, patterns.
+- Savepoints and nested transactions (a nested block joins the outer one).
+
+## Later: many collections
+
+Not planned. The design, kept so the work does not start from zero. The
+route would be `POST /_tx`, with `"coll"` in each op and in each lock.
+
+### An intent log, then redo
 
 Each collection has its own WAL and writer, so two WAL lines are two
 fsyncs. The commit point is a new file, `<data-dir>/tx.log`:
@@ -114,39 +177,8 @@ What it does not give:
 passes 16 MiB). A collection does not delete a WAL file (`wal_retention`)
 that holds a `_gtx` with no `done` line.
 
-## Epics
-
-### E25.1 Daemon: `_tx` on one collection
-- [ ] tests: mixed insert + update + delete in one record; any failing op writes nothing; N lock tokens; `unlock`; waits for a foreign lock; error index
-- [ ] `collection`: a request of mixed ops in `prepare`
-- [ ] `server`: `POST /_tx`, scope (write on every collection of the body), errors, docs, error table
-
-### E25.2 Daemon: many collections
-- [ ] tests first: kill at each step (before the intent, after it, between two applies, before `done`) and restart; then every collection has the write or none has
-- [ ] `internal/txlog`: append, fsync, read, cut
-- [ ] hold and release of the writers in name order; `_gtx` in the WAL record
-- [ ] recovery: redo before the collections accept writes
-- [ ] `wal_retention` keeps a file with a pending `_gtx`
-- [ ] `make bench`: a `tx` part (p99 of a 2-collection transaction; acked transactions lost or half written by a `kill -9`: 0), with budgets
-
-### E25.3 SDKs
-- [ ] Rails: `Model.transaction { }`, the writes collected, `Ndb::Rollback`, locks released at the end, `after_commit`-style order of callbacks
-- [ ] Go `db.Tx(ctx, fn)`, TypeScript `db.transaction(fn)`, Ruby `client.transaction { |tx| }`: `tx.insert / update / delete` per collection
-- [ ] a shared case file in `spec/` for the commit and the refusals
-
-### E25.4 Docs
-- [ ] `docs/dev/concurrency.md` (level 4: transaction), `http/` page, client pages, `llms-agents.md`, CHANGELOG, the backlog item closed
-
-## Exit criteria
-
-- The transfer example above passes in Rails, with a raise at each line leaving no change.
-- The kill tests pass 200 rounds (`-short` runs 5).
-- `make bench`: every check PASS, with the new `tx` checks.
-- A write outside a transaction is not slower (`live write p99` budget unchanged).
-
-## Out of scope
-
-- Reads inside the transaction that see its own writes.
-- A snapshot across collections (see above).
-- Direct collections, streams, patterns.
-- Savepoints and nested transactions (a nested block joins the outer one).
+Work it would need: tests that kill the daemon at each step (before the
+intent, after it, between two applies, before `done`); `internal/txlog`;
+the hold of the writers in name order; the redo in recovery;
+`wal_retention` keeping a file with a pending `_gtx`; a `tx` part in
+`make bench` (acked transactions lost or half written by a `kill -9`: 0).
