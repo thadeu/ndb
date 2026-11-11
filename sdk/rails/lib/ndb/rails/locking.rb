@@ -28,6 +28,13 @@ module Ndb
         Rails.client.lock(collection_name, id, **options)
       end
 
+      # POST /{coll}/_lock, see Ndb::Client#lock_set.
+      def ndb_lock_set(ids, **options)
+        ensure_collection!
+
+        Rails.client.lock_set(collection_name, ids, **options)
+      end
+
       # The record of a lock answer, holding the lock.
       def instantiate_locked(held)
         record = instantiate(held["doc"])
@@ -44,14 +51,14 @@ module Ndb
       raise RecordNotSaved, "Cannot lock a record that is not saved" unless persisted?
 
       held = self.class.ndb_lock(id, **{ ttl: ttl, wait: wait }.compact)
-      fresh = self.class.instantiate(held["doc"])
 
-      @attributes = fresh.instance_variable_get(:@attributes)
-      @version = fresh.version
-      @associations = nil
+      refresh_from!(held["doc"])
 
-      clear_changes_information
-      hold!(held["token"])
+      if (tx = current_transaction)
+        tx.joined(self, held["token"])
+      else
+        hold!(held["token"])
+      end
 
       self
     end
@@ -108,6 +115,32 @@ module Ndb
     end
 
     private
+
+    # Reads the record again from a document of a lock answer.
+    def refresh_from!(doc)
+      fresh = self.class.instantiate(doc)
+
+      @attributes = fresh.instance_variable_get(:@attributes)
+      @version = fresh.version
+      @associations = nil
+
+      clear_changes_information
+    end
+
+    # A lock that a transaction holds: the transaction releases it.
+    def hold_in_transaction!(token)
+      @lock_token = token
+      @lock_scoped = true
+    end
+
+    def written_in_transaction!(version)
+      @version = version
+    end
+
+    def leave_transaction!
+      @lock_token = nil
+      @lock_scoped = false
+    end
 
     def release_after_error
       unlock! if @lock_token && !@lock_scoped

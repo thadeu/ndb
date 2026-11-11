@@ -386,7 +386,7 @@ curl --unix-socket /run/ndb/ndb.sock http://ndb/accounts/_tx -d '{
 # {"results":[{"_id":"a1","_v":5},{"_id":"a2","_v":3},{"_id":"t1","_v":1}]}
 ```
 
-The SDK methods for transactions come in a later release.
+The SDKs wrap it: see [Concurrency](../concurrency.md#_4-transaction-many-writes-all-or-none).
 
 ## `POST /{coll}/_unlock/{id}`
 

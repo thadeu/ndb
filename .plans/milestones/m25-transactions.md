@@ -1,6 +1,6 @@
 # M25 — Transactions (one collection)
 
-Status: in progress (E25.1 done) · Depends on: locks (done) · Docs: `docs/dev/concurrency.md`
+Status: done (one collection) · Depends on: locks (done) · Docs: `docs/dev/concurrency.md`
 
 ## Scope (decided)
 
@@ -122,8 +122,10 @@ Taken as proposed when E25.1 started; change them before E25.2 if needed.
 2. An `update` of the transaction that matches nothing (its guard failed,
    or no such id) fails the whole transaction (`409 tx_conflict`). Outside
    a transaction it is `matched: 0`.
-3. Rails: `before_*` callbacks run at `update!`; `after_save` runs after
-   the commit, at the end of the block.
+3. Rails: the callbacks (`before_*` and `after_*`) run at each call in the
+   block, as in ActiveRecord (where `after_save` also runs inside the
+   transaction); the write happens at the commit. There is no
+   `after_commit` yet.
 
 ## Design
 
@@ -214,12 +216,12 @@ recovery.
 - [x] `server`: the routes, scope (write), errors, the partitioned case (one partition per transaction, else `not_supported`), docs, error table
 
 ### E25.2 SDKs
-- [ ] Rails: `Model.transaction { }` and `Model.transaction(lock:, ttl:, wait:) { }`, the writes collected, `Ndb::Rollback`, `lock!` inside the block joins the transaction, locks released at the end, another collection refused, the callback order of decision 3
-- [ ] Go `coll.Tx(ctx, ids, fn)`, TypeScript `coll.transaction(ids, fn)`, Ruby `coll.transaction(lock:) { |tx, docs| }`: `tx.insert / update / delete`, the rollback error, `ttl` and `wait`
-- [ ] a shared case file in `spec/` for the commit and the refusals
+- [x] Rails: `Model.transaction { }` and `Model.transaction(lock:, ttl:, wait:) { }`, the writes collected, `Ndb::Rollback`, `lock!` inside the block joins the transaction, locks released at the end, another collection refused, the callback order of decision 3
+- [x] Go `coll.Tx(ctx, ids, fn)`, TypeScript `coll.transaction(ids, fn)`, Ruby `coll.transaction(lock:) { |tx, docs| }`: `tx.insert / update / delete`, the rollback error, `ttl` and `wait`
+- [ ] a shared case file in `spec/` for the commit and the refusals. Not done: the spec runners know only `bulk` writes and reads with expected rows; a `tx` case needs a new op and an error shape in the four runners, and each SDK already tests the same against a real daemon.
 
 ### E25.3 Docs
-- [ ] `docs/dev/concurrency.md` (level 4: transaction, and its limit of one collection), `http/documents.md`, client pages, `llms-agents.md`, CHANGELOG
+- [x] `docs/dev/concurrency.md` (level 4: transaction, and its limit of one collection), `http/documents.md`, client pages, `llms-agents.md`, CHANGELOG
 
 ## Exit criteria
 

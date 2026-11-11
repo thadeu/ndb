@@ -112,6 +112,16 @@ await calls.lock('c1', async (call) => {
   call.status = 'billed'
 })
 
+// transaction: the writes of the function go in one step, all or none. The
+// ids are locked first (all or none) and given by _id; [] takes no lock. A
+// throw writes nothing; throw new Rollback() stops with no error. A stale or
+// missing document fails it with TxConflictError.
+await calls.transaction(['c1', 'c2'], (tx, docs) => {
+  tx.update({ ...docs.c1!, status: 'merged' })
+  tx.delete('c2')
+  tx.insert({ _id: 'c3', status: 'new', caller: '+5511999990003', at: new Date() })
+}, { ttl: 5 })
+
 // Atomic update by query. A guarded decrement: exactly one of two racing calls wins.
 await stock.updateBy({ _id: 'a', qty: { $gte: 1 } }, { $inc: { qty: -1 } })
 

@@ -170,6 +170,66 @@ export class Collection<F extends Fields> {
     }
   }
 
+  // A transaction of this collection (POST /{coll}/_tx). With ids, it first
+  // locks those documents, all of them or none (POST /{coll}/_lock), and
+  // gives them to fn by _id, read under the lock. fn records the writes with
+  // tx.insert, tx.update and tx.delete; they are written when fn returns, all
+  // of them or none, and the locks are released.
+  //
+  // A throw in fn writes nothing; throw new Rollback() to stop with no error.
+  // A refused commit writes nothing: TxConflictError when an update or a
+  // delete matches nothing (a missing document, or a stale version),
+  // LockExpiredError when the locks outlived ttl (default 30 s: the time
+  // limit of the transaction). wait is how long to wait for a document that
+  // another caller holds (then LockedError). Reads inside fn see the stored
+  // data, not the writes of the block.
+  async transaction(
+    ids: string[],
+    fn: (tx: Tx<F>, docs: Record<string, Row<F>>) => void | Promise<void>,
+    opts: LockOptions = {},
+  ): Promise<void> {
+    const tx = new Tx<F>()
+    const docs: Record<string, Row<F>> = {}
+    const tokens: string[] = []
+
+    if (ids.length > 0) {
+      const held = await this.send<{ token: string; docs: Record<string, unknown>[] }>('POST', '_lock', { ids, ttl: opts.ttl, wait: opts.wait })
+
+      tokens.push(held.token)
+
+      for (const raw of held.docs) {
+        const doc = this.decode(raw) as Row<F>
+
+        docs[doc._id] = doc
+        tx.locked(doc)
+      }
+    }
+
+    try {
+      await fn(tx, docs)
+    } catch (err) {
+      await this.unlockAll(tokens)
+
+      if (err instanceof Rollback) return
+
+      throw err
+    }
+
+    if (tx.ops.length === 0) {
+      await this.unlockAll(tokens)
+
+      return
+    }
+
+    await this.send('POST', '_tx', { ops: tx.ops, locks: tokens, unlock: true })
+  }
+
+  private async unlockAll(tokens: string[]): Promise<void> {
+    for (const token of tokens) {
+      await this.send('POST', '_unlock', { token }).catch(() => undefined)
+    }
+  }
+
   // Calls fn with doc and writes the top-level fields that fn changed, in
   // one update with opts (a guard, or the token of a lock). It returns the
   // document as written (doc when fn changed nothing), or null when the
@@ -520,4 +580,64 @@ function changes(before: Record<string, unknown>, after: Record<string, unknown>
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+// Stops a transaction block: nothing is written and transaction resolves.
+export class Rollback extends Error {
+  constructor(message = 'rollback') {
+    super(message)
+    this.name = 'Rollback'
+  }
+}
+
+interface TxOp {
+  op: 'insert' | 'update' | 'delete'
+  id?: string
+  doc?: unknown
+  query?: Record<string, unknown>
+  update?: Record<string, Record<string, unknown>>
+}
+
+// The writes of a transaction block. Nothing is sent until the block ends.
+export class Tx<F extends Fields> {
+  readonly ops: TxOp[] = []
+  private readonly before = new Map<string, Record<string, unknown>>()
+
+  // Records the insert of doc. A doc without _id gets one from the daemon.
+  insert(doc: Input<F>): void {
+    this.ops.push({ op: 'insert', doc })
+  }
+
+  // Records the write of row. A document that the transaction locked gets
+  // the fields that changed since the lock; any other gets all its fields,
+  // guarded by its _v: a document that changed since it was read fails the
+  // transaction (TxConflictError).
+  update(row: Row<F>): void {
+    const before = this.before.get(row._id)
+
+    if (before) {
+      const ops = changes(before, row as Record<string, unknown>)
+
+      this.before.set(row._id, structuredClone(row) as Record<string, unknown>)
+
+      if (ops) this.ops.push({ op: 'update', id: row._id, update: ops })
+
+      return
+    }
+
+    const set = Object.fromEntries(Object.entries(row).filter(([k, v]) => !lockSkip.has(k) && v !== undefined))
+
+    this.ops.push({ op: 'update', id: row._id, update: { $set: set }, query: row._v ? { _v: row._v } : undefined })
+  }
+
+  // Records the delete of the document with this _id. A missing document
+  // fails the transaction (TxConflictError).
+  delete(id: string): void {
+    this.ops.push({ op: 'delete', id })
+  }
+
+  // Keeps a locked document as it was, for update.
+  locked(row: Row<F>): void {
+    this.before.set(row._id, structuredClone(row) as Record<string, unknown>)
+  }
 }

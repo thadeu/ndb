@@ -124,6 +124,17 @@ calls.lock("c1") do |call|
 end
 calls.update("c9", { "$inc" => { hits: 1 } }, upsert: true)            # create c9 when missing
 
+# transaction: the writes of the block go in one step, all or none. lock:
+# takes the locks first (all or none) and yields the documents by _id. An
+# exception writes nothing; raise Ndb::Rollback to stop with no error. A
+# stale or missing document fails it with Ndb::TxConflict.
+calls.transaction(lock: %w[c1 c2], ttl: 5) do |tx, docs|
+  docs["c1"]["status"] = "merged"
+  tx.update(docs["c1"])
+  tx.delete("c2")
+  tx.insert(_id: "c3", status: "new")
+end
+
 stock.update_by({ sku: "a", qty: { "$gte" => 1 } }, { "$inc" => { qty: -1 } })   # guarded decrement
 calls.update_by({ status: "failed" }, { "$set" => { status: "retry" } }, many: true)   # => {"matched" => 3, "modified" => 3}
 

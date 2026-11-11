@@ -9,7 +9,11 @@ import (
 	"time"
 )
 
-// LockOption changes Lock.
+// unlockTimeout bounds a release, which runs after the ctx of the call may
+// be done.
+const unlockTimeout = 5 * time.Second
+
+// LockOption changes Lock and Tx.
 type LockOption func(*lockOptions)
 
 type lockOptions struct {
@@ -102,7 +106,7 @@ func (c *Coll[T]) Lock(ctx context.Context, id string, fn func(doc *T) error, op
 // unlock releases the lock. It runs after ctx may be done, so it has its
 // own short deadline; a lock that it cannot release ends with its ttl.
 func (c *Coll[T]) unlock(id, token string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), unlockTimeout)
 	defer cancel()
 
 	body, _ := json.Marshal(map[string]string{"token": token})
