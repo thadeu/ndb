@@ -232,6 +232,52 @@ const bytes = await db.getBlob(blob) // Uint8Array
 
 :::
 
+## `GET /_cluster/settings`
+
+The settings of the daemon that live in its data dir, not in `ndb.yml`: the encryption key and the log settings. Each setting has its value and where it comes from. Over TCP it needs a token with admin of `*`.
+
+```bash
+curl --unix-socket /run/ndb/ndb.sock http://ndb/_cluster/settings
+```
+
+```json
+{
+  "encryption": {"key": "e5af****…****edff", "key_id": "k1", "fingerprint": "eca62a9e574bcd0a", "source": "made", "created_at": "2026-11-11T23:03:03Z"},
+  "log": {
+    "level": {"value": "info", "source": "default"},
+    "body_max": {"value": 2048, "source": "default"},
+    "slow_ms": {"value": 1000, "source": "yml"}
+  }
+}
+```
+
+| `source` | Meaning |
+|---|---|
+| `flag`, `env`, `yml` | set by a flag, the env (`NDB_LOG_LEVEL`) or `ndb.yml` at start: it wins over a stored value at the next start |
+| `stored` | set by `PUT /_cluster/settings`, kept in the data dir |
+| `default` | the default |
+| `made`, `stored`, `env` (the key) | the key was made by this daemon, read from the data dir, or given in `NDB_ENCRYPTION_KEY` |
+
+The key is never in an answer: only its first and last 4 hex characters, and a fingerprint (the first 8 bytes of its SHA-256). See [The encryption key](../security.md#the-encryption-key).
+
+## `PUT /_cluster/settings`
+
+Changes settings at run time and stores them in the data dir, so they hold across a restart and go in the backups. Today the settings are the log ones:
+
+```bash
+curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/_cluster/settings -d '{"log":{"level":"debug","slow_ms":250}}'
+```
+
+| Body key | Type | Meaning |
+|---|---|---|
+| `log.level` | string | `debug`, `info`, `warn`, `error` or `quiet` |
+| `log.body_max` | int | the largest body or document in a log line, in bytes |
+| `log.slow_ms` | int | a request over this is a `warn` line |
+
+**Answer:** the settings, as `GET`. When `ndb.yml`, the env or a flag also sets a setting you changed, `warnings` says that it wins at the next start. **Errors:** `400 invalid_request` for an unknown key, a bad value, or `encryption` (the key cannot change: no rotation yet); `403 forbidden` over TCP without admin of `*`.
+
+`PUT /_log` changes the same log settings until the daemon stops, with nothing stored.
+
 ## `GET /_log`
 
 The log settings of the daemon: `{"level":"info","format":"text","body_max":2048,"slow_ms":1000}`. Over TCP it needs a token with admin of `*`, else `403 forbidden`. See [Logs](../operations.md#logs).

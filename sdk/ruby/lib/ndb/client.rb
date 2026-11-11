@@ -343,6 +343,18 @@ module Ndb
       json(request("GET", "/_stats", nil))
     end
 
+    # GET /_cluster/settings: the encryption key, masked, and the log
+    # settings, each with where its value comes from.
+    def settings
+      json(request("GET", "/_cluster/settings", nil))
+    end
+
+    # PUT /_cluster/settings: changes settings and stores them in the data
+    # dir, such as { log: { level: "debug" } }.
+    def put_settings(settings)
+      json(request("PUT", "/_cluster/settings", settings))
+    end
+
     # GET /_size: disk use per collection and per part.
     def size
       json(request("GET", "/_size", nil))

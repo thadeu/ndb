@@ -51,6 +51,32 @@ func logOptions(cfg config.Config, getenv func(string) string, fl logFlags) (log
 	return logging.Options{Level: lv, Format: f, BodyMax: cfg.LogBodyMax, SlowMs: cfg.LogSlowMs}, nil
 }
 
+// logSources is where each log setting comes from at start, for
+// /_cluster/settings: flag, env, yml, or default (then the value stored in
+// the settings of the data dir is used, if any).
+func logSources(cfg config.Config, getenv func(string) string, levelFlag bool) map[string]string {
+	src := map[string]string{}
+
+	switch {
+	case levelFlag:
+		src["level"] = "flag"
+	case getenv("NDB_LOG_LEVEL") != "":
+		src["level"] = "env"
+	case cfg.InFile["log_level"]:
+		src["level"] = "yml"
+	}
+
+	if cfg.InFile["log_body_max"] {
+		src["body_max"] = "yml"
+	}
+
+	if cfg.InFile["slow_ms"] {
+		src["slow_ms"] = "yml"
+	}
+
+	return src
+}
+
 // setupLog makes the logger of the daemon and the slog default, so the
 // packages that use slog.Default (collection, writer) follow the level.
 func setupLog(w io.Writer, o logging.Options) *logging.Logger {

@@ -212,7 +212,15 @@ ndb serve -log-level debug -log-format json
 NDB_LOG_LEVEL=warn ndb serve
 ```
 
-`PUT /_log` changes the level, `log_body_max` and `slow_ms` at run time, without a restart. What each level writes, the size guard and rotation: [Operations, Logs](operations.md#logs).
+`PUT /_log` changes the level, `log_body_max` and `slow_ms` at run time, until the daemon stops. `PUT /_cluster/settings` changes them and stores them in the data dir: they hold across a restart, unless a flag, the env or `ndb.yml` sets the same one ([System](http/system.md#put-cluster-settings)). What each level writes, the size guard and rotation: [Operations, Logs](operations.md#logs).
+
+## Encryption key
+
+`NDB_ENCRYPTION_KEY` (64 hex characters) gives the encryption key of the data dir. Without it the daemon makes one at the first start and keeps it in the data dir. Never in `ndb.yml`. See [The encryption key](security.md#the-encryption-key).
+
+```sh
+NDB_ENCRYPTION_KEY=$(cat /run/secrets/ndb_key) ndb serve
+```
 
 ## Authentication
 

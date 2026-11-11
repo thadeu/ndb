@@ -35,15 +35,15 @@ crypto in every SDK.
 
 ## Design
 
-- **Stored value:** `"enc:v1:<base64(nonce + ciphertext + tag)>"`, AES-256-GCM
+- **Stored value:** `"ndb:e1:k1:<base64url(nonce + ciphertext + tag)>"`, AES-256-GCM
   with a random nonce, the key derived from the master key. It is what the
   WAL, the segments, the backups and `watch` over a token with no right
-  hold. With the default key (in the settings, so in the backups) this
+  hold (`e1` is the format, `k1` the key: a later rotation writes `k2`). With the default key (in the settings, so in the backups) this
   keeps the value out of the API, the logs and the console; to protect the
   files too, the key goes in `NDB_ENCRYPTION_KEY` (see M27).
 - **Blind index:** for a field in `blind`, the daemon also stores
-  `<field>_bidx`: HMAC-SHA256 of the normalized value, with a second
-  derived key. An index, a unique key or a compound index on the field
+  `<field>_bidx`: `ndb:h1:k1:<hex>`, HMAC-SHA256 of the normalized value,
+  with a second derived key. An index, a unique key or a compound index on the field
   uses `<field>_bidx`. A filter with `$eq` or `$in` on the field is
   rewritten to it.
 - **Normalization** per field, declared with it: none (default), `digits`
@@ -55,7 +55,7 @@ crypto in every SDK.
   value back decrypted; `$distinct` counts the hashes. `$sum`, `$min`,
   `$max`, `$avg` of an encrypted field are refused.
 - **Who reads the value:** the unix socket and a token with the right
-  `decrypt` get the value; any other token gets `"enc:v1:..."`. The
+  `decrypt` get the value; any other token gets `"ndb:e1:k1:..."`. The
   console shows "encrypted" and never the value.
 - **Cost, measured** (AES-256-GCM + base64, one core): 0.1 µs for a CPF,
   3 µs for a 2 KB `.pem`, 11 µs for an 8 KB `.pfx`; the HMAC of a CPF
@@ -86,3 +86,9 @@ crypto in every SDK.
 - Range, sort, prefix or math on an encrypted field.
 - Key rotation (M27 leaves the version for it).
 - The app-held key mode.
+
+## The key on the hot path
+
+No client reads the key: `/_cluster/settings` never gives it. The daemon encrypts and decrypts.
+The two derived keys (`ndb:e1`, `ndb:h1`) and the AES-GCM cipher are made once, at open, and
+kept in the `DB`. A read or a write does no HKDF, no settings read and no lock.

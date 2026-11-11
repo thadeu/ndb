@@ -41,6 +41,18 @@ export class Ndb {
     return this.transport.request('GET', '/_stats')
   }
 
+  // The settings of the daemon (GET /_cluster/settings): the encryption key,
+  // masked, and the log settings, each with where its value comes from.
+  settings(): Promise<Record<string, unknown>> {
+    return this.transport.request('GET', '/_cluster/settings')
+  }
+
+  // Changes settings and stores them in the data dir (PUT
+  // /_cluster/settings), such as { log: { level: 'debug' } }.
+  putSettings(settings: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.transport.request('PUT', '/_cluster/settings', settings)
+  }
+
   // Disk use per collection and per part (GET /_size).
   size(): Promise<Record<string, unknown>> {
     return this.transport.request('GET', '/_size')

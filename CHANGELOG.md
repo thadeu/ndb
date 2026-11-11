@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **`GET` and `PUT /_cluster/settings`**: the settings of the daemon that live in its data dir, as in Elasticsearch. `PUT {"log":{"level":"debug","slow_ms":250}}` changes the log settings and stores them, so they hold across a restart and go in the backups (`PUT /_log` still changes them until the next start only). Each setting shows where its value comes from (`flag`, `env`, `yml`, `stored`, `default`); a flag, the env or `ndb.yml` wins at the next start, and the answer says so. Admin of `*`. In the SDKs: Go `db.Settings`, `db.PutSettings`; TypeScript `db.settings()`, `db.putSettings()`; Ruby `client.settings`, `client.put_settings`.
+- **An encryption key per data dir**, for the encrypted fields of the next release. The daemon takes `NDB_ENCRYPTION_KEY` (64 hex characters), else the key kept in the data dir, else it makes one at the first start (a `warn` line, once). The settings are a log of their own, `_system/settings.wal` (mode `0600`), with the format of the WAL; a backup holds them, the key with them, so a restore needs nothing. An env key is not written, only its fingerprint, so a start with no env or another key is an error. The key is never in an answer or a log line: `GET /_cluster/settings` shows `e5af****…****edff` and a fingerprint. See `docs/dev/security.md`.
+
 ## [1.20.1] - 2026-11-11
 
 ### Added

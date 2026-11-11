@@ -2,6 +2,7 @@ package ndb
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 )
 
@@ -34,6 +35,33 @@ func (db *DB) Stats(ctx context.Context) (map[string]any, error) {
 	var out map[string]any
 
 	return out, db.get(ctx, "/_stats", &out)
+}
+
+// Settings are the settings of the daemon (GET /_cluster/settings): the
+// encryption key, masked, and the log settings, each with where its value
+// comes from.
+func (db *DB) Settings(ctx context.Context) (map[string]any, error) {
+	var out map[string]any
+
+	return out, db.get(ctx, "/_cluster/settings", &out)
+}
+
+// PutSettings changes settings and stores them in the data dir (PUT
+// /_cluster/settings), such as {"log": {"level": "debug"}}.
+func (db *DB) PutSettings(ctx context.Context, settings map[string]any) (map[string]any, error) {
+	body, err := json.Marshal(settings)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := db.do(ctx, http.MethodPut, "/_cluster/settings", body)
+	if err != nil {
+		return nil, err
+	}
+
+	var out map[string]any
+
+	return out, decodeBody(resp, &out)
 }
 
 // Size is the disk use per collection and per part (GET /_size).

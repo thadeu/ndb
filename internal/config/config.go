@@ -111,6 +111,15 @@ type Config struct {
 	LogBodyMax int `yaml:"log_body_max"`
 	LogSlowMs  int `yaml:"slow_ms"`
 
+	// EncryptionKey is the value of NDB_ENCRYPTION_KEY: 64 hex characters,
+	// or "" to use the key in the settings of the data dir (see
+	// internal/settings). It is never read from ndb.yml.
+	EncryptionKey string `yaml:"-"`
+
+	// InFile has the top-level keys that ndb.yml sets, so a setting of the
+	// file wins over the same setting of /_cluster/settings.
+	InFile map[string]bool `yaml:"-"`
+
 	// CORSOrigins are the browser origins (https://app.example.com) that
 	// may call the daemon. Empty (default): every request with an Origin
 	// header is refused (CSRF guard).
@@ -259,6 +268,7 @@ func Load(path string) (Config, error) {
 
 	cfg := f.Config
 	cfg.Collections = map[string]catalog.Def{}
+	cfg.InFile = topKeys(data)
 
 	if cfg.Listen.UnixModeText != "" {
 		if cfg.Listen.UnixMode, err = ParseUnixMode(cfg.Listen.UnixModeText); err != nil {
@@ -522,4 +532,20 @@ func ParseIdleClose(s string) (time.Duration, error) {
 	}
 
 	return d, nil
+}
+
+// topKeys are the top-level keys of a YAML document (none when it is not a
+// mapping).
+func topKeys(data []byte) map[string]bool {
+	var m map[string]any
+
+	_ = yaml.Unmarshal(data, &m)
+
+	out := make(map[string]bool, len(m))
+
+	for k := range m {
+		out[k] = true
+	}
+
+	return out
 }

@@ -1,6 +1,6 @@
 # M27 — Server settings and the encryption key
 
-Status: not started · Depends on: nothing · Needed by: [M28](m28-encrypted-fields.md)
+Status: E27.1 and E27.2 done (but the console) · Depends on: nothing · Needed by: [M28](m28-encrypted-fields.md)
 
 ## Goal
 
@@ -44,7 +44,7 @@ start error (the encrypted values would not be readable).
 
 ### Where the settings live
 
-A system log of its own, `<data-dir>/_system/wal/`, with the same format
+A system log of its own, `<data-dir>/_system/settings.wal`, with the same format
 and the same recovery as the WAL of a collection: one line per change,
 CRC, fsync before the answer. `ndb backup` copies it with the collections,
 and `ndb restore` brings it back first, so the key is there before any
@@ -74,18 +74,27 @@ change (no rotation), so a `PUT` of it is `400`. `GET` also shows the log
 level, so one call tells the state of the daemon; the log level keeps its
 route `PUT /_log`.
 
+## Built
+
+- The settings at start: the key and `log.level`, `log.body_max`, `log.slow_ms`. A setting of a flag, the env or `ndb.yml` wins; else the stored one; else the default. `GET` gives each one with its `source`.
+- The key: env (only its fingerprint is written; a start with no env or another key is an error), else stored, else made (a `warn` line, once). Masked as `e5af****…****edff`.
+- The stored format of M28 is `ndb:e1:k1:<base64url>` (`e1`: AES-256-GCM; `k1`: the key) and `ndb:h1:k1:<hex>` for a blind index.
+
 ## Epics
 
-### E27.1 Daemon
-- [ ] tests first: the order env, stored, made; the stored key survives a restart and a `kill -9` while it is written; an env key that differs from the stored one is a start error; a key that is not 64 hex is a start error; `GET /_cluster/settings` has the key masked only (a test greps the whole answer and every log line for the key); backup and restore bring the key; scope (admin)
-- [ ] `internal/settings`: the system log (`_system/wal`), load, make, mask, derive (HKDF) the keys of M28
-- [ ] `server`: `GET` and `PUT /_cluster/settings`
-- [ ] backup and restore: the system log first
+### E27.1 Daemon (done)
+- [x] tests first: env, stored, made; a restart keeps the key; a cut last line of the settings log is dropped; an env key is not written and is checked; a bad env is a start error; the answer and the log have the key masked only; backup and restore bring the settings and the key; the log settings stored, applied at start, and beaten by `ndb.yml`
+- [x] `internal/settings`: the log, the key, the mask, `Derive` (HKDF-SHA256) for M28
+- [x] `server`: `GET` and `PUT /_cluster/settings` (admin of `*`)
+- [x] backup (`settings` section) and restore; offline backup and restore read `NDB_ENCRYPTION_KEY`
 
-### E27.2 SDKs and docs
-- [ ] Go, Ruby, TypeScript: `settings()` (read)
-- [ ] `docs/dev/security.md` (the table above), `configuration.md`, `operations.md` (backup and restore with a key), `http/system.md`, `llms-agents.md`, CHANGELOG
-- [ ] the console: the masked key and where it came from
+### E27.2 SDKs and docs (done, but the console)
+- [x] Go, Ruby, TypeScript: read and change the settings
+- [x] `http/system.md`, `security.md`, `configuration.md`, `operations.md`, `llms-agents.md`, CHANGELOG
+- [ ] the console: the masked key and the log settings (later)
+
+### Next settings (not started)
+`idle_close`, `max_conns`, `max_watches`, `cors_origins`, `allowed_hosts`, the auth limits and `group_limit`: each one read at start today; each needs a test that it changes with no restart.
 
 ## Exit criteria
 

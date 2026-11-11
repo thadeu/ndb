@@ -149,6 +149,10 @@ func run(args []string) error {
 		return errors.New("-max-conns and -max-watches must be zero or more")
 	}
 
+	cfg.EncryptionKey = os.Getenv("NDB_ENCRYPTION_KEY")
+
+	logSrc := logSources(cfg, os.Getenv, set["log-level"])
+
 	logOpts, err := logOptions(cfg, os.Getenv, logFlags{
 		level:     *logLevel,
 		format:    *logFormat,
@@ -192,7 +196,7 @@ func run(args []string) error {
 
 	defer out.Close()
 
-	return serve(ctx, cfg, token, setupLog(out, logOpts))
+	return serve(ctx, cfg, token, setupLog(out, logOpts), logSrc)
 }
 
 // listFlag is a flag that can be given more than once.
@@ -267,7 +271,7 @@ func scopedTokens(tokens []config.Token) ([]server.Token, error) {
 
 // serve listens, recovers the data dir, and stops in order when ctx ends:
 // no new requests, in-flight requests finish, then the collections close.
-func serve(ctx context.Context, cfg config.Config, token string, lg *logging.Logger) error {
+func serve(ctx context.Context, cfg config.Config, token string, lg *logging.Logger, logSrc map[string]string) error {
 	log := lg.Logger
 
 	log.Info("ndb starting",
@@ -298,6 +302,7 @@ func serve(ctx context.Context, cfg config.Config, token string, lg *logging.Log
 	srv.SetToken(token)
 	srv.SetTokens(scoped)
 	srv.SetLogger(lg)
+	srv.SetLogSources(logSrc)
 	srv.SetSecurity(security(cfg))
 
 	errc := make(chan error, len(listeners))
@@ -322,6 +327,7 @@ func serve(ctx context.Context, cfg config.Config, token string, lg *logging.Log
 	}
 
 	srv.Attach(db)
+	srv.ApplyStoredLog(db)
 
 	log.Info("ndb ready",
 		"version", version,

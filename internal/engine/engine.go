@@ -27,6 +27,7 @@ import (
 	"github.com/thadeu/ndb/internal/lock"
 	"github.com/thadeu/ndb/internal/locks"
 	"github.com/thadeu/ndb/internal/metrics"
+	"github.com/thadeu/ndb/internal/settings"
 	"github.com/thadeu/ndb/internal/tailer"
 	"github.com/thadeu/ndb/internal/writer"
 )
@@ -44,6 +45,11 @@ type DB struct {
 	log  *slog.Logger
 	lock *lock.Lock
 	cat  *catalog.Catalog
+
+	// settings are the settings of the data dir (/_cluster/settings), and
+	// key the encryption key of the daemon (internal/settings).
+	settings *settings.Store
+	key      settings.Key
 
 	// blobs is the content-addressed store under <data_dir>/blobs.
 	blobs *blob.Store
@@ -112,6 +118,13 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		return nil, err
 	}
 
+	st, key, err := openSettings(cfg, log)
+	if err != nil {
+		lk.Release()
+
+		return nil, err
+	}
+
 	cat, err := catalog.Open(filepath.Join(cfg.DataDir, "catalog.bolt"), catalog.Options{AllowImplicit: cfg.AllowImplicit})
 	if err != nil {
 		lk.Release()
@@ -143,6 +156,8 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		log:        log,
 		lock:       lk,
 		cat:        cat,
+		settings:   st,
+		key:        key,
 		blobs:      blobs,
 		cursors:    cur,
 		ctx:        ctx,
@@ -579,4 +594,35 @@ func (db *DB) AllStats() []Stats {
 	slices.SortFunc(out, func(a, b Stats) int { return strings.Compare(a.Name, b.Name) })
 
 	return out
+}
+
+// openSettings reads the settings of the data dir and the encryption key.
+// A key made now is logged once, with no part of it.
+func openSettings(cfg config.Config, log *slog.Logger) (*settings.Store, settings.Key, error) {
+	st, err := settings.Open(cfg.DataDir)
+	if err != nil {
+		return nil, settings.Key{}, err
+	}
+
+	key, err := settings.LoadKey(st, cfg.EncryptionKey)
+	if err != nil {
+		return nil, settings.Key{}, fmt.Errorf("encryption key: %w", err)
+	}
+
+	if key.Source == "made" {
+		log.Warn("made an encryption key for this data dir; it is kept in the settings and in every backup. To hold it outside the data dir, set NDB_ENCRYPTION_KEY",
+			"key", key.Masked(), "key_id", key.ID)
+	}
+
+	return st, key, nil
+}
+
+// Settings are the settings of the data dir.
+func (db *DB) Settings() *settings.Store {
+	return db.settings
+}
+
+// Key is the encryption key of the daemon.
+func (db *DB) Key() settings.Key {
+	return db.key
 }

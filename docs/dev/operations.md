@@ -82,6 +82,7 @@ The file is readable with `head`, `grep` and `jq`:
 
 ```json
 {"ndb_backup":1,"version":"0.2.0","created_at":"2026-11-06T14:13:52Z","collections":["users"]}
+{"_section":"settings","key":"log.level","value":"debug"}
 {"_section":"catalog","name":"users","definition":{"name":"users","write":"engine","unique":["email"]}}
 {"_section":"cursor","collection":"users","consumer":"mailer","pos":"e2.1"}
 {"_section":"wal","collection":"users"}
@@ -94,6 +95,7 @@ The file is readable with `head`, `grep` and `jq`:
 | Line | Meaning |
 |---|---|
 | header | the first line; marks the file as an ndb backup, with the format and daemon versions |
+| `settings` | the settings of the data dir (`/_cluster/settings`), the [encryption key](security.md#the-encryption-key) with them unless it comes from `NDB_ENCRYPTION_KEY` |
 | `catalog` | the definition of each collection (indexes, unique, TTL, write mode) |
 | `cursor` | the saved position of each `watch` consumer |
 | `wal` | the WAL lines of one collection, as stored, each with its `_crc` |
