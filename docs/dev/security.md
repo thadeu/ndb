@@ -130,10 +130,34 @@ curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/users -d '{"encrypted":["
 - `e1` is the format and `k1` the key. Each value is bound to its collection and field: a value copied to another field or collection does not decrypt.
 - **Who reads the value:** the unix socket, the token of `-token-file`, and a token with `decrypt` on the collection get the plain value, on every read (`_doc`, `_search`, `_aggregate`, `_watch`, the `doc` of `_update` and `_lock`). Any other token gets the stored `"ndb:e1:k1:..."`.
 - **Writes:** `_doc`, `_bulk`, upsert, `_tx` and `$set` encrypt the field. `$inc`, `$push` and the other operators on it are `400 invalid_query`: they need the value.
-- **Filters:** a filter on the value of an encrypted field finds nothing: the stored value is encrypted. A blind index for `$eq` and `$in` is the next step.
+- **Filters:** only `$exists`. Any other filter on the field is `400 invalid_query`, unless the field is [blind](#blind-fields).
+- **Aggregate:** a stage that reads the field (`"$cpf"` in `$group`, `$project`, `$sum`) is `400 invalid_query`. `$match` follows the filter rules.
 - **Logs:** no request body or document of a collection with encrypted fields goes in a log line, at any level.
 - A field added to `encrypted` later is encrypted from the next write of each document; the documents that are not written again stay as they are.
 - The key protects the files only when it is in `NDB_ENCRYPTION_KEY` (see [The encryption key](#the-encryption-key)). With the default key, encrypted fields keep the value out of the API for tokens with no `decrypt`, the logs and the console.
+
+## Blind fields
+
+A blind field is an encrypted field that a filter can find by its value. The daemon keeps a second value in the document, `<field>_bidx`: an HMAC-SHA256 of the normalized value (`"ndb:h1:k1:<hex>"`), with a key of its own. A filter on the field is changed to a filter on that hash.
+
+```bash
+curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/users \
+  -d '{"encrypted":["cpf"],"blind":{"cpf":"digits"},"unique":["cpf"],"indexes":["cpf"]}'
+curl --unix-socket /run/ndb/ndb.sock http://ndb/users/_search -d '{"query":{"cpf":"390.533.447-05"}}'
+```
+
+| Normalization | The hash of | For |
+|---|---|---|
+| `exact` (default) | the value as sent | tokens, ids |
+| `digits` | only the digits | a CPF or a phone, with or without dots and dashes |
+| `lower` | the value in lower case, with no spaces at the ends | an email |
+
+- **Filters:** `$eq` (or a plain value), `$in`, `$ne`, `$nin` and `$exists`, also inside `$and`, `$or`, `$nor`, in `_count`, `_update_by_query`, `_delete_by_query` and in `$match`. A range, `$regex` or a sort need the value: `400 invalid_query`.
+- **Indexes:** `indexes` and `unique` on the field (also in a compound key) use `<field>_bidx`; the definition shows that name.
+- **Aggregate:** group by the hash, `"$cpf_bidx"`. The `_id` of each group is the hash, not the value.
+- `<field>_bidx` is in no answer. A value sent in it is replaced.
+- The hash of a value is the same for each document, so who reads the files sees which documents have the same value. It does not show the value: the HMAC key is derived from the master key.
+- A field made blind later has a hash from the next write of each document.
 
 ## Logs
 

@@ -162,7 +162,7 @@ func TestSharedCases(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	spec.Run(t, cases, func(t *testing.T) spec.Engine {
+	spec.Run(t, spec.WithoutDaemon(cases), func(t *testing.T) spec.Engine {
 		return &specEngine{t: t, cols: map[string]*collection.Collection{}}
 	})
 }
@@ -173,7 +173,7 @@ func TestSharedCasesAfterSealing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	spec.Run(t, cases, func(t *testing.T) spec.Engine {
+	spec.Run(t, spec.WithoutDaemon(cases), func(t *testing.T) spec.Engine {
 		return &specEngine{t: t, cols: map[string]*collection.Collection{}, seal: true}
 	})
 }
@@ -184,7 +184,7 @@ func TestSharedCasesAfterCompaction(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	spec.Run(t, cases, func(t *testing.T) spec.Engine {
+	spec.Run(t, spec.WithoutDaemon(cases), func(t *testing.T) spec.Engine {
 		return &specEngine{t: t, cols: map[string]*collection.Collection{}, compact: true}
 	})
 }

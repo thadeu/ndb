@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/thadeu/ndb/internal/catalog"
+	"github.com/thadeu/ndb/internal/crypt"
 	"github.com/thadeu/ndb/internal/engine"
 )
 
@@ -41,11 +43,29 @@ func openDoc(r *http.Request, db *engine.DB, coll string, doc json.RawMessage) j
 	}
 
 	def, ok := db.Definition(coll)
-	if !ok || len(def.Encrypted) == 0 || !mayDecrypt(r, coll) {
+	if !ok || len(def.Encrypted) == 0 {
+		return doc
+	}
+
+	doc = crypt.DropFields(doc, hashFields(def))
+
+	if !mayDecrypt(r, coll) {
 		return doc
 	}
 
 	return db.Box().OpenDoc(def.Place(), def.Encrypted, doc)
+}
+
+// hashFields are the <field>_bidx names of the blind fields: never in an
+// answer.
+func hashFields(def catalog.Def) []string {
+	out := make([]string, 0, len(def.Blind))
+
+	for f := range def.Blind {
+		out = append(out, f+crypt.HashSuffix)
+	}
+
+	return out
 }
 
 // openRows is openDoc on each row of a page.

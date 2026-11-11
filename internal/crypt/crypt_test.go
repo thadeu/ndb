@@ -144,3 +144,30 @@ func TestSealDocWithNoFieldIsTheSameDoc(t *testing.T) {
 		t.Fatalf("%s %v", out, err)
 	}
 }
+
+func TestHashDocSetsKeepsAndDropsTheHashField(t *testing.T) {
+	b := testBox(t)
+	blind := map[string]Norm{"cpf": Digits}
+
+	out, err := b.HashDoc("users", blind, json.RawMessage(`{"_id":"u1","cpf":"123.4","cpf_bidx":"forged"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want, _ := b.Hash("users/cpf", Digits, json.RawMessage(`"1234"`))
+	if !strings.Contains(string(out), `"cpf_bidx":"`+want+`"`) || strings.Contains(string(out), "forged") {
+		t.Fatalf("set %s", out)
+	}
+
+	sealed, _ := b.SealDoc("users", []string{"cpf"}, out)
+
+	kept, _ := b.HashDoc("users", blind, sealed)
+	if string(kept) != string(sealed) {
+		t.Fatalf("a sealed value lost its hash: %s", kept)
+	}
+
+	dropped, _ := b.HashDoc("users", blind, json.RawMessage(`{"_id":"u1","cpf_bidx":"old"}`))
+	if string(dropped) != `{"_id":"u1"}` {
+		t.Fatalf("drop %s", dropped)
+	}
+}

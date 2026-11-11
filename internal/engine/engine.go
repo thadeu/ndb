@@ -440,6 +440,8 @@ func (db *DB) attach(def catalog.Def) error {
 	}
 
 	if def.PartitionBy != "" {
+		db.encryptPartitions(def)
+
 		return nil // a logical collection: its partitions hold the data
 	}
 
@@ -451,7 +453,7 @@ func (db *DB) attach(def catalog.Def) error {
 		defer col.leave()
 
 		if col.eng != nil {
-			col.eng.SetEncrypted(def.Encrypted)
+			col.eng.SetEncrypted(def)
 		}
 
 		for _, f := range def.Indexes {
@@ -471,6 +473,18 @@ func (db *DB) attach(def catalog.Def) error {
 	db.cols[def.Name] = col
 
 	return nil
+}
+
+// encryptPartitions gives the encrypted fields of a logical collection to
+// its open partitions.
+func (db *DB) encryptPartitions(def catalog.Def) {
+	for name, col := range db.cols {
+		if col.eng != nil && strings.HasPrefix(name, def.Name+"-") {
+			if part, ok := db.cat.Get(name); ok && part.PartitionOf == def.Name {
+				col.eng.SetEncrypted(catalog.PartitionDef(def, name))
+			}
+		}
+	}
 }
 
 func (db *DB) open(def catalog.Def) (*Collection, error) {

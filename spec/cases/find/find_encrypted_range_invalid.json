@@ -1,0 +1,11 @@
+{
+  "name": "a range on an encrypted field is refused",
+  "collection": "people",
+  "daemon": true,
+  "setup": {
+    "catalog": { "write": "engine", "encrypted": ["cpf"], "blind": { "cpf": "digits" } },
+    "writes": [{ "op": "bulk", "body": { "docs": [{ "_id": "p1", "cpf": "1" }] } }]
+  },
+  "request": { "op": "search", "body": { "query": { "cpf": { "$gt": "0" } } } },
+  "expect": { "error": "invalid_query" }
+}

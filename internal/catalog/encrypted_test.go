@@ -45,3 +45,43 @@ func TestEncryptedRefusesWhatCannotWork(t *testing.T) {
 		}
 	}
 }
+
+func TestBlindFieldsIndexTheirHash(t *testing.T) {
+	c, _ := open(t, catalog.Options{})
+
+	def, err := c.Ensure(catalog.Def{
+		Name:      "users",
+		Encrypted: []string{"cpf", "email"},
+		Blind:     map[string]string{"cpf": "digits", "email": ""},
+		Unique:    []string{"cpf", "org,email"},
+	}, catalog.FromCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Equal(def.Unique, []string{"cpf_bidx", "org,email_bidx"}) || def.Blind["email"] != "exact" {
+		t.Fatalf("unique %v blind %v", def.Unique, def.Blind)
+	}
+
+	def, err = c.Ensure(catalog.Def{Name: "users", Indexes: []string{"email"}}, catalog.FromCode)
+	if err != nil || !slices.Equal(def.Indexes, []string{"email_bidx"}) {
+		t.Fatalf("indexes %v %v", def.Indexes, err)
+	}
+
+	if _, err := c.Ensure(catalog.Def{Name: "users", Blind: map[string]string{"cpf": "lower"}}, catalog.FromCode); !errors.Is(err, catalog.ErrConflict) {
+		t.Fatalf("a changed normalization: %v, want ErrConflict", err)
+	}
+}
+
+func TestBlindNeedsAnEncryptedFieldAndAKnownNorm(t *testing.T) {
+	for _, d := range []catalog.Def{
+		{Name: "a", Blind: map[string]string{"cpf": "digits"}},
+		{Name: "b", Encrypted: []string{"cpf"}, Blind: map[string]string{"cpf": "upper"}},
+	} {
+		c, _ := open(t, catalog.Options{})
+
+		if _, err := c.Ensure(d, catalog.FromCode); !errors.Is(err, catalog.ErrInvalid) {
+			t.Errorf("%s: %v, want ErrInvalid", d.Name, err)
+		}
+	}
+}

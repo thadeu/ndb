@@ -181,3 +181,99 @@ func TestEncryptedAddedLaterReachesAnOpenPartition(t *testing.T) {
 
 	noPlainOnDisk(t, srv.DB().Dir(), cpf)
 }
+
+func TestBlindFieldIsFoundByItsValue(t *testing.T) {
+	srv, h := newHandler(t)
+
+	expectStatus(t, call(h, "PUT", "/users", `{"encrypted":["cpf"],"blind":{"cpf":"digits"},"unique":["cpf"],"indexes":["cpf"]}`), http.StatusOK)
+	call(h, "POST", "/users/_doc", `{"_id":"u1","cpf":"390.533.447-05","name":"Ana"}`)
+	call(h, "POST", "/users/_doc", `{"_id":"u2","cpf":"11122233344","name":"Bia"}`)
+
+	expectCode(t, call(h, "POST", "/users/_doc", `{"_id":"u3","cpf":"`+cpf+`"}`), http.StatusConflict, "unique_violation")
+
+	ids := func(body string) string {
+		rec := call(h, "POST", "/users/_search", body)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", body, rec.Code, rec.Body.String())
+		}
+
+		if strings.Contains(rec.Body.String(), "_bidx") {
+			t.Fatalf("an answer has the hash: %s", rec.Body.String())
+		}
+
+		var out []string
+
+		for line := range strings.SplitSeq(strings.TrimSpace(rec.Body.String()), "\n") {
+			if i := strings.Index(line, `"_id":"`); i >= 0 {
+				out = append(out, line[i+7:i+9])
+			}
+		}
+
+		return strings.Join(out, ",")
+	}
+
+	cases := map[string]string{
+		`{"query":{"cpf":"` + cpf + `"}}`:                        "u1",
+		`{"query":{"cpf":{"$eq":"390.533.447-05"}}}`:             "u1",
+		`{"query":{"cpf":{"$in":["11122233344","x"]}}}`:          "u2",
+		`{"query":{"cpf":{"$ne":"11122233344"}},"sort":{"_id":1}}`: "u1",
+		`{"query":{"$or":[{"cpf":"x"},{"name":"Bia"}]}}`:         "u2",
+		`{"query":{"cpf":{"$exists":true}},"sort":{"_id":1}}`:      "u1,u2",
+	}
+
+	for body, want := range cases {
+		if got := ids(body); got != want {
+			t.Errorf("%s: %s, want %s", body, got, want)
+		}
+	}
+
+	waitIndexReady(t, h, "users")
+
+	if plan := planOf(t, h, "/users/_search", `{"query":{"cpf":"`+cpf+`"}}`); plan != "index:cpf_bidx" {
+		t.Errorf("plan %s, want index:cpf_bidx", plan)
+	}
+
+	for _, body := range []string{`{"query":{"cpf":{"$gt":"1"}}}`, `{"query":{"cpf":{"$regex":"^3"}}}`} {
+		expectCode(t, call(h, "POST", "/users/_search", body), http.StatusBadRequest, "invalid_query")
+	}
+
+	expectCode(t, call(h, "POST", "/users/_aggregate", `{"pipeline":[{"$group":{"_id":"$cpf"}}]}`), http.StatusBadRequest, "invalid_query")
+
+	if rows := aggOf(t, h, "users", `[{"$match":{"cpf":"`+cpf+`"}},{"$project":{"name":1}}]`); len(rows) != 1 || !strings.Contains(rows[0], "Ana") {
+		t.Errorf("aggregate %v", rows)
+	}
+
+	if rec := call(h, "POST", "/users/_count", `{"query":{"cpf":"`+cpf+`"}}`); !strings.Contains(rec.Body.String(), `"count":1`) {
+		t.Errorf("count %s", rec.Body.String())
+	}
+
+	call(h, "POST", "/users/_update/u1", `{"update":{"$set":{"cpf":"222.333.444-55"}}}`)
+
+	if got := ids(`{"query":{"cpf":"22233344455"}}`); got != "u1" {
+		t.Errorf("after a $set: %s", got)
+	}
+
+	if got := ids(`{"query":{"cpf":"` + cpf + `"}}`); got != "" {
+		t.Errorf("the old value still matches: %s", got)
+	}
+
+	if rec := call(h, "GET", "/users/_doc/u1", ""); strings.Contains(rec.Body.String(), "_bidx") || !strings.Contains(rec.Body.String(), "222.333.444-55") {
+		t.Errorf("get %s", rec.Body.String())
+	}
+
+	noPlainOnDisk(t, srv.DB().Dir(), "22233344455")
+}
+
+func TestEncryptedFieldWithoutBlindRefusesAValueFilter(t *testing.T) {
+	_, h := newHandler(t)
+
+	expectStatus(t, call(h, "PUT", "/keys", `{"encrypted":["pem"]}`), http.StatusOK)
+	call(h, "POST", "/keys/_doc", `{"_id":"k1","pem":"x"}`)
+
+	expectCode(t, call(h, "POST", "/keys/_search", `{"query":{"pem":"x"}}`), http.StatusBadRequest, "invalid_query")
+	expectCode(t, call(h, "POST", "/keys/_delete_by_query", `{"query":{"pem":"x"}}`), http.StatusBadRequest, "invalid_query")
+
+	if rec := call(h, "POST", "/keys/_count", `{"query":{"pem":{"$exists":true}}}`); !strings.Contains(rec.Body.String(), `"count":1`) {
+		t.Fatalf("exists %s", rec.Body.String())
+	}
+}

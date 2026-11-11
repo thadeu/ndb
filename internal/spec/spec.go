@@ -23,6 +23,10 @@ type Case struct {
 	Request    Step   `json:"request"`
 	Expect     Expect `json:"expect"`
 
+	// Daemon marks a case that needs the whole daemon (the encryption key,
+	// the decrypt of answers): a runner below the HTTP API skips it.
+	Daemon bool `json:"daemon"`
+
 	File string `json:"-"`
 }
 
@@ -59,6 +63,11 @@ type Engine interface {
 }
 
 // Load reads every *.json file under dir.
+// WithoutDaemon is cases with no case that needs the whole daemon.
+func WithoutDaemon(cases []Case) []Case {
+	return slices.DeleteFunc(slices.Clone(cases), func(c Case) bool { return c.Daemon })
+}
+
 func Load(dir string) ([]Case, error) {
 	var cases []Case
 

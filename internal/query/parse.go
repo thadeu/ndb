@@ -18,6 +18,11 @@ type Options struct {
 
 	// Now is the clock of date math (now-7d); nil is time.Now.
 	Now func() time.Time
+
+	// Field, when set, sees each field condition before it is compiled and
+	// may change its path and its value, or refuse it. Encrypted fields use
+	// it: a condition on a blind field becomes one on its hash.
+	Field func(path string, v any) (string, any, error)
 }
 
 type SortKey struct {
@@ -353,6 +358,14 @@ func (q *Query) compileNot(v any) (Node, error) {
 }
 
 func (q *Query) compileField(path string, v any) (Node, error) {
+	if hook := q.root().opts.Field; hook != nil {
+		var err error
+
+		if path, v, err = hook(path, v); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := checkPath(path); err != nil {
 		return nil, err
 	}

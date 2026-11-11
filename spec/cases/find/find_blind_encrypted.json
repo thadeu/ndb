@@ -1,0 +1,16 @@
+{
+  "name": "find by a blind encrypted field matches the normalized value and returns it plain",
+  "collection": "people",
+  "daemon": true,
+  "setup": {
+    "catalog": { "write": "engine", "encrypted": ["cpf"], "blind": { "cpf": "digits" } },
+    "writes": [
+      { "op": "bulk", "body": { "docs": [{ "_id": "p1", "cpf": "390.533.447-05" }, { "_id": "p2", "cpf": "11122233344" }] } }
+    ]
+  },
+  "request": { "op": "search", "body": { "query": { "cpf": { "$in": ["39053344705"] } } } },
+  "expect": {
+    "ordered": false,
+    "rows": [{ "_id": "p1", "cpf": "390.533.447-05" }]
+  }
+}

@@ -119,6 +119,7 @@ Every collection has `_id`, the primary key. It is not configurable.
 | `path` | glob of source files. Direct mode only. `**` is allowed. A relative glob such as `./logs/*.ndjson` starts at the folder of `ndb.yml`, not at the folder where you start the daemon. |
 | `unique` | fields whose value can belong to one live document only (a natural key such as `email` or `call_id`). Dot paths allowed. A duplicate is `409 unique_violation`. An entry with commas is a compound key: `account_id,email` allows one document per pair. |
 | `encrypted` | top-level fields that the daemon encrypts before the WAL. See [Encrypted fields](security.md#encrypted-fields). |
+| `blind` | encrypted fields that a filter finds by value, with their normalization. See [Blind fields](security.md#blind-fields). |
 | `time` | time field. Used for zone maps, `$dateTrunc`, TTL and retention. |
 | `indexes` | fields with a secondary index (dot paths allowed). |
 | `durability` | `strict` or `relaxed`. Engine mode only. See below. |

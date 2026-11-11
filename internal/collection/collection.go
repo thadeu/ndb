@@ -126,10 +126,10 @@ type Collection struct {
 	def catalog.Def
 	w   *writer.Writer
 
-	// box seals the encrypted fields; encrypted is their list (it changes
-	// when the definition does).
-	box       *crypt.Box
-	encrypted atomic.Pointer[[]string]
+	// box seals the encrypted fields; enc is their list and the blind
+	// fields (it changes when the definition does).
+	box *crypt.Box
+	enc atomic.Pointer[encState]
 
 	head *state
 
@@ -244,7 +244,7 @@ func Open(cfg Config) (*Collection, error) {
 		box:         cfg.Box,
 	}
 
-	c.SetEncrypted(cfg.Def.Encrypted)
+	c.SetEncrypted(cfg.Def)
 
 	c.feed = &engineFeed{fs: cfg.FS, dir: cfg.Dir, buf: cfg.WatchBuffer}
 	c.cursors = cfg.Cursors

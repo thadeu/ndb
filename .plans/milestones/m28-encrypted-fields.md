@@ -74,12 +74,15 @@ The stored value is about 35% bigger.
 - [x] read path: get, `_search`, `_aggregate`, `watch`, `_update` and `_lock` docs; the `decrypt`
   list of tokens. Not yet: the docs that lookup attaches (nested), they stay sealed
 - [x] no body or doc of an encrypted collection in a log line
-- [ ] a filter on an encrypted field without `blind`: `400 invalid_query` but `$exists` (with E28.2)
+- [x] a filter on an encrypted field without `blind`: `400 invalid_query` but `$exists`
 
 ### E28.2 `blind`
-- [ ] the `<field>_bidx` field, the filter rewrite, indexes, `unique`, compound
-- [ ] aggregate rules; `_count`, `_delete_by_query`, `_update_by_query` with the rewrite
-- [ ] a case in `spec/cases` (same answer in every SDK)
+- [x] the `<field>_bidx` field, the filter rewrite (`query.Options.Field`, one hook for every
+  parse), indexes, `unique`, compound
+- [x] aggregate: `$match` rewritten; a stage that reads the field refused; group by `"$cpf_bidx"`
+  (the group `_id` is the hash: no decrypt of group keys)
+- [x] `_count`, `_delete_by_query`, `_update_by_query` with the rewrite
+- [x] cases in `spec/cases` (`"daemon": true`: the collection runner skips them)
 
 ### E28.3 Clients and tools
 - [ ] SDKs: collection option `encrypted` / `blind` (Go, Ruby, TS); Rails

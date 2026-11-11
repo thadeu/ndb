@@ -193,6 +193,50 @@ func (b *Box) opens(place string, v json.RawMessage) bool {
 	return err == nil
 }
 
+// HashDoc sets <field>_bidx, the blind hash of each field of blind, from
+// its plain value. A sealed value keeps the hash it has; a missing or null
+// field has no hash. A hash field sent by the caller is never kept as is.
+func (b *Box) HashDoc(coll string, blind map[string]Norm, doc json.RawMessage) (json.RawMessage, error) {
+	if len(blind) == 0 {
+		return doc, nil
+	}
+
+	ms, err := members(doc)
+	if err != nil {
+		return nil, err
+	}
+
+	for f, norm := range blind {
+		hashKey := f + HashSuffix
+		v, has := get(ms, f)
+
+		switch {
+		case has && IsSealed(v):
+			continue
+		case !has || string(v) == "null":
+			ms = del(ms, hashKey)
+		default:
+			h, err := b.Hash(coll+"/"+f, norm, v)
+			if err != nil {
+				return nil, err
+			}
+
+			hv, _ := json.Marshal(h)
+			ms = set(ms, hashKey, hv)
+		}
+	}
+
+	return encode(ms), nil
+}
+
+// HashSuffix ends the name of the hash field of a blind field.
+const HashSuffix = "_bidx"
+
+type member struct {
+	name string
+	val  json.RawMessage
+}
+
 // rewrite calls fn on each top-level member of doc named in fields and
 // rebuilds the object in its order. A doc with none of them is returned
 // as it is.
@@ -201,6 +245,43 @@ func rewrite(doc json.RawMessage, fields []string, fn func(string, json.RawMessa
 		return doc, nil
 	}
 
+	ms, err := members(doc)
+	if err != nil {
+		return nil, err
+	}
+
+	for i, m := range ms {
+		if !slices.Contains(fields, m.name) {
+			continue
+		}
+
+		if ms[i].val, err = fn(m.name, m.val); err != nil {
+			return nil, err
+		}
+	}
+
+	return encode(ms), nil
+}
+
+// DropFields removes top-level fields of a JSON object.
+func DropFields(doc json.RawMessage, names []string) json.RawMessage {
+	if !mentions(doc, names) {
+		return doc
+	}
+
+	ms, err := members(doc)
+	if err != nil {
+		return doc
+	}
+
+	for _, n := range names {
+		ms = del(ms, n)
+	}
+
+	return encode(ms)
+}
+
+func members(doc json.RawMessage) ([]member, error) {
 	dec := json.NewDecoder(bytes.NewReader(doc))
 	dec.UseNumber()
 
@@ -208,7 +289,7 @@ func rewrite(doc json.RawMessage, fields []string, fn func(string, json.RawMessa
 		return nil, fmt.Errorf("crypt: the document is not an object")
 	}
 
-	out := append(make([]byte, 0, len(doc)+64), '{')
+	var ms []member
 
 	for dec.More() {
 		tok, err := dec.Token()
@@ -224,24 +305,54 @@ func rewrite(doc json.RawMessage, fields []string, fn func(string, json.RawMessa
 			return nil, err
 		}
 
-		if slices.Contains(fields, name) {
-			if v, err = fn(name, v); err != nil {
-				return nil, err
-			}
-		}
+		ms = append(ms, member{name: name, val: v})
+	}
 
-		if len(out) > 1 {
+	return ms, nil
+}
+
+func encode(ms []member) json.RawMessage {
+	out := []byte{'{'}
+
+	for i, m := range ms {
+		if i > 0 {
 			out = append(out, ',')
 		}
 
-		key, _ := json.Marshal(name)
+		key, _ := json.Marshal(m.name)
 
 		out = append(out, key...)
 		out = append(out, ':')
-		out = append(out, v...)
+		out = append(out, m.val...)
 	}
 
-	return append(out, '}'), nil
+	return append(out, '}')
+}
+
+func get(ms []member, name string) (json.RawMessage, bool) {
+	for _, m := range ms {
+		if m.name == name {
+			return m.val, true
+		}
+	}
+
+	return nil, false
+}
+
+func set(ms []member, name string, v json.RawMessage) []member {
+	for i, m := range ms {
+		if m.name == name {
+			ms[i].val = v
+
+			return ms
+		}
+	}
+
+	return append(ms, member{name: name, val: v})
+}
+
+func del(ms []member, name string) []member {
+	return slices.DeleteFunc(ms, func(m member) bool { return m.name == name })
 }
 
 func mentions(doc json.RawMessage, fields []string) bool {
