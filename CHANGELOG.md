@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **The `ndb` image has a health check** (`ndb health`, every 5 s). A daemon that is alive but does not answer made a container that Docker showed as `Up`; it is now `unhealthy` after 15 s, and Compose can wait for the daemon with `condition: service_healthy` with no check of its own. The docs have a new section, "Crash, hang and restart": a daemon that ends stops the container (use a restart policy; recovery needs no step by hand), and plain Docker does not restart an unhealthy container (use an orchestrator or a monitor).
+
 ## [1.20.0] - 2026-11-11
 
 ### Added

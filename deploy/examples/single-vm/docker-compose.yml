@@ -15,6 +15,8 @@ services:
     image: ndb:example
     # No command: the defaults are data dir /var/lib/ndb and socket
     # /run/ndb/ndb.sock with mode 0660. The apps below run with gid 65532.
+    # The image has a health check (ndb health): the apps start when the
+    # daemon answers. restart brings it back after a crash.
     stop_grace_period: 35s
     restart: unless-stopped
     volumes:
@@ -29,7 +31,9 @@ services:
       context: ../../..
       dockerfile: deploy/examples/single-vm/apps/go/Dockerfile
     user: "65532:65532"
-    depends_on: [ndb]
+    depends_on:
+      ndb:
+        condition: service_healthy
     restart: unless-stopped
     environment:
       NDB_URL: unix:///run/ndb/ndb.sock
@@ -41,7 +45,9 @@ services:
       context: ../../..
       dockerfile: deploy/examples/single-vm/apps/ruby/Dockerfile
     user: "1000:65532"
-    depends_on: [ndb]
+    depends_on:
+      ndb:
+        condition: service_healthy
     restart: unless-stopped
     environment:
       NDB_URL: unix:///run/ndb/ndb.sock
@@ -53,7 +59,9 @@ services:
       context: ../../..
       dockerfile: deploy/examples/single-vm/apps/node/Dockerfile
     user: "1000:65532"
-    depends_on: [ndb]
+    depends_on:
+      ndb:
+        condition: service_healthy
     restart: unless-stopped
     environment:
       NDB_URL: unix:///run/ndb/ndb.sock

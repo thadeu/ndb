@@ -28,5 +28,11 @@ VOLUME /var/lib/ndb /run/ndb
 
 EXPOSE 7070
 
+# The daemon answers /_health on its socket. A daemon that is alive but does
+# not answer (it hangs) makes the container "unhealthy"; without this check
+# Docker shows it as "Up". With only a TCP listener, set NDB_URL.
+HEALTHCHECK --interval=5s --timeout=2s --start-period=5s --retries=3 \
+  CMD ["/usr/local/bin/ndb", "health"]
+
 ENTRYPOINT ["/usr/local/bin/ndb"]
 CMD ["serve"]

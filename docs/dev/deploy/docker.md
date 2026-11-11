@@ -23,7 +23,8 @@ docker run -d --name ndb \
 - The process runs as UID 65532. A bind mount must allow this user to write. Named volumes work as they are.
 - For TCP, add `-tcp 0.0.0.0:7070` and publish the port on a private network only, and add `-token-file` (mount the token file as a secret).
 - Run one replica. Two daemons cannot share one data dir.
-- No shell in the image, but `ndb` is the entrypoint binary: see [CLI](#cli). For health checks use `ndb health` (see [Health check](#health-check)).
+- No shell in the image, but `ndb` is the entrypoint binary: see [CLI](#cli). The image has a health check, `ndb health` (see [Health check](#health-check)).
+- Add a restart policy (`restart: unless-stopped`), so the daemon comes back after a crash: see [Crash, hang and restart](#crash-hang-and-restart).
 - Stop timeout above 30 s, so that running requests finish.
 
 ## Compose
@@ -96,7 +97,7 @@ Inside the Compose network, TCP needs no shared volume: `command: ["-tcp", "0.0.
 
 ## Health check
 
-The image has no shell and no curl. `ndb health` asks the daemon on its socket and exits 0 when it is ready, so Compose can wait for it:
+The image has a health check: every 5 s, `ndb health` asks the daemon on its socket and exits 0 when it answers (the image has no shell and no curl). So `docker ps` shows `healthy`, `unhealthy` or `starting`, and Compose can wait for the daemon with `condition: service_healthy`. You can change the timing:
 
 ```yaml
 services:
@@ -114,7 +115,35 @@ services:
         condition: service_healthy
 ```
 
-`ndb health` exists from 0.2.1. From 0.2.2 it finds the socket by itself.
+`ndb health` exists from 0.2.1. From 0.2.2 it finds the socket by itself. The image has the check from the release after 1.20.0; before it, declare the check as above.
+
+- With only a TCP listener (`-unix ""`), the check finds no socket. Set `NDB_URL` in the container: `NDB_URL: tcp://127.0.0.1:7070`. With a token, declare the check in Compose with `-url` and the token, or keep the unix socket for it.
+- During recovery `/_health` answers `503 recovering`, so the container is `starting`, then `unhealthy` if recovery takes more than the retries. A big data dir needs a longer `start_period`.
+
+## Crash, hang and restart
+
+**The daemon ends** (a panic, an out-of-memory kill, a fatal error). `ndb serve` is the main process of the container, so the container stops with it. Docker starts it again only with a restart policy:
+
+```yaml
+services:
+  ndb:
+    image: ghcr.io/thadeu/ndb:latest
+    restart: unless-stopped          # or: docker run --restart unless-stopped
+```
+
+At the start the daemon recovers by itself: it replays the [WAL](../wal.md#recovery), which has every acked write, and drops a cut last line (a write that was never acked). No step by hand. The SDKs retry a refused connection and `not_ready` for 10 s, so the apps go on after a short restart.
+
+**The daemon hangs** (alive, but it does not answer). The container stays up. The health check fails, and after 3 failures (15 s) the container is `unhealthy`. Plain Docker and Compose **do not restart** an unhealthy container: they only show it. To restart it, use one of:
+
+- an orchestrator that acts on health (Docker Swarm, Kubernetes with a liveness probe on `ndb health`);
+- a monitor of `/_health`, or of the health status of the container (the command below), that runs `docker restart ndb`;
+- systemd on the host ([Linux](linux.md)), which restarts on failure.
+
+```bash
+docker inspect --format '{{.State.Health.Status}}' ndb   # healthy, unhealthy or starting
+```
+
+After any restart, the apps reconnect by themselves.
 
 ## CLI
 
