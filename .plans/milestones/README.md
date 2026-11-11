@@ -48,6 +48,8 @@ docs in `docs/dev/` describe what they built.
 | M24 | Streams: delayed retry | `nack` with `delay_ms`, `RetryAt` in the PEL, `Work.Retry` tiers + `MaxAge` in the SDKs (fsw-esl outbox off RabbitMQ) | done |
 | [M25](m25-transactions.md) | Transactions (one collection) | a block of creates, updates and deletes on one collection is one step, with a time limit: `POST /{coll}/_lock` and `_unlock` for a set of documents, `POST /{coll}/_tx`; `Model.transaction(lock:, ttl:)` and `Ndb::Rollback`, and the same in Go, TypeScript and Ruby; many collections kept as a later design | done |
 | [M26](m26-compound-indexes-unwind.md) | Compound indexes and `$unwind` | an index and a unique key on 2 to 4 fields (`"account_id,created_at"`): equality on the first fields, a range and a sort on the next; `$unwind` before `$group` in `_aggregate` | in progress |
+| [M27](m27-settings.md) | Server settings and the encryption key | `GET` and `PUT /_settings`; one master key per daemon (env, stored, or made at the first start), out of the backups; `ndb key export` | not started |
+| [M28](m28-encrypted-fields.md) | Encrypted fields and blind indexes | `encrypted` and `blind` in a collection: a `.pem` or a CPF encrypted before the WAL; equality, unique and group on a CPF by its hash | not started |
 | M17 | PITR and rename | restore a collection to an instant of the last day; rename to put it in place (1.2.3; at/to 1.2.4) | done |
 
 ## Next (after 0.1.2)
