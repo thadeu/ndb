@@ -164,6 +164,9 @@ type Token struct {
 	Read  []string `yaml:"read"`
 	Write []string `yaml:"write"`
 	Admin []string `yaml:"admin"`
+
+	// Decrypt is the collections whose encrypted fields the token reads.
+	Decrypt []string `yaml:"decrypt"`
 }
 
 // file is the YAML shape; sizes are strings like "1GiB".

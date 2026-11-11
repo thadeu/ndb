@@ -532,7 +532,7 @@ func (s *Server) partUpdateBy(w http.ResponseWriter, r *http.Request, db *engine
 		modified += res.Modified
 
 		if res.Doc != nil && !req.Many {
-			out["doc"] = res.Doc
+			out["doc"] = openDoc(r, db, r.PathValue("coll"), res.Doc)
 		}
 
 		return !req.Many && res.Matched > 0, nil
@@ -574,7 +574,7 @@ func (s *Server) upsertByQuery(w http.ResponseWriter, r *http.Request, db *engin
 
 	s.metrics.writes.Add(int64(res.Modified))
 
-	writeJSON(w, http.StatusOK, map[string]any{"matched": res.Matched, "modified": res.Modified, "doc": res.Doc})
+	writeJSON(w, http.StatusOK, map[string]any{"matched": res.Matched, "modified": res.Modified, "doc": openDoc(r, db, r.PathValue("coll"), res.Doc)})
 }
 
 // partDeleteBy deletes on every live partition, newest first. Without many

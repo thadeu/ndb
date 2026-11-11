@@ -118,6 +118,7 @@ Every collection has `_id`, the primary key. It is not configurable.
 | `write` | `engine` (default): only ndb writes, through its WAL. `direct`: apps append to the files in `path`; ndb only reads. |
 | `path` | glob of source files. Direct mode only. `**` is allowed. A relative glob such as `./logs/*.ndjson` starts at the folder of `ndb.yml`, not at the folder where you start the daemon. |
 | `unique` | fields whose value can belong to one live document only (a natural key such as `email` or `call_id`). Dot paths allowed. A duplicate is `409 unique_violation`. An entry with commas is a compound key: `account_id,email` allows one document per pair. |
+| `encrypted` | top-level fields that the daemon encrypts before the WAL. See [Encrypted fields](security.md#encrypted-fields). |
 | `time` | time field. Used for zone maps, `$dateTrunc`, TTL and retention. |
 | `indexes` | fields with a secondary index (dot paths allowed). |
 | `durability` | `strict` or `relaxed`. Engine mode only. See below. |
@@ -253,12 +254,17 @@ tokens:
   - name: ops
     file: /etc/ndb/ops.token
     admin: ["*"]
+  - name: kyc
+    file: /etc/ndb/kyc.token
+    read: [users]
+    decrypt: [users]              # reads the encrypted fields as plain values
 ```
 
 | Level | Routes |
 |---|---|
 | `read` | `GET /{coll}`, `_search`, `_count`, `_aggregate`, `_watch`, `GET _doc/{id}`, `_ttl`, `_stats`, `_quarantine`; the system reads (`/_health`, `/_metrics`, `/_stats`, `/_collections`, `/_size`, `/_pitr`, `GET /_blobs/{ref}`) with any read right |
 | `write` | `POST _doc`, `_bulk`, `_update`, `_update_by_query`, `_delete_by_query`, `DELETE _doc/{id}`, `_expire`, `_persist`, `_ack`; `POST /_blobs` with any write right; and all of `read` |
+| `decrypt` | read the plain value of the [encrypted fields](security.md#encrypted-fields). Not part of `admin`: give it on its own. Without it a token reads `"ndb:e1:k1:..."` |
 | `admin` | `PUT /{coll}` (declare), `DELETE /{coll}` (drop), `_truncate`, `_compact`, `_indexes`; and all of `write`. `GET` and `PUT /_log` need admin of `*` |
 
 - Each list holds collection names or globs: `calls*` covers `calls` and its partitions (`calls-2026-11`), `*` covers every collection. A pattern read (`/logs-2026-*/_search`) needs a glob that covers the whole pattern (`logs*` or `*`).

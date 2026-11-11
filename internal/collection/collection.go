@@ -25,6 +25,7 @@ import (
 
 	"github.com/thadeu/ndb/internal/blob"
 	"github.com/thadeu/ndb/internal/catalog"
+	"github.com/thadeu/ndb/internal/crypt"
 	"github.com/thadeu/ndb/internal/fs"
 	"github.com/thadeu/ndb/internal/locks"
 	"github.com/thadeu/ndb/internal/recovery"
@@ -100,6 +101,10 @@ type Config struct {
 	// nothing is externalized.
 	Blobs *blob.Store
 
+	// Box seals the encrypted fields of Def. Nil with encrypted fields is an
+	// error on write.
+	Box *crypt.Box
+
 	// Observer receives the commit and fsync timings of the WAL writer.
 	Observer writer.Observer
 
@@ -120,6 +125,11 @@ type Config struct {
 type Collection struct {
 	def catalog.Def
 	w   *writer.Writer
+
+	// box seals the encrypted fields; encrypted is their list (it changes
+	// when the definition does).
+	box       *crypt.Box
+	encrypted atomic.Pointer[[]string]
 
 	head *state
 
@@ -231,7 +241,10 @@ func Open(cfg Config) (*Collection, error) {
 		blobs:       cfg.Blobs,
 		shared:      cfg.Shared,
 		locks:       cfg.Locks,
+		box:         cfg.Box,
 	}
+
+	c.SetEncrypted(cfg.Def.Encrypted)
 
 	c.feed = &engineFeed{fs: cfg.FS, dir: cfg.Dir, buf: cfg.WatchBuffer}
 	c.cursors = cfg.Cursors
@@ -572,6 +585,11 @@ func (c *Collection) prepareInsert(v *view, r insertReq) ([]wal.Op, error) {
 			prior, doc, err = c.mergeInto(v, id, doc)
 		}
 
+		if err != nil {
+			return nil, err
+		}
+
+		doc, err = c.encrypt(doc)
 		if err != nil {
 			return nil, err
 		}

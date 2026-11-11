@@ -63,15 +63,18 @@ The stored value is about 35% bigger.
 ## Epics
 
 ### E28.1 `encrypted` (core)
-- [ ] tests first: a doc written over HTTP has no plain value in the WAL, a segment or a backup;
+- [x] tests first: a doc written over HTTP has no plain value in the WAL, a segment or a backup;
   a get and a `_search` give it back; a token with no `decrypt` gets `ndb:e1:k1:`; the value
   holds across restart, seal and compaction; a restore with the key reads it; a bad prefix or tag
   is an error, not a crash
-- [ ] `internal/crypt`: `Box{Seal, Open, Hash}`, made from `settings.Key`
-- [ ] catalog: `encrypted` (list), checks (no `_id`, no time field, no direct mode, no field
-  under an array), the def merge as `unique`
-- [ ] write path: insert, `_bulk`, `_tx`, upsert, updates (`$set` / `$unset` only)
-- [ ] read path: get, `_search`, `watch`, lookup; the `decrypt` list of tokens
+- [x] `internal/crypt`: `Box{Seal, Open, Hash}`, made from `settings.Key`
+- [x] catalog: `encrypted` (list), checks (no `_id`, time, expires field, indexed field, direct
+  mode, stream; top-level fields only), the def merge as `unique`
+- [x] write path: insert, `_bulk`, `_tx`, upsert, updates (`$set` / `$unset` only)
+- [x] read path: get, `_search`, `_aggregate`, `watch`, `_update` and `_lock` docs; the `decrypt`
+  list of tokens. Not yet: the docs that lookup attaches (nested), they stay sealed
+- [x] no body or doc of an encrypted collection in a log line
+- [ ] a filter on an encrypted field without `blind`: `400 invalid_query` but `$exists` (with E28.2)
 
 ### E28.2 `blind`
 - [ ] the `<field>_bidx` field, the filter rewrite, indexes, `unique`, compound

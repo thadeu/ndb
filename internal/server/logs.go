@@ -229,11 +229,38 @@ func (s *Server) logRequest(rl *reqLog, r *http.Request) {
 		)
 	}
 
-	if rl.body != nil {
+	if rl.body != nil && !s.hidesBody(collOf(r.URL.EscapedPath())) {
 		attrs = append(attrs, s.log.Body("body", rl.body))
 	}
 
 	s.log.LogAttrs(ctx, level, msg, attrs...)
+}
+
+// bodyKeys are the attrs that hold documents or request bodies.
+var bodyKeys = map[string]bool{"body": true, "doc": true, "docs": true}
+
+// hidesBody tells if the bodies of coll stay out of the logs: a collection
+// with encrypted fields, or a pattern or list when any collection has them.
+// A log line never holds the plain value of an encrypted field.
+func (s *Server) hidesBody(coll string) bool {
+	db := s.db.Load()
+	if coll == "" || db == nil {
+		return false
+	}
+
+	if !strings.ContainsAny(coll, "*,") {
+		def, ok := db.Definition(coll)
+
+		return ok && len(def.Encrypted) > 0
+	}
+
+	for _, def := range db.Definitions() {
+		if len(def.Encrypted) > 0 {
+			return true
+		}
+	}
+
+	return false
 }
 
 // collOf is the collection of a path: the first segment when it does not
@@ -353,7 +380,15 @@ func (s *Server) logWrite(w http.ResponseWriter, r *http.Request, op string, att
 		all = append(all, slog.String("coll", coll))
 	}
 
-	all = append(all, attrs...)
+	hide := s.hidesBody(r.PathValue("coll"))
+
+	for _, a := range attrs {
+		if hide && bodyKeys[a.Key] {
+			continue
+		}
+
+		all = append(all, a)
+	}
 
 	if rl != nil {
 		rl.body = nil

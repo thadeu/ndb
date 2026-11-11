@@ -64,6 +64,7 @@ type Def struct {
 	Path         string     `json:"path,omitempty" yaml:"path"`
 	Indexes      []string   `json:"indexes,omitempty" yaml:"indexes"`
 	Unique       []string   `json:"unique,omitempty" yaml:"unique"`
+	Encrypted    []string   `json:"encrypted,omitempty" yaml:"encrypted"`
 	Durability   Durability `json:"durability,omitempty" yaml:"durability"`
 	Retention    string     `json:"retention,omitempty" yaml:"retention"`
 	WALRetention string     `json:"wal_retention,omitempty" yaml:"wal_retention"`
@@ -293,6 +294,16 @@ func (c *Catalog) partitionOwner(name string) (Def, bool) {
 	return Def{}, false
 }
 
+// Place is the name the encrypted values of the collection are bound to: the
+// logical collection of a partition, so a value reads in every partition.
+func (d Def) Place() string {
+	if d.PartitionOf != "" {
+		return d.PartitionOf
+	}
+
+	return d.Name
+}
+
 // PartitionDef is the definition of the partition name of the logical
 // collection logical: the same keys, with partition_of set.
 func PartitionDef(logical Def, name string) Def {
@@ -479,6 +490,7 @@ func withDefaults(d Def, src Source) Def {
 
 	d.Indexes = normIndexes(d.Indexes)
 	d.Unique = normIndexes(d.Unique)
+	d.Encrypted = normIndexes(d.Encrypted)
 	d.OpsFromYAML = src == FromYAML && (d.Durability != Strict || d.Retention != "" || d.WALRetention != "" || d.PITR != "")
 
 	return d
@@ -532,6 +544,7 @@ func merge(cur, decl Def, src Source) (Def, error) {
 
 	next.Indexes = normIndexes(append(slices.Clone(cur.Indexes), decl.Indexes...))
 	next.Unique = normIndexes(append(slices.Clone(cur.Unique), decl.Unique...))
+	next.Encrypted = normIndexes(append(slices.Clone(cur.Encrypted), decl.Encrypted...))
 
 	if decl.MaxLineSize != 0 {
 		next.MaxLineSize = decl.MaxLineSize
@@ -674,6 +687,45 @@ func validateFinal(d Def) error {
 		return fmt.Errorf("%w: partition_by is for engine mode", ErrInvalid)
 	case d.Stream && (d.Write != Engine || d.Time != StreamTime || len(d.Unique) > 0 || d.PartitionBy != "" || d.TTL != "" || d.ExpiresField != ""):
 		return fmt.Errorf("%w: a stream is in engine mode, its time is %s, with no unique, partition_by, ttl or expires_field", ErrInvalid, StreamTime)
+	}
+
+	return checkEncrypted(d)
+}
+
+// checkEncrypted refuses an encrypted field that the daemon must read: the
+// _id, the time field, the expiry field, an indexed field (an index on it
+// needs a blind index) and a nested field. It also refuses direct mode: the
+// app writes the files, so the daemon cannot encrypt first.
+func checkEncrypted(d Def) error {
+	if len(d.Encrypted) == 0 {
+		return nil
+	}
+
+	if d.Stream {
+		return fmt.Errorf("%w: a stream has no encrypted fields", ErrInvalid)
+	}
+
+	if d.Write == Direct {
+		return fmt.Errorf("%w: encrypted is for engine mode (in direct mode the app writes the files)", ErrInvalid)
+	}
+
+	indexed := map[string]bool{}
+
+	for _, name := range slices.Concat(d.Indexes, d.Unique) {
+		for f := range strings.SplitSeq(name, ",") {
+			indexed[f] = true
+		}
+	}
+
+	for _, f := range d.Encrypted {
+		switch {
+		case f == "" || strings.ContainsAny(f, ".$,"):
+			return fmt.Errorf("%w: bad encrypted field %q (a top-level field)", ErrInvalid, f)
+		case f == "_id" || f == d.Time || f == d.ExpiresField:
+			return fmt.Errorf("%w: %s cannot be encrypted: the daemon reads it", ErrInvalid, f)
+		case indexed[f]:
+			return fmt.Errorf("%w: %s is encrypted: an index on it needs a blind index", ErrInvalid, f)
+		}
 	}
 
 	return nil

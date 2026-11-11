@@ -4,6 +4,7 @@
 package crypt
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
@@ -14,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
 )
@@ -134,4 +136,120 @@ func normalize(norm Norm, s string) string {
 	}
 
 	return s
+}
+
+// SealDoc seals the top-level fields of a JSON object that are in fields,
+// for the collection coll. The order of the fields stays. A null stays
+// null; a value already sealed for this place stays as it is.
+func (b *Box) SealDoc(coll string, fields []string, doc json.RawMessage) (json.RawMessage, error) {
+	return rewrite(doc, fields, func(name string, v json.RawMessage) (json.RawMessage, error) {
+		place := coll + "/" + name
+
+		if string(v) == "null" || b.opens(place, v) {
+			return v, nil
+		}
+
+		s, err := b.Seal(place, v)
+		if err != nil {
+			return nil, err
+		}
+
+		return json.Marshal(s)
+	})
+}
+
+// OpenDoc opens the sealed top-level fields of a JSON object. A value that
+// does not open stays sealed.
+func (b *Box) OpenDoc(coll string, fields []string, doc json.RawMessage) json.RawMessage {
+	out, err := rewrite(doc, fields, func(name string, v json.RawMessage) (json.RawMessage, error) {
+		var s string
+
+		if !IsSealed(v) || json.Unmarshal(v, &s) != nil {
+			return v, nil
+		}
+
+		if plain, err := b.Open(coll+"/"+name, s); err == nil {
+			return plain, nil
+		}
+
+		return v, nil
+	})
+	if err != nil {
+		return doc
+	}
+
+	return out
+}
+
+func (b *Box) opens(place string, v json.RawMessage) bool {
+	var s string
+
+	if !IsSealed(v) || json.Unmarshal(v, &s) != nil {
+		return false
+	}
+
+	_, err := b.Open(place, s)
+
+	return err == nil
+}
+
+// rewrite calls fn on each top-level member of doc named in fields and
+// rebuilds the object in its order. A doc with none of them is returned
+// as it is.
+func rewrite(doc json.RawMessage, fields []string, fn func(string, json.RawMessage) (json.RawMessage, error)) (json.RawMessage, error) {
+	if len(fields) == 0 || !mentions(doc, fields) {
+		return doc, nil
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(doc))
+	dec.UseNumber()
+
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return nil, fmt.Errorf("crypt: the document is not an object")
+	}
+
+	out := append(make([]byte, 0, len(doc)+64), '{')
+
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+
+		name, _ := tok.(string)
+
+		var v json.RawMessage
+
+		if err := dec.Decode(&v); err != nil {
+			return nil, err
+		}
+
+		if slices.Contains(fields, name) {
+			if v, err = fn(name, v); err != nil {
+				return nil, err
+			}
+		}
+
+		if len(out) > 1 {
+			out = append(out, ',')
+		}
+
+		key, _ := json.Marshal(name)
+
+		out = append(out, key...)
+		out = append(out, ':')
+		out = append(out, v...)
+	}
+
+	return append(out, '}'), nil
+}
+
+func mentions(doc json.RawMessage, fields []string) bool {
+	for _, f := range fields {
+		if bytes.Contains(doc, []byte(`"`+f+`"`)) {
+			return true
+		}
+	}
+
+	return false
 }

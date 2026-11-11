@@ -100,3 +100,47 @@ func TestIsSealed(t *testing.T) {
 		t.Fatal("IsSealed")
 	}
 }
+
+func TestSealDocKeepsOrderAndOpensBack(t *testing.T) {
+	b := testBox(t)
+	doc := json.RawMessage(`{"_id":"u1","cpf":"12345678909","name":"Ana","key":{"pem":"x"},"none":null}`)
+
+	sealed, err := b.SealDoc("users", []string{"cpf", "key", "none"}, doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := string(sealed)
+
+	if strings.Contains(s, "1234") || strings.Contains(s, "pem") || !strings.Contains(s, `"none":null`) {
+		t.Fatalf("sealed %s", s)
+	}
+
+	if !strings.HasPrefix(s, `{"_id":"u1","cpf":"ndb:e1:k1:`) || !strings.Contains(s, `"name":"Ana","key":"ndb:e1:k1:`) {
+		t.Fatalf("order lost: %s", s)
+	}
+
+	again, _ := b.SealDoc("users", []string{"cpf", "key", "none"}, sealed)
+	if string(again) != s {
+		t.Fatal("a sealed value was sealed twice")
+	}
+
+	plain := b.OpenDoc("users", []string{"cpf", "key", "none"}, sealed)
+	if string(plain) != string(doc) {
+		t.Fatalf("open %s, want %s", plain, doc)
+	}
+
+	if other := b.OpenDoc("admins", []string{"cpf"}, sealed); !strings.Contains(string(other), "ndb:e1:k1:") {
+		t.Fatal("opened in another collection")
+	}
+}
+
+func TestSealDocWithNoFieldIsTheSameDoc(t *testing.T) {
+	b := testBox(t)
+	doc := json.RawMessage(`{"_id":"u1","name":"Ana"}`)
+
+	out, err := b.SealDoc("users", []string{"cpf"}, doc)
+	if err != nil || string(out) != string(doc) {
+		t.Fatalf("%s %v", out, err)
+	}
+}

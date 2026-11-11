@@ -149,6 +149,7 @@ func (s *Server) read(w http.ResponseWriter, r *http.Request, db *engine.DB, too
 
 	w.Header().Set("X-Ndb-Took-Ms", strconv.FormatInt(elapsed.Milliseconds(), 10))
 
+	openRows(r, db, r.PathValue("coll"), page.Rows)
 	writePage(w, r, page)
 }
 
@@ -446,7 +447,7 @@ func (s *Server) runUpdate(w http.ResponseWriter, r *http.Request, db *engine.DB
 	out := map[string]any{"matched": res.Matched, "modified": res.Modified}
 
 	if res.Doc != nil && !opts.Many {
-		out["doc"] = res.Doc
+		out["doc"] = openDoc(r, db, r.PathValue("coll"), res.Doc)
 	}
 
 	writeJSON(w, http.StatusOK, out)
@@ -483,6 +484,8 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+
+	raw = openDoc(r, db, r.PathValue("coll"), raw)
 
 	_, _ = w.Write(append(raw, '\n'))
 }

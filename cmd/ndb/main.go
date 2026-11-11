@@ -263,7 +263,7 @@ func scopedTokens(tokens []config.Token) ([]server.Token, error) {
 			return nil, fmt.Errorf("token %s: %w", t.Name, err)
 		}
 
-		out = append(out, server.Token{Name: t.Name, Secret: secret, Read: t.Read, Write: t.Write, Admin: t.Admin})
+		out = append(out, server.Token{Name: t.Name, Secret: secret, Read: t.Read, Write: t.Write, Admin: t.Admin, Decrypt: t.Decrypt})
 	}
 
 	return out, nil

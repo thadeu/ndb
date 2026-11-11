@@ -22,6 +22,7 @@ import (
 	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/collection"
 	"github.com/thadeu/ndb/internal/config"
+	"github.com/thadeu/ndb/internal/crypt"
 	"github.com/thadeu/ndb/internal/cursors"
 	"github.com/thadeu/ndb/internal/fs"
 	"github.com/thadeu/ndb/internal/lock"
@@ -50,6 +51,7 @@ type DB struct {
 	// key the encryption key of the daemon (internal/settings).
 	settings *settings.Store
 	key      settings.Key
+	box      *crypt.Box
 
 	// blobs is the content-addressed store under <data_dir>/blobs.
 	blobs *blob.Store
@@ -125,6 +127,13 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		return nil, err
 	}
 
+	box, err := crypt.New(key.ID, key.Derive("ndb:e1"), key.Derive("ndb:h1"))
+	if err != nil {
+		lk.Release()
+
+		return nil, err
+	}
+
 	cat, err := catalog.Open(filepath.Join(cfg.DataDir, "catalog.bolt"), catalog.Options{AllowImplicit: cfg.AllowImplicit})
 	if err != nil {
 		lk.Release()
@@ -158,6 +167,7 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		cat:        cat,
 		settings:   st,
 		key:        key,
+		box:        box,
 		blobs:      blobs,
 		cursors:    cur,
 		ctx:        ctx,
@@ -440,6 +450,10 @@ func (db *DB) attach(def catalog.Def) error {
 
 		defer col.leave()
 
+		if col.eng != nil {
+			col.eng.SetEncrypted(def.Encrypted)
+		}
+
 		for _, f := range def.Indexes {
 			if err := col.rd.EnsureIndex(f); err != nil {
 				return err
@@ -484,6 +498,7 @@ func (db *DB) openEngine(def catalog.Def, dir string, wm *metrics.Writer) (*Coll
 		GroupLimit: db.groupLimit,
 		Shared:     db.shared,
 		Blobs:      db.blobs,
+		Box:        db.box,
 		Observer:   wm,
 		OnCompact:  db.compacted,
 		Locks:      db.locks.Scope(def.Name),
@@ -620,6 +635,11 @@ func openSettings(cfg config.Config, log *slog.Logger) (*settings.Store, setting
 // Settings are the settings of the data dir.
 func (db *DB) Settings() *settings.Store {
 	return db.settings
+}
+
+// Box seals and opens the encrypted fields, with keys derived once.
+func (db *DB) Box() *crypt.Box {
+	return db.box
 }
 
 // Key is the encryption key of the daemon.

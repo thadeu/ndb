@@ -30,6 +30,10 @@ type Token struct {
 	Read   []string
 	Write  []string
 	Admin  []string
+
+	// Decrypt is the collections whose encrypted fields the token reads as
+	// plain values. It is not implied by admin.
+	Decrypt []string
 }
 
 // allows tells if the token may do need on coll. An empty coll is a system

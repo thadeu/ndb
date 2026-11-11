@@ -101,7 +101,7 @@ ndb writes plain files: the WAL is NDJSON, the segments are Parquet, the blobs a
 
 ## The encryption key
 
-Each data dir has one encryption key of 32 bytes. Encrypted fields will use it (the next release); today it is made and kept, so every data dir has the same key from its first start. At start the daemon takes, in this order:
+Each data dir has one encryption key of 32 bytes. The [encrypted fields](#encrypted-fields) use it. At start the daemon takes, in this order:
 
 1. `NDB_ENCRYPTION_KEY`: 64 hex characters (`openssl rand -hex 32`). It is not written to the data dir; only its fingerprint is, so a later start with no env, or with another key, stops with an error instead of reading nothing.
 2. The key kept in the data dir, in `_system/settings.wal` (mode `0600`).
@@ -119,13 +119,29 @@ What protects what:
 
 So the default makes a restore need nothing. To keep the key out of the files, give it in `NDB_ENCRYPTION_KEY` from a secret store, and keep a copy of it: a backup of a data dir with an env key can only be restored with the same key.
 
+## Encrypted fields
+
+A field in `encrypted` is not stored as you send it. Before the WAL, the daemon replaces its value with `"ndb:e1:k1:<base64url>"`: AES-256-GCM of its JSON (a string, a number or an object), with a random nonce. So the WAL, the segments, the backups and the logs never have the plain value.
+
+```bash
+curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/users -d '{"encrypted":["cpf","private_key"]}'
+```
+
+- `e1` is the format and `k1` the key. Each value is bound to its collection and field: a value copied to another field or collection does not decrypt.
+- **Who reads the value:** the unix socket, the token of `-token-file`, and a token with `decrypt` on the collection get the plain value, on every read (`_doc`, `_search`, `_aggregate`, `_watch`, the `doc` of `_update` and `_lock`). Any other token gets the stored `"ndb:e1:k1:..."`.
+- **Writes:** `_doc`, `_bulk`, upsert, `_tx` and `$set` encrypt the field. `$inc`, `$push` and the other operators on it are `400 invalid_query`: they need the value.
+- **Filters:** a filter on the value of an encrypted field finds nothing: the stored value is encrypted. A blind index for `$eq` and `$in` is the next step.
+- **Logs:** no request body or document of a collection with encrypted fields goes in a log line, at any level.
+- A field added to `encrypted` later is encrypted from the next write of each document; the documents that are not written again stay as they are.
+- The key protects the files only when it is in `NDB_ENCRYPTION_KEY` (see [The encryption key](#the-encryption-key)). With the default key, encrypted fields keep the value out of the API for tokens with no `decrypt`, the logs and the console.
+
 ## Logs
 
 At the `debug` level, a request line has the body, and a `write` line has the documents (cut to `log_body_max`, default 2048 bytes). So debug logs contain your data.
 
 - Use `debug` only for a short time. `PUT /_log` changes the level without a restart.
 - Set `log_body_max: 0` to log no bodies.
-- Logs never contain the `Authorization` header or a token secret.
+- Logs never contain the `Authorization` header or a token secret, nor a body or a document of a collection with [encrypted fields](#encrypted-fields).
 
 ## Images
 

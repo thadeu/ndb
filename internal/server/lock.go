@@ -90,6 +90,8 @@ func (s *Server) lock(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
+	openRows(r, db, r.PathValue("coll"), held.Docs)
+
 	out := map[string]any{"token": held.Token, "expires_at": held.Expires.UTC().Format(time.RFC3339Nano)}
 
 	if id != "" {
