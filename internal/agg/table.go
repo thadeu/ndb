@@ -38,6 +38,10 @@ type accState struct {
 	val query.Value
 	pos query.Pos
 
+	// elem is the element of the document that val comes from, after an
+	// $unwind: it orders the rows of one document for $first and $last.
+	elem int
+
 	// set holds the distinct values of $distinct and $addToSet, by their
 	// key (appendKey); $distinct keeps only the keys.
 	set map[string]query.Value
@@ -80,6 +84,12 @@ func (p *Pipeline) NewTable(budget *Budget) *Table {
 // pos is the position of the document, which $first and $last use. Add keeps
 // no reference to vals.
 func (t *Table) Add(vals []query.Value, pos query.Pos) error {
+	return t.AddElem(vals, pos, 0)
+}
+
+// AddElem is Add for one row of an $unwind: elem is the place of the
+// element in its document.
+func (t *Table) AddElem(vals []query.Value, pos query.Pos, elem int) error {
 	g := t.p.group
 	t.key = t.key[:0]
 
@@ -122,7 +132,7 @@ func (t *Table) Add(vals []query.Value, pos query.Pos) error {
 			continue
 		}
 
-		b.accs[i].add(def.op, v, pos, t.p.Query)
+		b.accs[i].add(def.op, v, pos, elem, t.p.Query)
 	}
 
 	return nil
@@ -191,7 +201,7 @@ func boolByte(b bool) byte {
 	return 0
 }
 
-func (a *accState) add(op accOp, v query.Value, pos query.Pos, order *query.Query) {
+func (a *accState) add(op accOp, v query.Value, pos query.Pos, elem int, order *query.Query) {
 	switch op {
 	case opCount:
 		a.n++
@@ -207,7 +217,7 @@ func (a *accState) add(op accOp, v query.Value, pos query.Pos, order *query.Quer
 	case opMin, opMax:
 		a.extreme(op, v)
 	case opFirst, opLast:
-		a.edge(op, v, pos, order)
+		a.edge(op, v, pos, elem, order)
 	}
 }
 
@@ -224,17 +234,22 @@ func (a *accState) extreme(op accOp, v query.Value) {
 	}
 }
 
-// edge keeps the value of the first or last document in the order.
-func (a *accState) edge(op accOp, v query.Value, pos query.Pos, order *query.Query) {
+// edge keeps the value of the first or last document in the order; the
+// rows of one document (an $unwind) are in the order of its elements.
+func (a *accState) edge(op accOp, v query.Value, pos query.Pos, elem int, order *query.Query) {
 	if a.has {
 		c := order.Cmp(pos, a.pos)
+
+		if c == 0 {
+			c = elem - a.elem
+		}
 
 		if (op == opFirst && c >= 0) || (op == opLast && c <= 0) {
 			return
 		}
 	}
 
-	a.val, a.pos, a.has = v, pos, true
+	a.val, a.pos, a.elem, a.has = v, pos, elem, true
 }
 
 func (a *accState) merge(op accOp, o accState, order *query.Query) {
@@ -252,7 +267,7 @@ func (a *accState) merge(op accOp, o accState, order *query.Query) {
 		}
 	case opFirst, opLast:
 		if o.has {
-			a.edge(op, o.val, o.pos, order)
+			a.edge(op, o.val, o.pos, o.elem, order)
 		}
 	}
 }

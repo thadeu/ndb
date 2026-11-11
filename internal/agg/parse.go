@@ -34,6 +34,7 @@ type Pipeline struct {
 	Explain bool
 
 	opts   Options
+	unwind *unwind
 	group  *group
 	post   []stage
 	hash   string
@@ -42,7 +43,7 @@ type Pipeline struct {
 
 var topKeys = []string{"pipeline", "limit", "skip", "after", "count", "explain"}
 
-var knownStages = []string{"$match", "$group", "$sort", "$limit", "$skip", "$project", "$having"}
+var knownStages = []string{"$match", "$unwind", "$group", "$sort", "$limit", "$skip", "$project", "$having"}
 
 // Parse validates the body of POST /{coll}/_aggregate. Every error has
 // the code invalid_pipeline.
@@ -130,6 +131,9 @@ func (p *Pipeline) parseStages(stages []json.RawMessage) error {
 	var (
 		matches []json.RawMessage
 		sortArg json.RawMessage
+
+		// elems are the $match stages after the $unwind: they filter its rows.
+		elems []json.RawMessage
 	)
 
 	for _, raw := range stages {
@@ -139,6 +143,18 @@ func (p *Pipeline) parseStages(stages []json.RawMessage) error {
 		}
 
 		switch {
+		case name == "$unwind":
+			if p.group != nil {
+				return invalid("$unwind after $group is not supported: put it before")
+			}
+
+			if p.unwind != nil {
+				return invalid("only one $unwind stage is allowed")
+			}
+
+			p.unwind, err = compileUnwind(arg)
+		case name == "$match" && p.unwind != nil && p.group == nil:
+			elems = append(elems, arg)
 		case name == "$group":
 			if p.group != nil {
 				return invalid("only one $group stage is allowed")
@@ -166,7 +182,11 @@ func (p *Pipeline) parseStages(stages []json.RawMessage) error {
 		return invalid("the pipeline needs a $group stage")
 	}
 
-	return p.buildQuery(matches, sortArg)
+	if err := p.buildQuery(matches, sortArg); err != nil {
+		return err
+	}
+
+	return p.unwindMatch(elems)
 }
 
 // stageOf splits {"$name": arg}.

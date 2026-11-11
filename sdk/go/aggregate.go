@@ -16,6 +16,14 @@ type Stage = map[string]any
 // one $group; see the stages and accumulators of plan §10.2.
 type Pipeline []Stage
 
+// UnwindStage is an $unwind stage: one row per element of the array at
+// path, before $group. `UnwindStage("items")` is {"$unwind": "$items"}; for
+// the options (preserveNullAndEmptyArrays, includeArrayIndex), write the
+// Stage by hand.
+func UnwindStage(path string) Stage {
+	return Stage{"$unwind": "$" + path}
+}
+
 // SortStage is a $sort stage. It keeps the order of the keys, which a Go
 // map would lose.
 func SortStage(keys ...SortKey) Stage {

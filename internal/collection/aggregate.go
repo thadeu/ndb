@@ -151,7 +151,7 @@ func mergeAgg(parts []aggPart) (*agg.Table, int, Explain, error) {
 func (c *Collection) aggCands(ctx context.Context, p *agg.Pipeline, src source, budget *agg.Budget) (aggPart, error) {
 	part := aggPart{tbl: p.NewTable(budget)}
 	q := p.Query
-	keys := readKeys(q, p.Paths())
+	keys := readKeys(q, append(p.Paths(), p.UnwindPaths()...))
 
 	for i, cd := range src.cands {
 		if i&1023 == 0 && ctx.Err() != nil {
@@ -173,7 +173,7 @@ func (c *Collection) aggCands(ctx context.Context, p *agg.Pipeline, src source, 
 
 		pos := query.Pos{Keys: q.SortKeys(m), ID: cd.id, Seq: cd.e.seq}
 
-		if err := part.tbl.Add(p.Values(m), pos); err != nil {
+		if err := addRows(p, part.tbl, m, pos); err != nil {
 			return aggPart{}, err
 		}
 	}
@@ -251,10 +251,6 @@ func (c *Collection) aggSegment(ctx context.Context, p *agg.Pipeline, s segSnap,
 
 			part.matched++
 
-			if err := fillValues(p, st, at, groupPaths, vals); err != nil {
-				return aggPart{}, err
-			}
-
 			keys, err := st.keys()
 			if err != nil {
 				return aggPart{}, err
@@ -266,6 +262,28 @@ func (c *Collection) aggSegment(ctx context.Context, p *agg.Pipeline, s segSnap,
 				pos.ID = rows.IDs[i]
 			}
 
+			// An $unwind reads the array from the document, not from the
+			// columns.
+			if p.Unwound() {
+				if err := st.decode(); err != nil {
+					return aggPart{}, err
+				}
+
+				if st.m == nil {
+					continue
+				}
+
+				if err := addRows(p, part.tbl, st.m, pos); err != nil {
+					return aggPart{}, err
+				}
+
+				continue
+			}
+
+			if err := fillValues(p, st, at, groupPaths, vals); err != nil {
+				return aggPart{}, err
+			}
+
 			if err := part.tbl.Add(vals, pos); err != nil {
 				return aggPart{}, err
 			}
@@ -275,6 +293,18 @@ func (c *Collection) aggSegment(ctx context.Context, p *agg.Pipeline, s segSnap,
 	part.ex.RawFetched += sc.p.ex.RawFetched
 
 	return part, nil
+}
+
+// addRows adds the document m to the table: one row, or the rows of the
+// $unwind of the pipeline.
+func addRows(p *agg.Pipeline, tbl *agg.Table, m map[string]any, pos query.Pos) error {
+	if !p.Unwound() {
+		return tbl.Add(p.Values(m), pos)
+	}
+
+	return p.Expand(m, func(vals []query.Value, elem int) error {
+		return tbl.AddElem(vals, pos, elem)
+	})
 }
 
 // pathsByIndex lists the paths of a path-to-index map in index order.

@@ -490,6 +490,7 @@ Relations have simple group calculations. Each one is one aggregate request.
 Call.group(:status).count            # => {"answered" => 2, "failed" => 1}
 Call.group(:status).sum(:duration)
 Call.group(:status, :caller).count   # keys are arrays
+Order.where(status: "paid").unwind(:items).group("items.sku").sum("items.qty")   # one row per element of items ($unwind)
 Call.where(status: "answered").average(:duration)
 Call.minimum(:duration)
 Call.maximum(:duration)
