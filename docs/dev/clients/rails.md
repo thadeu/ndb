@@ -4,6 +4,8 @@ The gem `ndb-rails`: an ActiveModel layer with `Ndb::Record`, and [streams](#str
 
 The source and the same guide are in [`sdk/rails`](https://github.com/thadeu/ndb/tree/main/sdk/rails).
 
+> **Optimistic by default.** Every model is optimistic with no setup: each save sends the version (`_v`) the record was read with, as `lock_version` does in ActiveRecord, without the column. Use `with_retry` to try again after a conflict, and `lock` when the code must run once. See [Concurrency](../concurrency.md).
+
 ## Install
 
 Needs Ruby 3.2 or newer, `activemodel` and `activesupport` 7.1 or newer, and a running ndb daemon. The gem `ndb` (`~> 0.1`) is installed with it, as a dependency.

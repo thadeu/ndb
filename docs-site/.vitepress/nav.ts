@@ -29,6 +29,7 @@ export const tabs: Tab[] = [
           { text: 'Architecture', link: '/architecture' },
           { text: 'Storage', link: '/storage' },
           { text: 'WAL', link: '/wal' },
+          { text: 'Concurrency', link: '/concurrency' },
         ],
       },
       {
@@ -66,6 +67,9 @@ export const tabs: Tab[] = [
           { text: 'Update by query', link: '/query#update-by-query' },
           { text: 'Write operators', link: '/query#write-operators' },
           { text: 'Arrays', link: '/query#arrays' },
+          { text: 'Optimistic by default', link: '/concurrency' },
+          { text: 'with_retry', link: '/query#with-retry-read-change-write-retry' },
+          { text: 'Lock', link: '/query#lock-one-holder-at-a-time' },
           { text: 'Upsert', link: '/query#upsert' },
           { text: 'Delete by query', link: '/query#delete-by-query' },
         ],

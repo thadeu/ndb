@@ -459,6 +459,8 @@ curl ... /calls/_update_by_query -d '{"query":{"status":"failed"},"update":{"$se
 
 ### Optimistic concurrency
 
+ndb is optimistic by default; the overview with the three levels is on [Concurrency](concurrency.md).
+
 `_v` in the query is the version of the document. Read with `versions: true`, then write with that `_v`. `matched: 0` means somebody else wrote first.
 
 ```json

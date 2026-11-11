@@ -15,6 +15,7 @@ One Go process, `ndb`. It listens on a unix socket (and optional TCP), answers H
 - Your NDJSON is the truth (the [WAL](wal.md) in engine mode, your own files in direct mode). Segments, indexes and checkpoints are derived: delete them and ndb builds them again.
 - A query sees the data as of its start. Writes that happen while it runs do not change its answer.
 - A write in engine mode is answered only after it is on disk (`durability: strict`), and a crash never leaves half a write.
+- Writes are [optimistic by default](concurrency.md): every document has a version (`_v`), so a write can refuse to overwrite a change it did not see. No setup, and nobody waits.
 - The SDKs and `curl` give the same answer, because the daemon owns the meaning of every operator.
 - `/_health` answers `503 recovering` until the data directory is open, so a load balancer waits for you.
 - Version 1 is one node: no replication, no clustering, no joins, no SQL.
