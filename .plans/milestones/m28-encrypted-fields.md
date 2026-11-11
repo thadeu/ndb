@@ -38,7 +38,9 @@ crypto in every SDK.
 - **Stored value:** `"enc:v1:<base64(nonce + ciphertext + tag)>"`, AES-256-GCM
   with a random nonce, the key derived from the master key. It is what the
   WAL, the segments, the backups and `watch` over a token with no right
-  hold.
+  hold. With the default key (in the settings, so in the backups) this
+  keeps the value out of the API, the logs and the console; to protect the
+  files too, the key goes in `NDB_ENCRYPTION_KEY` (see M27).
 - **Blind index:** for a field in `blind`, the daemon also stores
   `<field>_bidx`: HMAC-SHA256 of the normalized value, with a second
   derived key. An index, a unique key or a compound index on the field
