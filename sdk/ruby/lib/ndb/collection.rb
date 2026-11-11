@@ -17,8 +17,18 @@ module Ndb
     def initialize(client, name, definition = {})
       @client = client
       @name = name
-      @definition = definition
+      @definition = self.class.normalize(definition)
       @ensured = false
+    end
+
+    # An entry of indexes or unique that is an Array is a compound index:
+    # %w[account_id created_at] becomes "account_id,created_at".
+    def self.normalize(definition)
+      definition.to_h do |key, value|
+        compound = %w[indexes unique].include?(key.to_s) && value.is_a?(Array)
+
+        [key, compound ? value.map { |entry| entry.is_a?(Array) ? entry.join(",") : entry } : value]
+      end
     end
 
     def pattern? = name.include?("*")

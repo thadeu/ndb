@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/thadeu/ndb/internal/index"
 	"github.com/thadeu/ndb/internal/segment"
 	"github.com/thadeu/ndb/internal/wal"
 )
@@ -204,7 +205,9 @@ func (s *state) unindex(id string, e *entry) {
 	}
 }
 
-// uniqueKey is the canonical JSON of the field value. Missing or null
+// uniqueKey is the canonical JSON of the field value, or of the values of a
+// compound key ("acc,email") as an array; a compound key with one field
+// missing or null is no key. Missing or null
 // values are not indexed, so many docs can lack a unique field.
 func uniqueKey(doc json.RawMessage, path string) (string, bool) {
 	var m map[string]any
@@ -216,12 +219,33 @@ func uniqueKey(doc json.RawMessage, path string) (string, bool) {
 		return "", false
 	}
 
-	v, ok := getPath(m, path)
-	if !ok || v == nil {
-		return "", false
+	if !index.Compound(path) {
+		v, ok := getPath(m, path)
+		if !ok || v == nil {
+			return "", false
+		}
+
+		b, err := json.Marshal(v)
+		if err != nil {
+			return "", false
+		}
+
+		return string(b), true
 	}
 
-	b, err := json.Marshal(v)
+	fields := index.Fields(path)
+	tuple := make([]any, len(fields))
+
+	for i, f := range fields {
+		v, ok := getPath(m, f)
+		if !ok || v == nil {
+			return "", false
+		}
+
+		tuple[i] = v
+	}
+
+	b, err := json.Marshal(tuple)
 	if err != nil {
 		return "", false
 	}

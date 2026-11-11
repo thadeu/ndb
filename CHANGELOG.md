@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **Compound indexes.** An entry of `indexes` with commas, `"account_id,created_at"`, is one index on 2 to 4 fields (also `PUT` and `DELETE /{coll}/_indexes/account_id,created_at`). It serves a filter with equality or `$in` on its first fields and, at most, a range on the next one; a filter on the first field alone uses it too, and a lookup whose foreign key is its first field. The other conditions are tested on the documents it gives, so the answer is the same as with no index (a test compares 2400 random queries with a scan, in the memtable and in segments). On 300 000 documents of 300 accounts, `account_id = x and amount >= 100 and amount < 200` goes from 1003 documents read in 36 ms (index of `account_id`) to 5 documents in 1 ms. The index does not order the rows: a `sort` still reads the documents the filter keeps.
+- **Compound unique keys.** `"unique": ["account_id,email"]` allows one live document per tuple of values (`409 unique_violation`): an email is unique inside an account. A document where one of the fields is missing or `null` is not checked.
+- In the SDKs: Go `ndb.Collection[T](db, name, ndb.Index("a", "b"), ndb.Unique("a", "b"))`; TypeScript `indexes: [['a', 'b']]` and `unique: [['a', 'b']]` in the schema; Ruby `indexes: [%w[a b]]` (or `"a,b"`); Rails `index :a, :b` and `index :a, :b, unique: true`.
+
 ## [1.19.0] - 2026-11-11
 
 ### Added

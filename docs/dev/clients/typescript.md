@@ -62,6 +62,7 @@ const calls = ndb.collection('calls', {
 
 - Field types: `string`, `number`, `boolean`, `date` (a `Date`), `json` (any value).
 - Field options: `index`, `unique`, `optional`.
+- A [compound index](../query.md#indexes) or unique key is a schema option, next to `fields`, with the fields in order: `indexes: [['caller', 'at']]`, `unique: [['account_id', 'email']]`.
 - `_id` is the primary key of every document. It is not a schema field: leave it out on insert and the daemon makes a UUIDv7 (or use `newId()`). For a natural key (email, SKU), keep `_id` and mark that field `unique`.
 - `time` is the collection time field. Used by zone maps, `$dateTrunc` and date math (`now-7d`).
 - `collection` sends nothing. The first call declares the collection (`PUT /calls`). You can call `await calls.ready()` to do it at once. A name with `*` (a [pattern](#collection-patterns)) never declares.

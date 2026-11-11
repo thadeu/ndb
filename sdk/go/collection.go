@@ -27,10 +27,19 @@ type Coll[T any] struct {
 // nothing, and its writes fail with pattern_read_only. Each row carries
 // "_coll", the name of its collection: map it with a field tagged
 // `ndb:"_coll"`.
-func Collection[T any](db *DB, name string) (*Coll[T], error) {
+//
+// Index and Unique declare a compound index or unique key (the index and
+// unique tags are for one field).
+func Collection[T any](db *DB, name string, opts ...CollOption) (*Coll[T], error) {
 	s, err := schemaOf(reflect.TypeFor[T]())
 	if err != nil {
 		return nil, err
+	}
+
+	for _, opt := range opts {
+		if err := opt(s); err != nil {
+			return nil, err
+		}
 	}
 
 	name = db.prefix + name
@@ -556,4 +565,40 @@ type updateBody struct {
 type deleteBody struct {
 	Query map[string]any `json:"query"`
 	Many  bool           `json:"many,omitempty"`
+}
+
+// CollOption adds to the definition of a collection.
+type CollOption func(*schema) error
+
+// Index declares a compound index on 2 to 4 fields, in this order: it serves
+// a query with equality on the first fields and a range on the next one.
+//
+//	ndb.Collection[Order](db, "orders", ndb.Index("account_id", "created_at"))
+func Index(fields ...string) CollOption {
+	return func(s *schema) error {
+		name, err := compoundName("Index", fields)
+		s.indexes = append(s.indexes, name)
+
+		return err
+	}
+}
+
+// Unique declares a compound unique key: one live document per tuple of
+// values (ErrUniqueViolation). A document that misses one of the fields is
+// not checked.
+func Unique(fields ...string) CollOption {
+	return func(s *schema) error {
+		name, err := compoundName("Unique", fields)
+		s.unique = append(s.unique, name)
+
+		return err
+	}
+}
+
+func compoundName(option string, fields []string) (string, error) {
+	if len(fields) < 2 || len(fields) > 4 {
+		return "", fmt.Errorf("ndb: %s takes 2 to 4 fields (one field: the struct tag)", option)
+	}
+
+	return strings.Join(fields, ","), nil
 }

@@ -13,8 +13,8 @@ Creates the collection, or merges the definition into it (`ensure_collection`). 
 | Body key | Type | Default | Meaning |
 |---|---|---|---|
 | `time` | string | none | the time field: RFC 3339 compare as instants, date math, zone maps, `$dateTrunc`, `ttl` |
-| `indexes` | string[] | `[]` | fields with a secondary index (dot paths allowed) |
-| `unique` | string[] | `[]` | fields whose value must be unique (`409 unique_violation`). A field added by a later `PUT` is enforced at once: when the data already holds a value twice, the `PUT` is `409 unique_violation` (the message gives the field, the value and two ids) and the definition does not change. Else the collection opens again with the new field, so its open `_watch` streams end and their consumers connect again from their position. |
+| `indexes` | string[] | `[]` | fields with a secondary index (dot paths allowed). An entry with commas is a [compound index](../query.md#indexes) on 2 to 4 fields: `"account_id,created_at"` |
+| `unique` | string[] | `[]` | fields whose value must be unique (`409 unique_violation`). An entry with commas is a compound key (`"account_id,email"`): the tuple of values must be unique. A field added by a later `PUT` is enforced at once: when the data already holds a value twice, the `PUT` is `409 unique_violation` (the message gives the field, the value and two ids) and the definition does not change. Else the collection opens again with the new field, so its open `_watch` streams end and their consumers connect again from their position. |
 | `write` | string | `engine` | `engine` (ndb writes) or `direct` (apps append NDJSON files) |
 | `path` | string | none | the files of a `direct` collection (a glob) |
 | `durability` | string | `strict` | `strict` (sync the WAL before the ack) or `relaxed` |
@@ -200,9 +200,9 @@ The PITR window of the collection: `{"collection":"calls","window":"1d","oldest"
 
 ## `PUT /{coll}/_indexes/{field}`
 
-Adds a secondary index on `field` (a dot path) and builds it in the background. Writes keep it up to date during the build; reads use it when it is `ready`.
+Adds a secondary index on `field` (a dot path) and builds it in the background. Writes keep it up to date during the build; reads use it when it is `ready`. A `field` with commas adds a [compound index](../query.md#indexes): `PUT /orders/_indexes/account_id,created_at`. `DELETE` takes the same name.
 
-**Answer:** `{"collection":"calls","indexes":["status","dnis"]}`. **Errors:** `404 unknown_collection`. An empty `field` has no route (`404 unknown_route`); an empty field in the `indexes` of `PUT /{coll}` is `400 catalog_invalid`.
+**Answer:** `{"collection":"calls","indexes":["status","dnis"]}`. **Errors:** `404 unknown_collection`. An empty `field` has no route (`404 unknown_route`); an empty field in the `indexes` of `PUT /{coll}` is `400 catalog_invalid`. A compound name that is not 2 to 4 different fields, or that holds `_id`, is `400 invalid_index` here and `400 catalog_invalid` in `PUT /{coll}`.
 
 ::: code-group
 

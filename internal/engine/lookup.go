@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/thadeu/ndb/internal/catalog"
+	"github.com/thadeu/ndb/internal/index"
 	"github.com/thadeu/ndb/internal/lookup"
 )
 
@@ -55,6 +56,11 @@ func (db *DB) checkIndexed(s lookup.Spec) error {
 	}
 
 	if s.Foreign == "_id" || slices.Contains(def.Indexes, s.Foreign) {
+		return nil
+	}
+
+	// A compound index that starts with the foreign field serves it too.
+	if slices.ContainsFunc(def.Indexes, func(name string) bool { return index.Fields(name)[0] == s.Foreign }) {
 		return nil
 	}
 

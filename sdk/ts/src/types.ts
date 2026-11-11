@@ -23,6 +23,15 @@ export interface Schema<F extends Fields> {
   // The date field that holds when a document expires. Needed by expireIn,
   // expire, persist and ttl.
   expires?: Extract<keyof F, string>
+
+  // Compound indexes, each one 2 to 4 fields in order: [['account_id',
+  // 'created_at']] serves equality on the first fields and a range on the
+  // next one. One field: index: true on the field.
+  indexes?: Extract<keyof F, string>[][]
+
+  // Compound unique keys: one live document per tuple of values. A document
+  // that misses one of the fields is not checked.
+  unique?: Extract<keyof F, string>[][]
   fields: F
 }
 

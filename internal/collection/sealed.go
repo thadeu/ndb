@@ -108,10 +108,12 @@ type sideRow struct {
 	doc []byte
 }
 
-// indexField is a secondary index whose key files a segment gets.
+// indexField is a secondary index whose key files a segment gets: its name
+// (one field, or the fields of a compound index with commas) and the time
+// field of the collection.
 type indexField struct {
-	name   string
-	isTime bool
+	name string
+	time string
 }
 
 // writeSidecars writes the key files of the segment at segPath: the ids, one
@@ -162,7 +164,7 @@ func (kf *keyFiles) add(r sideRow) error {
 	}
 
 	for i, f := range kf.fields {
-		for _, k := range index.Keys(m, f.name, f.isTime) {
+		for _, k := range index.DocKeys(m, f.name, f.time) {
 			kf.idx[i] = append(kf.idx[i], segment.KeyEntry{Key: k, Row: r.row})
 		}
 	}
@@ -278,7 +280,7 @@ func (c *Collection) indexFields() []indexField {
 	out := make([]indexField, 0, len(c.rd.idx))
 
 	for _, s := range c.rd.idx {
-		out = append(out, indexField{name: s.field, isTime: s.isTime})
+		out = append(out, indexField{name: s.field, time: s.time})
 	}
 
 	return out

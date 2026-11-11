@@ -517,8 +517,8 @@ export class Collection<F extends Fields> {
     return {
       time: this.schema.time,
       expires_field: this.schema.expires,
-      indexes: entries.filter(([, d]) => d.index).map(([n]) => n),
-      unique: entries.filter(([, d]) => d.unique).map(([n]) => n),
+      indexes: [...entries.filter(([, d]) => d.index).map(([n]) => n), ...(this.schema.indexes ?? []).map((f) => f.join(','))],
+      unique: [...entries.filter(([, d]) => d.unique).map(([n]) => n), ...(this.schema.unique ?? []).map((f) => f.join(','))],
     }
   }
 }
