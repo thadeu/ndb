@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.19.0] - 2026-11-11
+
 ### Added
 
 - **Transactions of one collection.** `POST /{coll}/_tx` writes a list of inserts, updates and deletes in one WAL record: all of them, or none, also after a `kill -9` (200 kills in the crash test, never half a transaction). An update or a delete that matches nothing (no such document, or its `_v` guard does not match) is `409 tx_conflict` and nothing is written; the error names the op. `POST /{coll}/_lock` `{"ids":[...]}` takes the locks of a set of documents under one token, all or none, so two callers never deadlock; `POST /{coll}/_unlock` `{"token"}` releases them. With the tokens in `locks`, a lock that expired refuses the whole transaction (`lock_expired`): the `ttl` is its time limit, and `"unlock": true` releases the locks in the same call. In the SDKs: Rails `Model.transaction { }` as in ActiveRecord (the writes of the block are collected and sent in one call at its end; `raise Ndb::Rollback`; `lock: [records], ttl:, wait:` takes every lock in one call, and `lock!` inside the block joins it; another model in the block is `Ndb::TransactionError`), Go `coll.Tx(ctx, ids, fn)` with `ndb.ErrRollback`, TypeScript `coll.transaction(ids, fn)` with `Rollback`, Ruby `coll.transaction(lock: ids) { |tx, docs| }` with `Ndb::Rollback`.
@@ -653,7 +655,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.18.2...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.19.0...HEAD
+[1.19.0]: https://github.com/thadeu/ndb/compare/v1.18.2...v1.19.0
 [1.18.2]: https://github.com/thadeu/ndb/compare/v1.18.1...v1.18.2
 [1.18.1]: https://github.com/thadeu/ndb/compare/v1.18.0...v1.18.1
 [1.18.0]: https://github.com/thadeu/ndb/compare/v1.17.2...v1.18.0
