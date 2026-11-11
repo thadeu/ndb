@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.20.0] - 2026-11-11
+
 ### Added
 
 - `ndb bench -compound` (also in `make bench`): 60 000 orders of 60 accounts, each with items, read with an index of the account and then with compound indexes (`account,amount`, `account,status`); each read shows its plan and the documents it examined, and two of them have an `$unwind`. On the benchmark machine, an account with amounts of a 1% range goes from 973 documents examined in 10.1 ms to 9 in 2.2 ms. Budget: the slowest of these reads 66 ms.
@@ -668,7 +670,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.19.0...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.20.0...HEAD
+[1.20.0]: https://github.com/thadeu/ndb/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/thadeu/ndb/compare/v1.18.2...v1.19.0
 [1.18.2]: https://github.com/thadeu/ndb/compare/v1.18.1...v1.18.2
 [1.18.1]: https://github.com/thadeu/ndb/compare/v1.18.0...v1.18.1

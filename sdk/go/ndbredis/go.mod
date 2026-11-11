@@ -4,7 +4,7 @@ go 1.26.10
 
 require (
 	github.com/redis/go-redis/v9 v9.23.0
-	github.com/thadeu/ndb/sdk/go v1.19.0
+	github.com/thadeu/ndb/sdk/go v1.20.0
 )
 
 require (
