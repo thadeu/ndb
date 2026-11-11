@@ -59,6 +59,7 @@ docs in `docs/dev/` describe what they built.
 | Collection patterns | read many collections by name prefix (`logs-2026-*`): `find`, `count`, `aggregate`, `_coll` per row | done (0.4.0) | docs/dev/query.md#collection-patterns |
 | Date math and `$elemMatch` | `now-7d/d` in ranges on the time field; one array element matches many conditions | done (0.4.0) | docs/dev/query.md#date-math |
 | Relationships | `lookup` in find, Rails `includes` | done (M18) | docs/dev/query.md#lookup |
+| Locks | `with_retry` in every SDK (optimistic, the `_v` guard with the retry done); pessimistic locks: `_lock/{id}`, `_unlock/{id}`, `?lock=<token>`, `Lock` / `lock` in the SDKs, Rails `Model.lock.find`, `lock!`, `with_lock` | done | docs/dev/query.md#lock-one-holder-at-a-time |
 
 ## Milestone file template
 
