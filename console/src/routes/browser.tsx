@@ -1,14 +1,14 @@
 import type { Hono } from 'hono';
 
+import { buildWhere, emptyRow, readFind, searchBody } from '@/components/filter-model';
 import { updateBody } from '@/components/json-model';
-import { NdbError, type Doc, type SearchResult } from '@/ndb';
+import { type Doc, type Ndb, NdbError, type SearchResult, type Stats } from '@/ndb';
 import type { Env } from '@/prefix';
-import { BrowserPage, browserHref } from '@/views/browser';
+import { browserHref, type DocumentsProps } from '@/components/documents';
 import { OfflinePage } from '@/views/offline';
 
 import { connectionOf, redirectTo, type RouteDeps, wantsJson } from './context';
 
-const PAGE = 25;
 const DONE: Record<string, string> = { saved: 'Saved.', deleted: 'Deleted.', inserted: 'Inserted.' };
 
 interface WhereResult {
@@ -36,73 +36,92 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+// loadDocuments runs the find query of the Documents tab and reads the open
+// document. Add and remove of a filter row come from the same form. A bad
+// filter or a missing _id becomes a message on the page, never an error page.
+export async function loadDocuments(ndb: Ndb, stats: Stats, coll: string, params: URLSearchParams, message: (error: unknown) => string): Promise<Omit<DocumentsProps, 'current'>> {
+  const find = readFind(params);
+  const remove = params.get('remove');
+
+  if (params.get('add')) find.rows.push(emptyRow());
+
+  if (remove !== null) find.rows.splice(Number(remove), 1);
+
+  if (find.rows.length === 0) find.rows.push(emptyRow());
+
+  const built = find.mode === 'json' ? readWhere(find.json) : buildWhere(find.rows);
+  const where = built.where ?? {};
+  const body = searchBody(find, where);
+  const trail = params.getAll('after').filter(Boolean);
+  const after = trail.at(-1);
+  const id = params.get('id') || undefined;
+  const known = stats.collections.some(item => item.name === coll);
+
+  let found: SearchResult = { rows: [] };
+  let whereError = built.error;
+
+  if (known && !whereError) {
+    try {
+      found = await ndb.search(coll, { ...body, count: true, versions: true, ...(after ? { after } : {}) });
+    } catch (error) {
+      whereError = message(error);
+    }
+  }
+
+  let selected: Doc | undefined;
+  let selectedError: string | undefined;
+
+  if (known && id) {
+    try {
+      selected = await ndb.document(coll, id);
+    } catch (error) {
+      selectedError = error instanceof NdbError && error.code === 'not_found' ? `No document with _id ${id}.` : message(error);
+    }
+  }
+
+  return {
+    collections: stats.collections,
+    coll,
+    find,
+    body,
+    whereError,
+    rows: found.rows,
+    plan: found.plan,
+    examined: found.examined,
+    total: found.total,
+    next: found.next,
+    trail,
+    id,
+    selected,
+    selectedError,
+    notice: DONE[params.get('done') ?? ''],
+    insertOpen: params.get('insert') === '1',
+    insertError: params.get('err') || undefined,
+    findOpen: params.has('add') || remove !== null,
+  };
+}
+
 export function browserRoutes(app: Hono<Env>, deps: RouteDeps): void {
+  // The old Browser page is now the Documents tab of the Explorer. Old links
+  // go there, with the first collection when none is chosen.
   app.get('/c/:name/browser', async c => {
     const connection = connectionOf(deps, c);
 
     if (!connection) return c.text('Not found', 404);
 
-    const ndb = deps.client(connection);
+    let coll = c.req.query('coll') ?? '';
 
-    let stats;
-
-    try {
-      stats = await ndb.stats();
-    } catch (error) {
-      return c.html(<OfflinePage current={deps.currentOf(connection)} message={deps.message(error)} />, 502);
-    }
-
-    const coll = c.req.query('coll') ?? '';
-    const first = stats.collections[0];
-
-    if (coll === '' && first) return c.redirect(`${c.var.prefix}/${browserHref(connection.name, { coll: first.name })}`, 302);
-
-    const query = { coll, where: c.req.query('where') ?? '', id: c.req.query('id') || undefined, after: c.req.query('after') || undefined, q: c.req.query('q') || undefined };
-    const known = stats.collections.some(item => item.name === coll);
-    const parsed = readWhere(query.where);
-
-    let found: SearchResult = { rows: [] };
-    let whereError = parsed.error;
-
-    if (known && parsed.where) {
+    if (coll === '') {
       try {
-        found = await ndb.search(coll, { query: parsed.where, limit: PAGE, count: true, versions: true, ...(query.after ? { after: query.after } : {}) });
+        coll = (await deps.client(connection).stats()).collections[0]?.name ?? '';
       } catch (error) {
-        whereError = deps.message(error);
+        return c.html(<OfflinePage current={deps.currentOf(connection)} message={deps.message(error)} />, 502);
       }
     }
 
-    const selectedId = query.id ?? (found.rows[0] ? String(found.rows[0]._id) : undefined);
+    const location = browserHref(connection.name, { coll, where: c.req.query('where'), id: c.req.query('id'), after: c.req.query('after') });
 
-    let selected: Doc | undefined;
-    let selectedError: string | undefined;
-
-    if (known && selectedId) {
-      try {
-        selected = await ndb.document(coll, selectedId);
-      } catch (error) {
-        selectedError = error instanceof NdbError && error.code === 'not_found' ? `No document with _id ${selectedId}.` : deps.message(error);
-      }
-    }
-
-    return c.html(
-      <BrowserPage
-        current={deps.currentOf(connection, stats)}
-        collections={stats.collections}
-        query={{ ...query, id: selectedId }}
-        rows={found.rows}
-        plan={found.plan}
-        examined={found.examined}
-        total={found.total}
-        next={found.next}
-        whereError={whereError}
-        selected={selected}
-        selectedError={selectedError}
-        notice={DONE[c.req.query('done') ?? '']}
-        insertOpen={c.req.query('insert') === '1'}
-        insertError={c.req.query('err') || undefined}
-      />,
-    );
+    return c.redirect(`${c.var.prefix}/${location}`, 302);
   });
 
   // The save route takes the diff that the island computed and writes it with

@@ -11,7 +11,7 @@ export interface DevtoolsPageProps {
 }
 
 export const DevtoolsPage: FC<DevtoolsPageProps> = ({ current, collection, curl }) => {
-  const props = { name: current.name, collection, sendUrl: `c/${encodeURIComponent(current.name)}/devtools/send`, curl, browserHref: `c/${encodeURIComponent(current.name)}/browser` };
+  const props = { name: current.name, collection, sendUrl: `c/${encodeURIComponent(current.name)}/devtools/send`, curl, browserHref: `c/${encodeURIComponent(current.name)}/explorer?${new URLSearchParams({ coll: collection, tab: 'documents' })}` };
 
   return (
     <Layout title="Dev Tools" current={current} tab="devtools" scripts={['devtools']} bleed>

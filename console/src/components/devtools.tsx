@@ -190,7 +190,7 @@ const ResponsePane: FC<{ answer: Answer | null; failure: Failure | null; view: V
       )}
 
       <span class="hint">
-        NDJSON answers show one node per line. Open a row in <a href={browserHref}>Browser</a> to edit it.
+        NDJSON answers show one node per line. Open a row in <a href={browserHref}>Explorer</a> to edit it.
       </span>
     </>
   );

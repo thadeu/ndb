@@ -8,12 +8,17 @@ import { Card, CardHeader } from '@/ui/card';
 import { CodeBlock } from '@/ui/code-block';
 import { DatePicker } from '@/ui/date-picker';
 import { Dialog, openDialog } from '@/ui/dialog';
+import { DataTable } from '@/ui/data-table';
+import { DescriptionList } from '@/ui/description-list';
 import { Empty } from '@/ui/empty';
 import { Field } from '@/ui/field';
+import { Icon, type IconName } from '@/ui/icon';
 import { Input } from '@/ui/input';
+import { Pagination } from '@/ui/pagination';
 import { Popover, popoverTrigger } from '@/ui/popover';
 import { SegmentBar } from '@/ui/progress';
 import { Segmented } from '@/ui/segmented';
+import { Select } from '@/ui/select';
 import { Stat } from '@/ui/stat';
 import { Table } from '@/ui/table';
 import { Tabs } from '@/ui/tabs';
@@ -141,6 +146,60 @@ export const UiPage: FC = () => (
 
     <Block title="CodeBlock">
       <CodeBlock code={'ndb backup /backups/daily -gzip'} />
+    </Block>
+
+    <Block title="Icon">
+      {(['refresh', 'plus', 'x', 'chevron-down', 'chevron-right', 'chevron-left', 'chevrons-left', 'arrow-left', 'arrow-up', 'arrow-down', 'columns', 'documents'] as IconName[]).map(name => (
+        <span class="badge" title={name}>
+          <Icon name={name} />
+        </span>
+      ))}
+    </Block>
+
+    <Block title="Select">
+      <Select
+        name="op"
+        value="gte"
+        aria-label="Condition"
+        options={[
+          { id: 'eq', label: 'Equal to' },
+          { id: 'gte', label: 'Greater than or equal to' },
+        ]}
+      />
+    </Block>
+
+    <Block title="DataTable and Pagination">
+      <div class="card flush dtable-card">
+        <DataTable
+          id="gallery"
+          label="Example"
+          columns={[
+            { id: '_id', label: '_id', href: 'ui', sort: 'desc' },
+            { id: 'status', label: 'status', href: 'ui' },
+            { id: 'total', label: 'total' },
+          ]}
+          title={<h2 class="card-title">Orders</h2>}
+          footer={<Pagination page={2} from={26} to={50} total={812} firstHref="ui" prevHref="ui" nextHref="ui" />}
+        >
+          <tr>
+            <td data-col="_id">a1</td>
+            <td data-col="status">paid</td>
+            <td data-col="total">120</td>
+          </tr>
+
+          <tr>
+            <td data-col="_id">a2</td>
+            <td data-col="status">new</td>
+            <td data-col="total">80</td>
+          </tr>
+        </DataTable>
+      </div>
+    </Block>
+
+    <Block title="DescriptionList">
+      <Card>
+        <DescriptionList items={[{ label: 'Write mode', value: 'engine' }, { label: 'Documents', value: '557,598' }, { label: 'Size', value: '96 MB' }, { label: 'PITR', value: 'On' }]} />
+      </Card>
     </Block>
 
     <Block title="Empty">

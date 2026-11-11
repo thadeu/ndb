@@ -29,7 +29,7 @@ beforeAll(async () => {
   mkdirSync(join(dir, 'data'));
   writeFileSync(join(dir, 'ndb.yml'), `data_dir: ${join(dir, 'data')}\nlisten:\n  unix: ${sock}\n`);
 
-  daemon = Bun.spawn([BIN, '-config', join(dir, 'ndb.yml')], { stdout: 'ignore', stderr: 'ignore' });
+  daemon = Bun.spawn([BIN, '-config', join(dir, 'ndb.yml'), '-tcp', ''], { stdout: 'ignore', stderr: 'ignore' });
 
   for (let i = 0; i < 200; i++) {
     const ready = await new Ndb({ url }).health().then(() => true).catch(() => false);
@@ -209,27 +209,73 @@ async function ndbPost(path: string, body: unknown): Promise<Response> {
   return fetch(`http://ndb${path}`, { method: 'POST', body: JSON.stringify(body), unix: sock } as RequestInit);
 }
 
-describe('browser tab', () => {
-  it('lists the documents with _v and shows the selected one as a tree', async () => {
-    const html = await (await page('/c/local/browser?coll=orders')).text();
+describe('explorer documents tab', () => {
+  it('lists the documents in a table and opens the selected one in a drawer', async () => {
+    const list = await (await page('/c/local/explorer?coll=orders&tab=documents')).text();
 
-    expect(html).toContain('docrow');
-    expect(html).toContain('_v 1');
-    expect(html).toContain('2 matches');
+    expect(list).toContain('2 matches');
+    expect(list).toContain('1–2 of 2');
+    expect(list).toContain('data-table="docs:orders"');
+    expect(list).toContain('<details class="find-fold" data-fold="find">');
+    expect(list).toContain('POST /orders/_search');
+    expect(list).not.toContain('id="doc-editor"');
+
+    const html = await (await page('/c/local/explorer?coll=orders&tab=documents&id=a')).text();
+
     expect(html).toContain('id="doc-editor"');
     expect(html).toContain('class="tkey">status');
     expect(html.indexOf('>_id<')).toBeLessThan(html.indexOf('>_v<'));
+  });
+
+  it('builds the filter from rows and shows the request json', async () => {
+    const html = await (await page('/c/local/explorer?coll=orders&tab=documents&f=status&op=eq&t=string&v=paid')).text();
+
+    expect(html).toContain('1 match');
+    expect(html).toContain('&quot;status&quot;: &quot;paid&quot;');
+  });
+
+  it('pages forward and back with the cursor trail, and sorts by a column', async () => {
+    const first = await (await page('/c/local/explorer?coll=orders&tab=documents&sort=_id&dir=asc')).text();
+
+    expect(first).toContain('aria-sort="ascending"');
+    expect(first).toContain('dir=asc');
+
+    await ndbPost('/pages/_bulk', { docs: Array.from({ length: 30 }, (_, i) => ({ _id: `p${String(i).padStart(2, '0')}` })) });
+
+    const one = await (await page('/c/local/explorer?coll=pages&tab=documents')).text();
+    const next = one.match(/href="([^"]*after=[^"]*)" aria-label="Next page"/)?.[1]?.replaceAll('&amp;', '&');
+
+    expect(one).toContain('1–25 of 30');
+    expect(next).toBeDefined();
+
+    const two = await (await page(`/${next}`)).text();
+
+    expect(two).toContain('26–30 of 30');
+    expect(two).toContain('Page 2');
+    expect(two).toContain('aria-label="Previous page"');
+    expect(two).toMatch(/<button[^>]*disabled[^>]*aria-label="Next page"/);
+  });
+
+  it('adds and removes a filter row', async () => {
+    const added = await (await page('/c/local/explorer?coll=orders&tab=documents&f=status&op=eq&t=string&v=paid&add=1')).text();
+
+    expect(added.match(/aria-label="Field name"/g)).toHaveLength(2);
+
+    const removed = await (await page('/c/local/explorer?coll=orders&tab=documents&f=status&op=eq&t=string&v=paid&remove=0')).text();
+
+    expect(removed).toContain('2 matches');
   });
 
   it('redirects to the first collection when none is chosen', async () => {
     const response = await page('/c/local/browser');
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('location')).toContain('coll=orders');
+    expect(response.headers.get('location')).toContain('explorer?coll=orders');
+    expect(response.headers.get('location')).toContain('tab=documents');
   });
 
   it('shows an invalid filter inline and does not crash', async () => {
-    const response = await page(`/c/local/browser?coll=orders&where=${encodeURIComponent('{oops')}`);
+    const response = await page(`/c/local/explorer?coll=orders&tab=documents&mode=json&where=${encodeURIComponent('{oops')}`);
     const html = await response.text();
 
     expect(response.status).toBe(200);
@@ -237,7 +283,7 @@ describe('browser tab', () => {
   });
 
   it('filters with where', async () => {
-    const html = await (await page(`/c/local/browser?coll=orders&where=${encodeURIComponent('{"status":"paid"}')}`)).text();
+    const html = await (await page(`/c/local/explorer?coll=orders&tab=documents&mode=json&where=${encodeURIComponent('{"status":"paid"}')}`)).text();
 
     expect(html).toContain('1 match');
     expect(html).toContain('id=b');

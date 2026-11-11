@@ -4,10 +4,11 @@ import type { Child, FC } from 'hono/jsx';
 import { prefix } from '@/prefix';
 
 import { Dot } from '@/ui/badge';
+import { Icon } from '@/ui/icon';
 import { Logo } from '@/ui/logo';
 import { formatVersion } from '@/format';
 
-export type Tab = 'overview' | 'browser' | 'devtools' | 'watch' | 'backups';
+export type Tab = 'overview' | 'devtools' | 'watch' | 'backups' | 'explorer';
 
 export interface Current {
   name: string;
@@ -19,7 +20,7 @@ export interface Current {
 
 const TABS: { id: Tab; label: string; path: string }[] = [
   { id: 'overview', label: 'Overview', path: '' },
-  { id: 'browser', label: 'Browser', path: '/browser' },
+  { id: 'explorer', label: 'Explorer', path: '/explorer' },
   { id: 'devtools', label: 'Dev Tools', path: '/devtools' },
   { id: 'watch', label: 'Watch', path: '/watch' },
   { id: 'backups', label: 'Backups', path: '/backups' },
@@ -98,7 +99,9 @@ const Switcher: FC<{ current: Current }> = ({ current }) => (
     <Dot on={current.online} />
     <span class="switcher-name">{current.name}</span>
     <span class="switcher-url mono">{current.url}</span>
-    <span class="chev" aria-hidden="true">▾</span>
+    <span class="chev">
+      <Icon name="chevron-down" size={16} />
+    </span>
   </a>
 );
 

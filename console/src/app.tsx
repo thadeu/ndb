@@ -10,6 +10,7 @@ import { hostGuard, originGuard, parseAllowedHosts } from './guard';
 import { Ndb, NdbError, type Stats, target } from './ndb';
 import { type Env, readPrefix } from './prefix';
 
+import { explorerRoutes } from '@/routes/explorer';
 import { backupsRoutes } from '@/routes/backups';
 import { browserRoutes } from '@/routes/browser';
 import { pageOrigin, sameOrigin } from '@/routes/context';
@@ -272,6 +273,7 @@ export function createApp(connections: Connections, assets: Assets, options: App
   devtoolsRoutes(app, deps);
   watchRoutes(app, deps);
   backupsRoutes(app, deps);
+  explorerRoutes(app, deps);
 
   return app;
 }
