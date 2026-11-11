@@ -102,6 +102,11 @@ type secondary struct {
 	ready bool
 	done  int
 	total int
+
+	// multi is the memtable documents with more than one key (an array
+	// field): a range of two sides reads them besides its range, see
+	// byIndex.
+	multi map[string]struct{}
 }
 
 type snapshot struct {
@@ -216,17 +221,39 @@ func (c *Collection) applyDurable(op wal.Op, tx uint64) {
 
 	for _, s := range c.rd.idx {
 		if oldDoc != nil {
-			for _, k := range index.DocKeys(oldDoc, s.field, s.time) {
-				s.mem.Remove(k, op.ID)
-			}
+			s.remove(op.ID, index.DocKeys(oldDoc, s.field, s.time))
 		}
 
 		if curDoc != nil {
-			for _, k := range index.DocKeys(curDoc, s.field, s.time) {
-				s.mem.Add(k, op.ID)
-			}
+			s.add(op.ID, index.DocKeys(curDoc, s.field, s.time))
 		}
 	}
+}
+
+// add puts the keys of a memtable document in the index.
+func (s *secondary) add(id string, keys [][]byte) {
+	for _, k := range keys {
+		s.mem.Add(k, id)
+	}
+
+	if len(keys) > 1 {
+		s.multi[id] = struct{}{}
+	}
+}
+
+// remove takes the keys of a memtable document out of the index.
+func (s *secondary) remove(id string, keys [][]byte) {
+	for _, k := range keys {
+		s.mem.Remove(k, id)
+	}
+
+	delete(s.multi, id)
+}
+
+// reset empties the memtable index.
+func (s *secondary) reset() {
+	s.mem = index.NewMem()
+	s.multi = map[string]struct{}{}
 }
 
 func docOf(e *entry) json.RawMessage {
@@ -283,7 +310,9 @@ func (c *Collection) EnsureIndex(field string) error {
 		return errf("closed", "collection is closed")
 	}
 
-	s := &secondary{field: field, time: c.def.Time, mem: index.NewMem()}
+	s := &secondary{field: field, time: c.def.Time}
+
+	s.reset()
 	items := make([]cand, 0, len(c.durable.docs))
 
 	for id, e := range c.durable.docs {
@@ -359,9 +388,7 @@ func (c *Collection) build(s *secondary, items []cand, segs []*segRef) {
 				continue
 			}
 
-			for _, k := range keys[i] {
-				s.mem.Add(k, it.id)
-			}
+			s.add(it.id, keys[i])
 		}
 
 		s.done += len(chunk)
@@ -843,23 +870,32 @@ func (c *Collection) byID(conds []query.Cond) ([]cand, bool) {
 // index, and in the key file of each segment, whose rows it keeps when they
 // are live. A segment with no key file for the field is scanned whole. A
 // range condition is narrowed with the opposite bound on the same field.
+//
+// A narrowed range holds the documents with one value between the two
+// bounds. A document with an array also matches when one element passes
+// each bound and no element is between them ([1, 3] for > 1 and <= 2), so
+// a narrowed read also takes every document with more than one key. The
+// query tests each candidate, so the extra ones cost a read, not a wrong
+// answer.
 func (c *Collection) byIndex(s *secondary, cd query.Cond, conds []query.Cond) source {
 	ranges := make([]index.Range, len(cd.Vals))
+	narrowed := false
 
 	for i, v := range cd.Vals {
 		ranges[i] = index.Eq(v)
 
 		if isRange(cd.Op) {
-			ranges[i] = narrow(index.Cmp(cd.Op, v), cd, conds)
+			ranges[i], narrowed = narrow(index.Cmp(cd.Op, v), cd, conds)
 		}
 	}
 
-	return c.byRanges(s, ranges)
+	return c.byRanges(s, ranges, narrowed)
 }
 
 // byRanges is the documents of the index s whose key is in one of ranges:
 // the memtable ones, and for each segment its live rows with such a key.
-func (c *Collection) byRanges(s *secondary, ranges []index.Range) source {
+// With multi, it adds the documents that have more than one key.
+func (c *Collection) byRanges(s *secondary, ranges []index.Range, multi bool) source {
 	var src source
 
 	seen := map[string]struct{}{}
@@ -882,6 +918,12 @@ func (c *Collection) byRanges(s *secondary, ranges []index.Range) source {
 		s.mem.Ascend(r, collect)
 	}
 
+	if multi {
+		for id := range s.multi {
+			collect(id)
+		}
+	}
+
 	if c.seal == nil {
 		return src
 	}
@@ -891,6 +933,10 @@ func (c *Collection) byRanges(s *secondary, ranges []index.Range) source {
 
 		if keys := r.keys[s.field]; keys != nil {
 			hits = c.indexHits(r, keys, ranges)
+
+			if multi {
+				hits.orLive(c.multiRows(r, s.field, keys), r.live)
+			}
 		}
 
 		src.segs = append(src.segs, segSnap{r: r, groups: r.Groups(), live: hits})
@@ -919,9 +965,44 @@ func (c *Collection) indexHits(r *segRef, keys *segment.Keys, ranges []index.Ran
 	return hits
 }
 
+// multiRows is the rows of r with more than one key in the index of field
+// (an array). It reads the key file once, on the first range of two sides
+// that needs it, and keeps the answer: the rows of a segment do not change.
+func (c *Collection) multiRows(r *segRef, field string, keys *segment.Keys) bitset {
+	r.multiMu.Lock()
+	defer r.multiMu.Unlock()
+
+	if rows, ok := r.multi[field]; ok {
+		return rows
+	}
+
+	seen, rows := newBitset(r.Len()), newBitset(r.Len())
+
+	err := keys.Range(nil, nil, true, true, func(e segment.KeyEntry) bool {
+		if seen.has(e.Row) {
+			rows.set(e.Row)
+		}
+
+		seen.set(e.Row)
+
+		return true
+	})
+	if err != nil {
+		c.fail(err)
+	}
+
+	if r.multi == nil {
+		r.multi = map[string]bitset{}
+	}
+
+	r.multi[field] = rows
+
+	return rows
+}
+
 // narrow takes the other end of r from a condition of the opposite side
-// on the same field and type.
-func narrow(r index.Range, cd query.Cond, conds []query.Cond) index.Range {
+// on the same field and type, and tells if it did.
+func narrow(r index.Range, cd query.Cond, conds []query.Cond) (index.Range, bool) {
 	lower := cd.Op == "gt" || cd.Op == "gte"
 
 	for _, o := range conds {
@@ -937,10 +1018,10 @@ func narrow(r index.Range, cd query.Cond, conds []query.Cond) index.Range {
 			r.Lo, r.LoIncl = other.Lo, other.LoIncl
 		}
 
-		return r
+		return r, true
 	}
 
-	return r
+	return r, false
 }
 
 // topK keeps the k first rows in the result order, with a max-heap, so a

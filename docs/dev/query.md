@@ -251,7 +251,7 @@ A **compound index** has 2 to 4 fields, written with commas: `"account_id,create
 | `created_at >= t` | does not use it: the first field is not in the filter |
 
 - A condition on a field that the index does not hold is tested on each document the index gives, so the answer is always the same as with no index.
-- An array field gives one entry per element, as in an index of one field.
+- An array field gives one entry per element, as in an index of one field. A range of two sides on an array field matches when one element passes each side (`[1, 3]` matches `> 1` and `<= 2`), with or without an index.
 - The index does not order the rows: a `sort` still reads the documents that the filter keeps. So put in the index the fields that cut the most.
 - A compound **unique** key (`"unique": ["account_id,email"]`) allows one live document per tuple of values: an email is unique inside an account. A document where one of the fields is missing or `null` is not checked.
 

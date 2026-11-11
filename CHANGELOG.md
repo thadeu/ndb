@@ -15,6 +15,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **Compound unique keys.** `"unique": ["account_id,email"]` allows one live document per tuple of values (`409 unique_violation`): an email is unique inside an account. A document where one of the fields is missing or `null` is not checked.
 - In the SDKs: Go `ndb.Collection[T](db, name, ndb.Index("a", "b"), ndb.Unique("a", "b"))`; TypeScript `indexes: [['a', 'b']]` and `unique: [['a', 'b']]` in the schema; Ruby `indexes: [%w[a b]]` (or `"a,b"`); Rails `index :a, :b` and `index :a, :b, unique: true`.
 
+### Fixed
+
+- **An index of one field gave fewer documents than a scan for a range of two sides on an array field.** `{"b": {"$gt": 1, "$lte": 2}}` matches `{"b": [1, 3]}` (one element passes each side; they need not be the same element, as in MongoDB), and a scan found it, but with an index on `b` the read took only the keys between the two bounds and missed it. Such a read now also takes the documents with more than one key in the index, and the filter tests them. A collection with no array in the field gets the same documents as before; the first range of two sides on a segment reads its key file once to find the rows with arrays (about 50 ms for 300 000 rows, then kept while the collection is open). Ranges of one side, `$eq` and `$in` were right.
+
 ## [1.19.0] - 2026-11-11
 
 ### Added

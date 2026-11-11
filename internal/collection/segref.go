@@ -28,6 +28,11 @@ type segRef struct {
 	keys map[string]*segment.Keys
 	uniq map[string]*segment.Keys
 
+	// multi is, per index field, the rows with more than one key (an array):
+	// read from the key file on first use (multiRows), under multiMu.
+	multiMu sync.Mutex
+	multi   map[string]bitset
+
 	// live has the rows that are the current version of their document, and
 	// nlive counts them. gen counts the changes to live, and saved is the gen
 	// that meta.bolt holds. All four are guarded by Collection.mu.

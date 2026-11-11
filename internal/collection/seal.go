@@ -775,7 +775,7 @@ func (c *Collection) adopt(snap sealSnap, r *segRef, name string) error {
 // than taking each sealed document out. The caller holds c.mu for writing.
 func (c *Collection) rebuildMemIndexes() {
 	for _, s := range c.rd.idx {
-		s.mem = index.NewMem()
+		s.reset()
 	}
 
 	if len(c.rd.idx) == 0 {
@@ -790,9 +790,7 @@ func (c *Collection) rebuildMemIndexes() {
 		}
 
 		for _, s := range c.rd.idx {
-			for _, k := range index.DocKeys(m, s.field, s.time) {
-				s.mem.Add(k, id)
-			}
+			s.add(id, index.DocKeys(m, s.field, s.time))
 		}
 	}
 }

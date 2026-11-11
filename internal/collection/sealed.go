@@ -61,6 +61,13 @@ func (b bitset) and(o bitset) {
 	}
 }
 
+// orLive adds the rows of o that are in live.
+func (b bitset) orLive(o, live bitset) {
+	for i := range b {
+		b[i] |= o[i] & live[i]
+	}
+}
+
 func (b bitset) clone() bitset { return append(bitset(nil), b...) }
 
 func (b bitset) bytes() []byte {
