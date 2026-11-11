@@ -213,11 +213,11 @@ func TestBlindFieldIsFoundByItsValue(t *testing.T) {
 	}
 
 	cases := map[string]string{
-		`{"query":{"cpf":"` + cpf + `"}}`:                        "u1",
-		`{"query":{"cpf":{"$eq":"390.533.447-05"}}}`:             "u1",
-		`{"query":{"cpf":{"$in":["11122233344","x"]}}}`:          "u2",
+		`{"query":{"cpf":"` + cpf + `"}}`:                          "u1",
+		`{"query":{"cpf":{"$eq":"390.533.447-05"}}}`:               "u1",
+		`{"query":{"cpf":{"$in":["11122233344","x"]}}}`:            "u2",
 		`{"query":{"cpf":{"$ne":"11122233344"}},"sort":{"_id":1}}`: "u1",
-		`{"query":{"$or":[{"cpf":"x"},{"name":"Bia"}]}}`:         "u2",
+		`{"query":{"$or":[{"cpf":"x"},{"name":"Bia"}]}}`:           "u2",
 		`{"query":{"cpf":{"$exists":true}},"sort":{"_id":1}}`:      "u1,u2",
 	}
 
