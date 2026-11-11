@@ -101,6 +101,15 @@ calls.update("c1", { "$set" => { status: "done" }, "$unset" => { caller: true } 
 # => {"matched" => 1, "modified" => 1, "doc" => {...with "_v"}}
 
 calls.update("c1", { "$set" => { duration: 50 } }, guard: { _v: 2 })   # only if the version is still 2
+
+# with_lock: read, yield, write the changed fields with the _v guard; on a
+# conflict read again and yield again (5 tries, retries:), then
+# Ndb::StaleObjectError. An exception in the block writes nothing.
+calls.with_lock("c1") do |call|
+  next if call["status"] == "done"
+
+  call["status"] = "done"
+end
 calls.update("c9", { "$inc" => { hits: 1 } }, upsert: true)            # create c9 when missing
 
 stock.update_by({ sku: "a", qty: { "$gte" => 1 } }, { "$inc" => { qty: -1 } })   # guarded decrement

@@ -89,6 +89,16 @@ const row = await calls.get('c1')
 const res = await calls.update('c1', { $set: { status: 'done' }, $unset: { duration: true } }, { guard: { _v: row!._v } })
 // res: { matched, modified, doc } (doc is the new row with _v)
 
+// withLock does the read, the guard and the retry: change the row in the
+// function, and the changed fields are written with the _v guard. On a
+// conflict it reads again and calls the function again (5 tries,
+// { retries }), then throws StaleObjectError. A throw in the function writes nothing.
+await calls.withLock('c1', (call) => {
+  if (call.status === 'done') return
+
+  call.status = 'done'
+})
+
 // Atomic update by query. A guarded decrement: exactly one of two racing calls wins.
 await stock.updateBy({ _id: 'a', qty: { $gte: 1 } }, { $inc: { qty: -1 } })
 

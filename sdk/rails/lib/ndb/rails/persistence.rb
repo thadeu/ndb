@@ -195,6 +195,34 @@ module Ndb
       add_to!(attribute, -by)
     end
 
+    # Reads the document again, yields the record, and saves it, guarded by
+    # the version it read (optimistic lock). When another write came first,
+    # it reads the document again and yields again, up to retries times; then
+    # it raises Ndb::StaleObjectError. An exception in the block stops it and
+    # nothing is written. Returns the record. Like ActiveRecord with_lock,
+    # without a database lock: nothing waits.
+    #
+    #   payment.with_lock do |p|
+    #     next if p.status == "paid"
+    #
+    #     p.status = "paid"
+    #   end
+    def with_lock(retries: 5)
+      retries = [retries, 1].max
+
+      retries.times do |attempt|
+        sleep((attempt * 5 + rand(10)) / 1000.0) if attempt.positive?
+
+        reload
+        yield self
+        save!
+
+        return self
+      rescue StaleObjectError
+        raise if attempt == retries - 1
+      end
+    end
+
     # Reads the document again, like ActiveRecord reload: the attributes,
     # the version and the associations (they load again on next use).
     def reload

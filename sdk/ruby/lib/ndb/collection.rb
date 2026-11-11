@@ -63,6 +63,42 @@ module Ndb
       client.update(name, id, ops, guard: guard, upsert: upsert, expire_in: expire_in)
     end
 
+    LOCK_SKIP = %w[_id _v _coll].freeze
+
+    # Reads the document with this _id, yields it, and writes the fields the
+    # block changed (set, or deleted), guarded by the version it read
+    # (optimistic lock). When another write came first, it reads the
+    # document again and yields again, up to retries times; then it raises
+    # StaleObjectError. An exception in the block stops it and nothing is
+    # written. A missing document raises NotFound. Returns the document as
+    # written.
+    #
+    #   wallets.with_lock("w1") do |w|
+    #     raise InsufficientFunds if w["balance_cents"] < 500
+    #
+    #     w["balance_cents"] -= 500
+    #   end
+    def with_lock(id, retries: 5)
+      retries = [retries, 1].max
+
+      retries.times do |attempt|
+        sleep((attempt * 5 + rand(10)) / 1000.0) if attempt.positive?
+
+        doc = get(id) or raise NotFound.new("#{name} #{id}", code: "not_found", status: 404)
+        before = Marshal.load(Marshal.dump(doc))
+
+        yield doc
+
+        ops = lock_changes(before, doc)
+        return doc if ops.empty?
+
+        result = update(id, ops, guard: { _v: before["_v"] })
+        return result["doc"] if result["matched"].positive?
+      end
+
+      raise StaleObjectError.new("#{name} #{id} changed on every try", code: "stale_object", status: 409)
+    end
+
     # The atomic update by query: the first match, or every match with many.
     def update_by(query, ops, many: false, upsert: false, expire_in: nil)
       ready!
@@ -180,6 +216,19 @@ module Ndb
 
       client.ensure_collection(name, definition)
       @ensured = true
+    end
+
+    private
+
+    # The $set and $unset of the top-level fields that differ.
+    def lock_changes(before, after)
+      set = after.reject { |k, v| LOCK_SKIP.include?(k) || before.key?(k) && before[k] == v }
+      unset = (before.keys - after.keys - LOCK_SKIP).to_h { |k| [k, ""] }
+
+      ops = {}
+      ops["$set"] = set unless set.empty?
+      ops["$unset"] = unset unless unset.empty?
+      ops
     end
   end
 

@@ -5,10 +5,6 @@ module Ndb
   # rescue of either name catches the same error.
   RecordNotUnique = UniqueViolation
 
-  # A save or destroy matched nothing: the record changed or was deleted
-  # since it was loaded (its "_v" guard did not match).
-  class StaleObjectError < Error; end
-
   # Raised by destroy! when a before_destroy callback aborts.
   class RecordNotDestroyed < Error
     attr_reader :record

@@ -1,4 +1,4 @@
-import { InvalidUpdateError, NotFoundError } from './errors.js'
+import { InvalidUpdateError, NotFoundError, StaleObjectError } from './errors.js'
 import type { Ndb } from './ndb.js'
 import { Query } from './query.js'
 import type {
@@ -12,6 +12,7 @@ import type {
   Filter,
   Input,
   InsertOptions,
+  LockOptions,
   PitrInfo,
   Row,
   Schema,
@@ -112,6 +113,38 @@ export class Collection<F extends Fields> {
     })
 
     return this.updated(out)
+  }
+
+  // Reads the document with this _id, calls fn with it, and writes the fields
+  // that fn changed (set, or deleted), guarded by the version it read
+  // (optimistic lock). When another write came first, it reads the document
+  // again and calls fn again, up to retries times (default 5); then it throws
+  // StaleObjectError. An error from fn stops it and nothing is written. A
+  // missing document is NotFoundError. It returns the document as written.
+  async withLock(id: string, fn: (doc: Row<F>) => void | Promise<void>, opts: LockOptions = {}): Promise<Row<F>> {
+    const retries = Math.max(opts.retries ?? 5, 1)
+
+    for (let attempt = 0; attempt < retries; attempt++) {
+      if (attempt > 0) await sleep(attempt * 5 + Math.random() * 10)
+
+      const doc = await this.get(id)
+
+      if (doc === null) throw new NotFoundError('not_found', `${this.name} ${id}`, 404)
+
+      const before = structuredClone(doc)
+
+      await fn(doc)
+
+      const ops = changes(before, doc)
+
+      if (ops === null) return doc
+
+      const res = await this.update(id, ops as UpdateOps<F>, { guard: { _v: before._v } as Filter<F> })
+
+      if (res.matched > 0 && res.doc) return res.doc
+    }
+
+    throw new StaleObjectError('stale_object', `${this.name} ${id} changed on every try`, 409)
   }
 
   // The atomic update by query (POST /{coll}/_update_by_query): the daemon
@@ -415,4 +448,35 @@ async function orNull<T>(p: Promise<T>): Promise<T | null> {
 
     throw err
   }
+}
+
+const lockSkip = new Set(['_id', '_v', '_coll'])
+
+// changes are the $set and $unset of the top-level fields that differ, or
+// null when nothing changed.
+function changes(before: Record<string, unknown>, after: Record<string, unknown>): Record<string, Record<string, unknown>> | null {
+  const set: Record<string, unknown> = {}
+  const unset: Record<string, true> = {}
+
+  for (const [k, v] of Object.entries(after)) {
+    if (lockSkip.has(k) || v === undefined) continue
+
+    if (!(k in before) || JSON.stringify(before[k]) !== JSON.stringify(v)) set[k] = v
+  }
+
+  for (const k of Object.keys(before)) {
+    if (!lockSkip.has(k) && after[k] === undefined) unset[k] = true
+  }
+
+  const ops: Record<string, Record<string, unknown>> = {}
+
+  if (Object.keys(set).length > 0) ops.$set = set
+
+  if (Object.keys(unset).length > 0) ops.$unset = unset
+
+  return Object.keys(ops).length > 0 ? ops : null
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }

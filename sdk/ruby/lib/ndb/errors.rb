@@ -24,6 +24,11 @@ module Ndb
 
   class Unauthorized < Error; end
   class NotFound < Error; end
+
+  # with_lock lost the race on every try, or a model save or destroy matched
+  # nothing: the document changed or was deleted since it was read (its "_v"
+  # guard did not match).
+  class StaleObjectError < Error; end
   class UnknownCollection < Error; end
   class UniqueViolation < Error; end
   class CatalogConflict < Error; end

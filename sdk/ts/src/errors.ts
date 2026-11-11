@@ -62,6 +62,7 @@ export type ErrorCode =
   | 'unknown_group'
   | 'group_exists'
   | 'invalid_update'
+  | 'stale_object'
   | 'http_status'
   | (string & {})
 
@@ -123,6 +124,10 @@ export class UnknownGroupError extends NdbError {}
 
 // A group create with a name that exists (group_exists).
 export class GroupExistsError extends NdbError {}
+
+// withLock lost the race on every try: the document changed between the read
+// and the write each time.
+export class StaleObjectError extends NdbError {}
 
 const subclasses: Record<string, typeof NdbError> = {
   unauthorized: UnauthorizedError,

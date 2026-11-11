@@ -104,6 +104,19 @@ if err == nil && upd.Matched == 0 {
 	// Someone else wrote first, or the document is gone. Read again and retry.
 }
 
+// WithLock does that loop: read, call fn, write the changed fields with the
+// _v guard, and read again on a conflict (5 tries, LockRetries(n)). An error
+// from fn writes nothing. After the last try: ErrStaleObject.
+call, err = calls.WithLock(ctx, "c1", func(c *Call) error {
+	if c.Status == "done" {
+		return nil
+	}
+
+	c.Status = "done"
+
+	return nil
+})
+
 // Atomic update by query: exactly one of two racing calls wins.
 upd, err = calls.UpdateBy(ctx,
 	ndb.And(ndb.Eq("_id", "c1"), ndb.Gte("duration", 1)),
@@ -1112,7 +1125,7 @@ if errors.As(err, &apiErr) {
 }
 ```
 
-Each code of the [error table](../http/errors.md) has a sentinel: `ndb.Err` and the code in CamelCase, for example `ErrNotFound` (`not_found`), `ErrInvalidPath` (`invalid_path`), `ErrUniqueViolation` (`unique_violation`). The exceptions are `ErrGroupLimit` (`group_limit_exceeded`), `ErrTTLNotEnabled` and `ErrTTLDerived`, and `ErrPITROff`. A test of the repository fails when the daemon gets a code that has no sentinel.
+Each code of the [error table](../http/errors.md) has a sentinel: `ndb.Err` and the code in CamelCase, for example `ErrNotFound` (`not_found`), `ErrInvalidPath` (`invalid_path`), `ErrUniqueViolation` (`unique_violation`). `ErrStaleObject` (`stale_object`) is the error of `WithLock` after its last try; the daemon never sends it. The exceptions are `ErrGroupLimit` (`group_limit_exceeded`), `ErrTTLNotEnabled` and `ErrTTLDerived`, and `ErrPITROff`. A test of the repository fails when the daemon gets a code that has no sentinel.
 
 A response that is not a daemon error has the code `http_status`. A failed connection returns the normal `net` error.
 

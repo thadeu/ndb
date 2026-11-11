@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **`with_lock` in every SDK** (`WithLock` in Go, `withLock` in TypeScript, `with_lock` in Ruby and on a Rails record): it reads the document, calls your function to change it, and writes the changed fields with the `_v` guard; when another write came first, it reads again and calls the function again (5 tries, `retries`), then fails with `stale_object` (`ErrStaleObject`, `StaleObjectError`, `Ndb::StaleObjectError`). An error in the function writes nothing, and no change writes nothing. No lock waits on the daemon. The docs show three cases: two debits of one balance, a payment webhook that arrives twice, and a seat limit.
+
 ## [1.18.2] - 2026-11-10
 
 ## [1.18.1] - 2026-11-10

@@ -467,6 +467,94 @@ curl ... /calls/_update_by_query -d '{"query":{"status":"failed"},"update":{"$se
 
 That is the body of `POST /{coll}/_update/c1`; the SDKs call it a guard (`Guard(Eq("_v", 7))`, `guard: { _v: 7 }`).
 
+#### with_lock: read, change, write, retry
+
+Every SDK has `with_lock` (`WithLock` in Go, `withLock` in TypeScript). It does the guard for you:
+
+1. It reads the document and its `_v`.
+2. It calls your function with the document. Change the fields there.
+3. It writes the fields that changed (`$set`, and `$unset` for a removed field), with the guard `_v`.
+4. When another write came first (`matched: 0`), it reads the document again and calls your function again. After 5 tries (`retries`) it fails with `stale_object`.
+
+An error in your function stops it, and nothing is written. When your function changes nothing, nothing is written. Nothing waits: there is no lock on the daemon, so a client that dies holds nothing. Use it when the new value depends on a decision in your code. When one operator does the job, use a [conditional update](#update-by-query): it is one call, with no retry.
+
+**1. Debit a balance from two requests at the same time.** The second request reads the new balance and debits again, so both debits land.
+
+```ruby
+# Rails
+Wallet.find("w1").with_lock do |w|
+  raise InsufficientFunds if w.balance_cents < 500
+
+  w.balance_cents -= 500
+end
+```
+
+```go
+// Go
+w, err := wallets.WithLock(ctx, "w1", func(w *Wallet) error {
+	if w.Balance < 500 {
+		return ErrInsufficientFunds
+	}
+
+	w.Balance -= 500
+
+	return nil
+})
+```
+
+The same debit without a decision in code is one conditional update, with no retry:
+
+```bash
+curl ... /wallets/_update/w1 -d '{"query":{"balance_cents":{"$gte":500}},"update":{"$inc":{"balance_cents":-500}}}'
+# {"matched":0,...} when the balance is too low
+```
+
+**2. The payment webhook arrives twice.** The second call sees `paid` and writes nothing. Without the retry, it gets `stale_object`, answers 500, and the gateway sends the webhook again.
+
+```ruby
+# Rails
+Payment.find(event.payment_id).with_lock do |p|
+  next if p.status == "paid"
+
+  p.status = "paid"
+  p.paid_at = Time.current
+end
+```
+
+```ts
+// TypeScript
+await payments.withLock(event.paymentId, (p) => {
+  if (p.status === 'paid') return
+
+  p.status = 'paid'
+  p.paid_at = new Date()
+})
+```
+
+**3. A setting with a rule (the seat limit of a plan).** Two invites at the same time cannot pass the limit.
+
+```go
+// Go
+_, err := accounts.WithLock(ctx, "acc_1", func(a *Account) error {
+	if a.Seats >= a.MaxSeats {
+		return ErrSeatLimit
+	}
+
+	a.Seats++
+
+	return nil
+})
+```
+
+```ruby
+# Ruby (plain client): documents are hashes
+accounts.with_lock("acc_1") do |a|
+  raise SeatLimit if a["seats"] >= a["max_seats"]
+
+  a["seats"] += 1
+end
+```
+
 ### Upsert
 
 With `"upsert": true` and no match, a document is created from the plain equality fields of the query (dot paths too). Then the operators run on it: `$inc` starts from 0, `$push` creates the array, `$min` and `$max` set the value. Without the id field in the query, an id is generated like an insert does.

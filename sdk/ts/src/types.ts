@@ -172,6 +172,11 @@ export interface UpdateResult<F extends Fields = Fields> {
   doc?: Row<F>
 }
 
+export interface LockOptions {
+  // How many times withLock tries (default 5).
+  retries?: number
+}
+
 export interface DeleteResult {
   deleted: number
 }
