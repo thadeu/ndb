@@ -66,6 +66,10 @@ type Options struct {
 	// kill -9), on a daemon of its own.
 	Streams bool
 
+	// Compound: compound indexes and $unwind on orders with items, on a
+	// daemon of its own.
+	Compound bool
+
 	// Concurrent: clients that read at the same time (1, 3 and 10).
 	Concurrent bool
 
@@ -101,7 +105,7 @@ type Options struct {
 }
 
 func (o Options) all() bool {
-	return !o.Stress && !o.Query && !o.Aggs && !o.Lookup && !o.Idle && !o.Concurrent && !o.Direct && !o.Streams
+	return !o.Stress && !o.Query && !o.Aggs && !o.Lookup && !o.Idle && !o.Concurrent && !o.Direct && !o.Streams && !o.Compound
 }
 
 // reads tells whether a part needs the loaded calls.
@@ -154,6 +158,10 @@ func (o Options) plan(reuse bool) []planned {
 
 	if o.Direct {
 		steps = append(steps, directPlan(o.DirectRows)...)
+	}
+
+	if o.Compound || o.all() {
+		steps = append(steps, compoundPlan()...)
 	}
 
 	if o.Streams || o.all() {
@@ -311,6 +319,11 @@ func Run(o Options, w io.Writer) (err error) {
 		report = append(report, direct(dir, o.DirectRows)...)
 	}
 
+	if o.Compound || o.all() {
+		report = append(report, "| **compound indexes and $unwind** (median of 5, min–max; plan, documents examined) | |")
+		report = append(report, compoundPart(dir)...)
+	}
+
 	if o.Streams || o.all() {
 		report = append(report, "| **streams** (Redis Streams parity) | |")
 		report = append(report, streamsPart(dir)...)
@@ -445,6 +458,13 @@ func (d *daemon) phase() func() int64 {
 }
 
 func (d *daemon) call(method, path string, body []byte) (int, []byte, time.Duration) {
+	code, out, _, took := d.do(method, path, body)
+
+	return code, out, took
+}
+
+// do is call with the headers of the answer (nil when the request failed).
+func (d *daemon) do(method, path string, body []byte) (int, []byte, http.Header, time.Duration) {
 	req, _ := http.NewRequest(method, "http://ndb"+path, bytes.NewReader(body))
 	req.Header.Set("Accept", "application/x-ndjson")
 
@@ -452,14 +472,14 @@ func (d *daemon) call(method, path string, body []byte) (int, []byte, time.Durat
 
 	resp, err := d.http.Do(req)
 	if err != nil {
-		return 0, []byte(err.Error()), time.Since(start)
+		return 0, []byte(err.Error()), nil, time.Since(start)
 	}
 
 	defer resp.Body.Close()
 
 	b, _ := io.ReadAll(resp.Body)
 
-	return resp.StatusCode, b, time.Since(start)
+	return resp.StatusCode, b, resp.Header, time.Since(start)
 }
 
 func (d *daemon) must(method, path, body string) []byte {

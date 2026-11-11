@@ -62,3 +62,23 @@ func Pick(raw []byte, keys []string) (map[string]any, error) {
 
 	return m, nil
 }
+
+// Lookup follows path, one key per step, through the objects of a decoded
+// document. ok is false when a key is missing or a step is not an object
+// (it does not walk into arrays).
+func Lookup(m map[string]any, path []string) (val any, ok bool) {
+	var cur any = m
+
+	for _, key := range path {
+		obj, isObj := cur.(map[string]any)
+		if !isObj {
+			return nil, false
+		}
+
+		if cur, ok = obj[key]; !ok {
+			return nil, false
+		}
+	}
+
+	return cur, true
+}

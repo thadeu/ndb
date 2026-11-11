@@ -31,23 +31,6 @@ func lockSet(t *testing.T, h http.Handler, coll, body string) setAnswer {
 	return out
 }
 
-func docOf(t *testing.T, h http.Handler, path string) map[string]any {
-	t.Helper()
-
-	rec := call(h, "GET", path, "")
-	if rec.Code == http.StatusNotFound {
-		return nil
-	}
-
-	var doc map[string]any
-
-	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
-		t.Fatalf("doc %s: %q", path, rec.Body.String())
-	}
-
-	return doc
-}
-
 func seedAccounts(t *testing.T, h http.Handler) {
 	t.Helper()
 

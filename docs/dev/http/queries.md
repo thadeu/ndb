@@ -128,7 +128,7 @@ const n = await calls.count({ status: 'failed' })
 
 ## `POST /{coll}/_aggregate`
 
-Runs a pipeline: `$match`, `$group`, `$sort`, `$limit`, `$skip`, `$project`, with accumulators and time buckets. The stages are on [Aggregate](../aggregate.md).
+Runs a pipeline: `$match`, `$unwind`, `$group`, `$sort`, `$limit`, `$skip`, `$project`, with accumulators and time buckets. The stages are on [Aggregate](../aggregate.md).
 
 | Body key | Type | Default | Meaning |
 |---|---|---|---|

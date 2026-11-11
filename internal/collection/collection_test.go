@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
@@ -15,6 +16,23 @@ import (
 )
 
 var ctx = context.Background()
+
+// openData opens a collection that seals to segments under root, with its
+// own definition (openSealed has a fixed one). The caller closes it.
+func openData(t *testing.T, root string, def catalog.Def) *collection.Collection {
+	t.Helper()
+
+	if def.Name == "" {
+		def.Name = "posts"
+	}
+
+	c, err := collection.Open(collection.Config{Dir: filepath.Join(root, "wal"), Data: root, FS: fs.OS{}, Def: def, CompactMin: 1 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return c
+}
 
 func open(t *testing.T, dir string, def catalog.Def) *collection.Collection {
 	t.Helper()

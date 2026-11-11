@@ -91,6 +91,16 @@ module Ndb
       with(group: fields.flatten.map(&:to_s))
     end
 
+    # Makes the aggregates of the relation (count, sum, average, minimum,
+    # maximum, with or without group) read one row per element of an array
+    # attribute, as $unwind: `Order.unwind(:items).group("items.sku")
+    # .sum("items.qty")`. A document with no element gives no row. It is for
+    # the aggregates only: reading the records of such a relation raises
+    # ArgumentError.
+    def unwind(field)
+      with(unwind: field.to_s)
+    end
+
     # The JSON body that this relation sends to the daemon, as a String,
     # with no request (like to_sql of ActiveRecord). It is the body of
     # POST /{collection}/_search; pretty: true gives it on many lines.
@@ -105,6 +115,8 @@ module Ndb
 
     # The find body: JSON only, the daemon decides what it means.
     def to_query
+      raise ArgumentError, "unwind is for count, sum, average, minimum and maximum; it does not change the records of a relation" if values[:unwind]
+
       query = {}
       where = Conditions.combine(values[:where])
 
@@ -270,7 +282,7 @@ module Ndb
     end
 
     def count
-      return calculate(:count) unless values[:group].empty?
+      return calculate(:count) unless values[:group].empty? && values[:unwind].nil?
 
       klass.ndb_find(to_query.slice("query").merge("count" => true, "limit" => 1, "fields" => [klass.primary_key])).total
     end
@@ -314,6 +326,7 @@ module Ndb
       where = Conditions.combine(values[:where])
 
       stages << { "$match" => where } unless where.empty?
+      stages << { "$unwind" => "$#{values[:unwind]}" } if values[:unwind]
       stages << { "$group" => { "_id" => group_id, op.to_s => accumulator(op, field) } }
 
       { "pipeline" => stages }
@@ -409,7 +422,7 @@ module Ndb
 
       return rows.to_h { |row| [group_key(row["_id"]), row[key]] } unless values[:group].empty?
 
-      rows.first&.fetch(key) || (op == :sum ? 0 : nil)
+      rows.first&.fetch(key) || (%i[sum count].include?(op) ? 0 : nil)
     end
 
     def group_key(id)

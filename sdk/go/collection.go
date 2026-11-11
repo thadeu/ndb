@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 )
@@ -570,34 +571,36 @@ type deleteBody struct {
 // CollOption adds to the definition of a collection.
 type CollOption func(*schema) error
 
-// Index declares a compound index on 2 to 4 fields, in this order: it serves
+// Index declares an index on 1 to 4 fields. With one field it is the index
+// tag as an option, for a path that is not a field of the struct
+// ("items.sku"). With more it is a compound index, in this order: it serves
 // a query with equality on the first fields and a range on the next one.
 //
-//	ndb.Collection[Order](db, "orders", ndb.Index("account_id", "created_at"))
+//	ndb.Collection[Order](db, "orders", ndb.Index("account_id", "created_at"), ndb.Index("items.sku"))
 func Index(fields ...string) CollOption {
 	return func(s *schema) error {
-		name, err := compoundName("Index", fields)
+		name, err := indexName("Index", fields)
 		s.indexes = append(s.indexes, name)
 
 		return err
 	}
 }
 
-// Unique declares a compound unique key: one live document per tuple of
-// values (ErrUniqueViolation). A document that misses one of the fields is
-// not checked.
+// Unique declares a unique key on 1 to 4 fields: one live document per
+// value, or per tuple of values (ErrUniqueViolation). A document that
+// misses one of the fields is not checked.
 func Unique(fields ...string) CollOption {
 	return func(s *schema) error {
-		name, err := compoundName("Unique", fields)
+		name, err := indexName("Unique", fields)
 		s.unique = append(s.unique, name)
 
 		return err
 	}
 }
 
-func compoundName(option string, fields []string) (string, error) {
-	if len(fields) < 2 || len(fields) > 4 {
-		return "", fmt.Errorf("ndb: %s takes 2 to 4 fields (one field: the struct tag)", option)
+func indexName(option string, fields []string) (string, error) {
+	if len(fields) < 1 || len(fields) > 4 || slices.Contains(fields, "") {
+		return "", fmt.Errorf("ndb: %s takes 1 to 4 field names", option)
 	}
 
 	return strings.Join(fields, ","), nil

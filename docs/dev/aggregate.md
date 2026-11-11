@@ -91,7 +91,7 @@ const res = await calls.aggregate<{ _id: string; n: number; avg: number }>(
 ## Pipeline shape
 
 - Exactly one `$group`.
-- Before it: `$match` (all are ANDed) and one `$sort`. The `$sort` matters only for `$first` and `$last`.
+- Before it: `$match` (all are ANDed), one `$sort`, and one `$unwind`. The `$sort` matters only for `$first` and `$last`. A `$match` after the `$unwind` filters its rows.
 - After it: `$match`, `$sort`, `$limit`, `$skip`, `$project`.
 - `$match` takes the [filters](query.md#filters) of `find`. A `$match` before `$group` uses indexes and zone maps like `find` does.
 
@@ -101,11 +101,54 @@ const res = await calls.aggregate<{ _id: string; n: number; avg: number }>(
 |---|---|---|
 | `$match` | before and after `$group` | keep the documents (or groups) that match a filter |
 | `$having` | after `$group` | the same as `$match` there, named as in SQL: keep the groups that match (`{"calls": {"$gt": 10}}`). Before `$group` it is `invalid_pipeline`: use `$match`. |
+| `$unwind` | before `$group` (once) | one row per element of an array, see [`$unwind`](#unwind) |
 | `$sort` | before `$group` (once), after `$group` | order. Before the group it only decides `$first` and `$last`. |
 | `$group` | once | build one row per key, see below |
 | `$limit`, `$skip` | after `$group` | cut the group rows |
 | `$project` | after `$group` | keep or remove fields of the group rows |
 | `$lookup` | at the end | add documents of another collection to each output row, see [Lookup](#lookup) |
+
+## `$unwind`
+
+`$unwind` makes one row per element of an array, so `$group` can group by the elements. In each row, the path of the array holds that element.
+
+```json
+{"pipeline": [
+  {"$match": {"status": "paid"}},
+  {"$unwind": "$items"},
+  {"$group": {"_id": "$items.sku", "qty": {"$sum": "$items.qty"}, "orders": {"$distinct": "$_id"}}},
+  {"$sort": {"qty": -1}},
+  {"$limit": 10}
+]}
+```
+
+With the orders `{"_id": "o1", "items": [{"sku": "a", "qty": 2}, {"sku": "b", "qty": 1}]}` and `{"_id": "o2", "items": [{"sku": "a", "qty": 5}]}`, the rows are `{"_id": "a", "qty": 7, "orders": 2}` and `{"_id": "b", "qty": 1, "orders": 1}`.
+
+The rules are those of MongoDB:
+
+| The value at the path | Rows |
+|---|---|
+| an array with elements | one per element |
+| an empty array, `null`, or no field | none (one, with `preserveNullAndEmptyArrays`) |
+| not an array | one, with the value |
+
+The long form has two options:
+
+```json
+{"$unwind": {"path": "$items", "preserveNullAndEmptyArrays": true, "includeArrayIndex": "i"}}
+```
+
+- `preserveNullAndEmptyArrays` keeps a document with no element as one row. In the row of an empty array the field is left out, so a group by it puts that row with the missing and `null` ones.
+- `includeArrayIndex` names a top-level field (not `_id`) that gets the place of the element, from 0 (`null` when the value is not an array).
+
+Notes:
+
+- A `$match` before `$unwind` uses indexes and zone maps. A `$match` after it is tested on each row (`{"items.qty": {"$gte": 2}}` keeps the elements with that quantity), with no index. So put the filters of the document first.
+- `$count` counts rows (elements). To count documents, use `{"$distinct": "$_id"}`.
+- `$first` and `$last` follow the order of the documents, then of the elements.
+- The path goes through objects only (`$order.items`), not through another array.
+- One `$unwind` per pipeline, before `$group`. A pipeline with `$unwind` needs a `$group`. Else `400 invalid_pipeline`.
+- The array is read from the document, not from a column. An `$unwind` on many documents is slower than a group on a plain field: filter first.
 
 ## Group key
 

@@ -11,7 +11,6 @@ import (
 
 	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/collection"
-	"github.com/thadeu/ndb/internal/fs"
 )
 
 func TestCompoundIndexPlans(t *testing.T) {
@@ -125,12 +124,7 @@ func TestCompoundIndexAnswersLikeAScan(t *testing.T) {
 	root := t.TempDir()
 
 	openAt := func(name string, indexes []string) *collection.Collection {
-		dir := filepath.Join(root, name)
-
-		c, err := collection.Open(collection.Config{Dir: filepath.Join(dir, "wal"), Data: dir, FS: fs.OS{}, Def: catalog.Def{Name: "t", Indexes: indexes}, CompactMin: 1 << 20})
-		if err != nil {
-			t.Fatal(err)
-		}
+		c := openData(t, filepath.Join(root, name), catalog.Def{Indexes: indexes})
 
 		t.Cleanup(func() { c.Close() })
 
@@ -358,14 +352,7 @@ func TestCompoundUniqueInSegments(t *testing.T) {
 	root := t.TempDir()
 	def := catalog.Def{Name: "users", Unique: []string{"acc,email"}}
 
-	openIt := func() *collection.Collection {
-		c, err := collection.Open(collection.Config{Dir: filepath.Join(root, "wal"), Data: root, FS: fs.OS{}, Def: def, CompactMin: 1 << 20})
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		return c
-	}
+	openIt := func() *collection.Collection { return openData(t, root, def) }
 
 	c := openIt()
 

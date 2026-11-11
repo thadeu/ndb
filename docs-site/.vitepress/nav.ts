@@ -53,6 +53,7 @@ export const tabs: Tab[] = [
         items: [
           { text: 'Search', link: '/query#search' },
           { text: 'Filters', link: '/query#filters' },
+          { text: 'Indexes', link: '/query#indexes' },
           { text: 'Regular expressions', link: '/query#regular-expressions' },
           { text: 'Date math', link: '/query#date-math' },
           { text: 'Array elements', link: '/query#array-elements' },
@@ -88,6 +89,7 @@ export const tabs: Tab[] = [
         items: [
           { text: 'Overview', link: '/aggregate' },
           { text: 'Pipeline shape', link: '/aggregate#pipeline-shape' },
+          { text: '$unwind', link: '/aggregate#unwind' },
           { text: 'Group key', link: '/aggregate#group-key' },
           { text: 'Accumulators', link: '/aggregate#accumulators' },
           { text: 'Time buckets', link: '/aggregate#time-buckets' },

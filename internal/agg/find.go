@@ -122,6 +122,8 @@ func (f *Find) parseStages(stages []json.RawMessage) error {
 			err = f.project(arg)
 		case "$having":
 			return invalid("$having filters the groups of a $group: use $match")
+		case "$unwind":
+			return invalid("$unwind needs a $group stage after it")
 		}
 
 		if err != nil {

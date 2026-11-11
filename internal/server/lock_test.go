@@ -30,16 +30,6 @@ func takeLock(t *testing.T, h http.Handler, path, body string) lockAnswer {
 	return out
 }
 
-func expectCode(t *testing.T, rec *httptest.ResponseRecorder, status int, code string) {
-	t.Helper()
-
-	expectStatus(t, rec, status)
-
-	if got := errorCode(t, rec); got != code {
-		t.Fatalf("code %q, want %q", got, code)
-	}
-}
-
 func TestLockGivesTheDocumentAndOnlyTheHolderWrites(t *testing.T) {
 	_, h := newHandler(t)
 

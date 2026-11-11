@@ -4,33 +4,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 )
-
-func waitIndexReady(t *testing.T, h http.Handler, coll string) {
-	t.Helper()
-
-	deadline := time.Now().Add(10 * time.Second)
-
-	for time.Now().Before(deadline) {
-		if body := call(h, "GET", "/"+coll+"/_stats", "").Body.String(); !strings.Contains(body, `"building"`) {
-			return
-		}
-
-		time.Sleep(5 * time.Millisecond)
-	}
-
-	t.Fatal("the indexes never became ready")
-}
-
-func planOf(t *testing.T, h http.Handler, path, body string) string {
-	t.Helper()
-
-	rec := call(h, "POST", path, body)
-	expectStatus(t, rec, http.StatusOK)
-
-	return rec.Header().Get("X-Ndb-Plan")
-}
 
 func TestCompoundIndexOverHTTP(t *testing.T) {
 	_, h := newHandler(t)

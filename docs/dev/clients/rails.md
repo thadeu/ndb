@@ -84,7 +84,7 @@ end
 | Option or method | Meaning |
 |---|---|
 | `_id` / `id` | The primary key is always `_id` (a string; the daemon makes a UUIDv7 when it is empty). `id` is an alias of `_id`. For a natural key (email, SKU) keep `_id` and use `unique: true` on that attribute. |
-| `index: true` | Index this field. For a [compound index](../query.md#indexes), call `index :account_id, :created_at` in the class; with `unique: true` it is a compound unique key (`index :account_id, :email, unique: true`). |
+| `index: true` | Index this field. For a [compound index](../query.md#indexes), call `index :account_id, :created_at` in the class; with `unique: true` it is a compound unique key (`index :account_id, :email, unique: true`). `index "items.sku"` indexes a path that is not an attribute. |
 | `unique: true` | Unique value. A second one raises `RecordNotUnique`. |
 | `time: true` | The collection time field. Used by zone maps, `$dateTrunc` and TTL. |
 | `expires: true` | The field holds the time the document expires. |
@@ -490,6 +490,8 @@ Relations have simple group calculations. Each one is one aggregate request.
 Call.group(:status).count            # => {"answered" => 2, "failed" => 1}
 Call.group(:status).sum(:duration)
 Call.group(:status, :caller).count   # keys are arrays
+Order.where(status: "paid").unwind(:items).group("items.sku").sum("items.qty")   # one row per element of items ($unwind)
+Order.unwind(:items).count           # the elements, not the orders; unwind is for the aggregates only
 Call.where(status: "answered").average(:duration)
 Call.minimum(:duration)
 Call.maximum(:duration)
