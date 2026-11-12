@@ -139,14 +139,19 @@ module Ndb
 
     # Atomic writes. The daemon matches the where and writes in one step on
     # every match, so the where needs the id or an indexed field
-    # (Ndb::UnindexedMany otherwise). ops is the operator Hash of
-    # Ndb::Client#update ({ "$inc" => { "n" => 1 } }); returns the number of
-    # modified documents. The braces are optional: update("$inc" => {...}).
+    # (Ndb::UnindexedMany otherwise). Returns the number of modified
+    # documents. It takes attributes, as Active Record (update(status: "x")
+    # is a $set, cast by the attribute types), the operators of
+    # Ndb::Client#update ("$inc" => { "n" => 1 }), or both: the attributes
+    # join the $set. Unlike Active Record, it runs no validation and no
+    # callback (as update_all).
     def update(ops = nil, expire_in: nil, **ops_kw)
-      ops = (ops || {}).merge(ops_kw)
-      plain = ops.keys.reject { |key| key.to_s.start_with?("$") }
+      ops = (ops || {}).merge(ops_kw).transform_keys(&:to_s)
+      attrs, ops = ops.partition { |key, _| !key.start_with?("$") }.map(&:to_h)
 
-      raise ArgumentError, "update takes operators such as \"$set\" => { status: ... }, got #{ops.keys.inspect}" if ops.empty? || plain.any?
+      raise ArgumentError, "update takes attributes (status: \"x\") or operators (\"$inc\" => { n: 1 })" if attrs.empty? && ops.empty?
+
+      ops = with_attributes(ops, attrs) unless attrs.empty?
 
       klass.ndb_update(Conditions.combine(values[:where]), with_updated_at(ops), many: true, expire_in: expire_in).fetch("modified")
     end
@@ -382,6 +387,18 @@ module Ndb
 
     def sealed_or_plain(&)
       values[:keep_encrypted] ? Rails.client.keep_encrypted(&) : yield
+    end
+
+    # ops with attrs, cast by their types, in its $set. A field in both is
+    # refused: it is not clear which value wins.
+    def with_attributes(ops, attrs)
+      set = (ops["$set"] || {}).transform_keys(&:to_s)
+      doc = klass.send(:upsert_document, attrs)
+      both = set.keys & doc.keys
+
+      raise ArgumentError, "update sets #{both.join(", ")} twice: as an attribute and in $set" if both.any?
+
+      ops.merge("$set" => set.merge(doc))
     end
 
     # The operators with $set of updated_at, unless they write it already.

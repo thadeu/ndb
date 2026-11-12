@@ -148,8 +148,12 @@ Call.find_or_create_by(_id: "c9") { |c| c.status = "new" }       # atomic: concu
 Call.find_or_create_by!(_id: "c9", status: "new")                # raises RecordInvalid
 
 # Atomic writes on every match of a where (it needs the id or an indexed field).
-# update takes the operators of the client and returns the number of modified documents.
+# update returns the number of modified documents. It takes attributes, as Active Record
+# (a $set, cast by the attribute types), the operators of the client, or both.
+# Unlike Active Record it runs no validation and no callback (as update_all).
+Call.where(status: "failed").update(status: "retry", queued_at: Time.current)
 Call.where(status: "failed").update("$set" => { "status" => "retry" })   # the braces are optional
+Call.where(id: "c1").update(status: "retry", "$inc" => { "tries" => 1 })   # the attributes join the $set
 Call.where(status: "retry").delete_all   # one delete, no callbacks, returns how many (delete is an alias)
 Call.where(status: "retry").destroy_all  # loads and destroys each record with its callbacks, returns them
 ```
@@ -1086,7 +1090,7 @@ Every public method of the gem, grouped. The names and return values follow Acti
 | `Model.find_or_create_by(hash)`, `find_or_create_by!(hash)` | atomic (an upsert) |
 | `Model.find_or_initialize_by(hash)` | a found record, or a new one not saved |
 | `Model.destroy(id)`, `Model.delete(id)` | by id, with or without callbacks |
-| `relation.update(ops)` | one atomic update on every match (`{ "$inc" => { "n" => 1 } }`); the number modified |
+| `relation.update(attrs or ops)` | one atomic update on every match: attributes (`status: "x"`, a `$set`), operators (`"$inc" => { "n" => 1 }`), or both; no callbacks; the number modified |
 | `relation.delete_all`, `relation.destroy_all` | delete every match (no callbacks / with callbacks) |
 | `Model.truncate!`, `Model.drop!` | empty the collection / remove it (keeps / removes the definition) |
 

@@ -246,12 +246,38 @@ class PersistenceTest < Minitest::Test
     assert_equal "b", found.status
   end
 
-  def test_relation_update_refuses_a_key_that_is_not_an_operator
+  # Like Active Record: plain keys are a $set, cast by the attribute type.
+  def test_relation_update_takes_plain_attributes_as_set
+    @post.create!(_id: "c1", status: "a", duration: 1)
+
+    at = Time.new(2026, 11, 12, 17, 31, 33, "-03:00")
+
+    assert_equal 1, @post.where(status: "a").update(status: "b", duration: "7", created_at: at)
+
+    raw = client.get(@post.collection_name, "c1")
+
+    assert_equal ["b", 7, "2026-11-12T20:31:33.000Z"], raw.values_at("status", "duration", "created_at")
+  end
+
+  # Plain keys and operators together: the plain keys join the $set.
+  def test_relation_update_mixes_plain_attributes_and_operators
+    @post.create!(_id: "c1", status: "a", duration: 1)
+
+    @post.where(id: "c1").update(status: "b", "$inc" => { duration: 2 })
+    @post.where(id: "c1").update({ "$set" => { status: "c" } }, duration: 9)
+
+    found = @post.find("c1")
+
+    assert_equal ["c", 9], [found.status, found.duration]
+  end
+
+  def test_relation_update_refuses_a_field_given_twice
     @post.create!(_id: "c1", status: "a")
 
-    error = assert_raises(ArgumentError) { @post.where(status: "a").update(status: "b") }
+    error = assert_raises(ArgumentError) { @post.where(id: "c1").update(status: "b", "$set" => { "status" => "c" }) }
 
-    assert_match(/\$set/, error.message)
+    assert_match(/status/, error.message)
+    assert_raises(ArgumentError) { @post.where(id: "c1").update({}) }
   end
 
   private

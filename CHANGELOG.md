@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **Rails: `Relation#update` takes attributes, as Active Record:** `where(...).update(queued_at: Time.current)` is a `$set`, cast by the attribute types. Attributes and operators go together (`update(status: "x", "$inc" => { tries: 1 })`); a field in both is an `ArgumentError`. It runs no callbacks, as `update_all`.
+
 ## [1.23.1] - 2026-11-12
 
 ### Added
