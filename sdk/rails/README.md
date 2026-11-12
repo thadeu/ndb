@@ -137,7 +137,7 @@ Call.find_or_create_by!(_id: "c9", status: "new")                # raises Record
 
 # Atomic writes on every match of a where (it needs the id or an indexed field).
 # update takes the operators of the client and returns the number of modified documents.
-Call.where(status: "failed").update({ "$set" => { "status" => "retry" } })
+Call.where(status: "failed").update("$set" => { "status" => "retry" })   # the braces are optional
 Call.where(status: "retry").delete_all   # one delete, no callbacks, returns how many (delete is an alias)
 Call.where(status: "retry").destroy_all  # loads and destroys each record with its callbacks, returns them
 ```

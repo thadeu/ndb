@@ -141,8 +141,13 @@ module Ndb
     # every match, so the where needs the id or an indexed field
     # (Ndb::UnindexedMany otherwise). ops is the operator Hash of
     # Ndb::Client#update ({ "$inc" => { "n" => 1 } }); returns the number of
-    # modified documents.
-    def update(ops, expire_in: nil)
+    # modified documents. The braces are optional: update("$inc" => {...}).
+    def update(ops = nil, expire_in: nil, **ops_kw)
+      ops = (ops || {}).merge(ops_kw)
+      plain = ops.keys.reject { |key| key.to_s.start_with?("$") }
+
+      raise ArgumentError, "update takes operators such as \"$set\" => { status: ... }, got #{ops.keys.inspect}" if ops.empty? || plain.any?
+
       klass.ndb_update(Conditions.combine(values[:where]), ops, many: true, expire_in: expire_in).fetch("modified")
     end
 

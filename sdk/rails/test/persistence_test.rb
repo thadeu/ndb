@@ -233,6 +233,25 @@ class PersistenceTest < Minitest::Test
     assert_equal 1, @post.count
   end
 
+  def test_relation_update_takes_the_operators_without_braces
+    @post.create!(_id: "c1", status: "a", duration: 1)
+
+    assert_equal 1, @post.where(status: "a").update("$inc" => { "duration" => 2 }, "$set" => { "status" => "b" })
+
+    found = @post.find("c1")
+
+    assert_equal 3, found.duration
+    assert_equal "b", found.status
+  end
+
+  def test_relation_update_refuses_a_key_that_is_not_an_operator
+    @post.create!(_id: "c1", status: "a")
+
+    error = assert_raises(ArgumentError) { @post.where(status: "a").update(status: "b") }
+
+    assert_match(/\$set/, error.message)
+  end
+
   private
 
   # Records the arguments of the next ndb_update call (nil when none).
