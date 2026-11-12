@@ -6,6 +6,7 @@ import bowl from '../../../brand/svg/mark-on-light.svg'
 import { pageTab, tabs } from '../nav'
 import { useCodeTabs } from './composables/useCodeTabs'
 import CopyPage from './components/CopyPage.vue'
+import ImageZoom from './components/ImageZoom.vue'
 import Landing from './components/Landing.vue'
 import Outline from './components/Outline.vue'
 import Sidebar from './components/Sidebar.vue'
@@ -119,5 +120,7 @@ watch(
 
       <Outline />
     </div>
+
+    <ImageZoom />
   </div>
 </template>

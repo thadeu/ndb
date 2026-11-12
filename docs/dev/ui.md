@@ -1,15 +1,18 @@
 # ndb UI
 
-`ndb-ui` is the web console for ndb. Open a local socket or a remote daemon, see the collections, edit documents as a JSON tree, send raw requests, tail changes live, and take backups.
+`ndb-ui` is the web console for ndb. Open a local socket or a remote daemon, see the collections, edit documents as a JSON tree, send raw requests, tail changes live, read streams, and take backups. Click a screenshot to see it at full size.
 
 <div class="ui-gallery">
-  <figure class="ui-shot wide"><img src="./ui/img/browser.png" alt="Browser: collections on the left, the document list, and the selected order as an editable JSON tree" /><figcaption>Browser: filter, page, and edit a document as a tree</figcaption></figure>
-  <figure class="ui-shot"><img src="./ui/img/connections.png" alt="Connections: one card per daemon with status, collections, rows and size" /><figcaption>Connections</figcaption></figure>
-  <figure class="ui-shot"><img src="./ui/img/discover.png" alt="New connection drawer with Discover results: two local sockets found" /><figcaption>Discover a daemon</figcaption></figure>
-  <figure class="ui-shot"><img src="./ui/img/overview.png" alt="Overview: rows, collections, version and disk cards, the collections table and the disk bar" /><figcaption>Overview</figcaption></figure>
-  <figure class="ui-shot"><img src="./ui/img/devtools.png" alt="Dev Tools: request editor on the left, the NDJSON answer as a tree on the right" /><figcaption>Dev Tools</figcaption></figure>
-  <figure class="ui-shot"><img src="./ui/img/watch.png" alt="Watch: live put events of the outbox collection" /><figcaption>Watch</figcaption></figure>
-  <figure class="ui-shot"><img src="./ui/img/backups.png" alt="Backups: download a backup and the restore command" /><figcaption>Backups</figcaption></figure>
+  <figure class="ui-shot wide"><img src="./ui/img/browser.webp" alt="Browser: the orders collection with a document open as an editable JSON tree" /><figcaption>Browser: filter, page, and edit a document as a tree</figcaption></figure>
+  <figure class="ui-shot wide"><img src="./ui/img/overview.webp" alt="Dashboard: documents, disk, memory and version cards, traffic, the disk bar and the collections table" /><figcaption>Dashboard</figcaption></figure>
+  <figure class="ui-shot"><img src="./ui/img/collections.webp" alt="Collections: the list on the left and the orders collection with its general information, definition and storage" /><figcaption>Collections</figcaption></figure>
+  <figure class="ui-shot"><img src="./ui/img/connections.webp" alt="Connections: one card per daemon with status, collections and version, and the Discover card" /><figcaption>Connections</figcaption></figure>
+  <figure class="ui-shot"><img src="./ui/img/aggregate.webp" alt="Aggregate: a $group stage and its result as a chart" /><figcaption>Aggregate</figcaption></figure>
+  <figure class="ui-shot"><img src="./ui/img/devtools.webp" alt="Dev Tools: request editor on the left, the answer as a tree on the right" /><figcaption>Dev Tools</figcaption></figure>
+  <figure class="ui-shot"><img src="./ui/img/watch.webp" alt="Watch: live put events of the orders collection" /><figcaption>Watch</figcaption></figure>
+  <figure class="ui-shot"><img src="./ui/img/streams.webp" alt="Streams: entries, groups, pending and lag of the jobs stream" /><figcaption>Streams</figcaption></figure>
+  <figure class="ui-shot"><img src="./ui/img/backups.webp" alt="Backups: point-in-time recovery per collection and a full backup" /><figcaption>Backups</figcaption></figure>
+  <figure class="ui-shot"><img src="./ui/img/operations.webp" alt="Operations: logs, encryption key, settings, security and tokens" /><figcaption>Operations</figcaption></figure>
 </div>
 
 ## Start
