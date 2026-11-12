@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.22.1] - 2026-11-12
+
 ### Added
 
 - **A field added to `encrypted` or `blind` encrypts the old documents** in the background, as an index build does. Until the job is `ready` (`"encrypting"` in `GET /{coll}` and `_stats`), a filter on a blind field also finds the old plain values, with the normalization of the hash. The job also runs at the open of a collection for a field added while the daemon was stopped and for a data dir of 1.22.0 or older. See `docs/dev/encryption.md#a-field-added-later`.
@@ -723,7 +725,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.22.0...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.22.1...HEAD
+[1.22.1]: https://github.com/thadeu/ndb/compare/v1.22.0...v1.22.1
 [1.22.0]: https://github.com/thadeu/ndb/compare/v1.21.2...v1.22.0
 [1.21.2]: https://github.com/thadeu/ndb/compare/v1.21.1...v1.21.2
 [1.21.1]: https://github.com/thadeu/ndb/compare/v1.21.0...v1.21.1
