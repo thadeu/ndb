@@ -145,11 +145,15 @@ func (c *Collection) filterField(path string, v any) (string, any, error) {
 }
 
 // checkAggRefs refuses a stage that reads an encrypted field ("$cpf"): a
-// group, a sum or a projection of it would work on the sealed value. A
-// group by a blind field names its hash: "$cpf_bidx".
+// sum or a projection of it would work on the sealed value. $first and $last
+// keep the sealed value as it is, so they may. The server turns a group by
+// a blind field into a group by its hash (blindgroup.go).
 func (c *Collection) checkAggRefs(body []byte) error {
 	for _, f := range c.Encrypted() {
-		if bytes.Contains(body, []byte(`"$`+f+`"`)) || bytes.Contains(body, []byte(`"$`+f+`.`)) {
+		ref := []byte(`"$` + f + `"`)
+		body := bytes.ReplaceAll(bytes.ReplaceAll(body, append([]byte(`"$first":`), ref...), nil), append([]byte(`"$last":`), ref...), nil)
+
+		if bytes.Contains(body, ref) || bytes.Contains(body, []byte(`"$`+f+`.`)) {
 			return errf("invalid_query", "%s is encrypted: a stage cannot read it (group by \"$%s%s\" when it is blind)", f, f, crypt.HashSuffix)
 		}
 	}

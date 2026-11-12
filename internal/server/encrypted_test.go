@@ -239,7 +239,7 @@ func TestBlindFieldIsFoundByItsValue(t *testing.T) {
 		expectCode(t, call(h, "POST", "/users/_search", body), http.StatusBadRequest, "invalid_query")
 	}
 
-	expectCode(t, call(h, "POST", "/users/_aggregate", `{"pipeline":[{"$group":{"_id":"$cpf"}}]}`), http.StatusBadRequest, "invalid_query")
+	expectCode(t, call(h, "POST", "/users/_aggregate", `{"pipeline":[{"$group":{"_id":null,"m":{"$max":"$cpf"}}}]}`), http.StatusBadRequest, "invalid_query")
 
 	if rows := aggOf(t, h, "users", `[{"$match":{"cpf":"`+cpf+`"}},{"$project":{"name":1}}]`); len(rows) != 1 || !strings.Contains(rows[0], "Ana") {
 		t.Errorf("aggregate %v", rows)
@@ -330,4 +330,82 @@ func TestAnyWriteEncryptsAnOldDocument(t *testing.T) {
 	}
 
 	noPlainOnDisk(t, filepath.Join(srv.DB().Dir(), "collections", "users", "segments"), cpf)
+}
+
+func TestGroupByABlindFieldGivesTheValue(t *testing.T) {
+	_, h := newHandler(t)
+
+	expectStatus(t, call(h, "PUT", "/orders", `{"blind":{"cpf":"digits"}}`), http.StatusOK)
+	call(h, "POST", "/orders/_bulk", `{"docs":[
+		{"_id":"o1","cpf":"390.533.447-05","total":10,"st":"paid"},
+		{"_id":"o2","cpf":"39053344705","total":5,"st":"paid"},
+		{"_id":"o3","cpf":"11122233344","total":7,"st":"open"}]}`)
+
+	rows := aggOf(t, h, "orders", `[{"$group":{"_id":"$cpf","total":{"$sum":"$total"}}},{"$sort":{"total":-1}}]`)
+	if len(rows) != 2 || !strings.Contains(rows[0], `"total":15`) || !strings.Contains(rows[0], `"_id":"390.533.447-05"`) && !strings.Contains(rows[0], `"_id":"39053344705"`) {
+		t.Fatalf("rows %v", rows)
+	}
+
+	rows = aggOf(t, h, "orders", `[{"$group":{"_id":{"c":"$cpf","st":"$st"},"n":{"$sum":1}}},{"$sort":{"n":-1}}]`)
+	if len(rows) != 2 || !strings.Contains(rows[0], `"st":"paid"`) || !strings.Contains(rows[0], `"c":"39053344705"`) && !strings.Contains(rows[0], `"c":"390.533.447-05"`) {
+		t.Fatalf("compound rows %v", rows)
+	}
+
+	for _, row := range rows {
+		if strings.Contains(row, "_ndb") || strings.Contains(row, "_bidx") || strings.Contains(row, "ndb:") {
+			t.Fatalf("a helper or a hash in %s", row)
+		}
+	}
+
+	expectCode(t, call(h, "POST", "/orders/_aggregate", `{"pipeline":[{"$group":{"_id":null,"s":{"$sum":"$cpf"}}}]}`), http.StatusBadRequest, "invalid_query")
+}
+
+func TestGroupByABlindFieldStaysSealedWithoutDecrypt(t *testing.T) {
+	unix, tcp, addr := authServer(t, func(srv *server.Server) {
+		srv.SetTokens([]server.Token{{Name: "bi", Secret: "bi-secret", Read: []string{"orders"}}})
+	})
+
+	for _, c := range []struct{ method, path, body string }{
+		{"PUT", "/orders", `{"blind":{"cpf":"digits"}}`},
+		{"POST", "/orders/_doc", `{"_id":"o1","cpf":"` + cpf + `"}`},
+	} {
+		req, _ := http.NewRequest(c.method, "http://ndb"+c.path, strings.NewReader(c.body))
+
+		resp, err := unix.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		resp.Body.Close()
+	}
+
+	req, _ := http.NewRequest("POST", "http://"+addr+"/orders/_aggregate", strings.NewReader(`{"pipeline":[{"$group":{"_id":"$cpf","n":{"$sum":1}}}]}`))
+	req.Header.Set("Authorization", "Bearer bi-secret")
+
+	resp, err := tcp.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	if strings.Contains(string(body), cpf) || !strings.Contains(string(body), `"_id":"ndb:e1:k1:`) {
+		t.Fatalf("aggregate %s", body)
+	}
+}
+
+func TestGroupByABlindFieldAcrossPartitions(t *testing.T) {
+	_, h := newHandler(t)
+
+	expectStatus(t, call(h, "PUT", "/sales", `{"time":"at","partition_by":"month","blind":{"cpf":"digits"}}`), http.StatusOK)
+	call(h, "POST", "/sales/_bulk", `{"docs":[
+		{"_id":"s1","at":"2026-10-03T00:00:00Z","cpf":"390.533.447-05","v":1},
+		{"_id":"s2","at":"2026-11-03T00:00:00Z","cpf":"39053344705","v":2}]}`)
+
+	rows := aggOf(t, h, "sales", `[{"$group":{"_id":"$cpf","v":{"$sum":"$v"}}}]`)
+	if len(rows) != 1 || !strings.Contains(rows[0], `"v":3`) || strings.Contains(rows[0], "ndb:") || strings.Contains(rows[0], "_ndb") {
+		t.Fatalf("rows %v", rows)
+	}
 }

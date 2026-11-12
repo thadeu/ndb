@@ -19,7 +19,7 @@ func (s *Server) withLookup(r *http.Request, db *engine.DB, run func(context.Con
 // withLookupStages is withLookup for _aggregate: the $lookup stages at the
 // end of the pipeline run on the output rows.
 func (s *Server) withLookupStages(r *http.Request, db *engine.DB, run func(context.Context, []byte) (collection.Page, error)) func(context.Context, []byte) (collection.Page, error) {
-	return s.lookupWith(lookup.SplitStages, r, db, run)
+	return s.lookupWith(lookup.SplitStages, r, db, s.withBlindGroups(r, db, run))
 }
 
 func (s *Server) lookupWith(split func([]byte) ([]byte, []lookup.Spec, []string, error), r *http.Request, db *engine.DB, run func(context.Context, []byte) (collection.Page, error)) func(context.Context, []byte) (collection.Page, error) {

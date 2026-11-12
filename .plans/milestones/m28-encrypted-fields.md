@@ -79,8 +79,10 @@ The stored value is about 35% bigger.
 ### E28.2 `blind`
 - [x] the `<field>_bidx` field, the filter rewrite (`query.Options.Field`, one hook for every
   parse), indexes, `unique`, compound
-- [x] aggregate: `$match` rewritten; a stage that reads the field refused; group by `"$cpf_bidx"`
-  (the group `_id` is the hash: no decrypt of group keys)
+- [x] aggregate: `$match` rewritten; `$group` by `"$cpf"` (or a key of a compound `_id`) groups by
+  the hash and gives the `_id` back from a hidden `$first`, decrypted for a caller with the right
+  (`server/blindgroup.go`, so plain, partitioned and pattern reads get it); `$first` / `$last` of
+  the field allowed; other stages that read it refused
 - [x] `_count`, `_delete_by_query`, `_update_by_query` with the rewrite
 - [x] cases in `spec/cases` (`"daemon": true`: the collection runner skips them)
 

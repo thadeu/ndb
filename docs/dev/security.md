@@ -131,7 +131,7 @@ curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/users -d '{"encrypted":["
 - **Who reads the value:** the unix socket, the token of `-token-file`, and a token with `decrypt` on the collection get the plain value, on every read (`_doc`, `_search`, `_aggregate`, `_watch`, the `doc` of `_update` and `_lock`). Any other token gets the stored `"ndb:e1:k1:..."`.
 - **Writes:** `_doc`, `_bulk`, upsert, `_tx` and `$set` encrypt the field. `$inc`, `$push` and the other operators on it are `400 invalid_query`: they need the value.
 - **Filters:** only `$exists`. Any other filter on the field is `400 invalid_query`, unless the field is [blind](#blind-fields).
-- **Aggregate:** a stage that reads the field (`"$cpf"` in `$group`, `$project`, `$sum`) is `400 invalid_query`. `$match` follows the filter rules.
+- **Aggregate:** `$match` follows the filter rules. `$first` and `$last` of the field give its value. Any other use (`$sum`, `$max`, `$project`) is `400 invalid_query`; a `$group` by the field needs it to be [blind](#blind-fields).
 - **Logs:** no request body or document of a collection with encrypted fields goes in a log line, at any level.
 - A field added to `encrypted` (or `blind`) later is encrypted from the next write of each document; the documents that are not written again stay as they are. To encrypt them all now, write each one again, for example:
 
@@ -163,7 +163,7 @@ curl --unix-socket /run/ndb/ndb.sock http://ndb/users/_search -d '{"query":{"cpf
 
 - **Filters:** `$eq` (or a plain value), `$in`, `$ne`, `$nin` and `$exists`, also inside `$and`, `$or`, `$nor`, in `_count`, `_update_by_query`, `_delete_by_query` and in `$match`. A range, `$regex` or a sort need the value: `400 invalid_query`.
 - **Indexes:** `indexes` and `unique` on the field (also in a compound key) use `<field>_bidx`; the definition shows that name.
-- **Aggregate:** group by the hash, `"$cpf_bidx"`. The `_id` of each group is the hash, not the value.
+- **Aggregate:** `{"$group":{"_id":"$cpf"}}` (also as a key of a compound `_id`) groups by the hash, so `390.533.447-05` and `39053344705` are one group. The `_id` of each group is the value of one of its documents: plain for a caller that may decrypt, else `"ndb:e1:k1:..."`. A `$sort` or `$match` on that `_id` after the group sees the hash.
 - `<field>_bidx` is in no answer. A value sent in it is replaced.
 - The hash of a value is the same for each document, so who reads the files sees which documents have the same value. It does not show the value: the HMAC key is derived from the master key.
 - A field made blind later has a hash from the next write of each document.
