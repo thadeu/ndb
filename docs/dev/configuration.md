@@ -224,6 +224,8 @@ NDB_LOG_LEVEL=warn ndb serve
 NDB_ENCRYPTION_KEY=$(cat /run/secrets/ndb_key) ndb serve
 ```
 
+`NDB_ENCRYPTION_KEY_OLD` is the old env key during a [key rotation](encryption.md#key-rotation): give it with the new key until the rotation ends, then remove it.
+
 ## Authentication
 
 `-token-file /etc/ndb/token` makes the TCP listener require `Authorization: Bearer <token>` on every request, `/_health` and `/_metrics` included. A missing or wrong token is `401 unauthorized`. The file holds one token; ndb trims the spaces around it, and an empty file stops the start. The token is compared in constant time.

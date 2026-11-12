@@ -260,6 +260,8 @@ curl --unix-socket /run/ndb/ndb.sock http://ndb/_cluster/settings
 
 The key is never in an answer: only its first and last 4 hex characters, and a fingerprint (the first 8 bytes of its SHA-256). See [The encryption key](../security.md#the-encryption-key).
 
+During a [key rotation](../encryption.md#key-rotation), `encryption` also has `"rotation":{"from":"k1","pending":["users","events"]}`: the old key, and the collections that still have values of it. It goes away when the rotation ends.
+
 ## `PUT /_cluster/settings`
 
 Changes settings at run time and stores them in the data dir, so they hold across a restart and go in the backups. Today the settings are the log ones:
@@ -274,9 +276,20 @@ curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/_cluster/settings -d '{"l
 | `log.body_max` | int | the largest body or document in a log line, in bytes |
 | `log.slow_ms` | int | a request over this is a `warn` line |
 
-**Answer:** the settings, as `GET`. When `ndb.yml`, the env or a flag also sets a setting you changed, `warnings` says that it wins at the next start. **Errors:** `400 invalid_request` for an unknown key, a bad value, or `encryption` (the key cannot change: no rotation yet); `403 forbidden` over TCP without admin of `*`.
+**Answer:** the settings, as `GET`. When `ndb.yml`, the env or a flag also sets a setting you changed, `warnings` says that it wins at the next start. **Errors:** `400 invalid_request` for an unknown key, a bad value, or `encryption` (the key changes with [`POST /_cluster/key`](#post-cluster-key)); `403 forbidden` over TCP without admin of `*`.
 
 `PUT /_log` changes the same log settings until the daemon stops, with nothing stored.
+
+## `POST /_cluster/key`
+
+Starts a [key rotation](../encryption.md#key-rotation). **On the unix socket only:** over TCP it is `403 forbidden`, also with the full token, so only a user with a shell on the host rotates the key. The CLI is `ndb key rotate`. No SDK has it.
+
+| Body | What it does |
+|---|---|
+| `{}` | For a key kept in the data dir: a new key `k<n+1>` is the current key at once, and every encrypted value is sealed again in the background. **Answer:** `{"key_id":"k2","from":"k1"}`. |
+| `{"env":true}` | Makes the key for `NDB_ENCRYPTION_KEY` and keeps only its fingerprint. The rotation starts at the next start with that key. **Answer:** `{"key":"<64 hex>","key_id":"k2","from":"k1"}`: the only time the key is shown. |
+
+**Errors:** `400 invalid_request` for `{}` when the key comes from `NDB_ENCRYPTION_KEY` (use `{"env":true}`); `403 forbidden` over TCP; `409 key_rotating` while a rotation is not finished.
 
 ## `GET /_log`
 

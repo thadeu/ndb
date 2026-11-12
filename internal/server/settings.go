@@ -98,15 +98,21 @@ func (s *Server) settingsAnswer(db *engine.DB, warnings []string) map[string]any
 		logOut[ls.name] = map[string]any{"value": values[ls.name], "source": s.logSrc.get(ls.name)}
 	}
 
+	enc := map[string]any{
+		"key":         key.Masked(),
+		"key_id":      key.ID,
+		"fingerprint": key.Fingerprint(),
+		"source":      key.Source,
+		"created_at":  key.Created.UTC().Format(time.RFC3339),
+	}
+
+	if rot := db.RotationState(); rot.From != "" {
+		enc["rotation"] = map[string]any{"from": rot.From, "pending": append([]string{}, rot.Pending...)}
+	}
+
 	out := map[string]any{
-		"encryption": map[string]any{
-			"key":         key.Masked(),
-			"key_id":      key.ID,
-			"fingerprint": key.Fingerprint(),
-			"source":      key.Source,
-			"created_at":  key.Created.UTC().Format(time.RFC3339),
-		},
-		"log": logOut,
+		"encryption": enc,
+		"log":        logOut,
 	}
 
 	if len(warnings) > 0 {

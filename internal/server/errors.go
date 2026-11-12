@@ -105,7 +105,7 @@ func statusOf(code string) int {
 	switch code {
 	case "not_found", "unknown_collection", "unknown_route", "unknown_group":
 		return http.StatusNotFound
-	case "duplicate_id", "unique_violation", "catalog_conflict", "direct_collection", "collection_exists", "group_exists", "lock_expired", "tx_conflict":
+	case "duplicate_id", "unique_violation", "catalog_conflict", "direct_collection", "collection_exists", "group_exists", "lock_expired", "tx_conflict", "key_rotating":
 		return http.StatusConflict
 	case "locked":
 		return http.StatusLocked

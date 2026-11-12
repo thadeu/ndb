@@ -8,10 +8,10 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sync/atomic"
 
-	"github.com/thadeu/ndb/internal/crypt"
 	"github.com/thadeu/ndb/internal/fs"
 	"github.com/thadeu/ndb/internal/query"
 	"github.com/thadeu/ndb/internal/wal"
@@ -36,6 +36,7 @@ const (
 // query hook reads ready with no lock.
 type resealState struct {
 	fields []string
+	key    string
 	done   atomic.Int64
 	total  int
 	ready  atomic.Bool
@@ -58,6 +59,26 @@ func (c *Collection) resealing(field string) bool {
 	done := c.resealed.Load()
 
 	return done == nil || !slices.Contains(*done, field)
+}
+
+// StartReseal starts the job for the encrypted fields not sealed with the
+// current key: after a key rotation, the engine calls it.
+func (c *Collection) StartReseal() {
+	c.startReseal()
+}
+
+// Resealed tells whether every encrypted field is sealed with the current
+// key in every document.
+func (c *Collection) Resealed() bool {
+	done := c.savedReseal()
+
+	for _, f := range c.Encrypted() {
+		if !slices.Contains(done, f) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // Resealing is the state of the job, for stats: one entry per field.
@@ -113,7 +134,7 @@ func (c *Collection) startReseal() {
 		return
 	}
 
-	st := &resealState{fields: fields, total: c.Len()}
+	st := &resealState{fields: fields, key: c.keyID(), total: c.Len()}
 
 	c.rd.mu.Lock()
 	defer c.rd.mu.Unlock()
@@ -148,8 +169,18 @@ func (c *Collection) runReseal(st *resealState) {
 
 	c.resealMu.Lock()
 
+	// A rotation during the job: values written before it have the old
+	// key, so the job runs again for the new one.
+	if st.key != c.keyID() {
+		st.ready.Store(true)
+		c.resealMu.Unlock()
+		c.startReseal()
+
+		return
+	}
+
 	done := normFields(append(c.savedReseal(), st.fields...))
-	err = c.saveReseal(done)
+	err = c.saveReseal(st.key, done)
 
 	if err == nil {
 		c.resealed.Store(&done)
@@ -172,7 +203,7 @@ func (c *Collection) runReseal(st *resealState) {
 // resealAll reads every document that has a plain value in one of the
 // fields, page by page, and writes it again.
 func (c *Collection) resealAll(st *resealState) error {
-	body, err := json.Marshal(map[string]any{"query": plainWhere(st.fields), "limit": resealBatch, "versions": true, "snapshot": true})
+	body, err := json.Marshal(map[string]any{"query": staleWhere(st.fields, c.box.Prefix()), "limit": resealBatch, "versions": true, "snapshot": true})
 	if err != nil {
 		return err
 	}
@@ -257,16 +288,18 @@ func (c *Collection) prepareReseal(v *view, r resealReq) ([]wal.Op, error) {
 	return ops, nil
 }
 
-// plainWhere matches a document with a value in one of fields that is not
-// sealed. It is parsed with no Field hook: it reads the stored values.
-func plainWhere(fields []string) map[string]any {
+// staleWhere matches a document with a value in one of fields that is not
+// sealed with the current key (prefix): a plain value, or one of the old
+// key of a rotation. It is parsed with no Field hook: it reads the stored
+// values.
+func staleWhere(fields []string, prefix string) map[string]any {
 	or := make([]any, 0, len(fields))
 
 	for _, f := range fields {
 		or = append(or, map[string]any{f: map[string]any{
 			"$exists": true,
 			"$ne":     nil,
-			"$not":    map[string]any{"$regex": "^" + crypt.SealPrefix},
+			"$not":    map[string]any{"$regex": "^" + regexp.QuoteMeta(prefix)},
 		}})
 	}
 
@@ -321,21 +354,42 @@ func (c *Collection) savedReseal() []string {
 
 	data := make([]byte, info.Size())
 
-	var fields []string
-
 	if _, err := f.ReadAt(data, 0); err != nil && !errors.Is(err, io.EOF) {
 		return nil
 	}
 
-	if json.Unmarshal(data, &fields) != nil {
+	var saved resealFileBody
+
+	// 1.23.0 wrote a list of fields, all of the key k1.
+	if json.Unmarshal(data, &saved.Fields) == nil {
+		saved.Key = "k1"
+	} else if json.Unmarshal(data, &saved) != nil {
 		return nil
 	}
 
-	return fields
+	if saved.Key != c.keyID() {
+		return nil // a key rotation: every field is sealed again
+	}
+
+	return saved.Fields
 }
 
-func (c *Collection) saveReseal(fields []string) error {
-	data, err := json.Marshal(fields)
+// resealFileBody is the file: the key of the values and the fields done.
+type resealFileBody struct {
+	Key    string   `json:"key"`
+	Fields []string `json:"fields"`
+}
+
+func (c *Collection) keyID() string {
+	if c.box == nil {
+		return ""
+	}
+
+	return c.box.ID()
+}
+
+func (c *Collection) saveReseal(key string, fields []string) error {
+	data, err := json.Marshal(resealFileBody{Key: key, Fields: fields})
 	if err != nil {
 		return err
 	}

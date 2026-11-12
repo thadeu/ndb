@@ -40,6 +40,8 @@ module Ndb
   # An update or a delete of a transaction matched nothing (no such
   # document, or its guard does not match): nothing of it was written.
   class TxConflict < Error; end
+  # A key rotation while another one is not finished (ndb key rotate).
+  class KeyRotating < Error; end
   class UnknownCollection < Error; end
   class UniqueViolation < Error; end
   class CatalogConflict < Error; end
@@ -161,6 +163,7 @@ module Ndb
     "locked" => Locked,
     "lock_expired" => LockExpired,
     "tx_conflict" => TxConflict,
+    "key_rotating" => KeyRotating,
     "unknown_operator" => UnknownOperator,
     "no_update" => NoUpdate,
     "conflicting_update" => ConflictingUpdate,

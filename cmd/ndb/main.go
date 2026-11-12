@@ -150,6 +150,7 @@ func run(args []string) error {
 	}
 
 	cfg.EncryptionKey = os.Getenv("NDB_ENCRYPTION_KEY")
+	cfg.EncryptionKeyOld = os.Getenv("NDB_ENCRYPTION_KEY_OLD")
 
 	logSrc := logSources(cfg, os.Getenv, set["log-level"])
 

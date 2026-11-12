@@ -15,6 +15,7 @@ The `ndb` binary is the daemon and the CLI. `ndb` with only flags still runs the
 | `ndb size` | Disk usage per collection and per part. |
 | `ndb collections [name]` | The catalog, or the definition of one collection. |
 | `ndb compact <collection>` | Seal and merge the segments now. |
+| `ndb key status` / `ndb key rotate [-env]` | The encryption key, and a [key rotation](../encryption.md#key-rotation). Unix socket only. |
 | `ndb truncate <collection>` | Remove every document; keep the definition and indexes. Asks you to type the name, or `-yes`. |
 | `ndb drop <collection>` | Remove the collection, its definition and its watch consumers. Asks you to type the name, or `-yes`. |
 | `ndb quarantine <collection>` | The bad lines of a direct collection. |
@@ -157,6 +158,26 @@ calls_2026_09: dropped
 ├────────────┼──────────┼────────────────────┼──────┤
 │ posts      │   1 -> 1 │ 2.6 KiB -> 2.6 KiB │ 24ms │
 └────────────┴──────────┴────────────────────┴──────┘
+```
+
+## key
+
+`ndb key status [-json]` shows the key id, where it comes from, and a running rotation with the collections that are left. `ndb key rotate` starts a [key rotation](../encryption.md#key-rotation) (`POST /_cluster/key`). It works on the unix socket only: run it on the host.
+
+```
+$ ndb key rotate
+rotation started: k1 -> k2. Every encrypted value is sealed again in the background; see ndb key status.
+
+$ ndb key rotate -env
+The new key k2, shown only this time. Keep a copy in your secret store first:
+without it, the encrypted fields cannot be read.
+
+  NDB_ENCRYPTION_KEY=5f0c...
+
+Then restart the daemon with it, and with the current key in
+NDB_ENCRYPTION_KEY_OLD (for a key kept in the data dir, NDB_ENCRYPTION_KEY_OLD
+is not needed). When ndb key status shows no rotation, remove
+NDB_ENCRYPTION_KEY_OLD.
 ```
 
 ## quarantine

@@ -6,7 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **Key rotation:** `ndb key rotate` makes a new encryption key `k2` and seals every encrypted value again in the background, with the reseal job; `ndb key rotate -env` makes the key for `NDB_ENCRYPTION_KEY`, and the next start takes the old one in `NDB_ENCRYPTION_KEY_OLD` (or from the data dir, to move the key to the env). Until it ends, a blind filter matches the hash of both keys. Then the old key is dropped and the settings file is written again with no copy of it. `POST /_cluster/key` and `ndb key status`; the route is unix socket only (`403` over TCP, also with the full token), and no SDK has it. See `docs/dev/encryption.md#key-rotation`.
+
 ## [1.23.0] - 2026-11-12
+
+### Fixed
+
+- **The job that encrypts the old documents reads its pages from one snapshot:** before, each page of 500 read the collection again, so 100 000 documents took 12 s; now 1.4 s.
 
 ## [1.22.1] - 2026-11-12
 

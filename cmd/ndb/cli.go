@@ -20,6 +20,7 @@ var subcommands = map[string]func(args []string) error{
 
 	"collections": runCollections,
 	"compact":     runCompact,
+	"key":         runKey,
 	"truncate":    runTruncate,
 	"drop":        runDrop,
 	"rename":      runRename,
@@ -121,6 +122,10 @@ Usage:
   ndb size                      disk usage per collection and per part
   ndb collections [name]        the catalog, or the definition of one collection
   ndb compact <collection>      seal and merge the segments now (engine mode)
+  ndb key status                the encryption key: id, source, a running rotation
+  ndb key rotate [-env]         a new encryption key; every encrypted value is sealed again
+                                in the background. -env: the new key for NDB_ENCRYPTION_KEY,
+                                shown once. Unix socket only
   ndb truncate <collection>     remove every document; keep the definition and indexes
   ndb drop <collection>         remove the collection, its definition and watch consumers
   ndb rename <collection> <to>  give the collection a new name (-replace: in place of <to>)
@@ -149,7 +154,7 @@ Common flags:
   -config FILE      ndb.yml (default NDB_CONFIG, ./ndb.yml, then /etc/ndb/ndb.yml)
   -data-dir DIR     data dir (overrides ndb.yml)
 
-Talking to the daemon (backup, stats, size, collections, compact, truncate, drop, rename, pitr, restore -at, health, get, update, delete, expire, persist, ttl, quarantine, query):
+Talking to the daemon (backup, stats, size, collections, compact, key, truncate, drop, rename, pitr, restore -at, health, get, update, delete, expire, persist, ttl, quarantine, query):
   -url unix:///sock|tcp://host:port   which daemon (default NDB_URL, then the
                                       unix socket of ndb.yml); NDB_TOKEN is the bearer token
   -json                               machine output (query: NDJSON rows)

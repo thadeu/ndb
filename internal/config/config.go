@@ -116,6 +116,10 @@ type Config struct {
 	// internal/settings). It is never read from ndb.yml.
 	EncryptionKey string `yaml:"-"`
 
+	// EncryptionKeyOld is the value of NDB_ENCRYPTION_KEY_OLD: the old env
+	// key of a key rotation that is not finished.
+	EncryptionKeyOld string `yaml:"-"`
+
 	// InFile has the top-level keys that ndb.yml sets, so a setting of the
 	// file wins over the same setting of /_cluster/settings.
 	InFile map[string]bool `yaml:"-"`

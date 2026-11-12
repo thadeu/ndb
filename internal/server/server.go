@@ -146,7 +146,7 @@ func (s *Server) routes() http.Handler {
 			"_blobs":       {{"POST", s.ready(s.putBlob)}},
 			"_blobs/{}":    {{"GET", s.ready(s.getBlob)}},
 			"_log":         {{"GET", s.getLog}, {"PUT", s.putLog}},
-			"_cluster/{}":  {{"GET", s.ready(s.getSettings)}, {"PUT", s.ready(s.putSettings)}},
+			"_cluster/{}":  {{"GET", s.ready(s.getSettings)}, {"PUT", s.ready(s.putSettings)}, {"POST", s.ready(s.rotateKey)}},
 		},
 		coll: map[string][]route{
 			"": {

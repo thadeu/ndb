@@ -3,6 +3,7 @@ package collection
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
 	"slices"
 	"strings"
 
@@ -108,34 +109,54 @@ func (c *Collection) filterField(path string, v any) (string, any, error) {
 		return "", nil, errf("invalid_query", "%s is encrypted: only $exists filters it (declare it in blind for $eq and $in)", path)
 	}
 
-	hash := func(x any) (any, error) {
+	place := c.def.Place() + "/" + path
+
+	// hashes is the hash of x with the current key and, during a key
+	// rotation, with the old one: a document not written again since the
+	// rotation has the old hash.
+	hashes := func(x any) ([]any, error) {
 		raw, err := json.Marshal(x)
 		if err != nil {
 			return nil, err
 		}
 
-		return c.box.Hash(c.def.Place()+"/"+path, norm, raw)
+		h, err := c.box.Hash(place, norm, raw)
+		if err != nil {
+			return nil, err
+		}
+
+		if old, ok := c.box.OldHash(place, norm, raw); ok {
+			return []any{h, old}, nil
+		}
+
+		return []any{h}, nil
 	}
 
 	if !isOps || !strings.HasPrefix(firstKey(m), "$") {
-		h, err := hash(v)
+		hs, err := hashes(v)
 		if err != nil {
 			return "", nil, err
 		}
 
-		return c.withPlain(path, h, map[string]any{"$eq": v}, norm)
+		return c.withPlain(path, oneOf("$eq", "$in", hs), map[string]any{"$eq": v}, norm)
 	}
 
 	out := make(map[string]any, len(m))
 
 	for op, x := range m {
-		var err error
+		var (
+			hs  []any
+			err error
+		)
 
 		switch op {
 		case "$eq", "$ne":
-			out[op], err = hash(x)
+			if hs, err = hashes(x); err == nil {
+				maps.Copy(out, oneOf(op, map[string]string{"$eq": "$in", "$ne": "$nin"}[op], hs))
+			}
 		case "$in", "$nin":
-			out[op], err = hashList(x, hash)
+			hs, err = hashList(x, hashes)
+			out[op] = append(asList(out[op]), hs...)
 		case "$exists":
 			out[op] = x
 		default:
@@ -237,24 +258,40 @@ func (c *Collection) checkAggRefs(body []byte) error {
 	return nil
 }
 
-func hashList(x any, hash func(any) (any, error)) (any, error) {
+func hashList(x any, hashes func(any) ([]any, error)) ([]any, error) {
 	list, ok := x.([]any)
 	if !ok {
-		return x, nil
+		return nil, errf("invalid_query", "$in and $nin take a list")
 	}
 
-	out := make([]any, len(list))
+	out := make([]any, 0, len(list))
 
-	for i, e := range list {
-		h, err := hash(e)
+	for _, e := range list {
+		hs, err := hashes(e)
 		if err != nil {
 			return nil, err
 		}
 
-		out[i] = h
+		out = append(out, hs...)
 	}
 
 	return out, nil
+}
+
+// oneOf is {op: h} for one hash, or {listOp: [h1, h2]} for the two hashes
+// of a rotation. A plain implicit value with one hash stays the hash alone.
+func oneOf(op, listOp string, hs []any) map[string]any {
+	if len(hs) > 1 {
+		return map[string]any{listOp: hs}
+	}
+
+	return map[string]any{op: hs[0]}
+}
+
+func asList(v any) []any {
+	l, _ := v.([]any)
+
+	return l
 }
 
 func firstKey(m map[string]any) string {

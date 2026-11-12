@@ -43,10 +43,11 @@ The SDKs turn each code into a typed error: Go `ndb.ErrUnknownCollection` (`erro
 | `unknown_group` | 404 | The stream group does not exist. |
 | `group_exists` | 409 | A stream group create with a name that exists. |
 | `unauthorized` | 401 | A TCP request without a known bearer token (`-token-file` or `tokens:`). |
-| `forbidden` | 403 | A scoped token without the right for this route and collection; `POST /_backup` over TCP; a browser request from an origin not in `cors_origins`; a TCP request with no token and a `Host` not allowed (see [Security](../security.md)). |
+| `forbidden` | 403 | A scoped token without the right for this route and collection; `POST /_backup` or `POST /_cluster/key` over TCP; a browser request from an origin not in `cors_origins`; a TCP request with no token and a `Host` not allowed (see [Security](../security.md)). |
 | `too_many_requests` | 429 | The client IP failed the token check too many times (`auth_failures`), or `max_watches` streams are open. Wait for `Retry-After` seconds. |
 | `not_found` | 404 | No document (or blob) with this id. |
 | `locked` | 423 | Another caller holds the [lock](../query.md#pessimistic-locking-one-holder-at-a-time) of the document: a `_lock` whose `wait` is over, or a `many` write that meets a locked document. |
+| `key_rotating` | 409 | A [key rotation](../encryption.md#key-rotation) while another one is not finished. See `GET /_cluster/settings`. |
 | `tx_conflict` | 409 | An `update` or a `delete` of a [transaction](documents.md#post-coll-tx) matched nothing: no such document, or its `query` (a `_v` guard) does not match. Nothing of the transaction was written; the message names the op. |
 | `lock_expired` | 409 | A write or an `_unlock` with a `lock` token that holds no lock on the document: the lock expired or was released. Nothing was written. |
 | `unknown_collection` | 404 | The collection does not exist. |

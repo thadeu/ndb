@@ -65,6 +65,7 @@ export type ErrorCode =
   | 'locked'
   | 'lock_expired'
   | 'tx_conflict'
+  | 'key_rotating'
   | 'stale_object'
   | 'http_status'
   | (string & {})
@@ -143,6 +144,9 @@ export class LockExpiredError extends NdbError {}
 // or its guard does not match): nothing of the transaction was written.
 export class TxConflictError extends NdbError {}
 
+// A key rotation while another one is not finished (ndb key rotate).
+export class KeyRotatingError extends NdbError {}
+
 const subclasses: Record<string, typeof NdbError> = {
   unauthorized: UnauthorizedError,
   not_found: NotFoundError,
@@ -161,6 +165,7 @@ const subclasses: Record<string, typeof NdbError> = {
   locked: LockedError,
   lock_expired: LockExpiredError,
   tx_conflict: TxConflictError,
+  key_rotating: KeyRotatingError,
   unknown_operator: InvalidUpdateError,
   no_update: InvalidUpdateError,
   conflicting_update: InvalidUpdateError,

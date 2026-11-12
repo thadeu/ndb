@@ -232,7 +232,7 @@ ndb:e1:k1:<base64url(nonce + ciphertext + tag)>    the value
 ndb:h1:k1:<32 hex>                                  the hash of a blind field
 ```
 
-`e1` and `h1` are the formats, `k1` the key: a key rotation will write `k2`. Each value is bound to its collection and field: a value copied to another field or collection does not decrypt.
+`e1` and `h1` are the formats, `k1` the key: after a [key rotation](#key-rotation) new values have `k2`. Each value is bound to its collection and field: a value copied to another field or collection does not decrypt.
 
 ## Cost
 
@@ -255,9 +255,44 @@ The encryption of a CPF takes 0.1 µs; the hash 0.5 µs. A stored value is about
 | a `.pem`, a `.pfx`, an API token of a third party | `encrypted` |
 | a note, an address | `encrypted` when it is personal data |
 
+## Key rotation
+
+A key rotation makes a new key `k2` the current key and seals every encrypted value again with it. Rotate when a key leaked or may have leaked, when a person who had it leaves, or to move the key from the data dir to `NDB_ENCRYPTION_KEY`.
+
+A rotation needs the old key: it opens each value with it. **A lost key cannot be rotated, and nothing reads its values again.** Keep a copy of an env key in your secret store.
+
+It runs on the host only: `ndb key rotate` talks to the unix socket, and `POST /_cluster/key` over TCP is `403`, also with the full token. No SDK has it.
+
+**A key kept in the data dir** (the default):
+
+```bash
+ndb key rotate      # k1 -> k2 now; no restart
+ndb key status      # rotation: k1 -> k2, 2 collections left: events, users
+```
+
+**A key in `NDB_ENCRYPTION_KEY`**, or to move the key of the data dir to the env:
+
+```bash
+ndb key rotate -env                     # shows the new key once: keep it
+NDB_ENCRYPTION_KEY=<new> NDB_ENCRYPTION_KEY_OLD=<old> ndb serve
+ndb key status                          # wait for: rotation: none
+NDB_ENCRYPTION_KEY=<new> ndb serve      # without the old key
+```
+
+The daemon keeps only the fingerprint of the new env key, so a start with another key still stops with an error. For a key that moves from the data dir to the env, `NDB_ENCRYPTION_KEY_OLD` is not needed: the old key is in the data dir, and it goes away when the rotation ends.
+
+What happens:
+
+1. New writes are sealed with `k2` at once. A value of `k1` still opens.
+2. In each collection with encrypted fields, the [job of a field added later](#a-field-added-later) seals every `k1` value again with `k2` and sets the hash of `k2`. Reads and writes do not wait. A restart resumes it. It does about 70 000 documents a second on a laptop: 1 million documents take some seconds.
+3. Until it ends, a filter on a blind field matches the hash of `k2` or of `k1`, so no document is missed.
+4. When every collection is done, the daemon drops `k1`: the settings file is written again with no copy of it, and the log says so (for an env key: remove `NDB_ENCRYPTION_KEY_OLD`).
+
+A second rotation waits for the end of the first (`409 key_rotating`). The `k1` values stay in the WAL files and in older backups until `wal_retention` and your backup rotation drop them: who has `k1` and an old backup still reads them.
+
 ## Limits
 
 - Equality only: no range, prefix, regex or sort on an encrypted field.
 - The hash of a value is the same for each document. Who reads the files sees which documents have the same CPF, not the CPF.
-- No key rotation yet.
+- During a [key rotation](#key-rotation), a `unique` blind field does not see a value of the other key: two documents can have the same value until the rotation ends. A `$group` by a blind field gives one group per key for the same value.
 - The daemon sees the value while it handles a request. A mode where the app holds the key is possible later with the same format.

@@ -117,6 +117,8 @@ What protects what:
 | a copy of the data dir or of the disk | **not protected** | protected |
 | the memory of the daemon | not protected | not protected |
 
+To change the key, use a [key rotation](encryption.md#key-rotation) (`ndb key rotate`, on the host only). `NDB_ENCRYPTION_KEY_OLD` gives the old env key during one.
+
 So the default makes a restore need nothing. To keep the key out of the files, give it in `NDB_ENCRYPTION_KEY` from a secret store, and keep a copy of it: a backup of a data dir with an env key can only be restored with the same key.
 
 ## Encrypted fields

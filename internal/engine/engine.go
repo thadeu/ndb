@@ -51,6 +51,7 @@ type DB struct {
 	// key the encryption key of the daemon (internal/settings).
 	settings *settings.Store
 	key      settings.Key
+	keyMu    sync.Mutex // key changes in a rotation (rotate.go)
 	box      *crypt.Box
 
 	// blobs is the content-addressed store under <data_dir>/blobs.
@@ -128,6 +129,11 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 	}
 
 	box, err := crypt.New(key.ID, key.Derive("ndb:e1"), key.Derive("ndb:h1"))
+
+	if err == nil && key.Old != nil {
+		err = box.SetOld(key.Old.ID, key.Old.Derive("ndb:e1"), key.Old.Derive("ndb:h1"))
+	}
+
 	if err != nil {
 		lk.Release()
 
@@ -214,11 +220,12 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 
 	db.log.Info("recovery done", "data_dir", cfg.DataDir, "collections", len(db.cols), "ms", time.Since(began).Milliseconds())
 
-	db.gcWait.Add(3)
+	db.gcWait.Add(4)
 
 	go db.sweepPartitionsLoop()
 	go db.pitrLoop()
 	go db.idleLoop()
+	go db.rotationLoop()
 
 	return db, nil
 }
@@ -633,7 +640,7 @@ func openSettings(cfg config.Config, log *slog.Logger) (*settings.Store, setting
 		return nil, settings.Key{}, err
 	}
 
-	key, err := settings.LoadKey(st, cfg.EncryptionKey)
+	key, err := settings.LoadKeys(st, cfg.EncryptionKey, cfg.EncryptionKeyOld)
 	if err != nil {
 		return nil, settings.Key{}, fmt.Errorf("encryption key: %w", err)
 	}
@@ -658,5 +665,8 @@ func (db *DB) Box() *crypt.Box {
 
 // Key is the encryption key of the daemon.
 func (db *DB) Key() settings.Key {
+	db.keyMu.Lock()
+	defer db.keyMu.Unlock()
+
 	return db.key
 }

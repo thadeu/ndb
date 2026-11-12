@@ -167,6 +167,50 @@ func (s *Store) Set(vals map[string]json.RawMessage) error {
 	return nil
 }
 
+// Compact writes the file again with only the last value of each key, so
+// an old value (an old encryption key) is no longer on disk.
+func (s *Store) Compact() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tmp := s.path + ".tmp"
+	_ = os.Remove(tmp)
+
+	rec := wal.Record{Tx: s.tx + 1, TS: time.Now().UTC()}
+
+	for _, key := range sortedKeys(s.vals) {
+		doc, err := json.Marshal(map[string]json.RawMessage{"value": s.vals[key]})
+		if err != nil {
+			return err
+		}
+
+		rec.Ops = append(rec.Ops, wal.Op{Kind: wal.Put, ID: key, V: rec.Tx, Doc: doc})
+	}
+
+	if err := appendRecord(tmp, rec); err != nil {
+		return err
+	}
+
+	if err := os.Rename(tmp, s.path); err != nil {
+		return err
+	}
+
+	s.tx = rec.Tx
+
+	return syncDir(filepath.Dir(s.path))
+}
+
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+
+	defer d.Close()
+
+	return d.Sync()
+}
+
 // WriteAll writes vals as the settings of dataDir, for a restore. The
 // file must not exist.
 func WriteAll(dataDir string, vals map[string]json.RawMessage) error {

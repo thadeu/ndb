@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"unicode"
 )
 
@@ -42,16 +43,24 @@ const (
 	hashLen    = 16
 )
 
-// Box holds the cipher and the hash key of one master key.
+// Box holds the cipher and the hash key of the current master key and,
+// during a key rotation, of the old one: new values use the current key,
+// and a value of either key opens. The keys change with Rotate and DropOld,
+// with no lock on the read side.
 type Box struct {
+	cur atomic.Pointer[keyset]
+	old atomic.Pointer[keyset]
+}
+
+// keyset is the derived keys of one master key.
+type keyset struct {
 	id     string
 	aead   cipher.AEAD
 	hmac   []byte
 	prefix string
 }
 
-// New makes a Box from the key id (k1) and the two derived keys.
-func New(id string, encKey, hashKey []byte) (*Box, error) {
+func newKeyset(id string, encKey, hashKey []byte) (*keyset, error) {
 	block, err := aes.NewCipher(encKey)
 	if err != nil {
 		return nil, err
@@ -62,37 +71,110 @@ func New(id string, encKey, hashKey []byte) (*Box, error) {
 		return nil, err
 	}
 
-	return &Box{id: id, aead: aead, hmac: hashKey, prefix: sealPrefix + id + ":"}, nil
+	return &keyset{id: id, aead: aead, hmac: hashKey, prefix: sealPrefix + id + ":"}, nil
+}
+
+// New makes a Box from the key id (k1) and the two derived keys.
+func New(id string, encKey, hashKey []byte) (*Box, error) {
+	ks, err := newKeyset(id, encKey, hashKey)
+	if err != nil {
+		return nil, err
+	}
+
+	b := &Box{}
+	b.cur.Store(ks)
+
+	return b, nil
+}
+
+// Rotate makes the key id the current key. The current key becomes the old
+// one: its values still open until DropOld.
+func (b *Box) Rotate(id string, encKey, hashKey []byte) error {
+	ks, err := newKeyset(id, encKey, hashKey)
+	if err != nil {
+		return err
+	}
+
+	b.old.Store(b.cur.Load())
+	b.cur.Store(ks)
+
+	return nil
+}
+
+// SetOld gives the old key of a rotation that a restart cut.
+func (b *Box) SetOld(id string, encKey, hashKey []byte) error {
+	ks, err := newKeyset(id, encKey, hashKey)
+	if err != nil {
+		return err
+	}
+
+	b.old.Store(ks)
+
+	return nil
+}
+
+// DropOld ends a rotation: the values of the old key no longer open.
+func (b *Box) DropOld() {
+	b.old.Store(nil)
+}
+
+// Rotating tells whether the box has an old key.
+func (b *Box) Rotating() bool {
+	return b.old.Load() != nil
+}
+
+// ID is the id of the current key (k1, k2...).
+func (b *Box) ID() string {
+	return b.cur.Load().id
+}
+
+// Prefix starts every value sealed with the current key: ndb:e1:k2:.
+func (b *Box) Prefix() string {
+	return b.cur.Load().prefix
 }
 
 // Seal encrypts a JSON value for a place (collection/field).
 func (b *Box) Seal(place string, value json.RawMessage) (string, error) {
-	nonce := make([]byte, b.aead.NonceSize(), b.aead.NonceSize()+len(value)+b.aead.Overhead())
+	ks := b.cur.Load()
+	nonce := make([]byte, ks.aead.NonceSize(), ks.aead.NonceSize()+len(value)+ks.aead.Overhead())
 
 	if _, err := rand.Read(nonce); err != nil {
 		return "", err
 	}
 
-	out := b.aead.Seal(nonce, nonce, value, []byte(place))
+	out := ks.aead.Seal(nonce, nonce, value, []byte(place))
 
-	return b.prefix + base64.RawURLEncoding.EncodeToString(out), nil
+	return ks.prefix + base64.RawURLEncoding.EncodeToString(out), nil
 }
 
-// Open decrypts a sealed value of a place back to its JSON.
+// Open decrypts a sealed value of a place back to its JSON, with the key
+// that its prefix names: the current one or the old one.
 func (b *Box) Open(place, sealed string) (json.RawMessage, error) {
-	rest, ok := strings.CutPrefix(sealed, b.prefix)
+	if plain, err := b.cur.Load().open(place, sealed); err == nil {
+		return plain, nil
+	}
+
+	if old := b.old.Load(); old != nil {
+		return old.open(place, sealed)
+	}
+
+	return nil, ErrOpen
+}
+
+func (ks *keyset) open(place, sealed string) (json.RawMessage, error) {
+	rest, ok := strings.CutPrefix(sealed, ks.prefix)
 	if !ok {
 		return nil, ErrOpen
 	}
 
 	raw, err := base64.RawURLEncoding.DecodeString(rest)
-	if err != nil || len(raw) < b.aead.NonceSize() {
+	if err != nil || len(raw) < ks.aead.NonceSize() {
 		return nil, ErrOpen
 	}
 
-	n := b.aead.NonceSize()
+	n := ks.aead.NonceSize()
 
-	plain, err := b.aead.Open(nil, raw[:n], raw[n:], []byte(place))
+	plain, err := ks.aead.Open(nil, raw[:n], raw[n:], []byte(place))
 	if err != nil {
 		return nil, ErrOpen
 	}
@@ -100,9 +182,24 @@ func (b *Box) Open(place, sealed string) (json.RawMessage, error) {
 	return plain, nil
 }
 
-// Hash is the blind hash of a JSON value for a place. A string is
-// normalized first; any other value is hashed as its JSON.
+// Hash is the blind hash of a JSON value for a place, with the current key.
+// A string is normalized first; any other value is hashed as its JSON.
 func (b *Box) Hash(place string, norm Norm, value json.RawMessage) (string, error) {
+	return b.cur.Load().hash(place, norm, value), nil
+}
+
+// OldHash is the hash of the old key, during a rotation: the hash that the
+// documents not written again still have.
+func (b *Box) OldHash(place string, norm Norm, value json.RawMessage) (string, bool) {
+	old := b.old.Load()
+	if old == nil {
+		return "", false
+	}
+
+	return old.hash(place, norm, value), true
+}
+
+func (ks *keyset) hash(place string, norm Norm, value json.RawMessage) string {
 	data := []byte(value)
 
 	var s string
@@ -110,12 +207,12 @@ func (b *Box) Hash(place string, norm Norm, value json.RawMessage) (string, erro
 		data = []byte(normalize(norm, s))
 	}
 
-	mac := hmac.New(sha256.New, b.hmac)
+	mac := hmac.New(sha256.New, ks.hmac)
 	mac.Write([]byte(place))
 	mac.Write([]byte{0})
 	mac.Write(data)
 
-	return fmt.Sprintf("%s%s:%s", hashPrefix, b.id, hex.EncodeToString(mac.Sum(nil)[:hashLen])), nil
+	return fmt.Sprintf("%s%s:%s", hashPrefix, ks.id, hex.EncodeToString(mac.Sum(nil)[:hashLen]))
 }
 
 // SealPrefix starts every sealed value.
@@ -168,13 +265,20 @@ func PlainPattern(norm Norm, s string) string {
 
 // SealDoc seals the top-level fields of a JSON object that are in fields,
 // for the collection coll. The order of the fields stays. A null stays
-// null; a value already sealed for this place stays as it is.
+// null; a value already sealed for this place with the current key stays as
+// it is, and one of the old key is sealed again with the current key.
 func (b *Box) SealDoc(coll string, fields []string, doc json.RawMessage) (json.RawMessage, error) {
+	cur := b.cur.Load()
+
 	return rewrite(doc, fields, func(name string, v json.RawMessage) (json.RawMessage, error) {
 		place := coll + "/" + name
 
-		if string(v) == "null" || b.opens(place, v) {
+		if string(v) == "null" || cur.opens(place, v) {
 			return v, nil
+		}
+
+		if plain, ok := b.openOld(place, v); ok {
+			v = plain
 		}
 
 		s, err := b.Seal(place, v)
@@ -218,15 +322,29 @@ func sealedText(v json.RawMessage) (string, bool) {
 	return string(v[1 : len(v)-1]), true
 }
 
-func (b *Box) opens(place string, v json.RawMessage) bool {
+func (ks *keyset) opens(place string, v json.RawMessage) bool {
 	s, ok := sealedText(v)
 	if !ok {
 		return false
 	}
 
-	_, err := b.Open(place, s)
+	_, err := ks.open(place, s)
 
 	return err == nil
+}
+
+// openOld opens a value of the old key.
+func (b *Box) openOld(place string, v json.RawMessage) (json.RawMessage, bool) {
+	old := b.old.Load()
+	s, ok := sealedText(v)
+
+	if old == nil || !ok {
+		return nil, false
+	}
+
+	plain, err := old.open(place, s)
+
+	return plain, err == nil
 }
 
 // HashDoc sets <field>_bidx, the blind hash of each field of blind, from
@@ -246,9 +364,16 @@ func (b *Box) HashDoc(coll string, blind map[string]Norm, doc json.RawMessage) (
 		hashKey := f + HashSuffix
 		v, has := get(ms, f)
 
+		if has && IsSealed(v) {
+			plain, old := b.openOld(coll+"/"+f, v)
+			if !old {
+				continue // the hash of the current key is there
+			}
+
+			v = plain
+		}
+
 		switch {
-		case has && IsSealed(v):
-			continue
 		case !has || string(v) == "null":
 			ms = del(ms, hashKey)
 		default:

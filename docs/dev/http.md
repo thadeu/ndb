@@ -6,7 +6,7 @@ The routes have pages by group:
 
 | Page | Routes |
 |---|---|
-| [System](http/system.md) | `/_health`, `/_metrics`, `/_collections`, `/_stats`, `/_size`, `/_backup`, `/_restore`, `/_pitr`, `/_blobs`, `/_log`, `/_cluster/settings` |
+| [System](http/system.md) | `/_health`, `/_metrics`, `/_collections`, `/_stats`, `/_size`, `/_backup`, `/_restore`, `/_pitr`, `/_blobs`, `/_log`, `/_cluster/settings`, `/_cluster/key` |
 | [Collections](http/collections.md) | `PUT`, `GET`, `DELETE /{coll}`, `_truncate`, `_rename`, `_restore`, `_pitr`, `_indexes`, `_stats`, `_compact`, `_quarantine` |
 | [Documents](http/documents.md) | `_doc`, `_bulk`, `_update/{id}`, `_expire`, `_persist`, `_ttl`, `_lock`, `_unlock`, `_tx` |
 | [Queries](http/queries.md) | `_search`, `_count`, `_aggregate`, `_update_by_query`, `_delete_by_query`, patterns |
@@ -44,6 +44,7 @@ The query language (operators, date math, `$elemMatch`) is on [Query](query.md),
 | PUT | `/_log` | [System](http/system.md#put-log) |
 | GET | `/_cluster/settings` | [System](http/system.md#get-cluster-settings) |
 | PUT | `/_cluster/settings` | [System](http/system.md#put-cluster-settings) |
+| POST | `/_cluster/key` | [System](http/system.md#post-cluster-key) (unix socket only) |
 | PUT | `/{coll}` | [Collections](http/collections.md#put-coll) |
 | GET | `/{coll}` | [Collections](http/collections.md#get-coll) |
 | DELETE | `/{coll}?confirm={coll}` | [Collections](http/collections.md#delete-coll) |

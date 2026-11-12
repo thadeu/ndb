@@ -187,7 +187,7 @@ func TestMembersScansNestedAndEscapedValues(t *testing.T) {
 	want := []member{{"a", json.RawMessage(`"x\"}{,"`)}, {"b", json.RawMessage(`{"c":[1,{"d":"]"}]}`)}, {"e", json.RawMessage(`-1.5e3`)}, {"f", json.RawMessage(`true`)}, {"g", json.RawMessage(`null`)}}
 
 	if len(ms) != len(want) {
-		t.Fatalf("members %q", ms)
+		t.Fatalf("members %v", ms)
 	}
 
 	for i := range want {

@@ -28,9 +28,15 @@ func testBox(t *testing.T) *crypt.Box {
 func openBox(t *testing.T, dir string, def catalog.Def) *collection.Collection {
 	t.Helper()
 
+	return openWithBox(t, dir, def, testBox(t))
+}
+
+func openWithBox(t *testing.T, dir string, def catalog.Def, box *crypt.Box) *collection.Collection {
+	t.Helper()
+
 	def.Name = "users"
 
-	c, err := collection.Open(collection.Config{Dir: dir, FS: fs.OS{}, Def: def, Box: testBox(t)})
+	c, err := collection.Open(collection.Config{Dir: dir, FS: fs.OS{}, Def: def, Box: box})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +167,7 @@ func TestTheResealRunsAtTheOpenForAFieldAddedWhileClosed(t *testing.T) {
 
 	data, err := os.ReadFile(filepath.Join(dir, collection.ResealFile))
 
-	if err != nil || string(data) != `["cpf","email"]` {
+	if err != nil || string(data) != `{"key":"k1","fields":["cpf","email"]}` {
 		t.Errorf("file %s %v", data, err)
 	}
 
@@ -215,5 +221,81 @@ func TestAFieldAddedDuringAResealRunsNext(t *testing.T) {
 
 	if got := findIDs(t, c, `{"email":"ana@dest.test"}`); got != "u1" {
 		t.Errorf("email after: %s", got)
+	}
+}
+
+// The file of 1.23.0 is a list of the fields of the key k1: no new job.
+func TestTheFileOf1230IsTheKeyK1(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(dir, collection.ResealFile), []byte(`["cpf","email"]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := openBox(t, dir, blindUsers)
+
+	defer c.Close()
+
+	if st := c.Resealing(); st != nil || !c.Resealed() {
+		t.Fatalf("a job for a 1.23.0 file: %v", st)
+	}
+}
+
+// After a key rotation the job seals every k1 value again with k2. Until it
+// is ready, a filter finds a k1 document by its old hash.
+func TestARotationSealsTheOldValuesAgain(t *testing.T) {
+	box := testBox(t)
+	c := openWithBox(t, t.TempDir(), blindUsers, box)
+
+	defer c.Close()
+
+	seed(t, c, `{"_id":"u1","cpf":"390.533.447-05","email":"ana@dest.test"}`, `{"_id":"u2","cpf":"111"}`)
+	waitResealed(t, c)
+
+	release := make(chan struct{})
+
+	collection.SetResealGate(c, func() { <-release })
+
+	if err := box.Rotate("k2", bytes.Repeat([]byte{3}, 32), bytes.Repeat([]byte{4}, 32)); err != nil {
+		t.Fatal(err)
+	}
+
+	c.StartReseal()
+	seed(t, c, `{"_id":"u3","cpf":"39053344705"}`)
+
+	if c.Resealed() {
+		t.Fatal("resealed before the job")
+	}
+
+	for _, where := range []string{`{"cpf":"39053344705"}`, `{"cpf":{"$in":["39053344705"]}}`} {
+		if got := findIDs(t, c, where); got != "u1,u3" {
+			t.Errorf("rotating %s: %s", where, got)
+		}
+	}
+
+	if got := findIDs(t, c, `{"cpf":{"$ne":"39053344705"}}`); got != "u2" {
+		t.Errorf("rotating $ne: %s", got)
+	}
+
+	close(release)
+
+	deadline := time.Now().Add(10 * time.Second)
+
+	for !c.Resealed() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	box.DropOld()
+
+	for _, id := range []string{"u1", "u2", "u3"} {
+		d, _ := c.Find(id)
+
+		if !strings.Contains(string(d.Doc), `"cpf":"ndb:e1:k2:`) || strings.Contains(string(d.Doc), ":k1:") {
+			t.Errorf("%s: %s", id, d.Doc)
+		}
+	}
+
+	if got := findIDs(t, c, `{"cpf":"39053344705"}`); got != "u1,u3" {
+		t.Errorf("after: %s", got)
 	}
 }
