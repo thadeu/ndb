@@ -58,7 +58,7 @@ class BaseTest < Minitest::Test
   end
 
   def test_collection_definition
-    assert_equal({ "indexes" => ["status"], "unique" => ["dnis"] }, Post.collection_definition)
+    assert_equal({ "indexes" => %w[created_at updated_at status], "unique" => ["dnis"] }, Post.collection_definition)
   end
 
   def test_time_option_sets_the_collection_time_field
@@ -115,6 +115,6 @@ class BaseTest < Minitest::Test
 
     stored = client.collections.find { |c| c["name"] == klass.collection_name }
 
-    assert_equal ["a"], stored["indexes"]
+    assert_equal %w[a created_at updated_at], stored["indexes"].sort
   end
 end

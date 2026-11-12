@@ -14,7 +14,7 @@ class CompoundTest < Minitest::Test
       index "items.sku"
     end
 
-    assert_equal ["acc,n", "items.sku"], member.collection_definition["indexes"]
+    assert_equal ["created_at", "updated_at", "acc,n", "items.sku"], member.collection_definition["indexes"]
     assert_equal ["acc,email"], member.collection_definition["unique"]
 
     member.create!(_id: "m1", acc: "a", email: "x@x", n: 1)

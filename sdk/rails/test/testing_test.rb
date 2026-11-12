@@ -37,7 +37,7 @@ class TestingTest < Minitest::Test
 
     definition = client.collections.find { |d| d["name"] == indexed.collection_name }
 
-    assert_equal ["status"], definition["indexes"]
+    assert_equal %w[created_at status updated_at], definition["indexes"].sort
   end
 
   def test_refused_outside_the_test_environment

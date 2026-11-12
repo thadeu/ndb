@@ -89,11 +89,13 @@ module Ndb
         upsert_all([attributes || attrs], expire_in: expire_in).first
       end
 
-      # upsert for many documents in one transaction, all or nothing.
+      # upsert for many documents in one transaction, all or nothing. Each
+      # document gets updated_at, and a new one also gets created_at: one
+      # read first finds the ids that exist.
       def upsert_all(attributes, expire_in: nil)
         ensure_collection!
 
-        docs = attributes.map { |attrs| upsert_document(attrs) }
+        docs = stamp_upserts(attributes.map { |attrs| upsert_document(attrs) })
 
         expire_in = expire_in.to_i if expire_in.is_a?(ActiveSupport::Duration)
 
@@ -310,6 +312,11 @@ module Ndb
         Rails.client.aggregate(collection_name, body)
       end
 
+      # The time of a write: UTC, in milliseconds (the precision stored).
+      def current_time
+        Time.now.utc.floor(3)
+      end
+
       # The given attributes, cast by their type, with id as _id.
       def upsert_document(attrs)
         attrs.to_h.each_with_object({}) do |(name, value), doc|
@@ -346,6 +353,22 @@ module Ndb
       def dynamic_finder_klass = self
       def dynamic_finder_scope = all
 
+      def stamp_upserts(docs)
+        now = Conditions.json_value(current_time)
+        stored = stored_ids(docs.filter_map { |doc| doc[primary_key] })
+
+        docs.each do |doc|
+          doc["updated_at"] ||= now
+          doc["created_at"] ||= now unless stored.include?(doc[primary_key])
+        end
+      end
+
+      def stored_ids(ids)
+        ids.uniq.each_slice(Relation::BATCH_SIZE).flat_map do |slice|
+          where(primary_key => slice).limit(slice.size).pluck(primary_key)
+        end.to_set
+      end
+
       def find_or_create(attrs, bang, &block)
         found = find_by(attrs)
 
@@ -378,5 +401,10 @@ module Ndb
         superclass.respond_to?(name) ? superclass.public_send(name) : []
       end
     end
+
+    # Like the timestamps of ActiveRecord, on every model with no
+    # declaration: a save sets them, and each write sets updated_at.
+    attribute :created_at, :datetime, index: true
+    attribute :updated_at, :datetime, index: true
   end
 end

@@ -265,6 +265,19 @@ module Ndb
 
     private
 
+    # A new record: created_at and updated_at, unless the app set them.
+    def stamp_create
+      now = self.class.current_time
+
+      self.created_at ||= now
+      self.updated_at ||= now
+    end
+
+    # A write of a saved record: updated_at, unless the app changed it.
+    def stamp_update
+      self.updated_at = self.class.current_time unless changed.include?("updated_at")
+    end
+
     def raise_if_readonly
       raise ReadOnlyRecord, "#{self.class.name} is marked as readonly" if readonly?
     end
@@ -314,22 +327,27 @@ module Ndb
       raise RecordNotSaved, "Cannot update a record that is not saved" unless persisted?
       raise ArgumentError, "#{name} is not an attribute of #{self.class.name}" unless self.class.attribute_names.include?(name)
 
+      now = self.class.current_time
+      ops = { "$inc" => { name => by }, "$set" => { "updated_at" => Conditions.json_value(now) } }
+
       if (tx = current_transaction)
-        tx.update(self, { "$inc" => { name => by } })
+        tx.update(self, ops)
         public_send("#{name}=", (public_send(name) || 0) + by)
-        clear_attribute_changes([name])
+        self.updated_at = now
+        clear_attribute_changes([name, "updated_at"])
 
         return self
       end
 
-      result = holding { self.class.ndb_update({ self.class.primary_key => id }, { "$inc" => { name => by } }, **lock_options) }
+      result = holding { self.class.ndb_update({ self.class.primary_key => id }, ops, **lock_options) }
 
       raise NotFound.new("#{self.class.name} #{id} was deleted", code: "not_found") if result["matched"].zero?
 
       @version = result["doc"]["_v"]
 
       public_send("#{name}=", result["doc"][name])
-      clear_attribute_changes([name])
+      self.updated_at = now
+      clear_attribute_changes([name, "updated_at"])
 
       self
     end
@@ -349,6 +367,8 @@ module Ndb
         [name, json_attribute(name)]
       end
 
+      stamp_create
+
       on_insert = insert_document.except(*filter.keys)
       result = self.class.ndb_update(filter, { "$setOnInsert" => on_insert }, upsert: true)
 
@@ -364,6 +384,7 @@ module Ndb
 
     def create_record
       run_callbacks(:create) do
+        stamp_create
         if (tx = current_transaction)
           raise ArgumentError, "expire_in is not supported inside a transaction" if @expire_in
 
@@ -385,6 +406,8 @@ module Ndb
 
     def update_record
       run_callbacks(:update) do
+        stamp_update if (changed - [self.class.primary_key]).any? || @expire_in
+
         set, unset = changed_fields
 
         if (tx = current_transaction)

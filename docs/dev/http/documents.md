@@ -116,7 +116,7 @@ await users.upsertAll([{ _id: 'u1', plan: 'pro' }, { _id: 'u2', name: 'Bia' }])
 
 :::
 
-In Go, a struct sends every field of `T`, so every field of `T` is set; fields of the stored document that `T` does not have stay. Rails sends only the attributes you pass, and runs no validations or callbacks, like `upsert` in ActiveRecord.
+In Go, a struct sends every field of `T`, so every field of `T` is set; fields of the stored document that `T` does not have stay. Rails sends only the attributes you pass, and runs no validations or callbacks, like `upsert` in ActiveRecord. It adds `updated_at`, and `created_at` on a new document.
 
 ## `GET /{coll}/_doc/{id}`
 

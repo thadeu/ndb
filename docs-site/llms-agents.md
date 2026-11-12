@@ -42,7 +42,7 @@ ndb is one Go daemon. It stores documents (JSON objects) in collections and answ
 
 ### Pick the SDK page
 
-- **Rails app**: `ndb-rails`. Models with `Ndb::Record` (`where` for a list, `find_by` for one, `find(id)` by id, `to_ndb` gives the JSON body). Streams with `include Ndb::Streams` in `app/streams`, run with `bundle exec ndb streams`, test with `Ndb::Streams.inline!` or `perform_now`.
+- **Rails app**: `ndb-rails`. Models with `Ndb::Record` (`where` for a list, `find_by` for one, `find(id)` by id, `to_ndb` gives the JSON body). Each model has `created_at` and `updated_at` with an index, and `scope`, `uniqueness:`, `dependent:` and `readonly?` work as in ActiveRecord. Streams with `include Ndb::Streams` in `app/streams`, run with `bundle exec ndb streams`, test with `Ndb::Streams.inline!` or `perform_now`.
 - **Plain Ruby**: the gem `ndb` (`Ndb::Client`).
 - **Go**: `github.com/thadeu/ndb/sdk/go` (standard library only).
 - **TypeScript (Node, Bun, Hono)**: `@thadeu/ndb`.

@@ -84,6 +84,7 @@ end
 | Option or method | Meaning |
 |---|---|
 | `_id` / `id` | The primary key is always `_id` (a string; the daemon makes a UUIDv7 when it is empty). `id` is an alias of `_id`, also in `where`, `find_by` and `exists?` (a model with its own `id` attribute keeps it). For a natural key (email, SKU) keep `_id` and use `unique: true` on that attribute. |
+| `created_at` / `updated_at` | Every model has them, with an index, as the timestamps of ActiveRecord. Do not declare them. A save of a new record sets both (a value that you set stays). Each write sets `updated_at`: `save`, `update`, `increment!`, `Relation#update`, `upsert` and `upsert_all` (`created_at` only on a new document; one read finds the ids that exist). A save with no change writes nothing. The values are UTC with milliseconds (`2026-11-12T15:00:05.000Z`). |
 | `index: true` | Index this field. For a [compound index](../query.md#indexes), call `index :account_id, :created_at` in the class; with `unique: true` it is a compound unique key (`index :account_id, :email, unique: true`). `index "items.sku"` indexes a path that is not an attribute. |
 | `unique: true` | Unique value. A second one raises `RecordNotUnique`. |
 | `encrypted: true` | The daemon encrypts the attribute before it stores it. A filter on it is only `exists`. See [Encrypted fields](../security.md#encrypted-fields). |

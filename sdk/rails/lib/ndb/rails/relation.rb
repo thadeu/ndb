@@ -148,7 +148,7 @@ module Ndb
 
       raise ArgumentError, "update takes operators such as \"$set\" => { status: ... }, got #{ops.keys.inspect}" if ops.empty? || plain.any?
 
-      klass.ndb_update(Conditions.combine(values[:where]), ops, many: true, expire_in: expire_in).fetch("modified")
+      klass.ndb_update(Conditions.combine(values[:where]), with_updated_at(ops), many: true, expire_in: expire_in).fetch("modified")
     end
 
     # One daemon delete on every match, no callbacks (same rule as update).
@@ -382,6 +382,17 @@ module Ndb
 
     def sealed_or_plain(&)
       values[:keep_encrypted] ? Rails.client.keep_encrypted(&) : yield
+    end
+
+    # The operators with $set of updated_at, unless they write it already.
+    def with_updated_at(ops)
+      ops = ops.transform_keys(&:to_s)
+
+      return ops if ops.values.any? { |fields| fields.is_a?(Hash) && fields.keys.map(&:to_s).include?("updated_at") }
+
+      set = (ops["$set"] || {}).merge("updated_at" => Conditions.json_value(klass.current_time))
+
+      ops.merge("$set" => set)
     end
 
     def model_method?(name)

@@ -74,7 +74,8 @@ class PersistenceTest < Minitest::Test
 
     sent = capture_update { post.update!(status: "b") }
 
-    assert_equal({ "$set" => { "status" => "b" } }, sent[:ops])
+    assert_equal %w[status updated_at], sent[:ops]["$set"].keys.sort
+    assert_equal ["$set"], sent[:ops].keys
     assert_equal({ "_id" => "c1", "_v" => 1 }, sent[:filter])
     assert_equal "b", @post.find("c1").status
     assert_equal 1, @post.find("c1").duration
@@ -85,7 +86,8 @@ class PersistenceTest < Minitest::Test
 
     sent = capture_update { post.update!(duration: nil) }
 
-    assert_equal({ "$unset" => { "duration" => true } }, sent[:ops])
+    assert_equal({ "duration" => true }, sent[:ops]["$unset"])
+    assert_equal ["updated_at"], sent[:ops]["$set"].keys
     assert_nil @post.find("c1").duration
   end
 
