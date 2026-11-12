@@ -6,6 +6,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- **An RFC 3339 string is an instant on every field**, not only on the collection `time` field: `"...:05Z"`, `"...:05.1Z"` and `"...:05.100Z"` compare in the right order, and two offsets of one instant are equal, in filters, sorts, cursors, indexes, `$min`, `$max` and aggregates. `_id` stays text. A data dir of an older version builds its index keys again at the first start (the `.i.` key files become `.k.`), and queries scan until each index is `ready`. Shared cases in `spec/cases`. See `docs/dev/query.md#times`.
+- **Rails: every model has `created_at` and `updated_at`**, with an index, with no declaration. `save` sets them; `update`, `increment!`, `Relation#update`, `upsert` and `upsert_all` set `updated_at` (and `created_at` on a new document).
+- **Go writes a `time.Time` field and a `time.Time` in a filter in UTC with milliseconds** (`ndb.TimeLayout`), the width of the other SDKs.
+
+### Added
+
+- **`NDB_TOKEN` and `NDB_TOKEN_FILE` for `ndb serve`**, for a secret store that gives env vars. `-token-file` wins; a set but empty value stops the start.
+- **`NDB_PREFIX`** in Go, TypeScript and Rails: the default collection prefix.
+- **Go `ndb.Time`**: a time that goes out as `ndb.TimeLayout`, for a nested struct, a map or an update.
+- **Rails:** `scope`, and the scopes and class methods of a model on a relation; `before_validation` and `after_validation`; `validates :name, uniqueness: true` (with `scope:`) and the `taken` message; `exists?("id")` and `exists?(status: "x")`; `readonly?` and `readonly!` (`Ndb::ReadOnlyRecord`); `dependent: :destroy` and `:delete_all` on `has_many` and `has_one`.
+- **Docs:** "Writes across collections" in `docs/dev/concurrency.md`: one document, side effects first and the status last, or an outbox.
+
+### Fixed
+
+- **Rails: `where(id: x)`, `find_by(id: x)` and `where.not(id: x)` read `id` as `_id`.** They found nothing before.
+- **Rails: `Relation#update("$set" => {...})` without braces** was an `ArgumentError`. A key that is not an operator now has a clear error.
+- **Rails: the foreign key of `has_many` and `has_one` is in the indexes of the other model** from its first use, so `Key.where(app_id: id).delete_all` is not `unindexed_many`.
+- **Ruby: an idle keep-alive connection that the daemon closed is replaced before use.** A write after a quiet time got `Ndb::ConnectionError (EOFError)`.
+
 ## [1.21.2] - 2026-11-12
 
 ## [1.21.1] - 2026-11-12
