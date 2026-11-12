@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -15,7 +16,9 @@ import (
 
 	bolt "go.etcd.io/bbolt"
 
+	"github.com/thadeu/ndb/internal/crypt"
 	"github.com/thadeu/ndb/internal/index"
+	"go.yaml.in/yaml/v3"
 )
 
 var (
@@ -58,12 +61,18 @@ type Def struct {
 
 	// LegacyID only exists to reject the removed "id" setting with a clear
 	// message. The primary key is always _id.
-	LegacyID     string     `json:"id,omitempty" yaml:"id"`
-	Time         string     `json:"time,omitempty" yaml:"time"`
-	Write        WriteMode  `json:"write,omitempty" yaml:"write"`
-	Path         string     `json:"path,omitempty" yaml:"path"`
-	Indexes      []string   `json:"indexes,omitempty" yaml:"indexes"`
-	Unique       []string   `json:"unique,omitempty" yaml:"unique"`
+	LegacyID  string    `json:"id,omitempty" yaml:"id"`
+	Time      string    `json:"time,omitempty" yaml:"time"`
+	Write     WriteMode `json:"write,omitempty" yaml:"write"`
+	Path      string    `json:"path,omitempty" yaml:"path"`
+	Indexes   []string  `json:"indexes,omitempty" yaml:"indexes"`
+	Unique    []string  `json:"unique,omitempty" yaml:"unique"`
+	Encrypted []string  `json:"encrypted,omitempty" yaml:"encrypted"`
+
+	// Blind maps an encrypted field to its normalization (exact, numeric, upper,
+	// lower). The doc also stores <field>_bidx, the hash of the value, and
+	// an index or a unique key on the field uses it.
+	Blind        Blind      `json:"blind,omitempty" yaml:"blind"`
 	Durability   Durability `json:"durability,omitempty" yaml:"durability"`
 	Retention    string     `json:"retention,omitempty" yaml:"retention"`
 	WALRetention string     `json:"wal_retention,omitempty" yaml:"wal_retention"`
@@ -293,6 +302,16 @@ func (c *Catalog) partitionOwner(name string) (Def, bool) {
 	return Def{}, false
 }
 
+// Place is the name the encrypted values of the collection are bound to: the
+// logical collection of a partition, so a value reads in every partition.
+func (d Def) Place() string {
+	if d.PartitionOf != "" {
+		return d.PartitionOf
+	}
+
+	return d.Name
+}
+
 // PartitionDef is the definition of the partition name of the logical
 // collection logical: the same keys, with partition_of set.
 func PartitionDef(logical Def, name string) Def {
@@ -479,6 +498,7 @@ func withDefaults(d Def, src Source) Def {
 
 	d.Indexes = normIndexes(d.Indexes)
 	d.Unique = normIndexes(d.Unique)
+	blindIndexes(&d)
 	d.OpsFromYAML = src == FromYAML && (d.Durability != Strict || d.Retention != "" || d.WALRetention != "" || d.PITR != "")
 
 	return d
@@ -530,8 +550,15 @@ func merge(cur, decl Def, src Source) (Def, error) {
 		f.set(f.decl)
 	}
 
+	next.Encrypted = normIndexes(append(slices.Clone(cur.Encrypted), decl.Encrypted...))
+
+	if err := mergeBlind(&next, cur, decl); err != nil {
+		return Def{}, err
+	}
+
 	next.Indexes = normIndexes(append(slices.Clone(cur.Indexes), decl.Indexes...))
 	next.Unique = normIndexes(append(slices.Clone(cur.Unique), decl.Unique...))
+	blindIndexes(&next)
 
 	if decl.MaxLineSize != 0 {
 		next.MaxLineSize = decl.MaxLineSize
@@ -572,6 +599,128 @@ func mergeOps(next *Def, decl Def, src Source) {
 	if src == FromYAML && (decl.Durability != "" || decl.Retention != "" || decl.WALRetention != "" || decl.PITR != "") {
 		next.OpsFromYAML = true
 	}
+}
+
+// Blind maps each blind field to its normalization. In JSON and YAML it is
+// an object ({"cpf":"numeric"}) or a list of fields, each one exact.
+type Blind map[string]string
+
+func (b *Blind) UnmarshalJSON(data []byte) error {
+	var list []string
+
+	if json.Unmarshal(data, &list) == nil {
+		*b = blindOf(list)
+
+		return nil
+	}
+
+	var m map[string]string
+
+	if err := json.Unmarshal(data, &m); err != nil {
+		return fmt.Errorf("%w: blind is an object of field: normalization or a list of fields", ErrInvalid)
+	}
+
+	*b = m
+
+	return nil
+}
+
+func (b *Blind) UnmarshalYAML(value *yaml.Node) error {
+	var list []string
+
+	if value.Decode(&list) == nil {
+		*b = blindOf(list)
+
+		return nil
+	}
+
+	var m map[string]string
+
+	if err := value.Decode(&m); err != nil {
+		return fmt.Errorf("%w: blind is a map of field: normalization or a list of fields", ErrInvalid)
+	}
+
+	*b = m
+
+	return nil
+}
+
+func blindOf(fields []string) Blind {
+	out := Blind{}
+
+	for _, f := range fields {
+		out[f] = "exact"
+	}
+
+	return out
+}
+
+// BlindSuffix ends the name of the hash field of a blind field.
+const BlindSuffix = crypt.HashSuffix
+
+// mergeBlind adds the blind fields of decl. A field keeps its normalization:
+// another one would make the stored hashes wrong.
+func mergeBlind(next *Def, cur, decl Def) error {
+	if len(decl.Blind) == 0 {
+		return nil
+	}
+
+	next.Blind = maps.Clone(cur.Blind)
+	if next.Blind == nil {
+		next.Blind = map[string]string{}
+	}
+
+	for f, norm := range decl.Blind {
+		norm = blindNorm(norm)
+
+		if old, ok := cur.Blind[f]; ok && old != norm {
+			return fmt.Errorf("%w: %s.blind.%s is %q, declared %q", ErrConflict, cur.Name, f, old, norm)
+		}
+
+		next.Blind[f] = norm
+	}
+
+	return nil
+}
+
+// blindIndexes sets the default normalization, makes a blind field an
+// encrypted one, and makes each index and unique key on a blind field use
+// its hash field.
+func blindIndexes(d *Def) {
+	for f, norm := range d.Blind {
+		d.Blind[f] = blindNorm(norm)
+		d.Encrypted = append(d.Encrypted, f)
+	}
+
+	d.Encrypted = normIndexes(d.Encrypted)
+
+	hashed := func(names []string) []string {
+		out := make([]string, len(names))
+
+		for i, name := range names {
+			parts := strings.Split(name, ",")
+
+			for j, p := range parts {
+				if _, ok := d.Blind[p]; ok {
+					parts[j] = p + BlindSuffix
+				}
+			}
+
+			out[i] = strings.Join(parts, ",")
+		}
+
+		return normIndexes(out)
+	}
+
+	d.Indexes, d.Unique = hashed(d.Indexes), hashed(d.Unique)
+}
+
+func blindNorm(norm string) string {
+	if norm == "" {
+		return "exact"
+	}
+
+	return norm
 }
 
 func normIndexes(in []string) []string {
@@ -674,6 +823,52 @@ func validateFinal(d Def) error {
 		return fmt.Errorf("%w: partition_by is for engine mode", ErrInvalid)
 	case d.Stream && (d.Write != Engine || d.Time != StreamTime || len(d.Unique) > 0 || d.PartitionBy != "" || d.TTL != "" || d.ExpiresField != ""):
 		return fmt.Errorf("%w: a stream is in engine mode, its time is %s, with no unique, partition_by, ttl or expires_field", ErrInvalid, StreamTime)
+	}
+
+	return checkEncrypted(d)
+}
+
+// checkEncrypted refuses an encrypted field that the daemon must read: the
+// _id, the time field, the expiry field, an indexed field (an index on it
+// needs a blind index) and a nested field. It also refuses direct mode: the
+// app writes the files, so the daemon cannot encrypt first.
+func checkEncrypted(d Def) error {
+	if len(d.Encrypted) == 0 && len(d.Blind) == 0 {
+		return nil
+	}
+
+	if d.Stream {
+		return fmt.Errorf("%w: a stream has no encrypted fields", ErrInvalid)
+	}
+
+	if d.Write == Direct {
+		return fmt.Errorf("%w: encrypted is for engine mode (in direct mode the app writes the files)", ErrInvalid)
+	}
+
+	indexed := map[string]bool{}
+
+	for _, name := range slices.Concat(d.Indexes, d.Unique) {
+		for f := range strings.SplitSeq(name, ",") {
+			indexed[f] = true
+		}
+	}
+
+	for f, norm := range d.Blind {
+		switch {
+		case norm != "exact" && norm != "numeric" && norm != "lower":
+			return fmt.Errorf("%w: blind.%s must be exact, digits or lower", ErrInvalid, f)
+		}
+	}
+
+	for _, f := range d.Encrypted {
+		switch {
+		case f == "" || strings.ContainsAny(f, ".$,"):
+			return fmt.Errorf("%w: bad encrypted field %q (a top-level field)", ErrInvalid, f)
+		case f == "_id" || f == d.Time || f == d.ExpiresField:
+			return fmt.Errorf("%w: %s cannot be encrypted: the daemon reads it", ErrInvalid, f)
+		case indexed[f]:
+			return fmt.Errorf("%w: %s is encrypted: an index on it needs a blind index", ErrInvalid, f)
+		}
 	}
 
 	return nil

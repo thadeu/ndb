@@ -3,10 +3,18 @@ import { describe, expect, it } from 'bun:test';
 import { buildCurl } from '@/components/curl';
 import { editKey } from '@/components/editor-keys';
 import { blockAt, formatBlock, lineAt, parseBlocks, tokenize } from '@/components/devtools-blocks';
-import { containerIds, diffDocs, flatten, parseScalar, removeIn, setIn, addField, updateBody, describeDiff } from '@/components/json-model';
+import { containerIds, diffDocs, flatten, parseScalar, removeIn, setIn, addField, updateBody, describeDiff, scalarText, maskSealed } from '@/components/json-model';
 import { addEvent, MAX_EVENTS, type WatchEvent } from '@/components/watch';
 import { checkRequest } from '@/routes/devtools';
 import { readWhere } from '@/routes/browser';
+
+describe('encrypted values', () => {
+  it('shows a sealed value as encrypted, never its text', () => {
+    expect(scalarText('ndb:e1:k1:abc')).toBe('[encrypted]');
+    expect(scalarText('plain')).toBe('"plain"');
+    expect(maskSealed({ cpf: 'ndb:e1:k1:abc', name: 'Ana' })).toEqual({ cpf: '[encrypted]', name: 'Ana' });
+  });
+});
 
 describe('diffDocs', () => {
   const before = { _id: 'a', _v: 2, status: 'new', qty: 1, customer: { tier: 'silver', email: 'a@b.c' }, tags: ['x'], gone: true };

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "delegate"
+
 module Ndb
   # One collection of the daemon, with the query builder. The first call
   # declares it (PUT /{coll}) with its definition. A name with a "*" at the
@@ -32,6 +34,21 @@ module Ndb
     end
 
     def pattern? = name.include?("*")
+
+    # The same collection, with every read keeping the encrypted fields
+    # sealed ("ndb:e1:k1:..."): a list of secrets that shows none of them.
+    def encrypted
+      self.class.new(EncryptedClient.new(client), name, definition)
+    end
+
+    # A client whose every call runs inside Client#keep_encrypted.
+    class EncryptedClient < SimpleDelegator
+      def method_missing(name, ...)
+        __getobj__.keep_encrypted { super }
+      end
+
+      def respond_to_missing?(name, include_private = false) = super
+    end
 
     # A Hash is one document (_doc) and returns {"_id", "_v"}; an Array is
     # many in one transaction (_bulk) and returns the results. expire_in

@@ -19,6 +19,32 @@ type Coll[T any] struct {
 	schema *schema
 }
 
+// Encrypted is a handle on the same collection whose reads keep the
+// encrypted fields sealed ("ndb:e1:k1:..."): a list of secrets that shows
+// none of them. The reads of c still get the plain values.
+func (c *Coll[T]) Encrypted() *Coll[T] {
+	s := *c.schema
+	s.sealed = true
+
+	return &Coll[T]{db: c.db, name: c.name, schema: &s}
+}
+
+// withDecrypt adds decrypt=1 to a path, or decrypt=0 for an Encrypted
+// handle. The daemon gives the plain value only with decrypt=1 and the
+// decrypt right; else the stored, sealed one.
+func (c *Coll[T]) withDecrypt(path string) string {
+	flag := "decrypt=1"
+	if c.schema.sealed {
+		flag = "decrypt=0"
+	}
+
+	if strings.Contains(path, "?") {
+		return path + "&" + flag
+	}
+
+	return path + "?" + flag
+}
+
 // Collection returns the collection name for documents of type T. It sends
 // nothing: the first call on the collection declares it (PUT /{coll}) with
 // the time, expires, unique and index tags of T, once per name and DB.
@@ -398,7 +424,7 @@ func (c *Coll[T]) send(ctx context.Context, method, path string, body []byte, ou
 		target += "/" + path
 	}
 
-	resp, err := c.db.do(ctx, method, target, body)
+	resp, err := c.db.do(ctx, method, c.withDecrypt(target), body)
 	if err != nil {
 		return err
 	}
@@ -413,7 +439,7 @@ func (c *Coll[T]) stream(ctx context.Context, path string, body []byte) (*http.R
 		return nil, err
 	}
 
-	return c.db.do(ctx, http.MethodPost, collPath(c.name)+"/"+path, body)
+	return c.db.do(ctx, http.MethodPost, c.withDecrypt(collPath(c.name)+"/"+path), body)
 }
 
 // docPath is "{action}/{id}", with the id escaped.
@@ -508,7 +534,7 @@ func (db *DB) ensure(ctx context.Context, name string, s *schema) error {
 		return nil
 	}
 
-	body, err := json.Marshal(ensureBody{Time: s.time, ExpiresField: s.expires, Indexes: s.indexes, Unique: s.unique})
+	body, err := json.Marshal(ensureBody{Time: s.time, ExpiresField: s.expires, Indexes: s.indexes, Unique: s.unique, Encrypted: s.encrypted, Blind: s.blind})
 	if err != nil {
 		return err
 	}
@@ -547,6 +573,9 @@ type ensureBody struct {
 	ExpiresField string   `json:"expires_field,omitempty"`
 	Indexes      []string `json:"indexes,omitempty"`
 	Unique       []string `json:"unique,omitempty"`
+
+	Encrypted []string          `json:"encrypted,omitempty"`
+	Blind     map[string]string `json:"blind,omitempty"`
 }
 
 type bulkBody struct {
@@ -595,6 +624,44 @@ func Unique(fields ...string) CollOption {
 		s.unique = append(s.unique, name)
 
 		return err
+	}
+}
+
+// Encrypted declares fields that the daemon encrypts before it stores
+// them. A token with the decrypt right reads the plain value; any other reads
+// "ndb:e1:k1:...". A filter on the field is only $exists: see Blind.
+func Encrypted(fields ...string) CollOption {
+	return func(s *schema) error {
+		s.encrypted = append(s.encrypted, fields...)
+
+		return nil
+	}
+}
+
+// KeepEncrypted makes every read of the collection keep the encrypted fields
+// sealed. Coll.Encrypted does the same for one handle.
+func KeepEncrypted() CollOption {
+	return func(s *schema) error {
+		s.sealed = true
+
+		return nil
+	}
+}
+
+// Blind declares an encrypted field that a filter finds by value (Eq, In,
+// Ne, Nin), and that an index or a unique key may name. norm is "exact",
+// "lower" (an email), "upper" (a car plate) or "numeric" (only the digits:
+// a CPF with or without dots).
+func Blind(field, norm string) CollOption {
+	return func(s *schema) error {
+		if s.blind == nil {
+			s.blind = map[string]string{}
+		}
+
+		s.encrypted = append(s.encrypted, field)
+		s.blind[field] = norm
+
+		return nil
 	}
 }
 

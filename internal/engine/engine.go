@@ -22,6 +22,7 @@ import (
 	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/collection"
 	"github.com/thadeu/ndb/internal/config"
+	"github.com/thadeu/ndb/internal/crypt"
 	"github.com/thadeu/ndb/internal/cursors"
 	"github.com/thadeu/ndb/internal/fs"
 	"github.com/thadeu/ndb/internal/lock"
@@ -50,6 +51,7 @@ type DB struct {
 	// key the encryption key of the daemon (internal/settings).
 	settings *settings.Store
 	key      settings.Key
+	box      *crypt.Box
 
 	// blobs is the content-addressed store under <data_dir>/blobs.
 	blobs *blob.Store
@@ -125,6 +127,13 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		return nil, err
 	}
 
+	box, err := crypt.New(key.ID, key.Derive("ndb:e1"), key.Derive("ndb:h1"))
+	if err != nil {
+		lk.Release()
+
+		return nil, err
+	}
+
 	cat, err := catalog.Open(filepath.Join(cfg.DataDir, "catalog.bolt"), catalog.Options{AllowImplicit: cfg.AllowImplicit})
 	if err != nil {
 		lk.Release()
@@ -158,6 +167,7 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		cat:        cat,
 		settings:   st,
 		key:        key,
+		box:        box,
 		blobs:      blobs,
 		cursors:    cur,
 		ctx:        ctx,
@@ -430,6 +440,8 @@ func (db *DB) attach(def catalog.Def) error {
 	}
 
 	if def.PartitionBy != "" {
+		db.encryptPartitions(def)
+
 		return nil // a logical collection: its partitions hold the data
 	}
 
@@ -439,6 +451,10 @@ func (db *DB) attach(def catalog.Def) error {
 		}
 
 		defer col.leave()
+
+		if col.eng != nil {
+			col.eng.SetEncrypted(def)
+		}
 
 		for _, f := range def.Indexes {
 			if err := col.rd.EnsureIndex(f); err != nil {
@@ -457,6 +473,18 @@ func (db *DB) attach(def catalog.Def) error {
 	db.cols[def.Name] = col
 
 	return nil
+}
+
+// encryptPartitions gives the encrypted fields of a logical collection to
+// its open partitions.
+func (db *DB) encryptPartitions(def catalog.Def) {
+	for name, col := range db.cols {
+		if col.eng != nil && strings.HasPrefix(name, def.Name+"-") {
+			if part, ok := db.cat.Get(name); ok && part.PartitionOf == def.Name {
+				col.eng.SetEncrypted(catalog.PartitionDef(def, name))
+			}
+		}
+	}
 }
 
 func (db *DB) open(def catalog.Def) (*Collection, error) {
@@ -484,6 +512,7 @@ func (db *DB) openEngine(def catalog.Def, dir string, wm *metrics.Writer) (*Coll
 		GroupLimit: db.groupLimit,
 		Shared:     db.shared,
 		Blobs:      db.blobs,
+		Box:        db.box,
 		Observer:   wm,
 		OnCompact:  db.compacted,
 		Locks:      db.locks.Scope(def.Name),
@@ -620,6 +649,11 @@ func openSettings(cfg config.Config, log *slog.Logger) (*settings.Store, setting
 // Settings are the settings of the data dir.
 func (db *DB) Settings() *settings.Store {
 	return db.settings
+}
+
+// Box seals and opens the encrypted fields, with keys derived once.
+func (db *DB) Box() *crypt.Box {
+	return db.box
 }
 
 // Key is the encryption key of the daemon.

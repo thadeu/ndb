@@ -46,13 +46,29 @@ export class Collection<F extends Fields> {
     readonly db: Ndb,
     readonly name: string,
     readonly schema: Schema<F>,
+    private readonly sealed = false,
   ) {}
+
+  // A handle on the same collection whose reads keep the encrypted fields
+  // sealed ("ndb:e1:k1:..."): a list of secrets that shows none of them.
+  encrypted(): Collection<F> {
+    return new Collection(this.db, this.name, this.schema, true)
+  }
 
   // The path of the collection, or of one of its actions ("_search").
   path(action?: string): string {
     const base = `/${encodeURIComponent(this.name)}`
 
     return action ? `${base}/${action}` : base
+  }
+
+  // The path of an action that answers documents, with decrypt=1 (or
+  // decrypt=0 on an encrypted() handle). The daemon gives the plain value only
+  // with decrypt=1 and the decrypt right.
+  readPath(action: string): string {
+    const path = this.path(action)
+
+    return `${path}${path.includes('?') ? '&' : '?'}decrypt=${this.sealed ? 0 : 1}`
   }
 
   get isPattern(): boolean {
@@ -424,7 +440,7 @@ export class Collection<F extends Fields> {
   async search(body: SearchBody): Promise<SearchResult<Row<F>>> {
     await this.ready()
 
-    const res = await this.db.transport.stream('POST', this.path('_search'), { ...body, versions: true })
+    const res = await this.db.transport.stream('POST', this.readPath('_search'), { ...body, versions: true })
     const rows: Row<F>[] = []
 
     for await (const raw of res.rows()) {
@@ -440,7 +456,7 @@ export class Collection<F extends Fields> {
   ): Promise<AggregateResult<R>> {
     await this.ready()
 
-    const res = await this.db.transport.stream('POST', this.path('_aggregate'), { pipeline, ...opts })
+    const res = await this.db.transport.stream('POST', this.readPath('_aggregate'), { pipeline, ...opts })
     const rows: R[] = []
 
     for await (const row of res.rows()) {
@@ -454,7 +470,7 @@ export class Collection<F extends Fields> {
     await this.ready()
 
     const body = { consumer, from: opts.from, limit: opts.limit, query: opts.query === undefined ? undefined : toWhere(opts.query) }
-    const res = await this.db.transport.stream('POST', this.path('_watch'), body, opts.signal)
+    const res = await this.db.transport.stream('POST', this.readPath('_watch'), body, opts.signal)
 
     for await (const ev of watchEvents(res.rows(), consumer)) {
       yield { ...ev, doc: ev.doc && (this.decode(ev.doc) as Row<F>) }
@@ -504,7 +520,7 @@ export class Collection<F extends Fields> {
   private async send<T = unknown>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', action: string, body?: unknown): Promise<T> {
     await this.ready()
 
-    return this.db.transport.request<T>(method, this.path(action), body)
+    return this.db.transport.request<T>(method, this.readPath(action), body)
   }
 
   private updated(out: UpdateAnswer): UpdateResult<F> {
@@ -519,6 +535,8 @@ export class Collection<F extends Fields> {
       expires_field: this.schema.expires,
       indexes: [...entries.filter(([, d]) => d.index).map(([n]) => n), ...(this.schema.indexes ?? []).map((f) => f.join(','))],
       unique: [...entries.filter(([, d]) => d.unique).map(([n]) => n), ...(this.schema.unique ?? []).map((f) => f.join(','))],
+      encrypted: entries.filter(([, d]) => d.encrypted || d.blind).map(([n]) => n),
+      blind: Object.fromEntries(entries.filter(([, d]) => d.blind).map(([n, d]) => [n, d.blind])),
     }
   }
 }

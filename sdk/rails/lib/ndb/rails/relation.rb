@@ -61,6 +61,14 @@ module Ndb
     # block, the record is yielded and the lock ends with the block; without
     # one, it ends at the first save or destroy, or at unlock!. See
     # Ndb::Locking. ttl and wait: see Ndb::Client#lock.
+    # Reads that keep the encrypted fields sealed ("ndb:e1:k1:..."): a list
+    # of secrets that shows none of them. The other reads get the values.
+    #
+    #   Secret.encrypted.where(owner: user.id)
+    def encrypted
+      with(keep_encrypted: true)
+    end
+
     def lock(ttl: nil, wait: nil)
       with(lock: { ttl: ttl, wait: wait }.compact)
     end
@@ -158,7 +166,7 @@ module Ndb
     def load
       return self if loaded?
 
-      @result = klass.ndb_find(to_query)
+      @result = fetch(to_query)
       @records = @result.rows.map { |row| klass.instantiate(row) }
 
       self
@@ -265,14 +273,14 @@ module Ndb
     end
 
     def exists?
-      klass.ndb_find(to_query.slice("query").merge("limit" => 1, "fields" => [klass.primary_key])).rows.any?
+      fetch(to_query.slice("query").merge("limit" => 1, "fields" => [klass.primary_key])).rows.any?
     end
 
     def pluck(*fields)
       raise ArgumentError, "pluck needs at least one field" if fields.empty?
 
       names = fields.map(&:to_s)
-      rows = klass.ndb_find(to_query.merge("fields" => names)).rows
+      rows = fetch(to_query.merge("fields" => names)).rows
 
       rows.map do |row|
         values = names.map { |name| klass.attribute_types[name].cast(row.dig(*name.split("."))) }
@@ -284,7 +292,7 @@ module Ndb
     def count
       return calculate(:count) unless values[:group].empty? && values[:unwind].nil?
 
-      klass.ndb_find(to_query.slice("query").merge("count" => true, "limit" => 1, "fields" => [klass.primary_key])).total
+      fetch(to_query.slice("query").merge("count" => true, "limit" => 1, "fields" => [klass.primary_key])).total
     end
 
     # Pagination
@@ -342,6 +350,14 @@ module Ndb
     end
 
     private
+
+    def fetch(body)
+      sealed_or_plain { klass.ndb_find(body) }
+    end
+
+    def sealed_or_plain(&)
+      values[:keep_encrypted] ? Rails.client.keep_encrypted(&) : yield
+    end
 
     def add_clause(clause)
       with(where: values[:where] + [clause])
@@ -418,7 +434,7 @@ module Ndb
 
     def calculate(op, field = nil)
       key = op.to_s
-      rows = klass.ndb_aggregate(aggregate_body(op, field)).rows
+      rows = sealed_or_plain { klass.ndb_aggregate(aggregate_body(op, field)) }.rows
 
       return rows.to_h { |row| [group_key(row["_id"]), row[key]] } unless values[:group].empty?
 

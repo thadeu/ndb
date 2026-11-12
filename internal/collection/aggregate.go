@@ -29,7 +29,11 @@ func (c *Collection) SetGroupLimit(n int64) {
 
 // ParseAggregate parses an aggregate body with the collection time field.
 func (c *Collection) ParseAggregate(body []byte) (*agg.Pipeline, error) {
-	p, err := agg.Parse(body, agg.Options{TimeField: c.def.Time, ExpiresField: c.def.ExpiresField})
+	if err := c.checkAggRefs(body); err != nil {
+		return nil, err
+	}
+
+	p, err := agg.Parse(body, agg.Options{TimeField: c.def.Time, ExpiresField: c.def.ExpiresField, Field: c.filterField})
 	if err != nil {
 		return nil, err
 	}

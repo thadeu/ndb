@@ -55,8 +55,22 @@ export function childrenOf(value: unknown): [string, unknown][] {
   return [];
 }
 
-// scalarText is how a scalar shows in a row: strings keep their quotes.
+// isSealed tells if a value is an encrypted field as the daemon stores it.
+export function isSealed(value: unknown): boolean {
+  return typeof value === 'string' && value.startsWith('ndb:e1:');
+}
+
+// maskSealed is a document with each sealed top-level value shown as
+// "[encrypted]", for a preview.
+export function maskSealed(doc: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(doc).map(([key, value]) => [key, isSealed(value) ? '[encrypted]' : value]));
+}
+
+// scalarText is how a scalar shows in a row: strings keep their quotes. A
+// sealed value shows as [encrypted].
 export function scalarText(value: unknown): string {
+  if (isSealed(value)) return '[encrypted]';
+
   if (typeof value === 'string') return JSON.stringify(value);
 
   return value === undefined ? 'null' : JSON.stringify(value);

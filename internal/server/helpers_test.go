@@ -68,7 +68,13 @@ func planOf(t *testing.T, h http.Handler, path, body string) string {
 func aggOf(t *testing.T, h http.Handler, coll, pipeline string) []string {
 	t.Helper()
 
-	rec := call(h, "POST", "/"+coll+"/_aggregate", `{"pipeline":`+pipeline+`,"limit":1000}`)
+	path := "/" + coll + "/_aggregate"
+
+	if name, query, ok := strings.Cut(coll, "?"); ok {
+		path = "/" + name + "/_aggregate?" + query
+	}
+
+	rec := call(h, "POST", path, `{"pipeline":`+pipeline+`,"limit":1000}`)
 	expectStatus(t, rec, http.StatusOK)
 
 	var out []string

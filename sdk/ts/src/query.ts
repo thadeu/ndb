@@ -100,7 +100,7 @@ export class Query<F extends Fields, R = Row<F>> implements PromiseLike<R[]> {
   async count(): Promise<number> {
     await this.coll.ready()
 
-    const out = await this.coll.db.transport.request<{ count: number }>('POST', this.coll.path('_count'), { query: this.whereDoc() })
+    const out = await this.coll.db.transport.request<{ count: number }>('POST', this.coll.readPath('_count'), { query: this.whereDoc() })
 
     return out.count
   }
@@ -123,7 +123,7 @@ export class Query<F extends Fields, R = Row<F>> implements PromiseLike<R[]> {
   private async *rows(body: Record<string, unknown>): AsyncGenerator<R> {
     await this.coll.ready()
 
-    const res = await this.coll.db.transport.stream('POST', this.coll.path('_search'), body)
+    const res = await this.coll.db.transport.stream('POST', this.coll.readPath('_search'), body)
 
     this.nextCursor = res.header('x-ndb-next') ?? ''
 

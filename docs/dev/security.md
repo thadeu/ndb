@@ -101,7 +101,7 @@ ndb writes plain files: the WAL is NDJSON, the segments are Parquet, the blobs a
 
 ## The encryption key
 
-Each data dir has one encryption key of 32 bytes. Encrypted fields will use it (the next release); today it is made and kept, so every data dir has the same key from its first start. At start the daemon takes, in this order:
+Each data dir has one encryption key of 32 bytes. The [encrypted fields](#encrypted-fields) use it. At start the daemon takes, in this order:
 
 1. `NDB_ENCRYPTION_KEY`: 64 hex characters (`openssl rand -hex 32`). It is not written to the data dir; only its fingerprint is, so a later start with no env, or with another key, stops with an error instead of reading nothing.
 2. The key kept in the data dir, in `_system/settings.wal` (mode `0600`).
@@ -119,13 +119,78 @@ What protects what:
 
 So the default makes a restore need nothing. To keep the key out of the files, give it in `NDB_ENCRYPTION_KEY` from a secret store, and keep a copy of it: a backup of a data dir with an env key can only be restored with the same key.
 
+## Encrypted fields
+
+A field in `encrypted` is not stored as you send it. Before the WAL, the daemon replaces its value with `"ndb:e1:k1:<base64url>"`: AES-256-GCM of its JSON (a string, a number or an object), with a random nonce. So the WAL, the segments, the backups and the logs never have the plain value.
+
+```bash
+curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/users -d '{"encrypted":["cpf","private_key"]}'
+```
+
+- `e1` is the format and `k1` the key. Each value is bound to its collection and field: a value copied to another field or collection does not decrypt.
+- **Who reads the value:** an answer has the stored `"ndb:e1:k1:..."` by default. It has the plain value only when the call asks with `?decrypt=1` **and** the caller has the right: the unix socket, the token of `-token-file`, or a token with `decrypt` on the collection. A caller without the right that sends `?decrypt=1` gets the stored value, not an error. This applies to every read: `_doc`, `_search`, `_count`, `_aggregate`, `_watch`, the `doc` of `_update` and `_lock`, and the documents that a lookup adds (with the right on the collection they come from).
+
+  ```bash
+  curl --unix-socket /run/ndb/ndb.sock http://ndb/users/_doc/u1             # "cpf":"ndb:e1:k1:..."
+  curl --unix-socket /run/ndb/ndb.sock 'http://ndb/users/_doc/u1?decrypt=1' # "cpf":"390.533.447-05"
+  ```
+
+- **SDKs** send `decrypt=1` on every read, so an app with the right reads the values. `encrypted` (Go `vault.Encrypted()`, TS `vault.encrypted()`, Ruby `vault.encrypted`, Rails `Secret.encrypted`) sends `decrypt=0`: for a list of secrets that shows none of them, and a second read with the value when the user asks for it.
+- **Writes:** `_doc`, `_bulk`, upsert, `_tx` and `$set` encrypt the field. `$inc`, `$push` and the other operators on it are `400 invalid_query`: they need the value.
+- **Filters:** only `$exists`. Any other filter on the field is `400 invalid_query`, unless the field is [blind](#blind-fields).
+- **Aggregate:** `$match` follows the filter rules. `$first` and `$last` of the field give its value. Any other use (`$sum`, `$max`, `$project`) is `400 invalid_query`; a `$group` by the field needs it to be [blind](#blind-fields).
+- **Logs:** no request body or document of a collection with encrypted fields goes in a log line, at any level.
+- A field added to `encrypted` (or `blind`) later is encrypted from the next write of each document; the documents that are not written again stay as they are. To encrypt them all now, write each one again, for example:
+
+  ```bash
+  curl --unix-socket /run/ndb/ndb.sock http://ndb/users/_update_by_query \
+    -d '{"query":{"_id":{"$exists":true}},"update":{"$set":{"encrypted_at":"2026-11-12"}}}'
+  ```
+
+  The old plain values stay in the WAL files and in older backups until `wal_retention` and your backup rotation drop them.
+- **Console:** it never sends `decrypt=1`, so it shows `[encrypted]`, never the value. An edit of the document keeps the stored value.
+- **Cost:** a write of a document with a 2 KB `.pem` takes about 10% more time, a read about 8% more (`make bench`, with a check at 25%).
+- The key protects the files only when it is in `NDB_ENCRYPTION_KEY` (see [The encryption key](#the-encryption-key)). With the default key, encrypted fields keep the value out of the API for tokens with no `decrypt`, the logs and the console.
+
+## Blind fields
+
+A blind field is an encrypted field that a filter can find by its value. A field in `blind` is also encrypted: you do not have to put it in `encrypted` too. The daemon keeps a second value in the document, `<field>_bidx`: an HMAC-SHA256 of the normalized value (`"ndb:h1:k1:<hex>"`), with a key of its own. A filter on the field is changed to a filter on that hash.
+
+```bash
+curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/users \
+  -d '{"encrypted":["cpf"],"blind":{"cpf":"numeric"},"unique":["cpf"],"indexes":["cpf"]}'
+curl --unix-socket /run/ndb/ndb.sock http://ndb/users/_search -d '{"query":{"cpf":"390.533.447-05"}}'
+```
+
+| Normalization | The hash of | For |
+|---|---|---|
+| `exact` (default) | the value as sent | tokens, ids |
+| `lower` | the value in lower case, with no spaces at the ends | an email |
+| `upper` | the value in upper case, with no spaces at the ends | a car plate, a code |
+| `numeric` | only the digits (a zero at the start stays) | a CPF, a card, a phone, with or without dots and dashes |
+
+`blind` is an object of field and normalization, or a list of fields that are all `exact`: `"blind":["card_token"]`.
+
+- **Filters:** `$eq` (or a plain value), `$in`, `$ne`, `$nin` and `$exists`, also inside `$and`, `$or`, `$nor`, in `_count`, `_update_by_query`, `_delete_by_query` and in `$match`. A range, `$regex` or a sort need the value: `400 invalid_query`.
+- **Indexes:** `indexes` and `unique` on the field (also in a compound key) use `<field>_bidx`; the definition shows that name.
+- **Aggregate:** `{"$group":{"_id":"$cpf"}}` (also as a key of a compound `_id`) groups by the hash, so `390.533.447-05` and `39053344705` are one group. The `_id` of each group is the value of one of its documents: plain for a caller that may decrypt, else `"ndb:e1:k1:..."`. A `$sort` or `$match` on that `_id` after the group sees the hash.
+- `<field>_bidx` is in no answer. A value sent in it is replaced.
+- The hash of a value is the same for each document, so who reads the files sees which documents have the same value. It does not show the value: the HMAC key is derived from the master key.
+- A field made blind later has a hash from the next write of each document.
+
+## What to encrypt
+
+- **A user password:** do not encrypt it. Keep a hash (bcrypt or argon2) made by the app. Nobody needs to read a password back, the daemon too.
+- **A card number, a CPF, a document number:** `encrypted`, and `blind` when the app finds the record by it. Give `decrypt` only to the service that must show or send the value.
+- **A key or a certificate (`.pem`, `.pfx`), an API token of a third party:** `encrypted`.
+
 ## Logs
 
 At the `debug` level, a request line has the body, and a `write` line has the documents (cut to `log_body_max`, default 2048 bytes). So debug logs contain your data.
 
 - Use `debug` only for a short time. `PUT /_log` changes the level without a restart.
 - Set `log_body_max: 0` to log no bodies.
-- Logs never contain the `Authorization` header or a token secret.
+- Logs never contain the `Authorization` header or a token secret, nor a body or a document of a collection with [encrypted fields](#encrypted-fields).
 
 ## Images
 

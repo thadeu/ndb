@@ -52,6 +52,8 @@ var gates = []gate{
 	{metric: "idle.asleep", what: "idle collections still open after idle_close", max: 0},
 	{metric: "idle.wake_ms", what: "first call on a sleeping collection (median)", max: 50, unit: "ms"},
 	{metric: "idle.missing", what: "acked writes lost by a kill -9 while collections wake", max: 0},
+	{metric: "encrypted.write_pct", what: "extra time of a write with an encrypted 2 KB .pem (median)", max: 25, unit: "%"},
+	{metric: "encrypted.read_pct", what: "extra time of a read with an encrypted 2 KB .pem (median)", max: 25, unit: "%"},
 	{metric: "compound.worst", what: "slowest read with compound indexes or $unwind (median)", max: 66, unit: "ms"},
 	{metric: "streams.append_1_failed", what: "stream appends that failed, 1 client", max: 0},
 	{metric: "streams.append_10_failed", what: "stream appends that failed, 10 clients", max: 0},

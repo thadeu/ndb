@@ -162,6 +162,7 @@ func (o Options) plan(reuse bool) []planned {
 
 	if o.Compound || o.all() {
 		steps = append(steps, compoundPlan()...)
+		steps = append(steps, encryptedPlan()...)
 	}
 
 	if o.Streams || o.all() {
@@ -322,6 +323,8 @@ func Run(o Options, w io.Writer) (err error) {
 	if o.Compound || o.all() {
 		report = append(report, "| **compound indexes and $unwind** (median of 5, min–max; plan, documents examined) | |")
 		report = append(report, compoundPart(dir)...)
+		report = append(report, "| **encrypted fields** (median of 2000) | |")
+		report = append(report, encryptedPart(dir)...)
 	}
 
 	if o.Streams || o.all() {

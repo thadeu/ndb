@@ -93,7 +93,7 @@ func (e *httpEngine) EnsureCollection(ctx context.Context, name string, def json
 }
 
 func (e *httpEngine) Do(ctx context.Context, collection string, step spec.Step) ([]json.RawMessage, error) {
-	return e.send(ctx, "POST", "/"+collection+"/_"+step.Op, step.Body)
+	return e.send(ctx, "POST", "/"+collection+"/_"+step.Op+"?decrypt=1", step.Body)
 }
 
 // send returns the rows of a 2xx answer (a JSON array for _search and

@@ -125,7 +125,9 @@ func (s *Server) watch(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.WriteHeader(http.StatusOK)
 
-	s.pump(ctx, w, events, req.Limit, stream, req.Consumer)
+	open := func(doc json.RawMessage) json.RawMessage { return openDoc(r, db, r.PathValue("coll"), doc) }
+
+	s.pump(ctx, w, events, req.Limit, stream, req.Consumer, open)
 }
 
 func validateWatch(req watchReq) error {
@@ -147,7 +149,7 @@ func validateWatch(req watchReq) error {
 // ends. After heartbeat of silence it writes a heartbeat line. On a stream
 // collection (unpad), the _id of an event is <ms>-<seq>, not the padded
 // _id on disk.
-func (s *Server) pump(ctx context.Context, w http.ResponseWriter, stream feed.Stream, limit int, unpad bool, consumer string) {
+func (s *Server) pump(ctx context.Context, w http.ResponseWriter, stream feed.Stream, limit int, unpad bool, consumer string, open func(json.RawMessage) json.RawMessage) {
 	line := lineWriter{w: w, rc: http.NewResponseController(w), enc: json.NewEncoder(w), s: s, consumer: consumer}
 
 	if !line.flush() {
@@ -176,6 +178,8 @@ func (s *Server) pump(ctx context.Context, w http.ResponseWriter, stream feed.St
 		if unpad {
 			ev = unpadEvent(ev)
 		}
+
+		ev.Doc = open(ev.Doc)
 
 		if !line.write(ev) {
 			return

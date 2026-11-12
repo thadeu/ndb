@@ -73,6 +73,17 @@ module Ndb
       body.empty? ? nil : JSON.parse(body)
     end
 
+    # Runs the block with the reads of this thread keeping the encrypted
+    # fields sealed (decrypt=0). Collection#encrypted uses it.
+    def keep_encrypted
+      before = Thread.current[:ndb_keep_encrypted]
+      Thread.current[:ndb_keep_encrypted] = true
+
+      yield
+    ensure
+      Thread.current[:ndb_keep_encrypted] = before
+    end
+
     # The timeout of the connections of this client, in seconds.
     def timeout = @pool.timeout
 
@@ -420,6 +431,7 @@ module Ndb
     end
 
     def request(method, target, body, headers: {}, wait: true, timeout: nil)
+      target = with_decrypt(target)
       payload = encode(body)
       headers = authorize(headers)
 
@@ -436,7 +448,18 @@ module Ndb
     end
 
     def idempotent?(method, target)
-      method == "GET" || target.match?(%r{/(_search|_count|_aggregate)\z})
+      method == "GET" || target.match?(%r{/(_search|_count|_aggregate)(\?|\z)})
+    end
+
+    # A collection route gets decrypt=1: the daemon gives the plain value of
+    # an encrypted field only with it and the decrypt right. decrypt=0 inside
+    # keep_encrypted. A system route (/_...) gets nothing.
+    def with_decrypt(target)
+      return target if target.start_with?("/_")
+
+      flag = Thread.current[:ndb_keep_encrypted] ? "decrypt=0" : "decrypt=1"
+
+      "#{target}#{target.include?("?") ? "&" : "?"}#{flag}"
     end
 
     # Runs the block again while the daemon is not ready. It repeats only
@@ -507,7 +530,7 @@ module Ndb
       pending = +""
 
       response = @pool.with do |conn|
-        conn.stream("POST", target, JSON.generate(body), headers: authorize({})) do |chunk|
+        conn.stream("POST", with_decrypt(target), JSON.generate(body), headers: authorize({})) do |chunk|
           pending << chunk
 
           while (newline = pending.index("\n"))

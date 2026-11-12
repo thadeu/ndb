@@ -166,7 +166,7 @@ func (c *Collection) prepareTxUpdate(v *view, op TxOp, vq *query.Query) ([]wal.O
 		return nil, TxResult{}, err
 	}
 
-	filterMap, fops, err := splitBody(top)
+	filterMap, fops, err := c.splitOps(top)
 	if err != nil {
 		return nil, TxResult{}, err
 	}

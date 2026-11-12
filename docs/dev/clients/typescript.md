@@ -61,7 +61,7 @@ const calls = ndb.collection('calls', {
 ```
 
 - Field types: `string`, `number`, `boolean`, `date` (a `Date`), `json` (any value).
-- Field options: `index`, `unique`, `optional`.
+- Field options: `index`, `unique`, `optional`, `encrypted: true`, `blind: 'numeric'` (or `'exact'`, `'lower'`, `'upper'`). Reads send `decrypt=1`; `coll.encrypted()` is a handle whose reads keep the values sealed. See [Encrypted fields](../security.md#encrypted-fields): a blind field is found by value with `query({ cpf: '390.533.447-05' })`.
 - A [compound index](../query.md#indexes) or unique key is a schema option, next to `fields`, with the fields in order: `indexes: [['caller', 'at']]`, `unique: [['account_id', 'email']]`.
 - `_id` is the primary key of every document. It is not a schema field: leave it out on insert and the daemon makes a UUIDv7 (or use `newId()`). For a natural key (email, SKU), keep `_id` and mark that field `unique`.
 - `time` is the collection time field. Used by zone maps, `$dateTrunc` and date math (`now-7d`).

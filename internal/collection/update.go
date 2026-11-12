@@ -102,7 +102,7 @@ func (c *Collection) update(ctx context.Context, top map[string]any, opts Update
 		return UpdateResult{}, err
 	}
 
-	filterMap, ops, err := splitBody(top)
+	filterMap, ops, err := c.splitOps(top)
 	if err != nil {
 		return UpdateResult{}, err
 	}
@@ -374,6 +374,11 @@ func (c *Collection) finishDoc(v *view, id string, m map[string]any) (json.RawMe
 		return nil, err
 	}
 
+	doc, err = c.encrypt(doc)
+	if err != nil {
+		return nil, err
+	}
+
 	doc, err = c.externalize(doc)
 	if err != nil {
 		return nil, err
@@ -429,6 +434,11 @@ func (c *Collection) prepareUpsert(v *view, r updateReq) ([]wal.Op, error) {
 	}
 
 	prior, err := c.priorVersion(v, id)
+	if err != nil {
+		return nil, err
+	}
+
+	doc, err = c.encrypt(doc)
 	if err != nil {
 		return nil, err
 	}

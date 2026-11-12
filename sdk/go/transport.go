@@ -252,7 +252,9 @@ func (db *DB) doOnce(ctx context.Context, method, path string, body []byte) (*ht
 
 	// A watch and a stream read (block_ms) hold the connection while they
 	// wait: they do not count against WithMaxConns.
-	if strings.HasSuffix(path, "/_watch") || isStreamRead(path) {
+	route, _, _ := strings.Cut(path, "?")
+
+	if strings.HasSuffix(route, "/_watch") || isStreamRead(path) {
 		client = db.watches
 	}
 

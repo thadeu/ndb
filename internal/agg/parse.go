@@ -18,6 +18,9 @@ type Options struct {
 
 	// ExpiresField is the TTL field of the collection (plan §11.5).
 	ExpiresField string
+
+	// Field is the query hook of $match (see query.Options.Field).
+	Field func(path string, v any) (string, any, error)
 }
 
 // Pipeline is a validated aggregate request.
@@ -264,7 +267,7 @@ func (p *Pipeline) parseQuery(body map[string]any) (*query.Query, error) {
 		return nil, invalid("%v", err)
 	}
 
-	q, err := query.Parse(raw, query.Options{TimeField: p.opts.TimeField, ExpiresField: p.opts.ExpiresField})
+	q, err := query.Parse(raw, query.Options{TimeField: p.opts.TimeField, ExpiresField: p.opts.ExpiresField, Field: p.opts.Field})
 	if err != nil {
 		return nil, invalid("%s", strings.TrimPrefix(err.Error(), "invalid_query: "))
 	}

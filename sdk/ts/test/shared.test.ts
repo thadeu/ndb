@@ -70,7 +70,7 @@ describe.each(transports)('shared cases over %s', (_t, db) => {
     }
 
     const run = async () => {
-      const res = await db.stream('POST', `${base}/_${c.request.op}`, c.request.body)
+      const res = await db.stream('POST', `${base}/_${c.request.op}?decrypt=1`, c.request.body)
       const rows: unknown[] = []
 
       for await (const row of res.rows()) {

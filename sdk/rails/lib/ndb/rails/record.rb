@@ -26,7 +26,7 @@ module Ndb
 
     class << self
       QUERY_METHODS = %i[
-        where where_raw order limit offset page after group unwind includes lock find find_by find_by! first last count pluck exists?
+        where where_raw order limit offset page after group unwind includes lock encrypted find find_by find_by! first last count pluck exists?
         find_each in_batches sum average minimum maximum to_a each destroy_all delete_all to_ndb
       ].freeze
 
@@ -150,9 +150,14 @@ module Ndb
         @source
       end
 
-      def attribute(name, *args, index: false, unique: false, time: false, expires: false, **options)
+      # encrypted: true makes the daemon encrypt the attribute before it
+      # stores it; blind: :numeric (or :exact, :lower, :upper) also lets where and
+      # find_by find it by value, and index or unique name it.
+      def attribute(name, *args, index: false, unique: false, time: false, expires: false, encrypted: false, blind: nil, **options)
         own_indexed << name.to_s if index
         own_unique << name.to_s if unique
+        own_encrypted << name.to_s if encrypted && !blind
+        own_blind[name.to_s] = blind.to_s if blind
         @time_field = name.to_s if time
         @expires_field = name.to_s if expires
 
@@ -201,12 +206,22 @@ module Ndb
         inherited_list(:unique_fields) | own_unique
       end
 
+      def encrypted_fields
+        inherited_list(:encrypted_fields) | own_encrypted
+      end
+
+      def blind_fields
+        (superclass.respond_to?(:blind_fields) ? superclass.blind_fields : {}).merge(own_blind)
+      end
+
       # The ensure_collection body for this model.
       def collection_definition
         definition = {}
 
         definition["indexes"] = indexed_fields if indexed_fields.any?
         definition["unique"] = unique_fields if unique_fields.any?
+        definition["encrypted"] = encrypted_fields if encrypted_fields.any?
+        definition["blind"] = blind_fields if blind_fields.any?
         definition["time"] = time_field if time_field
         definition["expires_field"] = expires_field if expires_field
         definition["ttl"] = ttl if ttl
@@ -306,6 +321,14 @@ module Ndb
 
       def own_unique
         @own_unique ||= []
+      end
+
+      def own_encrypted
+        @own_encrypted ||= []
+      end
+
+      def own_blind
+        @own_blind ||= {}
       end
 
       def inherited_list(name)
