@@ -83,7 +83,7 @@ end
 
 | Option or method | Meaning |
 |---|---|
-| `_id` / `id` | The primary key is always `_id` (a string; the daemon makes a UUIDv7 when it is empty). `id` is an alias of `_id`. For a natural key (email, SKU) keep `_id` and use `unique: true` on that attribute. |
+| `_id` / `id` | The primary key is always `_id` (a string; the daemon makes a UUIDv7 when it is empty). `id` is an alias of `_id`, also in `where`, `find_by` and `exists?` (a model with its own `id` attribute keeps it). For a natural key (email, SKU) keep `_id` and use `unique: true` on that attribute. |
 | `index: true` | Index this field. For a [compound index](../query.md#indexes), call `index :account_id, :created_at` in the class; with `unique: true` it is a compound unique key (`index :account_id, :email, unique: true`). `index "items.sku"` indexes a path that is not an attribute. |
 | `unique: true` | Unique value. A second one raises `RecordNotUnique`. |
 | `encrypted: true` | The daemon encrypts the attribute before it stores it. A filter on it is only `exists`. See [Encrypted fields](../security.md#encrypted-fields). |

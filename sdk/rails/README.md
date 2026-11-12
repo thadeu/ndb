@@ -82,7 +82,7 @@ end
 
 | Option or method | Meaning |
 |---|---|
-| `_id` / `id` | The primary key is always `_id` (a string; the daemon makes a UUIDv7 when it is empty). `id` is an alias of `_id`. For a natural key (email, SKU) keep `_id` and use `unique: true` on that attribute. |
+| `_id` / `id` | The primary key is always `_id` (a string; the daemon makes a UUIDv7 when it is empty). `id` is an alias of `_id`, also in `where`, `find_by` and `exists?` (a model with its own `id` attribute keeps it). For a natural key (email, SKU) keep `_id` and use `unique: true` on that attribute. |
 | `index: true` | Index this field. |
 | `unique: true` | Unique value. A second one raises `RecordNotUnique`. |
 | `time: true` | The collection time field. Used by zone maps, `$dateTrunc` and TTL. |

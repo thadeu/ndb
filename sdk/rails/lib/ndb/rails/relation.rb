@@ -26,7 +26,7 @@ module Ndb
       return WhereChain.new(self) if attrs == :chain
       raise ArgumentError, "where takes a Hash, got #{attrs.class}" unless attrs.is_a?(Hash)
 
-      add_clause(Conditions.equality(attrs))
+      add_clause(Conditions.equality(alias_id(attrs)))
     end
 
     # A where Hash built elsewhere, such as from a search form, sent as is:
@@ -359,6 +359,14 @@ module Ndb
       values[:keep_encrypted] ? Rails.client.keep_encrypted(&) : yield
     end
 
+    # id is an alias of _id, as on a record, unless the model has its own
+    # id attribute.
+    def alias_id(attrs)
+      return attrs if klass.attribute_names.include?("id")
+
+      attrs.transform_keys { |key| key.to_s == "id" ? klass.primary_key : key }
+    end
+
     def add_clause(clause)
       with(where: values[:where] + [clause])
     end
@@ -452,7 +460,7 @@ module Ndb
       end
 
       def not(attrs)
-        @relation.send(:add_clause, Conditions.negation(attrs))
+        @relation.send(:add_clause, Conditions.negation(@relation.send(:alias_id, attrs)))
       end
     end
   end
