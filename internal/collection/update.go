@@ -125,7 +125,7 @@ func (c *Collection) update(ctx context.Context, top map[string]any, opts Update
 	if opts.Many {
 		req.cur = &manyCursor{}
 
-		if err := c.list(req.cur, filter); err != nil {
+		if err := c.list(ctx, req.cur, filter); err != nil {
 			return UpdateResult{}, err
 		}
 	}
@@ -177,7 +177,7 @@ func (c *Collection) deleteTop(ctx context.Context, top map[string]any, many boo
 	req := deleteReq{filter: filter, many: many, cur: &manyCursor{}}
 
 	if many {
-		if err := c.list(req.cur, filter); err != nil {
+		if err := c.list(ctx, req.cur, filter); err != nil {
 			return 0, err
 		}
 	}

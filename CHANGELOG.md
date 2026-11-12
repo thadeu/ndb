@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- **A `many` update or delete waits for an index that is building**, up to 30 s, instead of `400 unindexed_many`. A new partition builds its indexes after its first write, so a `many` write right after it failed now and then.
+
 ## [1.23.2] - 2026-11-12
 
 ### Added

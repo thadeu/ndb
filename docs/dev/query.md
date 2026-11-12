@@ -492,7 +492,7 @@ Always HTTP 200 when the body is valid:
 ### Which documents
 
 - Without `many`, a query with the id field uses the id lookup. Without the id, the first matching document is used.
-- With `"many": true`, the query must be served by the id or a ready secondary index. Otherwise the call is `400 unindexed_many`, so a big update never blocks the writer on a full scan.
+- With `"many": true`, the query must be served by the id or a secondary index. Otherwise the call is `400 unindexed_many`, so a big update never blocks the writer on a full scan. An index that is still `building` (a new index, or the indexes of a new partition after its first write) is waited for, up to 30 seconds.
 - A query must not be empty (`400 empty_filter`). Expired documents are never matched.
 - A `many` write has no size limit. ndb lists the matches one time, then writes them in WAL records of up to half of `max_line_size`. Other writes to the collection run between two records. Each record is atomic, but the write as a whole is not: after a crash, the records already written stay, and you can send the same call again. Each document is written at most one time, so an `$inc` never runs two times on the same document.
 

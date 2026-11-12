@@ -2,7 +2,9 @@ package collection
 
 import (
 	"cmp"
+	"context"
 	"slices"
+	"time"
 
 	"github.com/thadeu/ndb/internal/query"
 	"github.com/thadeu/ndb/internal/segment"
@@ -37,9 +39,15 @@ func (m *manyCursor) done() bool {
 	return m.listed && m.pos >= len(m.cands)
 }
 
+// indexWait is how long a many write waits for an index that is building.
+var indexWait = 30 * time.Second
+
 // list makes the candidate list of the write. Each candidate is tested
-// again in the writer, so a list made before the first record is safe.
-func (c *Collection) list(m *manyCursor, q *query.Query) error {
+// again in the writer, so a list made before the first record is safe. An
+// index of the filter that is still building is waited for, up to
+// indexWait: it is declared, so the write is not unindexed_many. A new
+// partition, for one, builds its indexes after its first write.
+func (c *Collection) list(ctx context.Context, m *manyCursor, q *query.Query) error {
 	conds := q.Indexable()
 	path, exact := q.IndexOnly()
 
@@ -56,9 +64,13 @@ func (c *Collection) list(m *manyCursor, q *query.Query) error {
 		return nil
 	}
 
-	c.mu.RLock()
-	plan, cands, ok := c.indexedCands(conds)
-	c.mu.RUnlock()
+	plan, cands, ok := c.lockedCands(conds)
+
+	if !ok && c.building(conds) {
+		c.waitBuilt(ctx, conds)
+
+		plan, cands, ok = c.lockedCands(conds)
+	}
 
 	if !ok {
 		return errf("unindexed_many", "many needs the id or an indexed field in the filter")
@@ -71,6 +83,48 @@ func (c *Collection) list(m *manyCursor, q *query.Query) error {
 	m.exact = exact && plan == "index:"+path
 
 	return nil
+}
+
+func (c *Collection) lockedCands(conds []query.Cond) (string, []cand, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.indexedCands(conds)
+}
+
+// building tells whether a condition is on an index that is not ready.
+func (c *Collection) building(conds []query.Cond) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	for _, cd := range conds {
+		if s, ok := c.rd.idx[cd.Path]; ok && !s.ready {
+			return true
+		}
+	}
+
+	return false
+}
+
+// waitBuilt waits until no index of conds is building, up to indexWait, the
+// end of ctx or the close of the collection.
+func (c *Collection) waitBuilt(ctx context.Context, conds []query.Cond) {
+	tick := time.NewTicker(5 * time.Millisecond)
+	defer tick.Stop()
+
+	deadline := time.After(indexWait)
+
+	for c.building(conds) {
+		select {
+		case <-ctx.Done():
+			return
+		case <-c.rd.stop:
+			return
+		case <-deadline:
+			return
+		case <-tick.C:
+		}
+	}
 }
 
 // byLocation sorts the candidates by segment and row, memtable rows first.

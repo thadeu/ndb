@@ -3,6 +3,7 @@ package collection_test
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -209,5 +210,53 @@ func TestDeleteManySeesAPendingChange(t *testing.T) {
 
 		c.Insert(ctx, doc(`{"_id":"d00000x","s":"x","day":0}`))
 		c.Delete(ctx, []byte(`{"_id":"d00000x"}`), false)
+	}
+}
+
+// A many write on a field whose index is still building waits for the
+// build, instead of unindexed_many: the index is declared, only not ready.
+func TestAManyWriteWaitsForAnIndexThatIsBuilding(t *testing.T) {
+	c := open(t, t.TempDir(), catalog.Def{})
+
+	seedN(t, c, 100, func(i int) string { return fmt.Sprintf(`{"_id":"p%03d","g":%d}`, i, i%10) })
+
+	gate := make(chan struct{})
+	reached := make(chan struct{}, 1)
+
+	collection.SetBuildGate(c, func() {
+		select {
+		case reached <- struct{}{}:
+		default:
+		}
+
+		<-gate
+	})
+
+	if err := c.EnsureIndex("g"); err != nil {
+		t.Fatal(err)
+	}
+
+	<-reached
+
+	done := make(chan error, 1)
+
+	go func() {
+		res, err := c.Update(ctx, []byte(`{"g":3,"$set":{"seen":true}}`), collection.UpdateOpts{Many: true})
+		if err == nil && res.Modified != 10 {
+			err = fmt.Errorf("modified %d", res.Modified)
+		}
+
+		done <- err
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	close(gate)
+
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := c.Update(ctx, []byte(`{"nope":3,"$set":{"x":1}}`), collection.UpdateOpts{Many: true}); err == nil || !strings.Contains(err.Error(), "unindexed_many") {
+		t.Fatalf("a field with no index: %v", err)
 	}
 }
