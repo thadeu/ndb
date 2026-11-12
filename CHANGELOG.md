@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.23.3] - 2026-11-12
+
 ### Fixed
 
 - **A `many` update or delete waits for an index that is building**, up to 30 s, instead of `400 unindexed_many`. A new partition builds its indexes after its first write, so a `many` write right after it failed now and then.
@@ -747,7 +749,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.23.2...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.23.3...HEAD
+[1.23.3]: https://github.com/thadeu/ndb/compare/v1.23.2...v1.23.3
 [1.23.2]: https://github.com/thadeu/ndb/compare/v1.23.1...v1.23.2
 [1.23.1]: https://github.com/thadeu/ndb/compare/v1.23.0...v1.23.1
 [1.23.0]: https://github.com/thadeu/ndb/compare/v1.22.1...v1.23.0
