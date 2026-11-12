@@ -40,6 +40,14 @@ class RailtieTest < Minitest::Test
     end
   end
 
+  def test_collection_prefix_reads_ndb_prefix
+    ENV["NDB_PREFIX"] = "env_"
+
+    assert_equal "env_", Ndb::Rails::Configuration.new.collection_prefix
+  ensure
+    ENV.delete("NDB_PREFIX")
+  end
+
   def test_activerecord_like_names_are_aliases
     assert_same Ndb::UniqueViolation, Ndb::RecordNotUnique
     assert_kind_of Ndb::Client, Ndb::Rails.client

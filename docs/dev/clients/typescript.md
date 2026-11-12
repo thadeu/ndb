@@ -982,6 +982,7 @@ beforeAll(() => cleanAll(db))  // every collection with the prefix
 afterEach(() => clean(db))     // the ones this test used
 ```
 
+- Without `prefix`, the prefix is `NDB_PREFIX`.
 - `clean(db, { only, except })`: truncate these, or leave some out.
 - `cleanAll(db)` truncates every engine collection with the prefix of `db`. Direct collections and partitions are left out.
 - `prefix` (a `connect` option) goes before the name of every collection: each parallel worker gets collections of its own.

@@ -1235,7 +1235,7 @@ The daemon is shared by every worker, so each one gets collections of its own: t
 
 - **Rails `parallelize`:** `ndb/rails/minitest` sets it in `parallelize_setup`.
 - **parallel_tests (`TEST_ENV_NUMBER`):** `ndb/rails/minitest` and `ndb/rails/rspec` read it.
-- By hand: `Ndb::Testing.worker!(2)`, or `config.collection_prefix = "ci_"` in `Ndb::Rails.configure`.
+- By hand: `Ndb::Testing.worker!(2)`, or `config.collection_prefix = "ci_"` in `Ndb::Rails.configure`. Without it, `collection_prefix` is `NDB_PREFIX`.
 
 The prefix covers the models (and their associations). A collection written with the raw client (`Ndb::Rails.client`) is not prefixed and not cleaned unless you pass it: `Ndb::Testing.clean!(only: %w[raw_events])`.
 

@@ -145,6 +145,7 @@ func truncateForTest(ctx context.Context, db *DB, name string) error {
 
 // WithPrefix puts prefix before the name of every Collection of the DB:
 // "test1_" gives each parallel package or worker collections of its own.
+// Without it, the prefix is NDB_PREFIX.
 func WithPrefix(prefix string) ConnectOption {
 	return func(db *DB) { db.prefix = prefix }
 }

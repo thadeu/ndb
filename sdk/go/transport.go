@@ -91,7 +91,8 @@ func WithIdleTimeout(d time.Duration) ConnectOption {
 
 // Connect returns a handle for addr: unix:///path/to/ndb.sock,
 // tcp://host:port, or https://host[:port] (ndb behind a TLS proxy such as
-// Caddy; http:// works too). An empty addr reads NDB_URL. It does not dial;
+// Caddy; http:// works too). An empty addr reads NDB_URL. NDB_TOKEN and
+// NDB_PREFIX are the defaults of WithToken and WithPrefix. It does not dial;
 // the first call does, and waits while the daemon starts (WithReadyTimeout).
 func Connect(addr string, opts ...ConnectOption) (*DB, error) {
 	if addr == "" {
@@ -103,7 +104,7 @@ func Connect(addr string, opts ...ConnectOption) (*DB, error) {
 		return nil, fmt.Errorf("ndb: bad address %q: %w", addr, err)
 	}
 
-	db := &DB{ensured: map[string]bool{}, token: os.Getenv("NDB_TOKEN"), readyTimeout: DefaultReadyTimeout, maxConns: DefaultMaxConns}
+	db := &DB{ensured: map[string]bool{}, token: os.Getenv("NDB_TOKEN"), prefix: os.Getenv("NDB_PREFIX"), readyTimeout: DefaultReadyTimeout, maxConns: DefaultMaxConns}
 
 	for _, opt := range opts {
 		opt(db)

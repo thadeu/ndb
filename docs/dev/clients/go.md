@@ -1183,7 +1183,7 @@ t.Cleanup(func() { ndb.Testing.Clean(ctx, db) })
 - `Clean` and `CleanAll` return the names of the collections they truncated.
 - `ndb.CleanOnly(names...)` truncates these, not the ones used; `ndb.CleanExcept(names...)` leaves some out.
 - `ndb.Testing.CleanAll(ctx, db)` truncates every engine collection with the prefix of the DB, for the start of a run. Direct collections and partitions are left out.
-- `ndb.WithPrefix("test1_")` on `Connect` puts a prefix before the name of every `Collection`: each parallel package or worker gets collections of its own.
+- `ndb.WithPrefix("test1_")` on `Connect` puts a prefix before the name of every `Collection`: each parallel package or worker gets collections of its own. Without it, the prefix is `NDB_PREFIX`, so a test that starts the app from env vars only can set it too.
 - A collection that does not exist is not an error.
 - A clean runs only under `go test` (`testing.Testing()`). Anywhere else it returns `ndb.ErrUnsafeClean`, so it never truncates production data. `NDB_ALLOW_CLEAN=1` forces it.
 - The SDK does not start a daemon: start it in CI as a service, with `make up`, or with Docker, and connect with `NDB_URL`.

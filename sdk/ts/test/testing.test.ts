@@ -29,6 +29,23 @@ describe('clean', () => {
     expect(await clean(db, { only: [`never_${collName()}`] })).toHaveLength(1)
   })
 
+  it('reads the prefix from NDB_PREFIX; the option wins', async () => {
+    process.env.NDB_PREFIX = 'env_'
+
+    try {
+      const envDb = connect(inject('unixAddr'))
+      const optDb = connect(inject('unixAddr'), { prefix: 'opt_' })
+
+      expect(envDb.collection('calls', { fields: {} }).name).toBe('env_calls')
+      expect(optDb.collection('calls', { fields: {} }).name).toBe('opt_calls')
+
+      await envDb.close()
+      await optDb.close()
+    } finally {
+      delete process.env.NDB_PREFIX
+    }
+  })
+
   it('prefix and cleanAll', async () => {
     const prefix = `p${collName()}_`
     const pdb = connect(inject('unixAddr'), { prefix })

@@ -27,7 +27,9 @@ Sources are in `sdk/`: `sdk/go`, `sdk/ruby` (gem `ndb`), `sdk/rails` (gem `ndb-r
 
 Addresses are `unix:///run/ndb/ndb.sock` or `tcp://host:port`. Every SDK and the CLI speak both. Without an address, each SDK reads `NDB_URL`.
 
-When the daemon runs with `-token-file`, the TCP listener needs a bearer token (the unix socket never does). Each SDK takes a `token` option, or reads `NDB_TOKEN`. The token goes only in the `Authorization` header. A wrong or missing token is `401 unauthorized`. See [configuration.md](configuration.md#authentication).
+`NDB_PREFIX` goes before every collection name, in Go (`WithPrefix`), TypeScript (`prefix`) and Rails (`collection_prefix`); the option in code wins. A test that starts the whole app from env vars gives each parallel package its own collections with it.
+
+When the daemon runs with `-token-file` (or `NDB_TOKEN`), the TCP listener needs a bearer token (the unix socket never does). Each SDK takes a `token` option, or reads `NDB_TOKEN`. The token goes only in the `Authorization` header. A wrong or missing token is `401 unauthorized`. See [configuration.md](configuration.md#authentication).
 
 | SDK | Address | Token |
 |---|---|---|

@@ -64,6 +64,32 @@ func TestCleanOnlyAndUnknownCollections(t *testing.T) {
 	}
 }
 
+// NDB_PREFIX gives the prefix to a DB that has no WithPrefix, so a test
+// that starts the app from env vars can have its own collections.
+func TestPrefixFromTheEnv(t *testing.T) {
+	t.Setenv("NDB_PREFIX", "env_")
+
+	db, _ := Connect(daemon.unix)
+
+	defer db.Close()
+
+	c, _ := Collection[Job](db, "calls")
+
+	if c.Name() != "env_calls" {
+		t.Fatalf("name %q, want env_calls", c.Name())
+	}
+
+	mine, _ := Connect(daemon.unix, WithPrefix("opt_"))
+
+	defer mine.Close()
+
+	d, _ := Collection[Job](mine, "calls")
+
+	if d.Name() != "opt_calls" {
+		t.Fatalf("WithPrefix must win: %q", d.Name())
+	}
+}
+
 func TestWithPrefixAndCleanAll(t *testing.T) {
 	ctx := context.Background()
 	prefix := "w" + newColl() + "_"

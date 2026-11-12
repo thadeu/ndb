@@ -30,6 +30,7 @@ export interface ConnectOptions {
   readyTimeout?: number
   // Goes before the name of every collection: "test1_" gives each parallel
   // test worker collections of its own (see clean in testing.ts).
+  // Default: env NDB_PREFIX.
   prefix?: string
   // The token of the app (for example "myapp/1.2"). It goes after the
   // User-Agent of the SDK, so the daemon can tell the apps apart.

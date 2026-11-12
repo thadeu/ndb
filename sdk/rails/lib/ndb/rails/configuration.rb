@@ -12,7 +12,8 @@ module Ndb
       attr_accessor :url, :socket, :token, :timeout, :pool_size, :ready_timeout
 
       # collection_prefix goes before every collection name of the models
-      # ("test2_" for a parallel test worker). nil by default.
+      # ("test2_" for a parallel test worker). The default is NDB_PREFIX,
+      # else nil.
       attr_accessor :collection_prefix
 
       # user_agent is the token of the app (for example "myapp/1.2"). It goes
@@ -28,6 +29,7 @@ module Ndb
         @timeout = 30
         @pool_size = 16
         @ready_timeout = 10
+        @collection_prefix = ENV["NDB_PREFIX"].presence
         @streams = {}
       end
 

@@ -13,7 +13,7 @@ export class Ndb {
 
   constructor(addr?: string, opts?: ConnectOptions) {
     this.transport = new Transport(addr, opts)
-    this.prefix = opts?.prefix ?? ''
+    this.prefix = opts?.prefix ?? process.env.NDB_PREFIX ?? ''
   }
 
   // A collection of the daemon; see Collection. Nothing is sent until its
