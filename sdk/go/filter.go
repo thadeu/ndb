@@ -15,7 +15,7 @@ type Filter struct {
 
 // Eq matches a field equal to v.
 func Eq(field string, v any) Filter {
-	return Filter{doc: map[string]any{field: v}}
+	return Filter{doc: map[string]any{field: wireValue(v)}}
 }
 
 // Ne matches a field not equal to v.
@@ -172,7 +172,7 @@ func ElemMatch(field string, filters ...Filter) Filter {
 }
 
 func operator(field, name string, v any) Filter {
-	return Filter{doc: map[string]any{field: map[string]any{name: v}}}
+	return Filter{doc: map[string]any{field: map[string]any{name: wireValue(v)}}}
 }
 
 // queryOf joins the filters into one query object. One JSON object cannot

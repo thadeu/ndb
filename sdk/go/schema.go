@@ -162,7 +162,8 @@ func (s *schema) option(name, opt string) error {
 	return nil
 }
 
-// encode turns a struct value into a JSON document, with the tag names.
+// encode turns a struct value into a JSON document, with the tag names. A
+// time.Time field goes out as TimeLayout, the width of every SDK.
 func (s *schema) encode(v any) (json.RawMessage, error) {
 	rv := reflect.ValueOf(v)
 	doc := make(map[string]any, len(s.fields))
@@ -174,7 +175,7 @@ func (s *schema) encode(v any) (json.RawMessage, error) {
 			continue
 		}
 
-		doc[f.name] = fv.Interface()
+		doc[f.name] = wireValue(fv.Interface())
 	}
 
 	return json.Marshal(doc)
