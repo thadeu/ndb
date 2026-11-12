@@ -131,6 +131,15 @@ type Collection struct {
 	box *crypt.Box
 	enc atomic.Pointer[encState]
 
+	// reseal is the job that seals the old documents of a field added to
+	// encrypted (reseal.go). dir and fsys hold its file.
+	reseal     atomic.Pointer[resealState]
+	resealed   atomic.Pointer[[]string]
+	resealGate func() // tests
+	resealMu   sync.Mutex
+	dir        string
+	fsys       fs.FS
+
 	head *state
 
 	// staged counts the records staged in head that are not applied to
@@ -242,6 +251,8 @@ func Open(cfg Config) (*Collection, error) {
 		shared:      cfg.Shared,
 		locks:       cfg.Locks,
 		box:         cfg.Box,
+		dir:         cfg.Dir,
+		fsys:        cfg.FS,
 	}
 
 	c.SetEncrypted(cfg.Def)
@@ -352,6 +363,8 @@ func Open(cfg Config) (*Collection, error) {
 	if c.seal != nil {
 		c.startSealer()
 	}
+
+	c.startReseal()
 
 	if c.expires() {
 		c.startSweeper(cfg.SweepEvery)
@@ -524,6 +537,8 @@ func (c *Collection) prepare(req any) (writer.Prepared, error) {
 		ops, err = c.prepareDelete(v, r)
 	case expireReq:
 		ops, err = c.prepareExpire(v, r)
+	case resealReq:
+		ops, err = c.prepareReseal(v, r)
 	case setExpiryReq:
 		ops, err = c.prepareSetExpiry(v, r)
 	case lockReq:

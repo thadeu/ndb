@@ -199,13 +199,20 @@ A value that you read encrypted and send back in a write (an edit form) stays as
 - `$unset` removes the field and its hash.
 - `$inc`, `$push`, `$min` and the other operators on an encrypted field are `400 invalid_query`: they need the value.
 - An encrypted field is a top-level field. It cannot be `_id`, the `time` field, `expires_field`, a field of a stream, or a field of a direct-mode collection (the app writes those files).
-- A field that you add to `encrypted` or `blind` later is encrypted from the next write of each document. To encrypt the old documents now, write each one again:
+- A field that you add to `encrypted` or `blind` later encrypts the old documents too. See [A field added later](#a-field-added-later).
 
-  ```bash
-  curl ... /users/_update_by_query -d '{"query":{"_id":{"$exists":true}},"update":{"$set":{"encrypted_at":"2026-11-12"}}}'
-  ```
+## A field added later
 
-  The old plain values stay in the WAL files and in older backups until `wal_retention` and your backup rotation drop them.
+When a field becomes `encrypted` or `blind`, the documents that you wrote before have the plain value. The daemon encrypts them in the background, as it builds a new index. You run no command.
+
+1. New writes are encrypted at once.
+2. A job reads each old document with a plain value, encrypts the field and sets its hash. It writes in batches of 500, through the WAL. Reads and writes do not wait for it.
+3. While the job runs, `GET /{coll}` and `GET /{coll}/_stats` show `"encrypting":[{"field":"rcpt_to","state":"building","done":200,"total":16000}]`. A filter on a blind field also tests the plain value of the old documents, with the same normalization as the hash: `{"rcpt_to":"ana@dest.test"}` finds an old `"Ana@Dest.test"` for `lower`. The answer is complete. Such a filter does not use the index, so it scans.
+4. At the end the state is `ready`, and the filter uses only the hash.
+
+The job also starts at the open of a collection: for a field added to `ndb.yml` while the daemon was stopped, for a job that a stop cut, and for a data dir of 1.22.0 or older. The file `encrypted.json` in the collection dir lists the fields whose old documents are encrypted.
+
+The old plain values stay in the WAL files and in older backups until `wal_retention` and your backup rotation drop them.
 
 ## The key
 

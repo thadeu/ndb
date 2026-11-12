@@ -357,12 +357,23 @@ func (q *Query) compileNot(v any) (Node, error) {
 	return notNode{n}, nil
 }
 
+// Plain is a field value that the Field hook leaves as it is. A hook that
+// returns "$or" or "$and" as the path, with a list of conditions, uses it for
+// a condition on the field itself.
+type Plain struct{ V any }
+
 func (q *Query) compileField(path string, v any) (Node, error) {
-	if hook := q.root().opts.Field; hook != nil {
+	if p, ok := v.(Plain); ok {
+		v = p.V
+	} else if hook := q.root().opts.Field; hook != nil {
 		var err error
 
 		if path, v, err = hook(path, v); err != nil {
 			return nil, err
+		}
+
+		if path == "$or" || path == "$and" {
+			return q.compileList(path, v)
 		}
 	}
 

@@ -15,7 +15,7 @@ Creates the collection, or merges the definition into it (`ensure_collection`). 
 | `time` | string | none | the time field: RFC 3339 compare as instants, date math, zone maps, `$dateTrunc`, `ttl` |
 | `indexes` | string[] | `[]` | fields with a secondary index (dot paths allowed). An entry with commas is a [compound index](../query.md#indexes) on 2 to 4 fields: `"account_id,created_at"` |
 | `unique` | string[] | `[]` | fields whose value must be unique (`409 unique_violation`). An entry with commas is a compound key (`"account_id,email"`): the tuple of values must be unique. A field added by a later `PUT` is enforced at once: when the data already holds a value twice, the `PUT` is `409 unique_violation` (the message gives the field, the value and two ids) and the definition does not change. Else the collection opens again with the new field, so its open `_watch` streams end and their consumers connect again from their position. |
-| `encrypted` | string[] | `[]` | top-level fields that the daemon encrypts before the WAL (AES-256-GCM). A read with `?decrypt=1` by a caller with the `decrypt` right gets the plain value; any other read gets `"ndb:e1:k1:..."`. Engine mode only; not `_id`, the `time` field, `expires_field`, an indexed field, or a stream. A field added later is encrypted from the next write of each document. See [Encrypted fields](../security.md#encrypted-fields) |
+| `encrypted` | string[] | `[]` | top-level fields that the daemon encrypts before the WAL (AES-256-GCM). A read with `?decrypt=1` by a caller with the `decrypt` right gets the plain value; any other read gets `"ndb:e1:k1:..."`. Engine mode only; not `_id`, the `time` field, `expires_field`, an indexed field, or a stream. A field added later is encrypted in the old documents by a background job (`"encrypting"` in the answer). See [Encrypted fields](../security.md#encrypted-fields) |
 | `blind` | object or string[] | `{}` | an encrypted field and its normalization (`exact`, `lower`, `upper`, `numeric`): `{"cpf":"numeric"}`, or a list of `exact` fields; the field is also encrypted. The daemon also keeps a hash of the value, so `$eq`, `$in`, `$ne`, `$nin`, `indexes` and `unique` work on the field. See [Blind fields](../security.md#blind-fields) |
 | `write` | string | `engine` | `engine` (ndb writes) or `direct` (apps append NDJSON files) |
 | `path` | string | none | the files of a `direct` collection (a glob) |
@@ -71,7 +71,7 @@ An unknown collection is also created by the first `POST /{coll}/_doc` or `_bulk
 
 ## `GET /{coll}`
 
-The definition and the state of each index, like the answer of `PUT`.
+The definition and the state of each index, like the answer of `PUT`. While the daemon encrypts the old documents of a field added to `encrypted` or `blind`, the answer also has `"encrypting":[{"field","state","done","total"}]` (see [A field added later](../encryption.md#a-field-added-later)).
 
 With a [collection pattern](queries.md#collection-patterns) (`GET /logs-2026-*`) it lists the names it matches: `{"collections":["logs-2026-10","logs-2026-11"]}`.
 
@@ -252,7 +252,7 @@ await calls.dropIndex('dnis')
 
 ## `GET /{coll}/_stats`
 
-One element of [GET /_stats](system.md#get-stats): `name`, `write`, `rows`, `quarantined`, `indexes` (each `building` or `ready`, with `done` and `total`), `segments`, `wal_files`, `bytes`, `total` and `asleep`.
+One element of [GET /_stats](system.md#get-stats): `name`, `write`, `rows`, `quarantined`, `indexes` (each `building` or `ready`, with `done` and `total`), `encrypting` (the same shape, only while a field added to `encrypted` is encrypted in the old documents), `segments`, `wal_files`, `bytes`, `total` and `asleep`.
 
 ::: code-group
 

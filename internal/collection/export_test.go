@@ -175,3 +175,12 @@ func Scheduled(c *Collection) (seal, compact bool) {
 
 	return queued(c.seal.sealJob), queued(c.seal.compactJob)
 }
+
+// SetResealGate makes the reseal job call g before each page. Set it before
+// SetEncrypted.
+func SetResealGate(c *Collection, g func()) {
+	c.resealGate = g
+}
+
+// ResealFile is the file that keeps the fields of a reseal job.
+const ResealFile = resealFile

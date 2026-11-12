@@ -36,6 +36,7 @@ type statsBody struct {
 	Rows        int               `json:"rows"`
 	Quarantined int64             `json:"quarantined"`
 	Indexes     []indexBody       `json:"indexes"`
+	Encrypting  []indexBody       `json:"encrypting,omitempty"`
 	Segments    int               `json:"segments"`
 	WALFiles    int               `json:"wal_files"`
 	Bytes       partBytes         `json:"bytes"`
@@ -50,6 +51,7 @@ func collectionStats(st engine.Stats, du diskusage.Collection) statsBody {
 		Rows:        st.Rows,
 		Quarantined: st.Quarantined,
 		Indexes:     indexBodies(st),
+		Encrypting:  infoBodies(st.Encrypting),
 		Segments:    du.SegmentFiles,
 		WALFiles:    du.WALFiles,
 		Bytes:       partBytes{WAL: du.Bytes.WAL, Segments: du.Bytes.Segments, Meta: du.Bytes.Meta},
@@ -171,10 +173,7 @@ func (s *Server) getCollection(w http.ResponseWriter, r *http.Request, db *engin
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"definition": def,
-		"indexes":    indexBodies(col.Stats()),
-	})
+	writeJSON(w, http.StatusOK, collectionBody(def, col.Stats()))
 }
 
 // compact is POST /{coll}/_compact: seal, then merge every segment now.

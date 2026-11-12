@@ -8,6 +8,7 @@ import (
 
 	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/crypt"
+	"github.com/thadeu/ndb/internal/query"
 )
 
 // encState is the encrypted and blind fields of the collection.
@@ -17,7 +18,8 @@ type encState struct {
 }
 
 // SetEncrypted takes the encrypted and blind fields of def. A field is
-// sealed from the next write on; the stored documents stay as they are.
+// sealed from the next write on, and a new field starts the job that seals
+// the stored documents (reseal.go).
 func (c *Collection) SetEncrypted(def catalog.Def) {
 	st := encState{fields: slices.Clone(def.Encrypted), blind: map[string]crypt.Norm{}}
 
@@ -26,6 +28,7 @@ func (c *Collection) SetEncrypted(def catalog.Def) {
 	}
 
 	c.enc.Store(&st)
+	c.startReseal()
 }
 
 func (c *Collection) encState() encState {
@@ -116,8 +119,11 @@ func (c *Collection) filterField(path string, v any) (string, any, error) {
 
 	if !isOps || !strings.HasPrefix(firstKey(m), "$") {
 		h, err := hash(v)
+		if err != nil {
+			return "", nil, err
+		}
 
-		return path + crypt.HashSuffix, h, err
+		return c.withPlain(path, h, map[string]any{"$eq": v}, norm)
 	}
 
 	out := make(map[string]any, len(m))
@@ -141,7 +147,77 @@ func (c *Collection) filterField(path string, v any) (string, any, error) {
 		}
 	}
 
-	return path + crypt.HashSuffix, out, nil
+	return c.withPlain(path, out, m, norm)
+}
+
+// withPlain is the condition on the hash of a blind field. While the reseal
+// job runs, an old document still has the plain value and no hash, so the
+// condition is the hash condition or the plain one (and, for $ne and $nin:
+// each of them is true on a document of the other kind).
+func (c *Collection) withPlain(path string, onHash any, ops map[string]any, norm crypt.Norm) (string, any, error) {
+	hashed := path + crypt.HashSuffix
+
+	if !c.resealing(path) {
+		return hashed, onHash, nil
+	}
+
+	_, ne := ops["$ne"]
+	_, nin := ops["$nin"]
+
+	join := "$or"
+
+	if ne || nin {
+		join = "$and"
+	}
+
+	return join, []any{map[string]any{hashed: onHash}, plainCond(path, ops, norm)}, nil
+}
+
+// plainCond tests the plain value of a field as the hash does: after the
+// normalization of the blind field, so "Ana@x.test" is "ana@x.test" for
+// lower and "390.533.447-05" is "39053344705" for numeric.
+func plainCond(path string, ops map[string]any, norm crypt.Norm) map[string]any {
+	field := func(cond any) map[string]any {
+		return map[string]any{path: query.Plain{V: cond}}
+	}
+
+	eq := func(x any) map[string]any {
+		if s, ok := x.(string); ok && norm != crypt.Exact {
+			return map[string]any{"$regex": crypt.PlainPattern(norm, s)}
+		}
+
+		return map[string]any{"$eq": x}
+	}
+
+	list := func(x any, each func(any) any) []any {
+		xs, _ := x.([]any)
+		out := make([]any, 0, len(xs))
+
+		for _, e := range xs {
+			out = append(out, each(e))
+		}
+
+		return out
+	}
+
+	var and []any
+
+	for op, x := range ops {
+		switch op {
+		case "$eq":
+			and = append(and, field(eq(x)))
+		case "$ne":
+			and = append(and, field(map[string]any{"$not": eq(x)}))
+		case "$in":
+			and = append(and, map[string]any{"$or": append(list(x, func(e any) any { return field(eq(e)) }), field(map[string]any{"$in": []any{}}))})
+		case "$nin":
+			and = append(and, map[string]any{"$and": append(list(x, func(e any) any { return field(map[string]any{"$not": eq(e)}) }), map[string]any{})})
+		case "$exists":
+			and = append(and, field(map[string]any{"$exists": x}))
+		}
+	}
+
+	return map[string]any{"$and": and}
 }
 
 // checkAggRefs refuses a stage that reads an encrypted field ("$cpf"): a

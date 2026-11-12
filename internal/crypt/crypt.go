@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"unicode"
@@ -117,6 +118,9 @@ func (b *Box) Hash(place string, norm Norm, value json.RawMessage) (string, erro
 	return fmt.Sprintf("%s%s:%s", hashPrefix, b.id, hex.EncodeToString(mac.Sum(nil)[:hashLen])), nil
 }
 
+// SealPrefix starts every sealed value.
+const SealPrefix = sealPrefix
+
 // IsSealed tells if a JSON value is a sealed string.
 func IsSealed(value json.RawMessage) bool {
 	return strings.HasPrefix(string(value), `"`+sealPrefix)
@@ -139,6 +143,27 @@ func normalize(norm Norm, s string) string {
 	}
 
 	return s
+}
+
+// PlainPattern is a regular expression that matches a plain string whose
+// normalization is the one of s: what the hash of s finds.
+func PlainPattern(norm Norm, s string) string {
+	n := normalize(norm, s)
+
+	switch norm {
+	case Numeric:
+		digits := make([]string, 0, len(n))
+
+		for _, r := range n {
+			digits = append(digits, regexp.QuoteMeta(string(r)))
+		}
+
+		return `^\D*` + strings.Join(digits, `\D*`) + `\D*$`
+	case Lower, Upper:
+		return `^\s*(?i:` + regexp.QuoteMeta(n) + `)\s*$`
+	}
+
+	return `^` + regexp.QuoteMeta(n) + `$`
 }
 
 // SealDoc seals the top-level fields of a JSON object that are in fields,

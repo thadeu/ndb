@@ -120,6 +120,10 @@ type Stats struct {
 	Indexes     []collection.IndexInfo
 	Quarantined int64
 
+	// Encrypting is the job that seals the old documents of a field added
+	// to encrypted, one entry per field; empty when there is none.
+	Encrypting []collection.IndexInfo
+
 	// Metrics fields. Writer is nil in direct mode; TailerLag is 0 in
 	// engine mode.
 	MemBytes    int64
@@ -402,6 +406,10 @@ func (c *Collection) Stats() Stats {
 	if st := c.store(); st != nil {
 		s.MemBytes = st.MemBytes()
 		s.Segments = st.Segments()
+	}
+
+	if c.eng != nil {
+		s.Encrypting = c.eng.Resealing()
 	}
 
 	if c.tail != nil {

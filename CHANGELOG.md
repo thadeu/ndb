@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **A field added to `encrypted` or `blind` encrypts the old documents** in the background, as an index build does. Until the job is `ready` (`"encrypting"` in `GET /{coll}` and `_stats`), a filter on a blind field also finds the old plain values, with the normalization of the hash. The job also runs at the open of a collection for a field added while the daemon was stopped and for a data dir of 1.22.0 or older. See `docs/dev/encryption.md#a-field-added-later`.
+
 ### Fixed
 
 - **Ruby and Rails: a `Time` in an update operator** (`$set`, `$max`, ... of `update`, `update_by` and `Relation#update`) goes out in RFC 3339, UTC, with milliseconds, as in a filter. Before, it went out as `Time#to_s` (`"2026-11-12 17:31:33 -0300"`), which the daemon compared as text.

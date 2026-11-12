@@ -629,10 +629,20 @@ func (s *Server) ensure(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"definition": final,
-		"indexes":    indexBodies(col.Stats()),
-	})
+	writeJSON(w, http.StatusOK, collectionBody(final, col.Stats()))
+}
+
+// collectionBody is the answer of GET and PUT /{coll}: the definition, the
+// indexes and, while it runs, the job that seals the old documents of a
+// field added to encrypted.
+func collectionBody(def catalog.Def, st engine.Stats) map[string]any {
+	out := map[string]any{"definition": def, "indexes": indexBodies(st)}
+
+	if enc := infoBodies(st.Encrypting); enc != nil {
+		out["encrypting"] = enc
+	}
+
+	return out
 }
 
 func (s *Server) list(w http.ResponseWriter, _ *http.Request, db *engine.DB) {
@@ -690,9 +700,23 @@ func (s *Server) dropIndex(w http.ResponseWriter, r *http.Request, db *engine.DB
 }
 
 func indexBodies(st engine.Stats) []indexBody {
-	out := make([]indexBody, len(st.Indexes))
+	out := infoBodies(st.Indexes)
 
-	for i, ix := range st.Indexes {
+	if out == nil {
+		return []indexBody{}
+	}
+
+	return out
+}
+
+func infoBodies(infos []collection.IndexInfo) []indexBody {
+	if len(infos) == 0 {
+		return nil
+	}
+
+	out := make([]indexBody, len(infos))
+
+	for i, ix := range infos {
 		out[i] = indexBody{Field: ix.Field, State: ix.State, Done: ix.Done, Total: ix.Total}
 	}
 

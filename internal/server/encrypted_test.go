@@ -467,3 +467,58 @@ func TestBlindTypeChangeAndUnset(t *testing.T) {
 		t.Fatalf("an unset field still matches: %s", rec.Body.String())
 	}
 }
+
+// A field that becomes blind seals the old documents in the background.
+// Until the job is ready, a filter on the field finds the old documents by
+// the plain value and the new ones by the hash.
+func TestAFieldThatBecomesBlindSealsTheOldDocuments(t *testing.T) {
+	_, h := newHandler(t)
+
+	expectStatus(t, call(h, "PUT", "/events", `{}`), http.StatusOK)
+	call(h, "POST", "/events/_doc", `{"_id":"e1","rcpt_to":"Ana@dest.test"}`)
+	call(h, "POST", "/events/_doc", `{"_id":"e2","rcpt_to":"bia@dest.test"}`)
+	call(h, "POST", "/events/_doc", `{"_id":"e3"}`)
+
+	expectStatus(t, call(h, "PUT", "/events", `{"encrypted":["rcpt_to"],"blind":{"rcpt_to":"lower"}}`), http.StatusOK)
+	call(h, "POST", "/events/_doc", `{"_id":"e4","rcpt_to":"ana@dest.test"}`)
+
+	ids := func() string {
+		rec := call(h, "POST", "/events/_search", `{"query":{"rcpt_to":"ana@dest.test"},"sort":{"_id":1}}`)
+		expectStatus(t, rec, http.StatusOK)
+
+		var out []string
+
+		for line := range strings.SplitSeq(strings.TrimSpace(rec.Body.String()), "\n") {
+			if i := strings.Index(line, `"_id":"`); i >= 0 {
+				out = append(out, line[i+7:i+9])
+			}
+		}
+
+		return strings.Join(out, ",")
+	}
+
+	if got := ids(); got != "e1,e4" {
+		t.Errorf("before ready: %s, want e1,e4", got)
+	}
+
+	waitIndexReady(t, h, "events")
+
+	if body := call(h, "GET", "/events", "").Body.String(); !strings.Contains(body, `"encrypting":[{"field":"rcpt_to","state":"ready"`) {
+		t.Errorf("GET /events: %s", body)
+	}
+
+	if got := ids(); got != "e1,e4" {
+		t.Errorf("after ready: %s, want e1,e4", got)
+	}
+
+	for _, id := range []string{"e1", "e2"} {
+		if body := call(h, "GET", "/events/_doc/"+id, "").Body.String(); !strings.Contains(body, `"rcpt_to":"ndb:e1:`) {
+			t.Errorf("%s is not sealed: %s", id, body)
+		}
+	}
+
+	if body := call(h, "GET", "/events/_doc/e3", "").Body.String(); strings.Contains(body, "rcpt_to") {
+		t.Errorf("e3 got the field: %s", body)
+	}
+
+}
