@@ -64,9 +64,9 @@ module Ndb
     # Reads that keep the encrypted fields sealed ("ndb:e1:k1:..."): a list
     # of secrets that shows none of them. The other reads get the values.
     #
-    #   Secret.no_decrypt.where(owner: user.id)
-    def no_decrypt
-      with(no_decrypt: true)
+    #   Secret.encrypted.where(owner: user.id)
+    def encrypted
+      with(keep_encrypted: true)
     end
 
     def lock(ttl: nil, wait: nil)
@@ -356,7 +356,7 @@ module Ndb
     end
 
     def sealed_or_plain(&)
-      values[:no_decrypt] ? Rails.client.no_decrypt(&) : yield
+      values[:keep_encrypted] ? Rails.client.keep_encrypted(&) : yield
     end
 
     def add_clause(clause)

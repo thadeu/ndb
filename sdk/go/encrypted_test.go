@@ -42,7 +42,7 @@ func TestEncryptedAndBlindOptions(t *testing.T) {
 	}
 }
 
-func TestNoDecryptKeepsTheValueSealed(t *testing.T) {
+func TestEncryptedHandleKeepsTheValueSealed(t *testing.T) {
 	ctx := context.Background()
 	db := openTest(t, daemon.unix)
 	name := newColl()
@@ -56,7 +56,7 @@ func TestNoDecryptKeepsTheValueSealed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	list, err := vault.NoDecrypt().Query().All(ctx)
+	list, err := vault.Encrypted().Query().All(ctx)
 	if err != nil || len(list) != 1 || !strings.HasPrefix(list[0].Pem, "ndb:e1:k1:") {
 		t.Fatalf("list %+v, err %v", list, err)
 	}
@@ -65,9 +65,9 @@ func TestNoDecryptKeepsTheValueSealed(t *testing.T) {
 		t.Fatalf("show %+v, err %v", shown, err)
 	}
 
-	sealed, _ := Collection[Person](db, name, Encrypted("pem"), NoDecrypt())
+	sealed, _ := Collection[Person](db, name, Encrypted("pem"), KeepEncrypted())
 
 	if got, _ := sealed.Get(ctx, "s1"); !strings.HasPrefix(got.Pem, "ndb:e1:k1:") {
-		t.Fatalf("a NoDecrypt collection read %q", got.Pem)
+		t.Fatalf("a KeepEncrypted collection read %q", got.Pem)
 	}
 }

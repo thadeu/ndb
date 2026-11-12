@@ -51,7 +51,7 @@ export class Collection<F extends Fields> {
 
   // A handle on the same collection whose reads keep the encrypted fields
   // sealed ("ndb:e1:k1:..."): a list of secrets that shows none of them.
-  noDecrypt(): Collection<F> {
+  encrypted(): Collection<F> {
     return new Collection(this.db, this.name, this.schema, true)
   }
 
@@ -63,7 +63,7 @@ export class Collection<F extends Fields> {
   }
 
   // The path of an action that answers documents, with decrypt=1 (or
-  // decrypt=0 on a noDecrypt handle). The daemon gives the plain value only
+  // decrypt=0 on an encrypted() handle). The daemon gives the plain value only
   // with decrypt=1 and the decrypt right.
   readPath(action: string): string {
     const path = this.path(action)

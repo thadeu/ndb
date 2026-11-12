@@ -100,7 +100,7 @@ The stored value is about 35% bigger.
 ### E28.4 Decrypt on request (done)
 - [x] answers are sealed by default; `?decrypt=1` and the right give the plain value (no 403 without
   the right: the stored value)
-- [x] SDKs send `decrypt=1`; `NoDecrypt` sends `decrypt=0` (a vault list, then a show)
+- [x] SDKs send `decrypt=1`; `encrypted` (Go `Encrypted()`, `KeepEncrypted()`) sends `decrypt=0` (a vault list, then a show)
 - [x] the documents of a lookup follow the right on their own collection; no `_bidx` in them
 - [x] `upper` normalization; `digits` renamed `numeric`; `X-Ndb-Decrypt` header removed
 

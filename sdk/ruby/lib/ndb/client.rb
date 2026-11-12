@@ -74,14 +74,14 @@ module Ndb
     end
 
     # Runs the block with the reads of this thread keeping the encrypted
-    # fields sealed (decrypt=0). Collection#no_decrypt uses it.
-    def no_decrypt
-      before = Thread.current[:ndb_no_decrypt]
-      Thread.current[:ndb_no_decrypt] = true
+    # fields sealed (decrypt=0). Collection#encrypted uses it.
+    def keep_encrypted
+      before = Thread.current[:ndb_keep_encrypted]
+      Thread.current[:ndb_keep_encrypted] = true
 
       yield
     ensure
-      Thread.current[:ndb_no_decrypt] = before
+      Thread.current[:ndb_keep_encrypted] = before
     end
 
     # The timeout of the connections of this client, in seconds.
@@ -453,11 +453,11 @@ module Ndb
 
     # A collection route gets decrypt=1: the daemon gives the plain value of
     # an encrypted field only with it and the decrypt right. decrypt=0 inside
-    # no_decrypt. A system route (/_...) gets nothing.
+    # keep_encrypted. A system route (/_...) gets nothing.
     def with_decrypt(target)
       return target if target.start_with?("/_")
 
-      flag = Thread.current[:ndb_no_decrypt] ? "decrypt=0" : "decrypt=1"
+      flag = Thread.current[:ndb_keep_encrypted] ? "decrypt=0" : "decrypt=1"
 
       "#{target}#{target.include?("?") ? "&" : "?"}#{flag}"
     end

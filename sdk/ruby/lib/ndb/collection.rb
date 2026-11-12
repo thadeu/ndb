@@ -37,14 +37,14 @@ module Ndb
 
     # The same collection, with every read keeping the encrypted fields
     # sealed ("ndb:e1:k1:..."): a list of secrets that shows none of them.
-    def no_decrypt
-      self.class.new(NoDecryptClient.new(client), name, definition)
+    def encrypted
+      self.class.new(EncryptedClient.new(client), name, definition)
     end
 
-    # A client whose every call runs inside Client#no_decrypt.
-    class NoDecryptClient < SimpleDelegator
+    # A client whose every call runs inside Client#keep_encrypted.
+    class EncryptedClient < SimpleDelegator
       def method_missing(name, ...)
-        __getobj__.no_decrypt { super }
+        __getobj__.keep_encrypted { super }
       end
 
       def respond_to_missing?(name, include_private = false) = super

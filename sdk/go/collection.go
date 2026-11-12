@@ -19,17 +19,17 @@ type Coll[T any] struct {
 	schema *schema
 }
 
-// NoDecrypt is a handle on the same collection whose reads keep the
+// Encrypted is a handle on the same collection whose reads keep the
 // encrypted fields sealed ("ndb:e1:k1:..."): a list of secrets that shows
 // none of them. The reads of c still get the plain values.
-func (c *Coll[T]) NoDecrypt() *Coll[T] {
+func (c *Coll[T]) Encrypted() *Coll[T] {
 	s := *c.schema
 	s.sealed = true
 
 	return &Coll[T]{db: c.db, name: c.name, schema: &s}
 }
 
-// withDecrypt adds decrypt=1 to a path, or decrypt=0 for a NoDecrypt
+// withDecrypt adds decrypt=1 to a path, or decrypt=0 for an Encrypted
 // handle. The daemon gives the plain value only with decrypt=1 and the
 // decrypt right; else the stored, sealed one.
 func (c *Coll[T]) withDecrypt(path string) string {
@@ -638,9 +638,9 @@ func Encrypted(fields ...string) CollOption {
 	}
 }
 
-// NoDecrypt makes every read of the collection keep the encrypted fields
-// sealed. Coll.NoDecrypt does the same for one handle.
-func NoDecrypt() CollOption {
+// KeepEncrypted makes every read of the collection keep the encrypted fields
+// sealed. Coll.Encrypted does the same for one handle.
+func KeepEncrypted() CollOption {
 	return func(s *schema) error {
 		s.sealed = true
 

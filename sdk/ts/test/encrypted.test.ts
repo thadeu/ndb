@@ -26,16 +26,16 @@ describe('encrypted fields', () => {
   })
 })
 
-describe('noDecrypt', () => {
+describe('encrypted()', () => {
   it('keeps the values sealed on a list and opens them on a show', async () => {
     const vault = db.collection(collName(), { fields: { secret: { type: 'string', encrypted: true } } })
 
     await vault.insert({ _id: 's1', secret: 'PRIVATE' })
 
-    const list = await vault.noDecrypt().query().all()
+    const list = await vault.encrypted().query().all()
 
     expect(list[0]?.secret).toMatch(/^ndb:e1:k1:/)
     expect((await vault.get('s1'))?.secret).toBe('PRIVATE')
-    expect((await vault.noDecrypt().get('s1'))?.secret).toMatch(/^ndb:e1:k1:/)
+    expect((await vault.encrypted().get('s1'))?.secret).toMatch(/^ndb:e1:k1:/)
   })
 })

@@ -26,7 +26,7 @@ module Ndb
 
     class << self
       QUERY_METHODS = %i[
-        where where_raw order limit offset page after group unwind includes lock no_decrypt find find_by find_by! first last count pluck exists?
+        where where_raw order limit offset page after group unwind includes lock encrypted find find_by find_by! first last count pluck exists?
         find_each in_batches sum average minimum maximum to_a each destroy_all delete_all to_ndb
       ].freeze
 

@@ -135,7 +135,7 @@ curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/users -d '{"encrypted":["
   curl --unix-socket /run/ndb/ndb.sock 'http://ndb/users/_doc/u1?decrypt=1' # "cpf":"390.533.447-05"
   ```
 
-- **SDKs** send `decrypt=1` on every read, so an app with the right reads the values. `NoDecrypt` (Go `vault.NoDecrypt()`, TS `vault.noDecrypt()`, Ruby `vault.no_decrypt`, Rails `Secret.no_decrypt`) sends `decrypt=0`: for a list of secrets that shows none of them, and a second read with the value when the user asks for it.
+- **SDKs** send `decrypt=1` on every read, so an app with the right reads the values. `encrypted` (Go `vault.Encrypted()`, TS `vault.encrypted()`, Ruby `vault.encrypted`, Rails `Secret.encrypted`) sends `decrypt=0`: for a list of secrets that shows none of them, and a second read with the value when the user asks for it.
 - **Writes:** `_doc`, `_bulk`, upsert, `_tx` and `$set` encrypt the field. `$inc`, `$push` and the other operators on it are `400 invalid_query`: they need the value.
 - **Filters:** only `$exists`. Any other filter on the field is `400 invalid_query`, unless the field is [blind](#blind-fields).
 - **Aggregate:** `$match` follows the filter rules. `$first` and `$last` of the field give its value. Any other use (`$sum`, `$max`, `$project`) is `400 invalid_query`; a `$group` by the field needs it to be [blind](#blind-fields).

@@ -88,7 +88,7 @@ end
 | `unique: true` | Unique value. A second one raises `RecordNotUnique`. |
 | `encrypted: true` | The daemon encrypts the attribute before it stores it. A filter on it is only `exists`. See [Encrypted fields](../security.md#encrypted-fields). |
 | `blind: :numeric` | An encrypted attribute that `where` and `find_by` find by value, after this normalization (`:exact`, `:lower`, `:upper`, `:numeric`). It may also be `unique: true`. |
-| `Secret.no_decrypt` | Reads that keep the encrypted fields sealed (`"ndb:e1:k1:..."`); the other reads get the values (the gem sends `decrypt=1`). |
+| `Secret.encrypted` | Reads that keep the encrypted fields sealed (`"ndb:e1:k1:..."`); the other reads get the values (the gem sends `decrypt=1`). |
 | `time: true` | The collection time field. Used by zone maps, `$dateTrunc` and TTL. |
 | `expires: true` | The field holds the time the document expires. |
 | `ttl 24.hours` | Documents expire this long after the time field. Use `ttl` or `expires:`, not both: the daemon returns `catalog_invalid`. |

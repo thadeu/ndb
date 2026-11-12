@@ -17,14 +17,14 @@ class EncryptedTest < Minitest::Test
   end
 end
 
-class NoDecryptTest < Minitest::Test
-  def test_no_decrypt_keeps_the_values_sealed
+class EncryptedHandleTest < Minitest::Test
+  def test_encrypted_keeps_the_values_sealed
     vault = client.collection(NdbTestHelpers.next_name, encrypted: %w[secret])
 
     vault.insert(_id: "s1", secret: "PRIVATE")
 
-    assert_match(/\Andb:e1:k1:/, vault.no_decrypt.query.first["secret"])
-    assert_match(/\Andb:e1:k1:/, vault.no_decrypt.get("s1")["secret"])
+    assert_match(/\Andb:e1:k1:/, vault.encrypted.query.first["secret"])
+    assert_match(/\Andb:e1:k1:/, vault.encrypted.get("s1")["secret"])
     assert_equal "PRIVATE", vault.get("s1")["secret"]
   end
 end
