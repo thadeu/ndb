@@ -118,6 +118,30 @@ function tab(text: string, start: number, end: number, shift: boolean): Edit {
   return { text: next, start: Math.max(from, start + firstDelta), end: Math.max(from, end + totalDelta) };
 }
 
+// toggleComment adds "# " to every line of the selection, or removes it when
+// every line that is not blank has it. Dev Tools never sends a comment line.
+export function toggleComment(text: string, start: number, end: number): Edit {
+  const from = lineStart(text, start);
+  const to = text.indexOf('\n', end === start ? end : end - 1);
+  const stop = to === -1 ? text.length : to;
+  const lines = text.slice(from, stop).split('\n');
+
+  const filled = lines.filter(line => line.trim() !== '');
+  const remove = filled.length > 0 && filled.every(line => line.trimStart().startsWith('#'));
+
+  const changed = lines.map(line => {
+    if (line.trim() === '') return line;
+
+    return remove ? line.replace(/^(\s*)# ?/, '$1') : `# ${line}`;
+  });
+
+  const firstDelta = changed[0]!.length - lines[0]!.length;
+  const totalDelta = changed.join('\n').length - lines.join('\n').length;
+  const next = text.slice(0, from) + changed.join('\n') + text.slice(stop);
+
+  return { text: next, start: Math.max(from, start + firstDelta), end: Math.max(from, end + totalDelta) };
+}
+
 export function editKey(text: string, start: number, end: number, input: KeyInput): Edit | null {
   switch (input.key) {
     case 'Enter':

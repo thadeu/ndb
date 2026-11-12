@@ -1,7 +1,7 @@
 import type { Context, Hono } from 'hono';
 
 import { NdbError, target } from '@/ndb';
-import { utc } from '@/pitr';
+import { restoreName, utc } from '@/pitr';
 import type { Env } from '@/prefix';
 import { BackupsPage, type BackupsQuery } from '@/views/backups';
 import { OfflinePage } from '@/views/offline';
@@ -21,12 +21,34 @@ export function backupsRoutes(app: Hono<Env>, deps: RouteDeps): void {
     const client = deps.client(connection);
     const q = c.req.query();
 
-    const query: BackupsQuery = { page: Number(q.page ?? 1), restore: q.restore, at: q.at, rename: q.rename === '1', from: q.from, to: q.to };
+    const query: BackupsQuery = {
+      page: Number(q.page ?? 1),
+      restore: q.restore,
+      at: q.at,
+      where: q.where,
+      confirm: q.confirm === '1',
+      restored: q.restored,
+      rename: q.rename === '1',
+      from: q.from,
+      to: q.to,
+    };
 
     try {
       const [stats, pitr] = await Promise.all([client.stats(), client.pitr()]);
 
-      return c.html(<BackupsPage current={deps.currentOf(connection, stats)} online={Boolean(target(connection.url).unix)} pitr={pitr} query={query} notice={q.notice} error={q.error} />);
+      const rows = Object.fromEntries(stats.collections.map(item => [item.name, item.rows]));
+
+      return c.html(
+        <BackupsPage
+          current={deps.currentOf(connection, stats)}
+          online={Boolean(target(connection.url).unix)}
+          pitr={pitr}
+          rows={rows}
+          query={query}
+          notice={q.notice}
+          error={q.error}
+        />,
+      );
     } catch (error) {
       return c.html(<OfflinePage current={deps.currentOf(connection)} message={deps.message(error)} />, 502);
     }
@@ -62,8 +84,12 @@ export function backupsRoutes(app: Hono<Env>, deps: RouteDeps): void {
     }
   });
 
-  // Restore is POST /{coll}/_restore. On success the page comes back with the
-  // rename dialog open and filled in, to put the copy in place.
+  // Restore is POST /{coll}/_restore: always a copy in a new collection. With
+  // where=copy the page comes back with a notice. With replace=1 the copy
+  // takes the name of the collection at once (the confirm step said so). In
+  // other cases the page comes back with step 2 open and filled in: the
+  // rename that puts the copy in place. back=explorer returns to the Backups
+  // tab of the collection.
   app.post('/c/:name/backups/restore', async c => {
     const connection = connectionOf(deps, c);
 
@@ -72,14 +98,42 @@ export function backupsRoutes(app: Hono<Env>, deps: RouteDeps): void {
     const form = await c.req.parseBody().catch(() => ({}) as Record<string, unknown>);
     const collection = String(form.collection ?? '');
     const at = String(form.at ?? '');
-    const to = String(form.to ?? '').trim();
+    const copyOnly = form.where === 'copy';
+    const replace = !copyOnly && form.replace === '1';
+    const to = replace ? restoreName(collection) : String(form.to ?? '').trim();
+
+    const client = deps.client(connection);
+    const instant = `${at.replace('T', ' ')} UTC`;
+
+    const back = (params: Record<string, string>) => {
+      if (form.back !== 'explorer') return backTo(c, connection.name, params);
+
+      const { restore: _restore, from: _from, ...rest } = params;
+
+      return toExplorer(c, connection.name, { coll: collection, tab: 'backups', ...rest });
+    };
+
+    const draft: Record<string, string> = { restore: collection, at, where: copyOnly ? 'copy' : 'place', ...(replace ? {} : { to }) };
 
     try {
-      const res = await deps.client(connection).restore(collection, utc(at), to);
+      const res = await client.restore(collection, utc(at), to);
+      const done = `${collection} as of ${instant} is in ${to} (${res.duration_ms} ms).`;
 
-      return backTo(c, connection.name, { notice: `${collection} as of ${at.replace('T', ' ')} UTC is in ${to} (${res.duration_ms} ms). Check it, then rename it in place.`, from: to, to: collection });
+      if (copyOnly) return back({ notice: `${done} ${collection} did not change.`, restored: to });
+
+      if (!replace) return back({ notice: `${done} Check it, then rename it in place.`, from: to, to: collection });
     } catch (error) {
-      return backTo(c, connection.name, { error: error instanceof NdbError ? error.message : 'The restore failed.', restore: collection, at });
+      return back({ error: error instanceof NdbError ? error.message : 'The restore failed.', ...draft });
+    }
+
+    try {
+      await client.rename(to, collection, true);
+
+      return back({ notice: `${collection} is now as it was at ${instant}. The old ${collection} is in the trash and stays restorable for its PITR window.`, restored: collection });
+    } catch (error) {
+      const why = error instanceof NdbError ? error.message : 'ndb did not answer.';
+
+      return back({ error: `The copy ${to} is ready, but ${collection} did not change: ${why}`, ...draft });
     }
   });
 
@@ -105,4 +159,8 @@ export function backupsRoutes(app: Hono<Env>, deps: RouteDeps): void {
 
 function backTo(c: Context<Env>, name: string, params: Record<string, string>) {
   return c.redirect(`${c.var.prefix}/c/${encodeURIComponent(name)}/backups?${new URLSearchParams(params)}`, 303);
+}
+
+function toExplorer(c: Context<Env>, name: string, params: Record<string, string>) {
+  return c.redirect(`${c.var.prefix}/c/${encodeURIComponent(name)}/explorer?${new URLSearchParams(params)}`, 303);
 }

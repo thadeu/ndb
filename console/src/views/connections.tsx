@@ -2,19 +2,23 @@ import type { FC } from 'hono/jsx';
 
 import { Layout } from '@/html/layout';
 import type { Connection } from '@/connections';
-import { formatBytes, formatCount, formatVersion } from '@/format';
+import { formatUptime, formatVersion } from '@/format';
 import type { Stats } from '@/ndb';
 import { Badge, Dot } from '@/ui/badge';
 import { Button } from '@/ui/button';
+import { Card } from '@/ui/card';
+import { CodeBlock } from '@/ui/code-block';
 import { openDialog } from '@/ui/dialog';
 import { Drawer } from '@/ui/drawer';
 import { Field } from '@/ui/field';
+import { Icon } from '@/ui/icon';
 import { Input } from '@/ui/input';
 
 export interface ConnectionStatus {
   connection: Connection;
   online: boolean;
   stats?: Stats;
+  streams?: number;
   error?: string;
 }
 
@@ -30,7 +34,34 @@ export interface ConnectionsPageProps {
 
 type Tested = { ok: boolean; message: string };
 
+const STACK_COMMAND = 'docker run -p 7070:7070 -p 4321:4321 \\\n  ghcr.io/thadeu/ndb-stack';
+
 const editId = (name: string) => `edit-${name}`;
+
+const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
+
+const isUnix = (connection: Connection) => connection.url.startsWith('unix://');
+
+function transportText(connection: Connection): string {
+  if (isUnix(connection)) return 'unix socket';
+
+  return connection.token ? 'TCP · bearer token' : 'TCP · no token';
+}
+
+function tokenText(connection: Connection): string {
+  if (connection.token) return 'token set';
+
+  return isUnix(connection) ? 'no token needed' : 'no token';
+}
+
+function dataText(item: ConnectionStatus): string {
+  if (!item.stats) return '— collections';
+
+  const streams = item.streams ?? 0;
+  const collections = plural(item.stats.totals.collections - streams, 'collection');
+
+  return item.streams === undefined ? collections : `${collections} · ${plural(streams, 'stream')}`;
+}
 
 export const ConnectionsPage: FC<ConnectionsPageProps> = ({ items, fixed, notice, error, tested, adding = false, editing }) => (
   <Layout title="Connections">
@@ -40,18 +71,44 @@ export const ConnectionsPage: FC<ConnectionsPageProps> = ({ items, fixed, notice
         <h1>Pick an ndb to open.</h1>
         <p class="lead">A local socket, or a daemon on another VM over TCP with its token. Tokens stay on this server.</p>
       </div>
+
+      {!fixed && (
+        <Button
+          variant="primary"
+          class="conn-new"
+          href="?new=1"
+          {...openDialog('new-connection')}
+        >
+          <Icon name="plus" />
+          New connection
+        </Button>
+      )}
     </div>
 
     {notice && <p class="note ok">{notice}</p>}
     {error && !adding && !editing && <p class="note bad">{error}</p>}
 
-    <div class="grid-cards">
-      {items.map(item => (
-        <ConnectionCard item={item} fixed={fixed} />
-      ))}
+    {items.length > 0 && (
+      <section class="grid-cards" aria-label="Saved connections">
+        {items.map(item => (
+          <ConnectionCard item={item} fixed={fixed} />
+        ))}
+      </section>
+    )}
 
-      {!fixed && <AddCard />}
-    </div>
+    <section class="grid-cards">
+      {!fixed && <DiscoverCard />}
+
+      <Card class="conn-side">
+        <h2 class="card-title">Try ndb in one command</h2>
+
+        <p class="conn-side-text">
+          The <strong>ndb-stack</strong> image has the daemon and this console together, for development.
+        </p>
+
+        <CodeBlock code={STACK_COMMAND} />
+      </Card>
+    </section>
 
     {!fixed && (
       <ConnectionDrawer
@@ -73,12 +130,47 @@ export const ConnectionsPage: FC<ConnectionsPageProps> = ({ items, fixed, notice
   </Layout>
 );
 
-const AddCard: FC = () => (
-  <a class="card conn-add" href="?new=1" {...openDialog('new-connection')}>
-    <span class="conn-add-icon" aria-hidden="true">+</span>
-    <span class="conn-add-title">New connection</span>
-    <span class="conn-add-hint">Discover a socket or a server, or type its URL.</span>
-  </a>
+// DiscoverCard finds a daemon from the page itself. A found daemon fills the
+// field, and Save and open makes the connection.
+const DiscoverCard: FC = () => (
+  <Card class="conn-side">
+    <h2 class="card-title">Discover</h2>
+
+    <p class="conn-side-text">Type a host, or leave it empty for this machine. The console looks for a socket and for TCP on port 7070.</p>
+
+    <form method="post" action="connections" class="discover" data-discover>
+      <label class="label" for="discover-host">
+        Host
+      </label>
+
+      <div class="discover-bar">
+        <Input
+          id="discover-host"
+          name="url"
+          mono
+          placeholder="localhost"
+          autocomplete="off"
+          data-discover-host
+        />
+
+        <Button variant="dark" type="button" data-discover-run>
+          Discover
+        </Button>
+      </div>
+
+      <noscript>
+        <p class="hint">Discover needs JavaScript. Use New connection and type the full URL.</p>
+      </noscript>
+
+      <p class="test-result" data-discover-status></p>
+
+      <ul class="discover-list" data-discover-list></ul>
+
+      <Button type="submit" class="discover-save">
+        Save and open
+      </Button>
+    </form>
+  </Card>
 );
 
 const ConnectionCard: FC<{ item: ConnectionStatus; fixed: boolean }> = ({ item, fixed }) => {
@@ -86,50 +178,44 @@ const ConnectionCard: FC<{ item: ConnectionStatus; fixed: boolean }> = ({ item, 
   const href = `c/${encodeURIComponent(connection.name)}`;
 
   return (
-    <div class="card conn">
-      <a class="conn-main" href={href}>
-        <div class="conn-title">
-          <Dot on={online} />
-          <span class="conn-name">{connection.name}</span>
-          <span class="grow" />
-          <span class={online ? 'state on' : 'state'}>{online ? 'online' : 'offline'}</span>
-        </div>
+    <article class="card conn">
+      <div class="conn-title">
+        <Dot on={online} />
+        <a class="conn-name" href={href}>
+          {connection.name}
+        </a>
+        <span class={online ? 'state on' : 'state'}>{online ? 'online' : 'offline'}</span>
+      </div>
 
-        <code class="url">{connection.url}</code>
+      <code class="conn-url">{connection.url}</code>
 
-        <div class="conn-facts">
-          <span>{stats ? `${stats.totals.collections} collections` : '— collections'}</span>
-          <span>{stats ? `${formatCount(stats.totals.rows)} rows` : '— rows'}</span>
-          <span>{stats ? formatBytes(stats.totals.bytes) : '—'}</span>
-          <span>{stats ? formatVersion(stats.version) : '—'}</span>
-        </div>
+      <div class="conn-facts">
+        <span>{dataText(item)}</span>
+        <span>{stats ? `ndb ${formatVersion(stats.version)}` : '—'}</span>
+        <span>{transportText(connection)}</span>
+        <span>{stats ? `up ${formatUptime(stats.uptime_seconds)}` : '—'}</span>
+      </div>
 
-        {item.error && <span class="conn-error">{item.error}</span>}
-      </a>
+      {item.error && <span class="conn-error">{item.error}</span>}
 
       <div class="conn-foot">
-        <Badge>{connection.token ? 'token set' : 'no token'}</Badge>
+        <Badge>{tokenText(connection)}</Badge>
+
+        <span class="grow" />
 
         {!fixed && (
-          <div class="conn-actions">
-            <Button
-              variant="ghost"
-              size="sm"
-              href={`?edit=${encodeURIComponent(connection.name)}`}
-              {...openDialog(editId(connection.name))}
-            >
-              Edit
-            </Button>
-
-            <form method="post" action={`connections/${encodeURIComponent(connection.name)}/delete`}>
-              <Button variant="ghost" size="sm" type="submit">
-                Remove
-              </Button>
-            </form>
-          </div>
+          <Button
+            variant="ghost"
+            href={`?edit=${encodeURIComponent(connection.name)}`}
+            {...openDialog(editId(connection.name))}
+          >
+            Edit
+          </Button>
         )}
+
+        <Button href={href}>Open</Button>
       </div>
-    </div>
+    </article>
   );
 };
 
@@ -213,6 +299,16 @@ const ConnectionDrawer: FC<ConnectionDrawerProps> = ({ connection, tested, error
       <p class="hint">
         Unix socket: <code class="mono">unix:///run/ndb/ndb.sock</code>. Over SSH: <code class="mono">ssh -L 7070:/run/ndb/ndb.sock vm</code>, then <code class="mono">tcp://127.0.0.1:7070</code>.
       </p>
+
+      {connection && (
+        <form method="post" action={`connections/${encodeURIComponent(connection.name)}/delete`} class="conn-remove">
+          <span class="hint">Remove this connection from the console. The daemon and its data stay.</span>
+
+          <Button variant="destructive" size="sm" type="submit">
+            Remove
+          </Button>
+        </form>
+      )}
     </Drawer>
   );
 };

@@ -1,27 +1,31 @@
 import type { FC } from 'hono/jsx';
 
+import { RestoreConfirm, RestoreFields, WindowBar, copyName, type RestoreDraft } from '@/components/restore-form';
 import { formatBytes } from '@/format';
 import { Layout, type Current } from '@/html/layout';
 import type { PitrInfo } from '@/ndb';
-import { defaultAt, pageOf, when } from '@/pitr';
+import { pageOf, seconds, when } from '@/pitr';
+import { ConfirmHost, confirm } from '@/ui/alert-dialog';
 import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
-import { Card, CardHeader } from '@/ui/card';
+import { Card } from '@/ui/card';
 import { CodeBlock } from '@/ui/code-block';
-import { DatePicker } from '@/ui/date-picker';
-import { Dialog } from '@/ui/dialog';
 import { Empty } from '@/ui/empty';
 import { Field } from '@/ui/field';
 import { Input } from '@/ui/input';
-import { Table } from '@/ui/table';
 import { Tabs, type TabItem } from '@/ui/tabs';
 
 // BackupsQuery is the state of the page in the URL: the PITR page, and the
-// dialog that is open (restore of one collection, or rename).
+// dialog that is open (restore of one collection, or rename). With confirm,
+// the restore card shows its confirm step. restored is the collection that
+// the last restore made.
 export interface BackupsQuery {
   page?: number;
   restore?: string;
   at?: string;
+  where?: string;
+  confirm?: boolean;
+  restored?: string;
   rename?: boolean;
   from?: string;
   to?: string;
@@ -31,6 +35,7 @@ export interface BackupsPageProps {
   current: Current;
   online: boolean;
   pitr: { default: string; collections: PitrInfo[] };
+  rows?: Record<string, number>;
   query?: BackupsQuery;
   notice?: string;
   error?: string;
@@ -40,39 +45,75 @@ const lines = (...rows: string[]) => rows.join('\n');
 
 const code = (id: string, label: string, text: string): TabItem => ({ id, label, content: <CodeBlock code={text} /> });
 
-// The backup file: taken while ndb runs, from the host.
-const BACKUP_TABS: TabItem[] = [
-  code('systemd', 'systemd', lines('sudo -u ndb ndb backup /backups/daily.ndb.gz -gzip', '# every night: a systemd timer or cron runs the same line')),
-  code('cli', 'CLI', lines('ndb backup /backups/daily -gzip', 'ndb backup - | aws s3 cp - s3://bucket/daily.ndb')),
-  code('docker', 'Docker', lines('docker exec ndb /usr/local/bin/ndb backup - > daily.ndb', '# or a second container with the volumes:', 'docker run --rm -v ndb-run:/run/ndb -v /backups:/backups ghcr.io/thadeu/ndb backup /backups/daily -gzip')),
-  code('voodu', 'Voodu', lines('vd exec ndb -- ndb backup - > daily.ndb', '# add -r <remote> as in your other vd commands')),
-];
-
-// Restoring a backup file swaps the data dir: the daemon must be stopped.
-const RESTORE_TABS: TabItem[] = [
-  code('systemd', 'systemd', lines('systemctl stop ndb', 'sudo -u ndb ndb restore /backups/daily.ndb.gz -data-dir /var/lib/ndb', 'systemctl start ndb')),
-  code('cli', 'CLI', lines('# the daemon must be stopped', 'ndb restore /backups/daily.ndb.gz -data-dir /var/lib/ndb', 'aws s3 cp s3://bucket/daily.ndb - | ndb restore - -data-dir /var/lib/ndb')),
-  code('docker', 'Docker', lines('docker stop ndb', 'docker run --rm -v ndb-data:/var/lib/ndb -v /backups:/backups:ro \\', '  ghcr.io/thadeu/ndb restore /backups/daily.ndb.gz -data-dir /var/lib/ndb', 'docker start ndb')),
-  code('voodu', 'Voodu', lines('# 1. replicas = 0 in ndb.voodu', 'vd apply -f ndb.voodu -y', '# 2. on the node, on the path of the data volume', 'ndb restore /backups/daily.ndb.gz -data-dir <data volume path>', '# 3. replicas = 1 again', 'vd apply -f ndb.voodu -y')),
-];
-
+// The same work from a terminal. The backup is taken while ndb runs. A
+// restore of a backup file swaps the data dir, so the daemon must be stopped.
 // PITR runs on the live daemon, so the SDKs can do it too.
-const PITR_TABS: TabItem[] = [
-  code('cli', 'CLI', lines('ndb pitr', 'ndb restore calls -at 15m -to calls_restored', 'ndb rename calls_restored calls -replace -yes')),
-  code('docker', 'Docker', lines('docker exec ndb /usr/local/bin/ndb restore calls -at 15m -to calls_restored', 'docker exec ndb /usr/local/bin/ndb rename calls_restored calls -replace -yes')),
-  code('voodu', 'Voodu', lines('vd exec ndb -- ndb restore calls -at 15m -to calls_restored', 'vd exec ndb -- ndb rename calls_restored calls -replace -yes')),
+const TERMINAL_TABS: TabItem[] = [
+  code(
+    'cli',
+    'CLI',
+    lines(
+      '# backup: one file, while ndb runs',
+      'ndb backup /backups/daily -gzip',
+      'ndb backup - | aws s3 cp - s3://bucket/daily.ndb',
+      '',
+      '# restore a backup file: the daemon must be stopped',
+      'ndb restore /backups/daily.ndb.gz -data-dir /var/lib/ndb',
+      '',
+      '# point in time: on the live daemon',
+      'ndb pitr',
+      'ndb restore calls -at 15m -to calls_restored',
+      'ndb rename calls_restored calls -replace -yes',
+    ),
+  ),
+  code(
+    'systemd',
+    'systemd',
+    lines(
+      'sudo -u ndb ndb backup /backups/daily.ndb.gz -gzip',
+      '# every night: a systemd timer or cron runs the same line',
+      '',
+      'systemctl stop ndb',
+      'sudo -u ndb ndb restore /backups/daily.ndb.gz -data-dir /var/lib/ndb',
+      'systemctl start ndb',
+    ),
+  ),
+  code(
+    'docker',
+    'Docker',
+    lines(
+      'docker exec ndb /usr/local/bin/ndb backup - > daily.ndb',
+      '',
+      'docker stop ndb',
+      'docker run --rm -v ndb-data:/var/lib/ndb -v /backups:/backups:ro \\',
+      '  ghcr.io/thadeu/ndb restore /backups/daily.ndb.gz -data-dir /var/lib/ndb',
+      'docker start ndb',
+      '',
+      'docker exec ndb /usr/local/bin/ndb restore calls -at 15m -to calls_restored',
+      'docker exec ndb /usr/local/bin/ndb rename calls_restored calls -replace -yes',
+    ),
+  ),
+  code(
+    'voodu',
+    'Voodu',
+    lines(
+      'vd exec ndb -- ndb backup - > daily.ndb',
+      '',
+      '# 1. replicas = 0 in ndb.voodu',
+      'vd apply -f ndb.voodu -y',
+      '# 2. on the node, on the path of the data volume',
+      'ndb restore /backups/daily.ndb.gz -data-dir <data volume path>',
+      '# 3. replicas = 1 again',
+      'vd apply -f ndb.voodu -y',
+      '',
+      'vd exec ndb -- ndb restore calls -at 15m -to calls_restored',
+      'vd exec ndb -- ndb rename calls_restored calls -replace -yes',
+    ),
+  ),
   code('curl', 'curl', lines("curl --unix-socket /run/ndb/ndb.sock http://ndb/calls/_restore -d '{\"at\":\"2026-11-12T14:04:00Z\",\"to\":\"calls_restored\"}'", "curl --unix-socket /run/ndb/ndb.sock http://ndb/calls_restored/_rename -d '{\"to\":\"calls\",\"replace\":true}'")),
   code('go', 'Go', lines('err := calls.Restore(ctx, at, "calls_restored")', 'err = restored.Rename(ctx, "calls", true)')),
   code('ruby', 'Ruby', lines('client.restore("calls", at: at, to: "calls_restored")', 'client.rename("calls_restored", "calls", replace: true)')),
   code('ts', 'TypeScript', lines("await calls.restore({ at, to: 'calls_restored' })", "await restored.rename('calls', { replace: true })")),
-];
-
-const PITR_PRESETS = [
-  { label: '5 minutes ago', ago: '5m' },
-  { label: '15 minutes ago', ago: '15m' },
-  { label: '1 hour ago', ago: '1h' },
-  { label: '6 hours ago', ago: '6h' },
-  { label: 'Start of the window', at: 'min' as const },
 ];
 
 export function backupsHref(name: string, query: BackupsQuery = {}): string {
@@ -87,123 +128,119 @@ export function backupsHref(name: string, query: BackupsQuery = {}): string {
   return `c/${encodeURIComponent(name)}/backups${search ? `?${search}` : ''}`;
 }
 
-export const BackupsPage: FC<BackupsPageProps> = ({ current, online, pitr, query = {}, notice, error }) => {
-  const action = `c/${encodeURIComponent(current.name)}/backups`;
+export const BackupsPage: FC<BackupsPageProps> = ({ current, online, pitr, rows = {}, query = {}, notice, error }) => {
+  const restoring = pitr.collections.find(item => item.collection === query.restore);
+  const renaming = !restoring && Boolean(query.rename || query.from);
 
   return (
     <Layout title="Backups" current={current} tab="backups">
       <header class="page-head">
         <div class="page-head-text">
           <h1>Backups</h1>
-          <p class="lead">Point in time recovery for the mistakes of the day, and backup files for everything else.</p>
+          <p class="lead">Go back to a point in time, or take a full copy of the data directory.</p>
         </div>
       </header>
 
-      {notice && <p class="note ok">{notice}</p>}
+      {notice && (
+        <p class="note ok">
+          {notice} {query.restored && <a href={explorerHref(current, query.restored)}>Open {query.restored} in the Explorer</a>}
+        </p>
+      )}
 
       {error && <p class="note bad">{error}</p>}
 
       <PitrCard current={current} pitr={pitr} query={query} />
 
-      <Card>
-        <CardHeader title="Backup file" description="One NDJSON file with the catalog, the WAL, the watch positions, and the blobs, taken at a mark between two commits while ndb runs." />
+      <div class="backup-grid">
+        {restoring && <RestoreCard current={current} item={restoring} rows={rows[restoring.collection]} query={query} />}
 
-        <form class="stack" method="post" action={`${action}/download`} data-backup-form>
-          <label class="check">
-            <input type="checkbox" name="gzip" value="1" />
-            <span>Compress with gzip (.ndb.gz)</span>
-          </label>
+        {renaming && <RenameCard current={current} query={query} />}
 
-          <label class="check">
-            <input type="checkbox" name="no_blobs" value="1" />
-            <span>Leave out the blobs</span>
-          </label>
+        {restoring || renaming ? (
+          <div class="backup-side">
+            <FullBackupCard current={current} online={online} />
 
-          <div class="form-actions">
-            <Button variant="primary" type="submit" disabled={!online}>
-              Download backup
-            </Button>
-
-            <span class="hint" data-backup-status hidden />
-
-            {!online && <span class="hint">ndb refuses a backup over TCP. Run <span class="mono">ndb backup</span> on the host, over the unix socket.</span>}
+            <TerminalCard />
           </div>
-        </form>
-      </Card>
+        ) : (
+          <>
+            <FullBackupCard current={current} online={online} />
 
-      <Card>
-        <CardHeader title="Backup from the host" description="The CLI writes the file by itself, with the daemon running or stopped." />
+            <TerminalCard />
+          </>
+        )}
+      </div>
 
-        <Tabs id="backup-how" label="Backup from the host" items={BACKUP_TABS} />
-      </Card>
-
-      <Card>
-        <CardHeader title="Restore a backup file" description="Not in the console: a restore swaps the data directory, so ndb must be stopped. There is no SDK call for it, since no daemon runs." />
-
-        <Tabs id="restore-how" label="Restore a backup file" items={RESTORE_TABS} />
-
-        <p class="hint">Restore refuses a data dir that is not empty unless you add <span class="mono">-force</span>. Documents keep their <span class="mono">_v</span>, and watch consumers resume after their last ack.</p>
-      </Card>
-
-      <RestoreDialog current={current} pitr={pitr} query={query} />
-
-      <RenameDialog current={current} query={query} />
+      <ConfirmHost />
     </Layout>
+  );
+};
+
+function explorerHref(current: Current, collection: string, tab = 'documents'): string {
+  return `c/${encodeURIComponent(current.name)}/explorer?${new URLSearchParams({ coll: collection, tab })}`;
+}
+
+const PitrRow: FC<{ current: Current; item: PitrInfo; page: number; on: boolean }> = ({ current, item, page, on }) => {
+  const snapshots = `${item.snapshots} ${item.snapshots === 1 ? 'snapshot' : 'snapshots'}`;
+
+  return (
+    <li class={on ? 'pitr-row on' : 'pitr-row'}>
+      <span class="pitr-name mono">
+        {item.collection} {item.dropped && <Badge tone="pink">dropped</Badge>}
+      </span>
+
+      <WindowBar item={item} />
+
+      <span class="pitr-meta">
+        {snapshots} · {formatBytes(item.bytes)}
+      </span>
+
+      <Button
+        variant="secondary"
+        size="sm"
+        href={`${backupsHref(current.name, { page, restore: item.collection })}#pitr-restore`}
+      >
+        Restore
+      </Button>
+    </li>
   );
 };
 
 const PitrCard: FC<{ current: Current; pitr: BackupsPageProps['pitr']; query: BackupsQuery }> = ({ current, pitr, query }) => {
   const { rows, page, pages } = pageOf(pitr.collections, query.page ?? 1);
-  const status = pitr.default === 'off' ? 'Off by default (pitr: off in ndb.yml).' : `On: every engine collection can go back ${pitr.default} (pitr in ndb.yml).`;
-
-  const rename = (
-    <Button variant="secondary" size="sm" href={backupsHref(current.name, { page, rename: true })}>
-      Rename a collection
-    </Button>
-  );
+  const status = pitr.default === 'off' ? 'off by default (pitr: off in ndb.yml)' : `default window ${pitr.default} · the bar shows what each collection can restore`;
 
   return (
-    <Card>
-      <CardHeader title="Point in time recovery (PITR)" description={`${status} A restore makes a copy in a new collection; a rename puts it in place.`} action={rename} />
+    <Card class="flush">
+      <div class="pitr-head">
+        <h2 class="card-title">Point-in-time recovery</h2>
+
+        <span class="hint">{status}</span>
+
+        <Button variant="secondary" size="sm" href={`${backupsHref(current.name, { page, rename: true })}#pitr-rename`}>
+          Rename a collection
+        </Button>
+      </div>
 
       {pitr.collections.length === 0 ? (
-        <Empty title="Nothing to restore yet" description={pitr.default === 'off' ? 'Set pitr in ndb.yml to turn it on.' : 'Collections appear here after their first write.'} />
+        <div class="pitr-empty">
+          <Empty title="Nothing to restore yet" description={pitr.default === 'off' ? 'Set pitr in ndb.yml to turn it on.' : 'Collections appear here after their first write.'} />
+        </div>
       ) : (
-        <Table minWidth={680} label="PITR windows">
-          <thead>
-            <tr>
-              <th>collection</th>
-              <th>window</th>
-              <th>restorable from</th>
-              <th class="num">snapshots</th>
-              <th class="num">disk</th>
-              <th />
-            </tr>
-          </thead>
-
-          <tbody>
-            {rows.map(item => (
-              <tr>
-                <td class="mono strong">
-                  {item.collection} {item.dropped && <Badge tone="pink">dropped</Badge>}
-                </td>
-                <td class="mono">{item.window}</td>
-                <td class="mono sub">{when(item.oldest)}</td>
-                <td class="num">{item.snapshots}</td>
-                <td class="num">{formatBytes(item.bytes)}</td>
-                <td class="num">
-                  <Button variant="ghost" size="sm" href={backupsHref(current.name, { page, restore: item.collection })}>
-                    Restore
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
+        <ul class="pitr-list" aria-label="PITR windows">
+          {rows.map(item => (
+            <PitrRow
+              current={current}
+              item={item}
+              page={page}
+              on={item.collection === query.restore}
+            />
+          ))}
+        </ul>
       )}
 
       {pages > 1 && (
-        <div class="form-actions">
+        <div class="pitr-pages">
           {page > 1 && (
             <Button variant="ghost" size="sm" href={backupsHref(current.name, { page: page - 1 })}>
               Previous
@@ -221,64 +258,129 @@ const PitrCard: FC<{ current: Current; pitr: BackupsPageProps['pitr']; query: Ba
           )}
         </div>
       )}
-
-      <details class="stack">
-        <summary class="hint">The same from the host or the SDKs</summary>
-
-        <Tabs id="pitr-how" label="PITR from the host" items={PITR_TABS} />
-      </details>
     </Card>
   );
 };
 
-const RestoreDialog: FC<{ current: Current; pitr: BackupsPageProps['pitr']; query: BackupsQuery }> = ({ current, pitr, query }) => {
-  const item = pitr.collections.find(c => c.collection === query.restore);
+const RestoreCard: FC<{ current: Current; item: PitrInfo; rows?: number; query: BackupsQuery }> = ({ current, item, rows, query }) => {
+  const base = `c/${encodeURIComponent(current.name)}`;
   const closeHref = backupsHref(current.name, { page: query.page });
 
-  if (!item) return null;
+  const draft: RestoreDraft = { at: query.at, where: query.where === 'place' ? 'place' : 'copy', to: query.to };
+  const to = copyName(item.collection, draft);
+  const confirming = Boolean(query.confirm && draft.at && seconds(draft.at) !== undefined);
+
+  const formParams = new URLSearchParams({ restore: item.collection, at: draft.at ?? '', where: draft.where ?? 'copy', to });
+  const formHref = `${base}/backups?${formParams}#pitr-restore`;
 
   return (
-    <Dialog id="pitr-restore" title={`Restore ${item.collection}`} description={`A copy of ${item.collection} as it was at an instant, in a new collection. Restorable from ${when(item.oldest)}.`} open closeHref={closeHref}>
-      <form class="stack" method="post" action={`c/${encodeURIComponent(current.name)}/backups/restore`}>
-        <input type="hidden" name="collection" value={item.collection} />
+    <section class="card restore-card" id="pitr-restore" aria-label={`Restore ${item.collection}`}>
+      <div class="restore-head">
+        <h2 class="card-title">
+          Restore <span class="mono">{item.collection}</span>
+        </h2>
 
-        <Field id="pitr-at" label="At (UTC)">
-          <DatePicker id="pitr-at" name="at" label="At (UTC)" value={query.at ?? defaultAt(item.oldest)} min={item.oldest} max="now" presets={PITR_PRESETS} required />
-        </Field>
+        <Badge tone="pink">step 1 of 2</Badge>
+      </div>
 
-        <Field id="pitr-to" label="To (a new collection)">
-          <Input id="pitr-to" mono name="to" value={`${item.collection}_restored`} required />
-        </Field>
+      <p class="hint">A copy of {item.collection} as it was at an instant, in a new collection. Restorable from {when(item.oldest)}.</p>
+
+      <form class="stack" method="get" action={`${base}/backups`}>
+        <input type="hidden" name="restore" value={item.collection} />
+        <input type="hidden" name="confirm" value="1" />
+
+        {query.page && query.page > 1 && <input type="hidden" name="page" value={String(query.page)} />}
+
+        <RestoreFields
+          item={item}
+          draft={draft}
+          placeHint={`The copy is made first. In step 2 you confirm the rename: the copy takes the name ${item.collection}, and the old one goes to the trash, where it stays restorable for its window.`}
+        />
+
+        {rows !== undefined && (
+          <div class="restore-now">
+            <span>
+              <span class="mono">{item.collection}</span> has <strong>{rows.toLocaleString('en-US')}</strong> {rows === 1 ? 'document' : 'documents'} now.
+            </span>
+
+            <span class="grow" />
+
+            <a href={explorerHref(current, item.collection)}>Open in Explorer</a>
+          </div>
+        )}
 
         <div class="form-actions">
-          <Button variant="primary" type="submit">
-            Restore copy
+          <Button variant="dark" type="submit">
+            Restore a copy
           </Button>
 
-          <Button variant="ghost" href={closeHref} data-dialog-close>
+          <Button variant="ghost" href={closeHref}>
             Cancel
           </Button>
         </div>
       </form>
-    </Dialog>
+
+      {confirming && (
+        <RestoreConfirm
+          collection={item.collection}
+          at={draft.at ?? ''}
+          to={to}
+          mode={draft.where === 'place' ? 'steps' : 'copy'}
+          action={`${base}/backups/restore`}
+          cancelHref={formHref}
+        />
+      )}
+    </section>
   );
 };
 
-const RenameDialog: FC<{ current: Current; query: BackupsQuery }> = ({ current, query }) => {
+const RenameCard: FC<{ current: Current; query: BackupsQuery }> = ({ current, query }) => {
   const closeHref = backupsHref(current.name, { page: query.page });
-  const open = Boolean(query.rename || query.from);
+  const afterRestore = Boolean(query.from && query.to);
 
-  if (!open) return null;
+  const sure = confirm({
+    title: 'Rename the collection?',
+    body: 'With Replace on, the collection that has the new name now goes to the trash. It stays restorable for its PITR window, and its watch consumers start over. With Replace off, nothing is replaced.',
+    action: afterRestore ? 'Put it in place' : 'Rename',
+  });
 
   return (
-    <Dialog id="pitr-rename" title="Rename a collection" description="Put a restored copy in place: its documents, indexes and watch positions move to the new name. With replace, the current collection goes to the trash, where it stays restorable for its window." open closeHref={closeHref}>
-      <form class="stack" method="post" action={`c/${encodeURIComponent(current.name)}/backups/rename`}>
+    <section class="card restore-card" id="pitr-rename" aria-label="Rename a collection">
+      <div class="restore-head">
+        {afterRestore ? (
+          <h2 class="card-title">
+            Restore <span class="mono">{query.to}</span>
+          </h2>
+        ) : (
+          <h2 class="card-title">Rename a collection</h2>
+        )}
+
+        {afterRestore && <Badge tone="pink">step 2 of 2</Badge>}
+      </div>
+
+      <p class="hint">Put a restored copy in place: its documents, indexes and watch positions move to the new name. With replace, the current collection goes to the trash, where it stays restorable for its window.</p>
+
+      <form class="stack" method="post" action={`c/${encodeURIComponent(current.name)}/backups/rename`} {...sure}>
         <Field id="rename-from" label="Collection">
-          <Input id="rename-from" mono name="from" value={query.from ?? ''} placeholder="calls_restored" required />
+          <Input
+            id="rename-from"
+            mono
+            name="from"
+            value={query.from ?? ''}
+            placeholder="calls_restored"
+            required
+          />
         </Field>
 
         <Field id="rename-to" label="New name">
-          <Input id="rename-to" mono name="to" value={query.to ?? ''} placeholder="calls" required />
+          <Input
+            id="rename-to"
+            mono
+            name="to"
+            value={query.to ?? ''}
+            placeholder="calls"
+            required
+          />
         </Field>
 
         <label class="check">
@@ -288,14 +390,56 @@ const RenameDialog: FC<{ current: Current; query: BackupsQuery }> = ({ current, 
 
         <div class="form-actions">
           <Button variant="dark" type="submit">
-            Rename
+            {afterRestore ? 'Put it in place' : 'Rename'}
           </Button>
 
-          <Button variant="ghost" href={closeHref} data-dialog-close>
-            Cancel
+          <Button variant="ghost" href={closeHref}>
+            {afterRestore ? 'Keep the copy only' : 'Cancel'}
           </Button>
         </div>
       </form>
-    </Dialog>
+    </section>
   );
 };
+
+const FullBackupCard: FC<{ current: Current; online: boolean }> = ({ current, online }) => (
+  <Card>
+    <h2 class="card-title">Full backup</h2>
+
+    <p class="hint">One NDJSON file with the catalog, the WAL, the watch positions and the blobs, taken while ndb runs. ndb gives it only over the unix socket, so a TCP connection must use the CLI.</p>
+
+    <form class="stack" method="post" action={`c/${encodeURIComponent(current.name)}/backups/download`} data-backup-form>
+      <div class="form-actions">
+        <Button variant="secondary" type="submit" disabled={!online}>
+          Download backup
+        </Button>
+
+        <label class="check">
+          <input type="checkbox" name="gzip" value="1" checked />
+          <span>gzip</span>
+        </label>
+
+        <label class="check">
+          <input type="checkbox" name="no_blobs" value="1" />
+          <span>Leave out the blobs</span>
+        </label>
+      </div>
+
+      <span class="hint" data-backup-status hidden />
+    </form>
+
+    {!online && <p class="note warn">This connection is TCP: use the command below.</p>}
+  </Card>
+);
+
+const TerminalCard: FC = () => (
+  <Card class="soft">
+    <h2 class="card-title">From a terminal</h2>
+
+    <Tabs id="terminal-how" label="From a terminal" items={TERMINAL_TABS} />
+
+    <p class="hint">
+      A restore of a backup file needs a stopped daemon on that data directory. It refuses a data dir that is not empty unless you add <span class="mono">-force</span>. The other flags are in the docs page Operations.
+    </p>
+  </Card>
+);

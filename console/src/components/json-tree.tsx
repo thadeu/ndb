@@ -2,6 +2,7 @@ import type { FC } from 'hono/jsx';
 import { useEffect, useRef, useState } from 'hono/jsx';
 
 import { addField, containerIds, deepEqual, flatten, getIn, parseScalar, pathId, removeIn, type Path, type Row, scalarText, setIn } from './json-model';
+import { filterRows } from './tree-filter';
 import { noSpelling } from '@/ui/input';
 
 const LOCKED = new Set(['_id', '_v']);
@@ -129,6 +130,7 @@ export interface JsonTreeProps {
   onChange?: (next: unknown) => void;
   baseline?: unknown;
   toolbar?: boolean;
+  filterable?: boolean;
   emphasizeTop?: boolean;
 }
 
@@ -164,17 +166,20 @@ const AddRow: FC<{ state: AddState; onSubmit: (key: string, value: string) => vo
 };
 
 // JsonTree shows a value as rows with a caret, key, colored value, and type.
-// Expand all and Collapse are in the toolbar. With editable and onChange, a
-// click on a scalar edits it, and rows can be added or removed. baseline marks
-// the rows that differ from it.
-export const JsonTree: FC<JsonTreeProps> = ({ value, editable = false, onChange, baseline, toolbar = true, emphasizeTop = false }) => {
+// Expand all and Collapse are in the toolbar. With filterable, the toolbar
+// starts with a box that narrows the rows to the keys or values that have
+// its text. With editable and onChange, a click on a scalar edits it, and
+// rows can be added or removed. baseline marks the rows that differ from it.
+export const JsonTree: FC<JsonTreeProps> = ({ value, editable = false, onChange, baseline, toolbar = true, filterable = false, emphasizeTop = false }) => {
   const [closed, setClosed] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [adding, setAdding] = useState<AddState | null>(null);
+  const [query, setQuery] = useState('');
   const active = useRef<string | null>(null);
 
-  const rows = flatten(value, closed);
+  const rows = filterRows(value, closed, filterable ? query : '');
+  const noMatch = rows.length === 0 && query.trim() !== '';
   const changed = baseline === undefined ? undefined : changedIds(rows, value, baseline);
 
   const toggle = (row: Row) => {
@@ -228,6 +233,18 @@ export const JsonTree: FC<JsonTreeProps> = ({ value, editable = false, onChange,
     <div class="jt">
       {toolbar && (
         <div class="jt-bar">
+          {filterable && (
+            <input
+              class="input jt-filter"
+              type="search"
+              {...noSpelling}
+              placeholder="Filter fields"
+              aria-label="Filter fields"
+              value={query}
+              onInput={(event: Event) => setQuery((event.target as HTMLInputElement).value)}
+            />
+          )}
+
           <button type="button" class="tbtn" onClick={() => setClosed(new Set())}>
             Expand all
           </button>
@@ -258,6 +275,8 @@ export const JsonTree: FC<JsonTreeProps> = ({ value, editable = false, onChange,
         onRemove={remove}
         onAdd={add}
       />
+
+      {noMatch && <p class="hint jt-none">No field or value has this text.</p>}
 
       {adding && <AddRow state={adding} onSubmit={submitAdd} onCancel={() => setAdding(null)} />}
     </div>

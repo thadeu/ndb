@@ -15,6 +15,20 @@ const PATHS = {
   'arrow-down': '<path d="M12 5v14M6 13l6 6 6-6"/>',
   columns: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M10 4v16M15 4v16"/>',
   documents: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/>',
+  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  sidebar: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
+  alert: '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16v.5"/>',
+  search: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4-4"/>',
+  star: '<path d="M12 3l2.7 5.6 6.1.8-4.5 4.3 1.1 6.1L12 16.9 6.6 19.8l1.1-6.1L3.2 9.4l6.1-.8z"/>',
+  'chevrons-up-down': '<path d="M8 10l4-4 4 4M8 14l4 4 4-4"/>',
+  dashboard: '<path d="M4 4h7v9H4zM13 4h7v5h-7zM13 11h7v9h-7zM4 15h7v5H4z"/>',
+  database: '<path d="M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
+  streams: '<path d="M3 7h14M14 4l3 3-3 3M21 17H7M10 14l-3 3 3 3"/>',
+  chart: '<path d="M5 20V10M12 20V4M19 20v-7"/>',
+  eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  code: '<path d="M8 8l-4 4 4 4M16 8l4 4-4 4M13 5l-2 14"/>',
+  history: '<path d="M12 8v4l3 2M4 12a8 8 0 108-8 8 8 0 00-6 2.7M4 4v4h4"/>',
+  sliders: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M14 4v4M8 10v4M16 16v4"/>',
 } as const;
 
 export type IconName = keyof typeof PATHS;

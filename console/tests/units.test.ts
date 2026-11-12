@@ -3,10 +3,53 @@ import { describe, expect, it } from 'bun:test';
 import { buildCurl } from '@/components/curl';
 import { editKey } from '@/components/editor-keys';
 import { blockAt, formatBlock, lineAt, parseBlocks, tokenize } from '@/components/devtools-blocks';
+import { filterRows, rowMatches } from '@/components/tree-filter';
 import { containerIds, diffDocs, flatten, parseScalar, removeIn, setIn, addField, updateBody, describeDiff } from '@/components/json-model';
 import { addEvent, MAX_EVENTS, type WatchEvent } from '@/components/watch';
 import { checkRequest } from '@/routes/devtools';
 import { readWhere } from '@/routes/browser';
+
+describe('tree filter', () => {
+  const doc = { _id: 'a', status: 'paid', customer: { name: 'Ana', tier: 'gold' }, items: [{ sku: 'x1', qty: 1 }, { sku: 'y2', qty: 12 }], total: 12 };
+  const ids = (query: string, closed: string[] = []) => filterRows(doc, new Set(closed), query).map(row => row.path.join('.'));
+
+  it('is the whole tree without a text', () => {
+    expect(filterRows(doc, new Set(), '  ')).toEqual(flatten(doc, new Set()));
+    expect(ids('', ['customer'])).not.toContain('customer.name');
+  });
+
+  it('keeps the rows with the text in the key, and the path to them', () => {
+    expect(ids('tier')).toEqual(['customer', 'customer.tier']);
+    expect(ids('SKU')).toEqual(['items', 'items.0', 'items.0.sku', 'items.1', 'items.1.sku']);
+  });
+
+  it('keeps the rows with the text in a scalar value', () => {
+    expect(ids('gold')).toEqual(['customer', 'customer.tier']);
+    expect(ids('12')).toEqual(['items', 'items.1', 'items.1.qty', 'total']);
+    expect(ids('"paid"')).toEqual(['status']);
+  });
+
+  it('keeps the content of a container that matches by its key', () => {
+    expect(ids('custom')).toEqual(['customer', 'customer.name', 'customer.tier']);
+  });
+
+  it('does not match the index of an array item', () => {
+    expect(ids('0')).toEqual([]);
+    expect(rowMatches(flatten(doc, new Set()).find(row => row.id === 'total')!, 'tot', true)).toBe(false);
+  });
+
+  it('keeps a container closed, with the summary of a closed one', () => {
+    const rows = filterRows(doc, new Set(['customer']), 'tier');
+
+    expect(rows.map(row => row.id)).toEqual(['customer']);
+    expect(rows[0]?.open).toBe(false);
+    expect(rows[0]?.summary).toBe('{ name, tier }');
+  });
+
+  it('gives no row when nothing matches', () => {
+    expect(ids('zzz')).toEqual([]);
+  });
+});
 
 describe('diffDocs', () => {
   const before = { _id: 'a', _v: 2, status: 'new', qty: 1, customer: { tier: 'silver', email: 'a@b.c' }, tags: ['x'], gone: true };

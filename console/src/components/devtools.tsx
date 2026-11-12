@@ -3,9 +3,10 @@ import { useRef, useState } from 'hono/jsx';
 import { render } from 'hono/jsx/dom';
 
 import { copyText } from '@/components/copy';
-import { type Block, blockAt, defaultText, formatBlock, lineAt, parseBlocks, tokenize } from '@/components/devtools-blocks';
+import { type Block, blockAt, defaultText, formatBlock, isComment, lineAt, parseBlocks, tokenize } from '@/components/devtools-blocks';
+import { type Example, type ExampleGroup, exampleGroups, findExamples, placeExample } from '@/components/devtools-examples';
 import { buildCurl } from '@/components/curl';
-import { editKey } from '@/components/editor-keys';
+import { editKey, toggleComment } from '@/components/editor-keys';
 import { JsonTree } from '@/components/json-tree';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import { useOutsideClick } from '@/hooks/useOutsideClick';
@@ -42,13 +43,30 @@ interface Entry {
   at: number;
 }
 
-type View = 'tree' | 'raw' | 'headers';
+type View = 'body' | 'headers';
 
 const VIEWS = [
-  { id: 'tree', label: 'Tree' },
-  { id: 'raw', label: 'Raw' },
+  { id: 'body', label: 'Body' },
   { id: 'headers', label: 'Headers' },
 ];
+
+const STATUS_TEXT: Record<number, string> = {
+  200: 'OK',
+  201: 'Created',
+  204: 'No Content',
+  400: 'Bad Request',
+  401: 'Unauthorized',
+  403: 'Forbidden',
+  404: 'Not Found',
+  405: 'Method Not Allowed',
+  409: 'Conflict',
+  410: 'Gone',
+  413: 'Content Too Large',
+  423: 'Locked',
+  429: 'Too Many Requests',
+  500: 'Internal Server Error',
+  503: 'Service Unavailable',
+};
 
 const HISTORY_LIMIT = 50;
 const LINE_HEIGHT = 22;
@@ -136,45 +154,58 @@ const FormatButton: FC<{ line: number; onClick: () => void }> = ({ line, onClick
   </button>
 );
 
-const Chips: FC<{ headers: Record<string, string> }> = ({ headers }) => (
-  <div class="chips">
-    {Object.entries(headers).map(([key, value]) => (
-      <span class="chip mono">
-        <span class="chip-key">{key}</span> {value}
-      </span>
-    ))}
-  </div>
-);
+// metaOf picks the headers that the response card shows under the body: the
+// request id first (the log lines of the daemon have it as request_id), then
+// the X-Ndb-* headers of a read (plan, total, examined, next).
+export function metaOf(headers: Record<string, string>): { label: string; value: string }[] {
+  const name = (key: string) => key.split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join('-');
+  const keys = Object.keys(headers).filter(key => key.startsWith('x-ndb-'));
 
-const ResponsePane: FC<{ answer: Answer | null; failure: Failure | null; view: View; onView: (id: string) => void; browserHref: string }> = ({ answer, failure, view, onView, browserHref }) => {
+  return ['x-request-id', ...keys].filter(key => headers[key] !== undefined).map(key => ({ label: name(key), value: headers[key] as string }));
+}
+
+const ResponsePane: FC<{ answer: Answer | null; failure: Failure | null; view: View; raw: boolean; onView: (id: string) => void; onRaw: () => void; browserHref: string }> = ({ answer, failure, view, raw, onView, onRaw, browserHref }) => {
   if (failure) return <p class="note bad">{failure.message}</p>;
 
   if (!answer) return <p class="hint">Send a request to see the answer here.</p>;
 
   const value = treeValue(answer);
   const treeable = value !== undefined && typeof value === 'object' && value !== null;
-  const shown: View = view === 'tree' && !treeable ? 'raw' : view;
+  const asTree = treeable && !raw;
+  const label = `${answer.status} ${STATUS_TEXT[answer.status] ?? ''}`.trim();
+  const meta = metaOf(answer.headers);
 
   return (
     <>
       <div class="resp-head">
-        <span class={`status ${statusTone(answer.status)}`}>{answer.status}</span>
+        <span class={`status ${statusTone(answer.status)}`}>{label}</span>
         <span class="hint">{describe(answer)}</span>
 
         <span class="grow" />
 
-        <Segmented items={VIEWS} value={shown} label="Response view" onSelect={onView} />
+        <Segmented
+          items={VIEWS}
+          value={view}
+          label="View"
+          onSelect={onView}
+        />
       </div>
-
-      <Chips headers={answer.headers} />
 
       {answer.truncated && <p class="note bad">The answer is cut at 4 MiB. Add a limit to the request.</p>}
 
-      {shown === 'tree' && <JsonTree value={value} emphasizeTop={isNdjson(answer)} />}
+      {view === 'body' && treeable && (
+        <div class="resp-sub">
+          <button type="button" class="tbtn" aria-pressed={raw} onClick={onRaw}>
+            {raw ? 'Show the tree' : 'Show the raw text'}
+          </button>
+        </div>
+      )}
 
-      {shown === 'raw' && <pre class="raw mono">{answer.body}</pre>}
+      {view === 'body' && asTree && <JsonTree value={value} emphasizeTop={isNdjson(answer)} />}
 
-      {shown === 'headers' && (
+      {view === 'body' && !asTree && <pre class="raw mono">{answer.body}</pre>}
+
+      {view === 'headers' && (
         <div class="scroll">
           <table aria-label="Response headers">
             <tbody>
@@ -189,8 +220,19 @@ const ResponsePane: FC<{ answer: Answer | null; failure: Failure | null; view: V
         </div>
       )}
 
+      {meta.length > 0 && (
+        <dl class="resp-meta">
+          {meta.map(item => (
+            <div>
+              <dt>{item.label}</dt>
+              <dd class="mono">{item.value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+
       <span class="hint">
-        NDJSON answers show one node per line. Open a row in <a href={browserHref}>Explorer</a> to edit it.
+        The log lines of the daemon have the X-Request-Id as request_id. NDJSON answers show one node per line. Open a row in <a href={browserHref}>Explorer</a> to edit it.
       </span>
     </>
   );
@@ -198,7 +240,7 @@ const ResponsePane: FC<{ answer: Answer | null; failure: Failure | null; view: V
 
 const HistoryList: FC<{ entries: Entry[]; onPick: (entry: Entry) => void }> = ({ entries, onPick }) => (
   <div class="popover" role="menu">
-    {entries.length === 0 && <p class="hint">No requests yet.</p>}
+    {entries.length === 0 && <p class="hint">No requests yet. Each request that you send is kept in this browser.</p>}
 
     {entries.map(entry => (
       <button type="button" class="history-item" role="menuitem" onClick={() => onPick(entry)}>
@@ -212,18 +254,84 @@ const HistoryList: FC<{ entries: Entry[]; onPick: (entry: Entry) => void }> = ({
   </div>
 );
 
+const SearchIcon: FC = () => (
+  <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+    <circle cx="11" cy="11" r="6" />
+    <path d="M20 20l-4-4" />
+  </svg>
+);
+
+const Library: FC<{ groups: ExampleGroup[]; search: string; active?: string; onSearch: (text: string) => void; onPick: (example: Example) => void }> = ({ groups, search, active, onSearch, onPick }) => {
+  const found = findExamples(groups, search);
+
+  return (
+    <nav class="dt-lib" aria-label="Examples">
+      <label class="dt-search">
+        <SearchIcon />
+
+        <input
+          type="search"
+          value={search}
+          placeholder="Find an example"
+          aria-label="Find an example"
+          {...noSpelling}
+          onInput={(event: Event) => onSearch((event.target as HTMLInputElement).value)}
+        />
+      </label>
+
+      {found.length === 0 && <p class="hint">No example has this text.</p>}
+
+      {found.map(group => (
+        <div class="dt-group">
+          <span class="side-label">{group.label}</span>
+
+          {group.items.map(example => (
+            <button
+              type="button"
+              class={example.id === active ? 'dt-example on' : 'dt-example'}
+              aria-current={example.id === active ? 'true' : undefined}
+              onClick={() => onPick(example)}
+            >
+              <span class="grow">{example.label}</span>
+              {example.fresh && <span class="dt-new">new</span>}
+            </button>
+          ))}
+        </div>
+      ))}
+    </nav>
+  );
+};
+
+// exampleOf finds the example that holds the request line of a block.
+export function exampleOf(groups: ExampleGroup[], block?: Block): Example | undefined {
+  if (!block) return undefined;
+
+  const line = `${block.method} ${block.path}`;
+
+  return groups.flatMap(group => group.items).find(example => example.text.split('\n').includes(line));
+}
+
+function offsetOfLine(text: string, line: number): number {
+  return text.split('\n').slice(0, line).reduce((sum, row) => sum + row.length + 1, 0);
+}
+
 export const Devtools: FC<DevtoolsProps> = ({ name, collection, sendUrl, browserHref, curl }) => {
   const [text, setText] = useLocalStorage(`ndb-console:${name}:devtools:text`, defaultText(collection));
   const [history, setHistory] = useLocalStorage<Entry[]>(`ndb-console:${name}:devtools:history`, []);
   const [line, setLine] = useState(0);
+  const [search, setSearch] = useState('');
+
   const [answer, setAnswer] = useState<Answer | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
-  const [view, setView] = useState<View>('tree');
+  const [view, setView] = useState<View>('body');
+  const [raw, setRaw] = useState(false);
+
   const [running, setRunning] = useState(false);
   const [menu, setMenu] = useState(false);
   const [toast, setToast] = useState('');
 
   const area = useRef<HTMLTextAreaElement | null>(null);
+  const scroller = useRef<HTMLDivElement | null>(null);
   const popover = useRef<HTMLDivElement | null>(null);
 
   const send = useSend(sendUrl);
@@ -234,6 +342,9 @@ export const Devtools: FC<DevtoolsProps> = ({ name, collection, sendUrl, browser
   const blocks = parseBlocks(text);
   const block = blockAt(blocks, line);
   const runs = new Set(blocks.map(item => item.start));
+
+  const groups = exampleGroups(collection);
+  const example = exampleOf(groups, block);
 
   const editorHeight = `${lines.length * LINE_HEIGHT + 28}px`;
 
@@ -276,29 +387,40 @@ export const Devtools: FC<DevtoolsProps> = ({ name, collection, sendUrl, browser
     setHistory([entry, ...history.filter(item => !(item.method === entry.method && item.path === entry.path && item.body === entry.body))].slice(0, HISTORY_LIMIT));
   };
 
+  const apply = (element: HTMLTextAreaElement, edit: { text: string; start: number; end: number }) => {
+    element.value = edit.text;
+    element.setSelectionRange(edit.start, edit.end);
+
+    setText(edit.text);
+    setLine(lineAt(edit.text, edit.start));
+  };
+
   const keys = (event: KeyboardEvent) => {
-    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+    const element = area.current;
+    const command = event.metaKey || event.ctrlKey;
+
+    if (command && event.key === 'Enter') {
       event.preventDefault();
       run();
 
       return;
     }
 
-    const element = area.current;
+    if (command && event.key === '/' && element) {
+      event.preventDefault();
+      apply(element, toggleComment(element.value, element.selectionStart, element.selectionEnd));
 
-    if (!element || event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
+      return;
+    }
+
+    if (!element || command || event.altKey || event.isComposing) return;
 
     const edit = editKey(element.value, element.selectionStart, element.selectionEnd, { key: event.key, shift: event.shiftKey });
 
     if (!edit) return;
 
     event.preventDefault();
-
-    element.value = edit.text;
-    element.setSelectionRange(edit.start, edit.end);
-
-    setText(edit.text);
-    setLine(lineAt(edit.text, edit.start));
+    apply(element, edit);
   };
 
   const format = () => {
@@ -325,78 +447,136 @@ export const Devtools: FC<DevtoolsProps> = ({ name, collection, sendUrl, browser
     say(copied ? 'Copied the curl command.' : 'The browser blocked the clipboard.');
   };
 
-  const load = (entry: Entry) => {
-    const added = `${entry.method} ${entry.path}${entry.body ? `\n${entry.body}` : ''}`;
-    const next = `${text.replace(/\s+$/, '')}\n\n${added}\n`;
+  // place puts a request in the editor and moves the cursor and the view to
+  // its first line.
+  const place = (request: string) => {
+    const placed = placeExample(text, request);
+    const first = placed.text.split('\n').findIndex((row, index) => index >= placed.line && !isComment(row));
+    const target = first === -1 ? placed.line : first;
 
-    setText(next);
-    setLine(next.split('\n').length - 2);
+    setText(placed.text);
+    setLine(target);
+
+    setTimeout(() => {
+      const offset = offsetOfLine(placed.text, target);
+
+      area.current?.focus({ preventScroll: true });
+      area.current?.setSelectionRange(offset, offset);
+
+      if (scroller.current) scroller.current.scrollTop = Math.max(0, (placed.line - 1) * LINE_HEIGHT);
+    }, 0);
+  };
+
+  const load = (entry: Entry) => {
+    place(`${entry.method} ${entry.path}${entry.body ? `\n${entry.body}` : ''}`);
     setMenu(false);
   };
 
   return (
     <div class="dt">
-      <div class="dt-bar">
-        <button type="button" class="btn primary small" disabled={running} onClick={run}>
-          {running ? 'Sending…' : '▶ Send'}
-        </button>
-
-        <span class="hint dt-hint">Ctrl or Cmd + Enter sends the request under the cursor</span>
-
-        <span class="grow" />
-
-        {toast && <span class="hint" role="status">{toast}</span>}
-
-        <div class="pop-host" ref={popover}>
-          <button type="button" class="btn small" aria-expanded={menu} onClick={() => setMenu(!menu)}>
-            History
-          </button>
-
-          {menu && <HistoryList entries={history} onPick={load} />}
+      <header class="page-head">
+        <div class="page-head-text">
+          <h1>Dev Tools</h1>
+          <p class="lead">Send any request of the HTTP API. Start from an example, then change it.</p>
         </div>
 
-        <button type="button" class="btn small" onClick={copyCurl}>
-          Copy as curl
-        </button>
-        <button type="button" class="btn small" onClick={format}>
-          Format
-        </button>
-      </div>
+        <div class="dt-actions">
+          {toast && <span class="hint dt-toast" role="status">{toast}</span>}
 
-      <div class="dt-panes">
-        <section class="ed" aria-label="Requests">
-          <div class="ed-scroll">
-            <Gutter count={lines.length} block={block} runs={runs} />
+          <div class="pop-host" ref={popover}>
+            <button type="button" class="btn" aria-expanded={menu} onClick={() => setMenu(!menu)}>
+              History
+            </button>
 
-            <div class="ed-main">
-              <Highlight lines={lines} block={block} />
-
-              <textarea
-                ref={area}
-                class="ed-ta"
-                style={`height:${editorHeight}`}
-                value={text}
-                {...noSpelling}
-                wrap="off"
-                aria-label="Requests"
-                onInput={(event: Event) => {
-                  setText((event.target as HTMLTextAreaElement).value);
-                  track();
-                }}
-                onKeyDown={keys}
-                onKeyUp={track}
-                onClick={track}
-                onFocus={track}
-              />
-
-              {block?.body ? <FormatButton line={block.start} onClick={format} /> : null}
-            </div>
+            {menu && <HistoryList entries={history} onPick={load} />}
           </div>
-        </section>
 
-        <section class="resp" aria-label="Response">
-          <ResponsePane answer={answer} failure={failure} view={view} onView={id => setView(id as View)} browserHref={browserHref} />
-        </section>
+          <button type="button" class="btn" onClick={copyCurl}>
+            Copy as curl
+          </button>
+
+          <button
+            type="button"
+            class="btn primary"
+            title="Ctrl or Cmd + Enter sends the request under the cursor"
+            disabled={running}
+            onClick={run}
+          >
+            {running ? 'Sending…' : 'Send · Ctrl Enter'}
+          </button>
+        </div>
+      </header>
+
+      <div class="dt-cols">
+        <Library
+          groups={groups}
+          search={search}
+          active={example?.id}
+          onSearch={setSearch}
+          onPick={picked => place(picked.text)}
+        />
+
+        <div class="dt-panes">
+          <section class="ed" aria-label="Request">
+            <div class="ed-head">
+              <span class="ed-title">Request</span>
+
+              <span class="grow" />
+
+              {example && <span>{example.note}</span>}
+
+              <button type="button" class="ed-btn" onClick={format}>
+                Format
+              </button>
+            </div>
+
+            <div class="ed-scroll" ref={scroller}>
+              <Gutter count={lines.length} block={block} runs={runs} />
+
+              <div class="ed-main">
+                <Highlight lines={lines} block={block} />
+
+                <textarea
+                  ref={area}
+                  class="ed-ta"
+                  style={`height:${editorHeight}`}
+                  value={text}
+                  {...noSpelling}
+                  wrap="off"
+                  aria-label="Requests"
+                  onInput={(event: Event) => {
+                    setText((event.target as HTMLTextAreaElement).value);
+                    track();
+                  }}
+                  onKeyDown={keys}
+                  onKeyUp={track}
+                  onClick={track}
+                  onFocus={track}
+                />
+
+                {block?.body ? <FormatButton line={block.start} onClick={format} /> : null}
+              </div>
+            </div>
+
+            <div class="ed-foot">
+              <span>Ctrl or Cmd + Enter sends the request under the cursor</span>
+              <span>Tab indents</span>
+              <span>Ctrl / comments a line</span>
+            </div>
+          </section>
+
+          <section class="resp" aria-label="Response">
+            <ResponsePane
+              answer={answer}
+              failure={failure}
+              view={view}
+              raw={raw}
+              onView={id => setView(id as View)}
+              onRaw={() => setRaw(!raw)}
+              browserHref={browserHref}
+            />
+          </section>
+        </div>
       </div>
     </div>
   );

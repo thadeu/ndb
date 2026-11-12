@@ -1,5 +1,6 @@
 import type { Hono } from 'hono';
 
+import { checkSettings, readFrom, watchBody, type WatchSettings } from '@/components/watch-model';
 import { NdbError } from '@/ndb';
 import type { Env } from '@/prefix';
 import { OfflinePage } from '@/views/offline';
@@ -31,24 +32,27 @@ export function watchRoutes(app: Hono<Env>, deps: RouteDeps): void {
       const stats = await deps.client(connection).stats();
       const coll = c.req.query('coll') || stats.collections[0]?.name || '';
 
-      return c.html(<WatchPage current={deps.currentOf(connection, stats)} collections={stats.collections} coll={coll} where={c.req.query('where') ?? ''} />);
+      const settings: WatchSettings = { coll, where: c.req.query('where') ?? '', from: readFrom(c.req.query('from')), consumer: c.req.query('consumer') ?? '' };
+
+      return c.html(<WatchPage current={deps.currentOf(connection, stats)} collections={stats.collections} settings={settings} />);
     } catch (error) {
       return c.html(<OfflinePage current={deps.currentOf(connection)} message={deps.message(error)} />, 502);
     }
   });
 
-  // The stream is a read-only tail: it opens a watch with a consumer of its
-  // own, forwards each line as an SSE event, and never acks. The upstream
-  // closes when the browser leaves.
+  // The stream is a read-only tail: it opens a watch, forwards each line as
+  // an SSE event, and never acks. The consumer is one of its own, or a named
+  // one (to read from its saved position, with no filter: see checkSettings).
+  // The upstream closes when the browser leaves.
   app.get('/c/:name/watch/stream', c => {
     const connection = connectionOf(deps, c);
 
     if (!connection) return c.text('Not found', 404);
 
-    const coll = c.req.query('coll') ?? '';
-    const parsed = readWhere(c.req.query('where') ?? '');
-    const from = c.req.query('from') === 'beginning' ? 'beginning' : 'now';
-    const problem = !COLLECTION.test(coll) ? 'Pick a collection.' : parsed.error;
+    const settings: WatchSettings = { coll: c.req.query('coll') ?? '', where: c.req.query('where') ?? '', from: readFrom(c.req.query('from')), consumer: c.req.query('consumer') ?? '' };
+    const coll = settings.coll;
+    const parsed = readWhere(settings.where);
+    const problem = !COLLECTION.test(coll) ? 'Pick a collection.' : (parsed.error ?? checkSettings(settings, parsed.where));
 
     const abort = new AbortController();
 
@@ -69,10 +73,8 @@ export function watchRoutes(app: Hono<Env>, deps: RouteDeps): void {
 
         abort.signal.addEventListener('abort', () => clearInterval(ping));
 
-        const consumer = `ndb-ui-${crypto.randomUUID().slice(0, 8)}`;
-        const request: Record<string, unknown> = { consumer, from };
-
-        if (parsed.where && Object.keys(parsed.where).length > 0) request.query = parsed.where;
+        const consumer = settings.from === 'consumer' ? settings.consumer : `ndb-ui-${crypto.randomUUID().slice(0, 8)}`;
+        const request = watchBody(settings, parsed.where, consumer);
 
         try {
           const upstream = await deps.client(connection).stream(`/${encodeURIComponent(coll)}/_watch`, request, abort.signal);

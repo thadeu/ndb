@@ -1,8 +1,8 @@
 import { buildWhere, readFind, searchBody } from '@/components/filter-model';
 
-// The find form of the Documents tab shows the _search body that a run
-// sends. The server renders it for the last run; this script keeps it in
-// step while the user types, before the run.
+// The find bar of the Documents tab shows the _search request that a run
+// sends, on one line. The server renders it for the last run; this script
+// keeps it in step while the user types, before the run.
 function refresh(form: HTMLFormElement): void {
   const preview = form.querySelector<HTMLElement>('[data-find-preview]');
 
@@ -20,17 +20,17 @@ function refresh(form: HTMLFormElement): void {
     try {
       const where = query.json.trim() === '' ? {} : JSON.parse(query.json);
 
-      text = JSON.stringify(searchBody(query, where), null, 2);
+      text = JSON.stringify(searchBody(query, where));
     } catch {
       text = 'The filter is not valid JSON.';
     }
   } else {
     const built = buildWhere(query.rows);
 
-    text = built.error ?? JSON.stringify(searchBody(query, built.where), null, 2);
+    text = built.error ?? JSON.stringify(searchBody(query, built.where));
   }
 
-  const code = `${preview.dataset.findPreview}\n${text}`;
+  const code = `${preview.dataset.findPreview} ${text}`;
   const pre = preview.querySelector('code');
   const copy = preview.querySelector<HTMLElement>('[data-copy]');
 

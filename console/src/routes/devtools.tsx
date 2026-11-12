@@ -1,5 +1,6 @@
 import type { Hono } from 'hono';
 
+import { DEMO_COLLECTION, DEMO_STREAM } from '@/components/devtools-examples';
 import { NdbError, target } from '@/ndb';
 import type { Env } from '@/prefix';
 import { DevtoolsPage } from '@/views/devtools';
@@ -93,8 +94,9 @@ export function devtoolsRoutes(app: Hono<Env>, deps: RouteDeps): void {
 
     try {
       const stats = await deps.client(connection).stats();
+      const first = stats.collections.find(item => item.name !== DEMO_COLLECTION && item.name !== DEMO_STREAM);
 
-      return c.html(<DevtoolsPage current={deps.currentOf(connection, stats)} collection={stats.collections[0]?.name ?? 'orders'} curl={curlTarget(connection.url)} />);
+      return c.html(<DevtoolsPage current={deps.currentOf(connection, stats)} collection={first?.name ?? 'orders'} curl={curlTarget(connection.url)} />);
     } catch (error) {
       return c.html(<OfflinePage current={deps.currentOf(connection)} message={deps.message(error)} />, 502);
     }
@@ -123,7 +125,7 @@ export function devtoolsRoutes(app: Hono<Env>, deps: RouteDeps): void {
       const headers: Record<string, string> = {};
 
       response.headers.forEach((value, key) => {
-        if (key.startsWith('x-ndb-') || key === 'content-type') headers[key] = value;
+        if (key.startsWith('x-ndb-') || key === 'content-type' || key === 'x-request-id') headers[key] = value;
       });
 
       return c.json({ status: response.status, ms: Math.round(performance.now() - started), bytes: read.bytes, headers, body: read.text, truncated: read.truncated });

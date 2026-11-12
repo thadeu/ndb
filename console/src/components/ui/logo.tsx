@@ -1,11 +1,24 @@
+import { raw } from 'hono/html';
 import type { FC } from 'hono/jsx';
 
-// Logo is the ndb bowl. The ink takes the text color.
-export const Logo: FC<{ size?: number }> = ({ size = 30 }) => (
-  <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true">
-    <path d="M4 14h24a12 12 0 0 1-24 0Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" />
-    <path d="M9 14c1-4 3-4 4 0M15 14c1-5 3-5 4 0M21 14c1-4 2-4 3 0" stroke="#f0047f" stroke-width="2" stroke-linecap="round" />
-    <circle cx="13" cy="20" r="1.2" fill="currentColor" />
-    <circle cx="19" cy="20" r="1.2" fill="currentColor" />
-  </svg>
+import mark from '@/assets/brand/mark-small-on-light.svg' with { type: 'text' };
+import wordmark from '@/assets/brand/wordmark-on-light.svg' with { type: 'text' };
+
+// The files in src/assets/brand are copies of /brand/svg in the repo, the
+// ndb identity. Do not draw the mascot again: copy a new file from there.
+
+// Logo is the ndb mascot, the ramen bowl. At this size the brand asks for
+// the small drawing (no steam, two heavy noodles).
+export const Logo: FC<{ size?: number }> = ({ size = 32 }) => (
+  <span class="logo-mark" style={`width:${size}px;height:${size}px`}>
+    {raw(mark)}
+  </span>
+);
+
+// Wordmark is "ndb" in the brand letters. height is the height of the
+// drawing in px; the width follows.
+export const Wordmark: FC<{ height?: number }> = ({ height = 18 }) => (
+  <span class="logo-wordmark" style={`height:${height}px`}>
+    {raw(wordmark)}
+  </span>
 );

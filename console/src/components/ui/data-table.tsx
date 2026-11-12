@@ -7,6 +7,7 @@ export interface DataColumn {
   label: string;
   href?: string;
   sort?: 'asc' | 'desc';
+  align?: 'right';
 }
 
 export interface DataTableProps {
@@ -18,6 +19,8 @@ export interface DataTableProps {
   actions?: Child;
   footer?: Child;
   empty?: Child;
+  selectable?: boolean;
+  bulk?: Child;
   children?: Child;
 }
 
@@ -27,13 +30,18 @@ interface TableState {
 }
 
 const MIN_WIDTH = 64;
+const CHECK_WIDTH = 40;
 
 // DataTable is a table for many columns. The reader can hide columns in the
 // Columns menu and drag the edge of a header to change its width. The
 // browser keeps both choices for each id. A header with href is a sort
 // link. Each cell of a row must have data-col with the id of its column.
 // With empty, that content shows in place of the table and its menu.
-export const DataTable: FC<DataTableProps> = ({ id, label, columns, minWidth = 0, title, actions, footer, empty, children }) => {
+// With selectable, the table has a first column of checkboxes: the header
+// has "select all", and each row starts with a RowCheck. bulk is the bar of
+// actions on the selected rows; it shows only while a row is selected. The
+// text of an element with data-bulk-count is the number of selected rows.
+export const DataTable: FC<DataTableProps> = ({ id, label, columns, minWidth = 0, title, actions, footer, empty, selectable = false, bulk, children }) => {
   const style = minWidth > 0 ? `min-width:${minWidth}px` : undefined;
 
   return (
@@ -46,12 +54,20 @@ export const DataTable: FC<DataTableProps> = ({ id, label, columns, minWidth = 0
         {actions}
       </div>
 
+      {bulk && !empty && <div class="dtable-bulk">{bulk}</div>}
+
       {empty && <div class="dtable-empty">{empty}</div>}
 
       <div class="scroll" hidden={Boolean(empty)}>
         <table style={style} aria-label={label}>
           <thead>
             <tr>
+              {selectable && (
+                <th class="dtable-check">
+                  <input type="checkbox" data-select-all aria-label="Select all rows" />
+                </th>
+              )}
+
               {columns.map(column => (
                 <HeaderCell column={column} />
               ))}
@@ -67,12 +83,21 @@ export const DataTable: FC<DataTableProps> = ({ id, label, columns, minWidth = 0
   );
 };
 
+// RowCheck is the first cell of a row in a selectable table. form is the id
+// of the form of the bulk bar, which gets the checked values under name.
+export const RowCheck: FC<{ name: string; value: string; form: string; label: string }> = ({ name, value, form, label }) => (
+  <td class="dtable-check">
+    <input type="checkbox" name={name} value={value} form={form} aria-label={label} />
+  </td>
+);
+
 const HeaderCell: FC<{ column: DataColumn }> = ({ column }) => {
   const arrow = column.sort === 'asc' ? <Icon name="arrow-up" size={14} /> : column.sort === 'desc' ? <Icon name="arrow-down" size={14} /> : null;
   const sorted = column.sort === 'asc' ? 'ascending' : column.sort === 'desc' ? 'descending' : undefined;
+  const className = column.align === 'right' ? 'mono num' : 'mono';
 
   return (
-    <th class="mono" data-col={column.id} aria-sort={sorted}>
+    <th class={className} data-col={column.id} aria-sort={sorted}>
       {column.href ? (
         <a class="dtable-sort" href={column.href} title={`Sort by ${column.label}`}>
           {column.label}
@@ -149,7 +174,7 @@ function apply(host: HTMLElement, sheet: HTMLStyleElement, state: TableState): v
 
   table.classList.toggle('dtable-fixed', sized);
 
-  let total = 0;
+  let total = host.querySelector('th.dtable-check') ? CHECK_WIDTH : 0;
 
   for (const cell of headers(host)) {
     const width = state.widths[cell.dataset.col ?? ''];
@@ -172,6 +197,25 @@ function freeze(host: HTMLElement, state: TableState): void {
   }
 }
 
+function rowChecks(host: HTMLElement): HTMLInputElement[] {
+  return [...host.querySelectorAll<HTMLInputElement>('td.dtable-check input')];
+}
+
+// showSelection puts the number of selected rows in the bulk bar and sets
+// the "select all" box: checked for all rows, a dash for some of them.
+function showSelection(host: HTMLElement): void {
+  const boxes = rowChecks(host);
+  const count = boxes.filter(box => box.checked).length;
+  const all = host.querySelector<HTMLInputElement>('[data-select-all]');
+
+  if (all) {
+    all.checked = count > 0 && count === boxes.length;
+    all.indeterminate = count > 0 && count < boxes.length;
+  }
+
+  for (const label of host.querySelectorAll<HTMLElement>('[data-bulk-count]')) label.textContent = String(count);
+}
+
 function upgrade(host: HTMLElement): void {
   const key = `ndb-ui:table:${host.dataset.table}`;
   const sheet = document.createElement('style');
@@ -181,10 +225,24 @@ function upgrade(host: HTMLElement): void {
   document.head.append(sheet);
   apply(host, sheet, state);
 
+  if (host.querySelector('th.dtable-check')) showSelection(host);
+
   host.addEventListener('change', event => {
     const box = event.target;
 
-    if (!(box instanceof HTMLInputElement) || box.dataset.colToggle === undefined) return;
+    if (!(box instanceof HTMLInputElement)) return;
+
+    if (box.dataset.selectAll !== undefined) {
+      for (const row of rowChecks(host)) row.checked = box.checked;
+    }
+
+    if (box.closest('.dtable-check')) {
+      showSelection(host);
+
+      return;
+    }
+
+    if (box.dataset.colToggle === undefined) return;
 
     const column = box.dataset.colToggle;
 

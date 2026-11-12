@@ -18,6 +18,16 @@ export interface FindQuery {
   dir: 'asc' | 'desc';
   fields: string;
   limit: number;
+  per: string;
+  perLimit: number;
+}
+
+export interface Chip {
+  index: number;
+  field: string;
+  op: string;
+  value: string;
+  label: string;
 }
 
 export const OPERATORS: { id: string; label: string }[] = [
@@ -45,6 +55,23 @@ export const TYPES: { id: string; label: string }[] = [
 
 export const LIMITS = [25, 50, 100, 250];
 export const DEFAULT_LIMIT = 25;
+export const DEFAULT_PER_LIMIT = 5;
+
+// The short form of each operator, for the chip of a filter.
+const SYMBOLS: Record<string, string> = {
+  eq: '=',
+  ne: '≠',
+  gt: '>',
+  gte: '≥',
+  lt: '<',
+  lte: '≤',
+  in: 'in',
+  nin: 'not in',
+  prefix: 'begins with',
+  regex: 'matches',
+  exists: 'exists',
+  missing: 'does not exist',
+};
 
 const NO_VALUE = new Set(['exists', 'missing']);
 
@@ -67,6 +94,7 @@ export function readFind(params: URLSearchParams): FindQuery {
   const rows = fields.map((field, i) => ({ field, op: ops[i] ?? 'eq', type: types[i] ?? 'string', value: values[i] ?? '' }));
 
   const limit = Number(params.get('limit'));
+  const perLimit = Number(params.get('per_limit'));
 
   return {
     mode: params.get('mode') === 'json' ? 'json' : 'builder',
@@ -76,6 +104,8 @@ export function readFind(params: URLSearchParams): FindQuery {
     dir: params.get('dir') === 'asc' ? 'asc' : 'desc',
     fields: params.get('fields') ?? '',
     limit: LIMITS.includes(limit) ? limit : DEFAULT_LIMIT,
+    per: (params.get('per') ?? '').trim(),
+    perLimit: Number.isInteger(perLimit) && perLimit >= 1 ? perLimit : DEFAULT_PER_LIMIT,
   };
 }
 
@@ -105,7 +135,51 @@ export function findParams(query: FindQuery): URLSearchParams {
 
   if (query.limit !== DEFAULT_LIMIT) params.set('limit', String(query.limit));
 
+  if (query.per) params.set('per', query.per);
+
+  if (query.per && query.perLimit !== DEFAULT_PER_LIMIT) params.set('per_limit', String(query.perLimit));
+
   return params;
+}
+
+// chipsOf is the short text of each filter row that has a field, such as
+// "status in paid, new". index is the place of the row in rows.
+export function chipsOf(rows: FilterRow[]): Chip[] {
+  const chips: Chip[] = [];
+
+  rows.forEach((row, index) => {
+    const field = row.field.trim();
+
+    if (field === '') return;
+
+    const op = SYMBOLS[row.op] ?? row.op;
+    const value = chipValue(row);
+
+    chips.push({ index, field, op, value, label: [field, op, value].filter(Boolean).join(' ') });
+  });
+
+  return chips;
+}
+
+function chipValue(row: FilterRow): string {
+  if (!needsValue(row.op)) return '';
+
+  if (row.type === 'null') return 'null';
+
+  if (row.op === 'in' || row.op === 'nin') {
+    return row.value
+      .split(',')
+      .map(item => item.trim())
+      .join(', ');
+  }
+
+  return row.value;
+}
+
+// withoutRow is the same find query without one filter row. The link of the
+// × of a chip uses it.
+export function withoutRow(query: FindQuery, index: number): FindQuery {
+  return { ...query, rows: query.rows.filter((_, i) => i !== index) };
 }
 
 function typed(text: string, type: string): unknown {
@@ -183,7 +257,9 @@ function isOperators(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).every(key => key.startsWith('$'));
 }
 
-// searchBody is the body of POST /{coll}/_search for this find query.
+// searchBody is the body of POST /{coll}/_search for this find query. per
+// gives the first rows of each value, so it takes the place of limit: ndb
+// refuses the two together.
 export function searchBody(query: FindQuery, where: Record<string, unknown>): Record<string, unknown> {
   const body: Record<string, unknown> = { query: where };
 
@@ -195,6 +271,12 @@ export function searchBody(query: FindQuery, where: Record<string, unknown>): Re
     .filter(Boolean);
 
   if (fields.length > 0) body.fields = fields.includes('_id') ? fields : ['_id', ...fields];
+
+  if (query.per) {
+    body.per = { field: query.per, limit: query.perLimit };
+
+    return body;
+  }
 
   body.limit = query.limit;
 

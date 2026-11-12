@@ -8,13 +8,17 @@ import { type DiscoverOptions, DiscoverError, discover } from './discover';
 import { formatUptime } from './format';
 import { hostGuard, originGuard, parseAllowedHosts } from './guard';
 import { Ndb, NdbError, type Stats, target } from './ndb';
+import { metrics } from './operations';
 import { type Env, readPrefix } from './prefix';
 
 import { explorerRoutes } from '@/routes/explorer';
+import { aggregateRoutes } from '@/routes/aggregate';
 import { backupsRoutes } from '@/routes/backups';
 import { browserRoutes } from '@/routes/browser';
 import { pageOrigin, sameOrigin } from '@/routes/context';
 import { devtoolsRoutes } from '@/routes/devtools';
+import { operationsRoutes } from '@/routes/operations';
+import { streamsRoutes } from '@/routes/streams';
 import { watchRoutes } from '@/routes/watch';
 
 import type { Current } from '@/html/layout';
@@ -72,9 +76,10 @@ export function createApp(connections: Connections, assets: Assets, options: App
   async function status(connection: Connection): Promise<ConnectionStatus> {
     try {
       const ndb = client(connection);
-      const [, stats] = await Promise.all([ndb.health(), ndb.stats()]);
+      const [, stats, definitions] = await Promise.all([ndb.health(), ndb.stats(), ndb.collections().catch(() => undefined)]);
+      const streams = definitions?.filter(definition => (definition as { stream?: boolean }).stream).length;
 
-      return { connection, online: true, stats };
+      return { connection, online: true, stats, streams };
     } catch (error) {
       return { connection, online: false, error: message(error) };
     }
@@ -259,9 +264,29 @@ export function createApp(connections: Connections, assets: Assets, options: App
     const ndb = client(connection);
 
     try {
-      const [stats, size, definitions] = await Promise.all([ndb.stats(), ndb.size().catch(() => undefined), ndb.collections().catch(() => [])]);
+      const [stats, size, definitions, counters, pitr] = await Promise.all([
+        ndb.stats(),
+        ndb.size().catch(() => undefined),
+        ndb.collections().catch(() => []),
+        metrics(ndb),
+        ndb.pitr().catch(() => undefined),
+      ]);
 
-      return c.html(<OverviewPage current={currentOf(connection, stats)} stats={stats} size={size} definitions={definitions} />);
+      const updated = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      const tcpNoToken = !connection.url.startsWith('unix://') && !connection.token;
+
+      return c.html(
+        <OverviewPage
+          current={currentOf(connection, stats)}
+          stats={stats}
+          size={size}
+          definitions={definitions}
+          metrics={counters}
+          pitrWindow={pitr?.default}
+          updated={updated}
+          tcpNoToken={tcpNoToken}
+        />,
+      );
     } catch (error) {
       return c.html(<OfflinePage current={currentOf(connection)} message={message(error)} />, 502);
     }
@@ -274,6 +299,9 @@ export function createApp(connections: Connections, assets: Assets, options: App
   watchRoutes(app, deps);
   backupsRoutes(app, deps);
   explorerRoutes(app, deps);
+  aggregateRoutes(app, deps);
+  streamsRoutes(app, deps);
+  operationsRoutes(app, deps);
 
   return app;
 }

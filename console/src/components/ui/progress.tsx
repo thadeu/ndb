@@ -3,7 +3,7 @@ import type { FC } from 'hono/jsx';
 export interface Segment {
   label: string;
   value: number;
-  tone: 'ink' | 'pink' | 'gray';
+  tone: 'ink' | 'pink' | 'gray' | 'light';
 }
 
 // SegmentBar draws one bar split into parts. Each part has a legend entry.

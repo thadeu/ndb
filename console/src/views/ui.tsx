@@ -6,6 +6,8 @@ import { Badge, Dot } from '@/ui/badge';
 import { Button } from '@/ui/button';
 import { Card, CardHeader } from '@/ui/card';
 import { CodeBlock } from '@/ui/code-block';
+import { CodeEditor } from '@/ui/code-editor';
+import { Combobox } from '@/ui/combobox';
 import { DatePicker } from '@/ui/date-picker';
 import { Dialog, openDialog } from '@/ui/dialog';
 import { DataTable } from '@/ui/data-table';
@@ -14,15 +16,19 @@ import { Empty } from '@/ui/empty';
 import { Field } from '@/ui/field';
 import { Icon, type IconName } from '@/ui/icon';
 import { Input } from '@/ui/input';
+import { Menu, MenuButton, MenuItem } from '@/ui/menu';
 import { Pagination } from '@/ui/pagination';
 import { Popover, popoverTrigger } from '@/ui/popover';
 import { SegmentBar } from '@/ui/progress';
+import { NavTabs } from '@/ui/nav-tabs';
 import { Segmented } from '@/ui/segmented';
+import { SegmentedNav } from '@/ui/segmented-nav';
 import { Select } from '@/ui/select';
 import { Stat } from '@/ui/stat';
 import { Table } from '@/ui/table';
 import { Tabs } from '@/ui/tabs';
 import { Textarea } from '@/ui/textarea';
+import { ToggleGroup } from '@/ui/toggle-group';
 
 const Block: FC<{ title: string; children?: unknown }> = ({ title, children }) => (
   <section class="section">
@@ -48,6 +54,9 @@ export const UiPage: FC = () => (
       <Badge>neutral</Badge>
       <Badge tone="pink">direct</Badge>
       <Badge tone="ok">ok</Badge>
+      <Badge tone="warn">warn</Badge>
+      <Badge tone="bad">bad</Badge>
+      <Badge tone="ok" size="lg">Healthy</Badge>
       <Dot on />
       <Dot on={false} />
     </Block>
@@ -92,6 +101,16 @@ export const UiPage: FC = () => (
       <Textarea mono rows={3} placeholder="{}" aria-label="Demo JSON" />
     </Block>
 
+    <Block title="ToggleGroup">
+      <ToggleGroup
+        name="demo-level"
+        label="Demo level"
+        mono
+        value="info"
+        items={[{ id: 'debug', label: 'debug' }, { id: 'info', label: 'info' }, { id: 'warn', label: 'warn' }]}
+      />
+    </Block>
+
     <Block title="Segmented">
       <Segmented items={[{ id: 'tree', label: 'Tree' }, { id: 'json', label: 'JSON' }]} value="tree" label="Demo view" />
     </Block>
@@ -130,12 +149,32 @@ export const UiPage: FC = () => (
       </div>
     </Block>
 
+    <Block title="Menu">
+      <MenuButton menu="demo-menu">Actions</MenuButton>
+
+      <Menu id="demo-menu" label="Demo actions">
+        <MenuItem href="ui" description="A link, or the button of a form">
+          Rename
+        </MenuItem>
+
+        <MenuItem type="button" tone="danger" description="A dangerous action">
+          Drop
+        </MenuItem>
+      </Menu>
+    </Block>
+
     <Block title="Popover">
       <Button {...popoverTrigger('demo-pop')}>Open popover</Button>
 
       <Popover id="demo-pop" label="Demo">
         <p class="hint" style="padding:12px;margin:0">Below the trigger when it fits, above when not; inside the viewport.</p>
       </Popover>
+    </Block>
+
+    <Block title="SegmentedNav and NavTabs">
+      <SegmentedNav items={[{ id: 'chart', label: 'Chart', href: 'ui' }, { id: 'table', label: 'Table', href: 'ui' }]} value="chart" label="Demo result view" />
+
+      <NavTabs items={[{ id: 'pending', label: 'Pending (3)', href: 'ui' }, { id: 'entries', label: 'Entries', href: 'ui' }]} value="pending" label="Demo sections" />
     </Block>
 
     <Block title="Tabs">
@@ -149,7 +188,7 @@ export const UiPage: FC = () => (
     </Block>
 
     <Block title="Icon">
-      {(['refresh', 'plus', 'x', 'chevron-down', 'chevron-right', 'chevron-left', 'chevrons-left', 'arrow-left', 'arrow-up', 'arrow-down', 'columns', 'documents'] as IconName[]).map(name => (
+      {(['refresh', 'plus', 'x', 'chevron-down', 'chevron-right', 'chevron-left', 'chevrons-left', 'arrow-left', 'arrow-up', 'arrow-down', 'columns', 'documents', 'menu', 'search', 'star', 'chevrons-up-down', 'dashboard', 'database', 'streams', 'chart', 'eye', 'code', 'history', 'sliders'] as IconName[]).map(name => (
         <span class="badge" title={name}>
           <Icon name={name} />
         </span>
@@ -165,6 +204,31 @@ export const UiPage: FC = () => (
           { id: 'eq', label: 'Equal to' },
           { id: 'gte', label: 'Greater than or equal to' },
         ]}
+      />
+    </Block>
+
+    <Block title="Combobox">
+      <Combobox
+        id="demo-target"
+        mono
+        multiple
+        name="target"
+        value="orders"
+        aria-label="Collection, list or pattern"
+        options={[
+          { id: 'orders', hint: '1,204 documents' },
+          { id: 'orders-2026-11', hint: '310 documents' },
+          { id: 'jobs', hint: '12 documents', badge: 'stream' },
+        ]}
+      />
+    </Block>
+
+    <Block title="CodeEditor">
+      <CodeEditor
+        class="grow"
+        name="body"
+        label="Example of JSON"
+        value={'{\n  "_id": "$status",\n  "n": { "$count": {} },\n  "paid": true\n}'}
       />
     </Block>
 
