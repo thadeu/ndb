@@ -211,6 +211,7 @@ Call.where(status: "answered").pluck(:_id)         # one field: an array of valu
 Call.where(status: "answered").pluck(:_id, :status) # several: an array of arrays
 Call.where(status: "answered").first(5)
 Call.where(status: "failed").exists?
+Call.exists?("c1")                           # by id; exists?(status: "failed") takes conditions
 ```
 
 - Chained `where` calls are ANDed. See the [query language](https://github.com/thadeu/ndb/blob/main/docs/dev/query.md) for the full operator list.

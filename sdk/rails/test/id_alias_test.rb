@@ -27,6 +27,16 @@ class IdAliasTest < Minitest::Test
     assert_equal ["p2"], @post.where.not(id: "p1").pluck(:_id)
   end
 
+  def test_exists_takes_an_id_or_conditions
+    assert @post.exists?("p1")
+    refute @post.exists?("nope")
+    assert @post.exists?(status: "done")
+    assert @post.exists?(id: "p2")
+    refute @post.where(status: "open").exists?("p2")
+    refute @post.exists?(false)
+    assert @post.exists?
+  end
+
   def test_a_model_with_an_id_attribute_keeps_it
     legacy = model do
       attribute :id, :string, index: true

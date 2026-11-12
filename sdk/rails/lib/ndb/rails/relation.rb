@@ -277,7 +277,13 @@ module Ndb
       find_by(attrs, &block) || raise(NotFound.new("Couldn't find #{klass.name}", code: "not_found"))
     end
 
-    def exists?
+    # Like ActiveRecord: exists?, exists?("id") or exists?(status: "x").
+    # false or nil is false, with no request.
+    def exists?(conditions = :none)
+      return false if conditions.nil? || conditions == false
+      return where(conditions).exists? if conditions.is_a?(Hash)
+      return where(klass.primary_key => conditions).exists? unless conditions == :none
+
       fetch(to_query.slice("query").merge("limit" => 1, "fields" => [klass.primary_key])).rows.any?
     end
 
