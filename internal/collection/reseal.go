@@ -172,7 +172,7 @@ func (c *Collection) runReseal(st *resealState) {
 // resealAll reads every document that has a plain value in one of the
 // fields, page by page, and writes it again.
 func (c *Collection) resealAll(st *resealState) error {
-	body, err := json.Marshal(map[string]any{"query": plainWhere(st.fields), "limit": resealBatch, "versions": true, "sort": map[string]any{idField: 1}})
+	body, err := json.Marshal(map[string]any{"query": plainWhere(st.fields), "limit": resealBatch, "versions": true, "snapshot": true})
 	if err != nil {
 		return err
 	}
