@@ -11,7 +11,7 @@ One tag `vX.Y.Z` releases everything. Version 0.1.0 is used in all packages.
 | Images | `ghcr.io/thadeu/ndb`, `ghcr.io/thadeu/ndb-ui` (two jobs at the same time), then `ghcr.io/thadeu/ndb-stack` (built FROM the two images of the same version) | `ghcr.yml` |
 | Gems | `ndb` (pushed first), then `ndb-rails` (depends on it) | `publish.yml` (job `gems`) |
 | npm | `@thadeu/ndb` | `publish.yml` (job `npm`, at the same time as `gems`) |
-| Docs site | Cloudflare Pages (project `ndb-docs`, via wrangler) | `docs.yml` (only when the site changes; run it by hand to show a new version at once) |
+| Docs site | Cloudflare Pages (project `ndb-docs`, via wrangler) | `docs.yml` (when the site changes, and on each `v*` tag from `ci.yml` to show the new version) |
 
 **One run does it all.** `make tag` pushes `main` and the tag, and ends at once. CI (`ci.yml`) tests the release commit; when the tests pass and the commit has a tag `v*`, its last jobs call `release.yml`, `ghcr.yml` and `publish.yml` for that tag, at the same time, in the same run. A failed test publishes nothing. So the tests run once, a push to `main` with no tag runs only the tests, and only the console is tested in `release.yml` (CI does not test it). The run of a release commit is never cancelled by a newer push.
 

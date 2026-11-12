@@ -202,3 +202,14 @@ jobs:
       contents: read
       id-token: write
     secrets: inherit
+
+  docs:
+    needs: [tag]
+    if: needs.tag.outputs.tag != ''
+    uses: ./.github/workflows/docs.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    permissions:
+      contents: read
+      deployments: write
+    secrets: inherit
