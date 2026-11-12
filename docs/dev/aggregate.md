@@ -161,6 +161,8 @@ Notes:
 
 Missing and `null` are the same key. Groups come out sorted by `_id`.
 
+A path of a [blind field](encryption.md#group-by-a-blind-field) (`"$cpf"`) groups by the hash of its value, and each group gets the value back as its `_id` (plain with `?decrypt=1` and the right). Any other field of `encrypted` can only be in `$first` and `$last`.
+
 ## Accumulators
 
 | Accumulator | Result |

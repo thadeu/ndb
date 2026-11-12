@@ -10,6 +10,7 @@ export const llmsSummaries: Record<string, string> = {
   configuration: 'ndb.yml, the flags and env vars of ndb serve (listeners, tokens, logs), the defaults of a server and a user install, and the collection definition keys.',
   http: 'The HTTP API contract: rules, every route, transport, auth, request and answer shapes, consistency, retries, long requests, limits and versioning.',
   'http/errors': 'Every error code with its HTTP status and meaning, and the typed error of each SDK.',
+  encryption: 'Encrypted fields and blind indexes: encrypted and blind (exact, lower, upper, numeric) in the collection, find by value, unique, index and $group on an encrypted field, ?decrypt=1 and the decrypt right, encrypted() reads in the SDKs, the key, the cost and what to encrypt.',
   query: 'The query language: filters, write operators, sort, fields, pagination and cursors, date math, $elemMatch, collection patterns and lookup.',
   'http/queries': 'The routes _search, _count, _aggregate, _update_by_query and _delete_by_query: bodies, answers and errors.',
   aggregate: 'The aggregation pipeline: $match, $group and its accumulators, $sort, $project, $having, $dateTrunc, $lookup, limits.',

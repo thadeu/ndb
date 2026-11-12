@@ -453,3 +453,17 @@ func TestLookupOpensTheDocumentsOfTheSourceCollection(t *testing.T) {
 		t.Fatalf("a right on orders opened customers: %s", shop)
 	}
 }
+
+func TestBlindTypeChangeAndUnset(t *testing.T) {
+	_, h := newHandler(t)
+
+	expectStatus(t, call(h, "PUT", "/users", `{"blind":{"cpf":"numeric"}}`), http.StatusOK)
+	expectCode(t, call(h, "PUT", "/users", `{"blind":{"cpf":"exact"}}`), http.StatusConflict, "catalog_conflict")
+
+	call(h, "POST", "/users/_doc", `{"_id":"u1","cpf":"`+cpf+`"}`)
+	call(h, "POST", "/users/_update/u1", `{"update":{"$unset":{"cpf":""}}}`)
+
+	if rec := call(h, "POST", "/users/_count", `{"query":{"cpf":"`+cpf+`"}}`); !strings.Contains(rec.Body.String(), `"count":0`) {
+		t.Fatalf("an unset field still matches: %s", rec.Body.String())
+	}
+}

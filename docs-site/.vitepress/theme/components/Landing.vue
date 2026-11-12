@@ -327,6 +327,11 @@ const reasons: Reason[] = [
     text: 'Update and delete by query run in one atomic step: a guarded $inc never sells the last item twice.',
   },
   {
+    icon: 'lock',
+    title: 'Encrypted, and still found',
+    text: 'Mark a CPF or a card as blind: it is encrypted on disk, in backups and logs, and a filter, a unique key or a $group still finds it by value. No library in your app.',
+  },
+  {
     icon: 'bell',
     title: 'Changes as a stream',
     text: 'watch and ack give you an outbox consumer without Kafka or Redis.',

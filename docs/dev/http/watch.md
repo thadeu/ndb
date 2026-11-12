@@ -13,6 +13,8 @@ Opens a long-lived NDJSON stream: first the events after the last ack of the con
 | `limit` | int | 0 | close the stream after that many events; 0 is no limit |
 | `query` | object | none | send only the changes whose document matches, see [Filters](../query.md#filters) |
 
+`?decrypt=1` in the URL gives the `doc` of each event with the plain values of the [encrypted fields](../encryption.md#who-reads-the-plain-value), for a caller with the right.
+
 **Answer:** `200`, `Content-Type: application/x-ndjson`, one line per event:
 
 ```json

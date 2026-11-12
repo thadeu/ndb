@@ -37,3 +37,21 @@ class EncryptedScopeTest < Minitest::Test
     assert_equal "PRIVATE", secret.find("s1").value
   end
 end
+
+class BlindGroupTest < Minitest::Test
+  def test_group_by_a_blind_attribute_gives_the_values
+    order = model do
+      attribute :cpf, :string, blind: :numeric
+      attribute :total, :integer
+    end
+
+    order.create!(cpf: "390.533.447-05", total: 10)
+    order.create!(cpf: "39053344705", total: 5)
+    order.create!(cpf: "111.222.333-44", total: 7)
+
+    sums = order.group(:cpf).sum(:total)
+
+    assert_equal [5 + 10, 7], sums.values.sort.reverse
+    assert(sums.keys.all? { |k| k.is_a?(String) && !k.start_with?("ndb:") })
+  end
+end

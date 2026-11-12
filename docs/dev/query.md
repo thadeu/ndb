@@ -257,6 +257,8 @@ A **compound index** has 2 to 4 fields, written with commas: `"account_id,create
 
 On 300 000 documents of 300 accounts, `account_id = x and amount >= 100 and amount < 200` reads 1003 documents in 36 ms with an index of `account_id`, and 5 documents in 1 ms with `"account_id,amount"`.
 
+An [encrypted field](encryption.md) accepts only `$exists`. A **blind** field also accepts `$eq`, `$in`, `$ne` and `$nin`, and an index or a unique key on it: the daemon compares the hash of the value (`<field>_bidx`, the plan shows `index:cpf_bidx`). A range, `$regex` or a sort on an encrypted field is `invalid_query`.
+
 ### Regular expressions
 
 ```json

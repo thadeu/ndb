@@ -121,6 +121,8 @@ So the default makes a restore need nothing. To keep the key out of the files, g
 
 ## Encrypted fields
 
+The full guide, with the examples of each client, is [Encrypted fields](encryption.md). This part is the security view.
+
 A field in `encrypted` is not stored as you send it. Before the WAL, the daemon replaces its value with `"ndb:e1:k1:<base64url>"`: AES-256-GCM of its JSON (a string, a number or an object), with a random nonce. So the WAL, the segments, the backups and the logs never have the plain value.
 
 ```bash

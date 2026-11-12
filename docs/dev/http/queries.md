@@ -22,7 +22,7 @@ Finds documents. No `query` matches every document.
 | `explain` | bool | `false` | add `X-Ndb-Explain`, the plan counters |
 | `lookup` | object | none | documents of other collections for each row, see [Lookup](../query.md#lookup) |
 
-An unknown key is `invalid_query`.
+An unknown key is `invalid_query`. `?decrypt=1` in the URL gives the plain value of the [encrypted fields](../encryption.md#who-reads-the-plain-value) to a caller with the right; it works on `_search`, `_count`, `_aggregate` and the `doc` of the writes.
 
 **Answer:** the rows, a JSON array (or NDJSON with `Accept: application/x-ndjson`), and the page headers `X-Ndb-Next`, `X-Ndb-Total`, `X-Ndb-Plan`, `X-Ndb-Examined`, `X-Ndb-Took-Ms`, `X-Ndb-Explain`. See [Answers](../http.md#answers).
 

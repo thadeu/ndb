@@ -30,6 +30,7 @@ export const tabs: Tab[] = [
           { text: 'Storage', link: '/storage' },
           { text: 'WAL', link: '/wal' },
           { text: 'Concurrency', link: '/concurrency' },
+          { text: 'Encrypted fields', link: '/encryption' },
         ],
       },
       {
@@ -57,6 +58,7 @@ export const tabs: Tab[] = [
           { text: 'Regular expressions', link: '/query#regular-expressions' },
           { text: 'Date math', link: '/query#date-math' },
           { text: 'Array elements', link: '/query#array-elements' },
+          { text: 'Encrypted fields', link: '/encryption#find-unique-and-index' },
           { text: 'Collection patterns', link: '/http/queries#collection-patterns' },
           { text: 'Pagination', link: '/query#pagination' },
         ],

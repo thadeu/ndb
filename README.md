@@ -130,6 +130,7 @@ A hosted version is planned for later. See [docs/dev/ui.md](docs/dev/ui.md).
 - `watch` and `ack` for outbox-style consumers, with an optional `query` filter and `wal_retention` to trim the WAL.
 - Optional bearer token on the TCP listener (`-token-file`); the unix socket needs none.
 - Secondary and unique indexes, built in the background.
+- **Encrypted fields with native blind indexes**: `{"blind":{"cpf":"numeric"}}` keeps the CPF encrypted in the WAL, segments, backups and logs, and still finds it by value (`{"cpf":"390.533.447-05"}`), with `unique`, indexes and `$group`. Plain values only for a read with `?decrypt=1` and the `decrypt` right. No library in the app. See [Encrypted fields](docs/dev/encryption.md).
 - TTL per document, retention, compaction, and a blob store for large values.
 - Quarantine for bad lines in direct mode. Online backup. Prometheus `/_metrics`.
 - One static binary, one data directory.

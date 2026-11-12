@@ -120,7 +120,7 @@ In Go, a struct sends every field of `T`, so every field of `T` is set; fields o
 
 ## `GET /{coll}/_doc/{id}`
 
-The document with its `_v`. The answer has one `_v`, the version: a document stored with its own `_v` (before the write refused it) answers without that one, and the next update of the document removes it.
+The document with its `_v`. With `?decrypt=1` and the `decrypt` right, the [encrypted fields](../encryption.md#who-reads-the-plain-value) have their plain values; else `"ndb:e1:k1:..."`. The answer has one `_v`, the version: a document stored with its own `_v` (before the write refused it) answers without that one, and the next update of the document removes it.
 
 **Errors:** `404 not_found`. In direct mode, a document without `_id` is never found by id.
 
