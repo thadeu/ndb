@@ -13,6 +13,8 @@ export interface CollectionDefinition extends Definition {
   max_line_size?: number;
   blob_threshold?: number;
   ops_from_yaml?: boolean;
+  encrypted?: string[];
+  blind?: Record<string, string> | string[];
 }
 
 export type CollectionInfo = CollectionStats & { asleep?: boolean };
@@ -32,6 +34,8 @@ export interface IndexRow {
   serves: string;
   droppable: boolean;
   keyOnly: boolean;
+  index: string;
+  blind?: string;
 }
 
 export interface Request {
@@ -167,29 +171,218 @@ export function dropNotice(definition: Pick<Definition, 'unique'> | undefined, i
 
 // indexRows is the table of the Indexes tab: the _id index, each secondary
 // index, and each unique key. A unique key that is not also an index has no
-// build state and no drop route.
-export function indexRows(indexes: IndexState[], unique: string[] = []): IndexRow[] {
+// build state and no drop route. ndb names an index on a blind field cpf
+// cpf_bidx: the row shows cpf, with the mode of the blind field, and keeps
+// the name of ndb for the drop.
+export function indexRows(indexes: IndexState[], unique: string[] = [], blind: Record<string, string> = {}): IndexRow[] {
   const keys = new Set(unique);
   const names = new Set(indexes.map(index => index.field));
 
-  const builtIn: IndexRow = { fields: '_id', kind: 'built in', unique: true, state: 'ready', ready: true, serves: indexServes('_id'), droppable: false, keyOnly: false };
+  const builtIn: IndexRow = { fields: '_id', kind: 'built in', unique: true, state: 'ready', ready: true, serves: indexServes('_id'), droppable: false, keyOnly: false, index: '_id' };
 
-  const secondary = indexes.map(index => ({
-    fields: index.field,
-    kind: indexKind(index.field),
-    unique: keys.has(index.field),
-    state: indexState(index),
-    ready: index.state === 'ready',
-    serves: indexServes(index.field),
-    droppable: true,
-    keyOnly: false,
-  }));
+  const secondary = indexes.map(index => {
+    const shown = blindName(index.field, blind);
+    const unique = keys.has(index.field);
+
+    return {
+      fields: shown.fields,
+      kind: indexKind(shown.fields),
+      unique,
+      state: indexState(index),
+      ready: index.state === 'ready',
+      serves: shown.blind ? blindServes(shown.fields, unique) : indexServes(shown.fields),
+      droppable: true,
+      keyOnly: false,
+      index: index.field,
+      blind: shown.blind,
+    };
+  });
 
   const keysOnly = unique
     .filter(name => !names.has(name))
-    .map(name => ({ fields: name, kind: indexKind(name), unique: true, state: 'enforced', ready: true, serves: indexServes(name, true), droppable: false, keyOnly: true }));
+    .map(name => {
+      const shown = blindName(name, blind);
+
+      return {
+        fields: shown.fields,
+        kind: indexKind(shown.fields),
+        unique: true,
+        state: 'enforced',
+        ready: true,
+        serves: shown.blind ? blindServes(shown.fields, true) : indexServes(shown.fields, true),
+        droppable: false,
+        keyOnly: true,
+        index: name,
+        blind: shown.blind,
+      };
+    });
 
   return [builtIn, ...secondary, ...keysOnly];
+}
+
+export const BLIND_SUFFIX = '_bidx';
+
+// BLIND_MODES are the normalizations that ndb takes for a blind field.
+export const BLIND_MODES = ['exact', 'lower', 'numeric'] as const;
+
+export const BLIND_MODE_TEXT: Record<string, string> = {
+  exact: 'exact (the value as sent)',
+  lower: 'lower (lower case, such as an email)',
+  numeric: 'numeric (only the digits, such as a CPF)',
+};
+
+// EQUALITY_ONLY is what a filter on a blind field can do.
+export const EQUALITY_ONLY = 'equality only ($eq, $in, $ne, $nin)';
+
+// blindName turns the ndb name of an index (cpf_bidx, org,cpf_bidx) into
+// the fields of the user, and gives the blind modes in it.
+export function blindName(name: string, blind: Record<string, string>): { fields: string; blind?: string } {
+  const modes: string[] = [];
+
+  const fields = name.split(',').map(part => {
+    const field = part.endsWith(BLIND_SUFFIX) ? part.slice(0, -BLIND_SUFFIX.length) : '';
+    const mode = field ? blind[field] : undefined;
+
+    if (!mode) return part;
+
+    modes.push(mode);
+
+    return field;
+  });
+
+  return { fields: fields.join(','), blind: modes.length > 0 ? modes.join(', ') : undefined };
+}
+
+function blindServes(fields: string, unique: boolean): string {
+  return unique ? `one document for each ${fields}; ${EQUALITY_ONLY}` : EQUALITY_ONLY;
+}
+
+// blindOf reads the blind key of a definition: an object of field to mode,
+// or a list of exact fields.
+export function blindOf(definition?: Pick<CollectionDefinition, 'blind'>): Record<string, string> {
+  const blind = definition?.blind;
+
+  if (!blind) return {};
+
+  if (Array.isArray(blind)) return Object.fromEntries(blind.map(field => [field, 'exact']));
+
+  return { ...blind };
+}
+
+// encryptedOnly is the encrypted fields that are not blind: ndb finds them
+// only with $exists.
+export function encryptedOnly(definition?: Pick<CollectionDefinition, 'encrypted' | 'blind'>): string[] {
+  const blind = blindOf(definition);
+
+  return (definition?.encrypted ?? []).filter(field => !(field in blind));
+}
+
+export function hasEncryption(definition?: Pick<CollectionDefinition, 'encrypted' | 'blind'>): boolean {
+  return (definition?.encrypted ?? []).length > 0 || Object.keys(blindOf(definition)).length > 0;
+}
+
+// indexFieldsError is the reason ndb refuses an index or a unique key on
+// these fields: a field that is encrypted but not blind.
+export function indexFieldsError(fields: string[], definition?: Pick<CollectionDefinition, 'encrypted' | 'blind'>): string | undefined {
+  const sealed = encryptedOnly(definition);
+  const field = fields.find(item => sealed.includes(item));
+
+  if (!field) return undefined;
+
+  return `${field} is encrypted, not blind. Only a blind field can be found by value, so only a blind field can have an index or a unique key.`;
+}
+
+export interface EncryptionDraft {
+  encrypted: string[];
+  blind: Record<string, string>;
+}
+
+type EncryptionTarget = Pick<CollectionDefinition, 'time' | 'expires_field' | 'write' | 'stream' | 'indexes' | 'unique'>;
+
+// encryptionError is the reason ndb refuses these encrypted and blind
+// fields on a collection, or undefined when it takes them.
+export function encryptionError(draft: EncryptionDraft, target: EncryptionTarget): string | undefined {
+  const blind = Object.keys(draft.blind);
+  const all = [...new Set([...draft.encrypted, ...blind])];
+
+  if (all.length === 0) return undefined;
+
+  if (target.stream) return 'A stream has no encrypted fields.';
+
+  if (target.write === 'direct') return 'Encrypted fields need engine mode. In direct mode the app writes the files, so ndb cannot encrypt them first.';
+
+  for (const [field, mode] of Object.entries(draft.blind)) {
+    if (!(BLIND_MODES as readonly string[]).includes(mode)) return `The mode of the blind field ${field} must be ${BLIND_MODES.join(', ')}.`;
+  }
+
+  const indexed = new Set([...(target.indexes ?? []), ...(target.unique ?? [])].flatMap(name => name.split(',')));
+
+  for (const field of all) {
+    if (/[.$,\s]/.test(field)) return `${field} is not a top-level field. Only a top-level field can be encrypted.`;
+
+    if (field === '_id') return '_id cannot be encrypted: ndb reads it.';
+
+    if (field === target.time) return `${field} is the time field. ndb reads it, so it cannot be encrypted.`;
+
+    if (field === target.expires_field) return `${field} is the expires_field. ndb reads it, so it cannot be encrypted.`;
+
+    if (indexed.has(field) && !blind.includes(field)) return `${field} has an index or a unique key. Make it a blind field, not only encrypted.`;
+  }
+
+  return undefined;
+}
+
+// encryptionDraft reads the encrypted and blind fields of a form: the text
+// of encrypted, and the rows blind_field_N with blind_mode_N.
+export function encryptionDraft(form: Record<string, unknown>): EncryptionDraft {
+  const blind: Record<string, string> = {};
+
+  for (const [key, value] of Object.entries(form)) {
+    const row = /^blind_field_(\d+)$/.exec(key);
+    const field = String(value ?? '').trim();
+
+    if (!row || !field) continue;
+
+    blind[field] = String(form[`blind_mode_${row[1]}`] ?? 'exact').trim() || 'exact';
+  }
+
+  const encrypted = parseFields(String(form.encrypted ?? '')).filter(field => !(field in blind));
+
+  return { encrypted, blind };
+}
+
+// fieldNames lists the fields that the index picker offers: the top-level
+// fields of a sample of documents and one level of their objects, and the
+// fields of the definition.
+export function fieldNames(rows: Record<string, unknown>[], definition?: CollectionDefinition): string[] {
+  const names = new Set<string>();
+
+  for (const row of rows) {
+    for (const [key, value] of Object.entries(row)) {
+      if (key === '_id' || key === '_v' || key.endsWith(BLIND_SUFFIX)) continue;
+
+      names.add(key);
+
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        for (const inner of Object.keys(value)) names.add(`${key}.${inner}`);
+      }
+    }
+  }
+
+  const blind = blindOf(definition);
+  const indexed = [...(definition?.indexes ?? []), ...(definition?.unique ?? [])].flatMap(name => blindName(name, blind).fields.split(','));
+
+  for (const field of [...(definition?.encrypted ?? []), ...Object.keys(blind), ...indexed]) names.add(field);
+
+  if (definition?.time) names.add(definition.time);
+
+  return [...names].filter(name => name !== '_id').sort();
+}
+
+// reencryptBody is the update that docs/dev/encryption.md gives to write
+// every document again, so ndb encrypts the fields that were added later.
+export function reencryptBody(day: string): Record<string, unknown> {
+  return { query: { _id: { $exists: true } }, update: { $set: { encrypted_at: day } } };
 }
 
 // planText turns the X-Ndb-Plan header (index:status, scan) into words.
@@ -222,6 +415,12 @@ export function definitionBody(form: Record<string, unknown>): Record<string, un
 
     if (values.length > 0) body[key] = values;
   }
+
+  const draft = encryptionDraft(form);
+
+  if (draft.encrypted.length > 0) body.encrypted = draft.encrypted;
+
+  if (Object.keys(draft.blind).length > 0) body.blind = draft.blind;
 
   return body;
 }
@@ -262,6 +461,10 @@ export function ensureIndex(ndb: Ndb, collection: string, fields: string[], uniq
   if (request.body) return putDefinition(ndb, collection, request.body);
 
   return ndb.call('PUT', path(collection, `/_indexes/${fields.map(encodeURIComponent).join(',')}`));
+}
+
+export function reencrypt(ndb: Ndb, collection: string, day: string): Promise<{ modified?: number }> {
+  return ndb.call('POST', path(collection, '/_update_by_query'), reencryptBody(day), 600_000);
 }
 
 export function dropIndex(ndb: Ndb, collection: string, name: string): Promise<unknown> {

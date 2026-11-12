@@ -1,6 +1,5 @@
 import type { Hono } from 'hono';
 
-import { DEMO_COLLECTION, DEMO_STREAM } from '@/components/devtools-examples';
 import { NdbError, target } from '@/ndb';
 import type { Env } from '@/prefix';
 import { DevtoolsPage } from '@/views/devtools';
@@ -108,7 +107,7 @@ export function devtoolsRoutes(app: Hono<Env>, deps: RouteDeps): void {
 
     try {
       const stats = await deps.client(connection).stats();
-      const first = stats.collections.find(item => item.name !== DEMO_COLLECTION && item.name !== DEMO_STREAM);
+      const first = stats.collections.find(item => !item.name.startsWith('devtools_'));
 
       const names = stats.collections.map(item => item.name);
 

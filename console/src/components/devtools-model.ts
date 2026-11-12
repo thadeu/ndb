@@ -323,6 +323,7 @@ export function clampSplit(percent: number): number {
 // part: autocomplete
 
 // The routes of docs/dev/http.md. {coll} and {s} take the collection names.
+// The reads with ?decrypt=1 ask for the plain values of encrypted fields.
 export const ROUTES: [string, string][] = [
   ['GET', '/_health'],
   ['GET', '/_metrics'],
@@ -335,6 +336,8 @@ export const ROUTES: [string, string][] = [
   ['GET', '/_blobs/{ref}'],
   ['GET', '/_log'],
   ['PUT', '/_log'],
+  ['GET', '/_cluster/settings'],
+  ['PUT', '/_cluster/settings'],
   ['PUT', '/{coll}'],
   ['GET', '/{coll}'],
   ['DELETE', '/{coll}?confirm={coll}'],
@@ -350,6 +353,7 @@ export const ROUTES: [string, string][] = [
   ['POST', '/{coll}/_doc'],
   ['POST', '/{coll}/_bulk'],
   ['GET', '/{coll}/_doc/{id}'],
+  ['GET', '/{coll}/_doc/{id}?decrypt=1'],
   ['DELETE', '/{coll}/_doc/{id}'],
   ['POST', '/{coll}/_update/{id}'],
   ['POST', '/{coll}/_expire/{id}'],
@@ -363,6 +367,9 @@ export const ROUTES: [string, string][] = [
   ['POST', '/{coll}/_search'],
   ['POST', '/{coll}/_count'],
   ['POST', '/{coll}/_aggregate'],
+  ['POST', '/{coll}/_search?decrypt=1'],
+  ['POST', '/{coll}/_count?decrypt=1'],
+  ['POST', '/{coll}/_aggregate?decrypt=1'],
   ['POST', '/{coll}/_update_by_query'],
   ['POST', '/{coll}/_delete_by_query'],
   ['POST', '/{coll}/_ack'],

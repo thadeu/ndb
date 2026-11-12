@@ -66,7 +66,7 @@ function paint(host: HTMLElement, select: HTMLSelectElement): void {
   });
 }
 
-function upgrade(host: HTMLElement): void {
+export function upgrade(host: HTMLElement): void {
   const select = host.querySelector('select');
 
   if (!select || host.querySelector('.dd-button')) return;

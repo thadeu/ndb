@@ -9,14 +9,19 @@ import {
   dropIndex,
   dropNotice,
   dropRefusal,
+  encryptionDraft,
+  encryptionError,
   ensureIndex,
   explain as runExplain,
+  fieldNames,
   fieldsError,
+  indexFieldsError,
   isPattern,
   matchPattern,
   parseFields,
   putDefinition,
   quarantine as loadQuarantine,
+  reencrypt,
   truncate,
 } from '@/collections';
 import type { RestoreDraft } from '@/components/restore-form';
@@ -109,6 +114,10 @@ export function explorerRoutes(app: Hono<Env>, deps: RouteDeps): void {
       }
 
       const documents = tab === 'documents' && coll ? await loadDocuments(client, stats, coll, new URL(c.req.url).searchParams, deps.message) : undefined;
+      const definition = definitions.find(item => item.name === coll);
+      const sample = tab === 'indexes' && coll ? await client.search(coll, { limit: 20 }).then(result => result.rows).catch(() => []) : [];
+      const fields = tab === 'indexes' && coll ? fieldNames(sample, definition) : undefined;
+
       const explain = tab === 'indexes' && coll && query.filter ? await explainFilter(client, coll, query.filter) : undefined;
 
       const bad = tab === 'storage' && coll && selected.write === 'direct' && selected.quarantined > 0;
@@ -127,6 +136,8 @@ export function explorerRoutes(app: Hono<Env>, deps: RouteDeps): void {
           pitr={window}
           documents={documents}
           explain={explain}
+          fields={fields}
+          reencrypt={q.reencrypt === '1'}
           quarantine={quarantine}
           updated={updated}
           restore={restore}
@@ -165,7 +176,12 @@ export function explorerRoutes(app: Hono<Env>, deps: RouteDeps): void {
 
       if (known.some(item => item.name === name)) return backTo(c, connection.name, { dialog: 'new', error: `The collection ${name} exists.` });
 
-      await putDefinition(client, name, definitionBody(form));
+      const body = definitionBody(form);
+      const refused = encryptionError(encryptionDraft(form), body);
+
+      if (refused) return backTo(c, connection.name, { dialog: 'new', error: refused });
+
+      await putDefinition(client, name, body);
 
       return backTo(c, connection.name, { coll: name, notice: `The collection ${name} is ready.` });
     } catch (error) {
@@ -176,12 +192,34 @@ export function explorerRoutes(app: Hono<Env>, deps: RouteDeps): void {
   action('definition', async (c, { connection, client, form, coll, tab }) => {
     try {
       const { write: _write, path: _path, indexes: _indexes, unique: _unique, ...body } = definitionBody(form);
+      const draft = encryptionDraft(form);
+      const definition = (await loadDefinitions(client)).find(item => item.name === coll);
+      const refused = definition ? encryptionError(draft, { ...definition, ...body }) : undefined;
+
+      if (refused) return backTo(c, connection.name, { coll, tab, dialog: 'edit', error: refused });
 
       await putDefinition(client, coll, body);
+
+      const added = draft.encrypted.length > 0 || Object.keys(draft.blind).length > 0;
+
+      if (added) return backTo(c, connection.name, { coll, tab: 'overview', reencrypt: '1', notice: 'The definition is saved. ndb encrypts the new fields from the next write of each document.' });
 
       return backTo(c, connection.name, { coll, tab, notice: 'The definition is saved.' });
     } catch (error) {
       return backTo(c, connection.name, { coll, tab, dialog: 'edit', error: reason(error, 'ndb did not save the definition.') });
+    }
+  });
+
+  action('reencrypt', async (c, { connection, client, coll }) => {
+    const day = new Date().toISOString().slice(0, 10);
+
+    try {
+      const result = await reencrypt(client, coll, day);
+      const count = typeof result.modified === 'number' ? `${result.modified} documents` : 'Every document';
+
+      return backTo(c, connection.name, { coll, notice: `${count} written again with encrypted_at ${day}. Their encrypted fields are now encrypted.` });
+    } catch (error) {
+      return backTo(c, connection.name, { coll, reencrypt: '1', error: reason(error, 'ndb did not write the documents again.') });
     }
   });
 
@@ -237,6 +275,11 @@ export function explorerRoutes(app: Hono<Env>, deps: RouteDeps): void {
     if (invalid) return backTo(c, connection.name, { coll, tab: 'indexes', error: invalid });
 
     try {
+      const definition = (await loadDefinitions(client)).find(item => item.name === coll);
+      const sealed = indexFieldsError(fields, definition);
+
+      if (sealed) return backTo(c, connection.name, { coll, tab: 'indexes', error: sealed });
+
       await ensureIndex(client, coll, fields, unique);
 
       const name = fields.join(',');

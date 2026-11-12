@@ -21,6 +21,7 @@ import { Pagination } from '@/ui/pagination';
 import { Popover, popoverTrigger } from '@/ui/popover';
 import { SegmentBar } from '@/ui/progress';
 import { NavTabs } from '@/ui/nav-tabs';
+import { Sealed } from '@/ui/sealed';
 import { Segmented } from '@/ui/segmented';
 import { SegmentedNav } from '@/ui/segmented-nav';
 import { Select } from '@/ui/select';
@@ -48,6 +49,10 @@ export const UiPage: FC = () => (
       <Button variant="ghost">Ghost</Button>
       <Button variant="destructive">Destructive</Button>
       <Button size="sm">Small</Button>
+    </Block>
+
+    <Block title="Sealed">
+      <Sealed />
     </Block>
 
     <Block title="Badge and Dot">

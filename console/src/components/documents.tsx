@@ -3,7 +3,8 @@ import type { FC } from 'hono/jsx';
 import type { Current } from '@/html/layout';
 import { DocFacts } from '@/components/document-facts';
 import { StaticTree } from '@/components/json-tree';
-import { byteSize, maskSealed } from '@/components/json-model';
+import { byteSize, isSealed, maskSealed } from '@/components/json-model';
+import { allowedOps, DOCS_URL, maskDoc, sealedNames, sealHint, type Sealing, NO_SEALING } from '@/components/sealed-model';
 import { cellText, columnsOf, type FilterRow, type FindQuery, findParams, DEFAULT_LIMIT, DEFAULT_PER_LIMIT, LIMITS, needsValue, OPERATORS } from '@/components/filter-model';
 import { heldLock, lockKey } from '@/locks';
 import type { CollectionStats, Doc } from '@/ndb';
@@ -18,6 +19,7 @@ import { Code } from '@/ui/code';
 import { Icon } from '@/ui/icon';
 import { Input, noSpelling } from '@/ui/input';
 import { Pagination } from '@/ui/pagination';
+import { Sealed } from '@/ui/sealed';
 import { Select } from '@/ui/select';
 import { Textarea } from '@/ui/textarea';
 import { ToggleGroup } from '@/ui/toggle-group';
@@ -43,6 +45,7 @@ export interface DocumentsProps {
   insertOpen?: boolean;
   insertError?: string;
   findOpen?: boolean;
+  sealing?: Sealing;
 }
 
 export interface DocsLink {
@@ -117,14 +120,23 @@ function base(current: Current): string {
   return `c/${encodeURIComponent(current.name)}`;
 }
 
-const FilterRowFields: FC<{ row: FilterRow; index: number; only: boolean }> = ({ row, index, only }) => {
+// opsOf lists the conditions of a row: all of them, or only the ones that
+// an encrypted field allows.
+function opsOf(field: string, sealing: Sealing): { id: string; label: string }[] {
+  const allowed = allowedOps(field, sealing);
+
+  return allowed ? OPERATORS.filter(item => allowed.includes(item.id)) : OPERATORS;
+}
+
+const FilterRowFields: FC<{ row: FilterRow; index: number; only: boolean; sealing: Sealing }> = ({ row, index, only, sealing }) => {
   const hint = needsValue(row.op) ? 'Value, such as paid or 10' : 'No value';
+  const sealText = sealHint(row.field, sealing);
 
   return (
     <div class="find-row" data-row={String(index)}>
       <Input mono name="f" value={row.field} placeholder="Field, such as status" aria-label="Field name" />
 
-      <Select name="op" value={row.op} options={OPERATORS} aria-label="Condition" />
+      <Select name="op" value={row.op} options={opsOf(row.field, sealing)} aria-label="Condition" />
 
       <input type="hidden" name="t" value={row.type} />
 
@@ -145,14 +157,18 @@ const FilterRowFields: FC<{ row: FilterRow; index: number; only: boolean }> = ({
           <Icon name="x" />
         </Button>
       )}
+
+      <p class="hint find-row-hint" data-seal-hint hidden={!sealText}>
+        {sealText}
+      </p>
     </div>
   );
 };
 
-const FilterRows: FC<{ rows: FilterRow[] }> = ({ rows }) => (
+const FilterRows: FC<{ rows: FilterRow[]; sealing: Sealing }> = ({ rows, sealing }) => (
   <div class="find-rows">
     {rows.map((row, index) => (
-      <FilterRowFields row={row} index={index} only={rows.length === 1} />
+      <FilterRowFields row={row} index={index} only={rows.length === 1} sealing={sealing} />
     ))}
 
     <div class="find-rows-foot">
@@ -231,8 +247,15 @@ const RequestPanel: FC<{ coll: string; body: Record<string, unknown> }> = ({ col
 // per, then the request that a run sends, Reset and Run. Every part is
 // always in view, and plain CSS switches the mode, so it works without the
 // script.
-const FindBar: FC<DocumentsProps> = ({ current, coll, find, body, whereError }) => (
-  <form class="find" method="get" action={`${base(current)}/explorer`} aria-label="Find documents" data-find-form>
+const FindBar: FC<DocumentsProps> = ({ current, coll, find, body, whereError, sealing = NO_SEALING }) => (
+  <form
+    class="find"
+    method="get"
+    action={`${base(current)}/explorer`}
+    aria-label="Find documents"
+    data-find-form
+    data-sealing={JSON.stringify(sealing)}
+  >
     <input type="hidden" name="coll" value={coll} />
     <input type="hidden" name="tab" value="documents" />
     <input type="hidden" name="limit" value={String(find.limit)} />
@@ -243,7 +266,7 @@ const FindBar: FC<DocumentsProps> = ({ current, coll, find, body, whereError }) 
       <ToggleGroup name="mode" label="Filter mode" items={MODES} value={find.mode} />
     </div>
 
-    <FilterRows rows={find.rows} />
+    <FilterRows rows={find.rows} sealing={sealing} />
 
     <JsonFilter json={find.json} />
 
@@ -405,19 +428,22 @@ const Results: FC<DocumentsProps & { writable: boolean }> = props => {
 const ResultRow: FC<{ current: Current; coll: string; find: FindQuery; trail: string[]; doc: Doc; columns: string[]; on: boolean; selectable: boolean }> = ({ current, coll, find, trail, doc, columns, on, selectable }) => {
   const docId = String(doc._id);
   const href = docsHref(current.name, coll, find, { trail, id: docId });
+  const masked = maskSealed(doc);
 
   return (
     <tr class={on ? 'find-row-on' : undefined} data-doc-href={href}>
       {selectable && <RowCheck name="ids" value={docId} form={BULK_FORM} label={`Select ${cellText(doc._id, 40)}`} />}
 
       {columns.map(column => (
-        <td class="mono" data-col={column} title={column === '_id' ? undefined : cellText(doc[column], 400)}>
+        <td class="mono" data-col={column} title={column === '_id' ? undefined : cellText(masked[column], 400)}>
           {column === '_id' ? (
             <a class="strong" href={href} data-doc-link>
               {cellText(doc._id, 40)}
             </a>
+          ) : isSealed(doc[column]) ? (
+            <Sealed />
           ) : (
-            cellText(maskSealed(doc)[column])
+            cellText(masked[column])
           )}
         </td>
       ))}
@@ -512,19 +538,20 @@ const DocumentPane: FC<PaneProps> = ({ current, coll, find, id: wanted, doc: fou
     );
   }
 
-  const doc = { _id: found._id, _v: found._v, ...found };
+  const masked = maskDoc(found);
+  const doc = { _id: found._id, _v: found._v, ...masked.doc };
   const id = String(doc._id);
   const query = findParams(find).toString();
   const lock = heldLock(lockKey(current.url, coll, id));
 
-  const urls = { saveUrl: `${base(current)}/browser/save`, lockUrl: `${base(current)}/browser/lock`, unlockUrl: `${base(current)}/browser/unlock`, deleteUrl: `${base(current)}/browser/delete` };
-  const props = { coll, id, doc, ...urls, find: query, lockedUntil: lock?.until, writable, reason, notice, problem };
+  const urls = { showUrl: `${base(current)}/browser/show`, saveUrl: `${base(current)}/browser/save`, lockUrl: `${base(current)}/browser/lock`, unlockUrl: `${base(current)}/browser/unlock`, deleteUrl: `${base(current)}/browser/delete` };
+  const props = { coll, id, doc, sealed: masked.sealed, ...urls, find: query, lockedUntil: lock?.until, writable, reason, notice, problem };
   const ask = confirm({ title: 'Delete this document?', body: `${id} is removed from ${coll}. A watch consumer sees a del event.`, action: 'Delete' });
 
   return (
     <div id="doc-editor" class="doc-editor" data-props={JSON.stringify(props)}>
       <section class="doc-fields" aria-label="Fields">
-        <StaticTree value={doc} />
+        <StaticTree value={doc} sealed={masked.sealed} />
       </section>
 
       <div class="doc-side">
@@ -601,6 +628,29 @@ const DocListItem: FC<{ doc: Doc; href: string; on: boolean }> = ({ doc, href, o
   );
 };
 
+// SealBanner tells that the collection has encrypted fields, and how to
+// read one.
+const SealBanner: FC<{ sealing: Sealing }> = ({ sealing }) => {
+  const count = sealedNames(sealing).length;
+
+  if (count === 0) return null;
+
+  const lead = count === 1 ? '1 field is encrypted.' : `${count} fields are encrypted.`;
+
+  return (
+    <p class="seal-banner" role="note">
+      <Sealed title={sealedNames(sealing).join(', ')} />
+
+      <span>
+        {lead} Values show as encrypted; use Show to read one.{' '}
+        <a href={DOCS_URL} target="_blank" rel="noopener noreferrer">
+          Encrypted fields
+        </a>
+      </span>
+    </p>
+  );
+};
+
 // Documents is the Documents tab of the Explorer: the find bar with its
 // request, the results table with the bulk actions, and the selected
 // document in a drawer that comes up from the bottom, with the editor
@@ -620,6 +670,8 @@ export const Documents: FC<DocumentsProps> = props => {
 
   return (
     <>
+      <SealBanner sealing={props.sealing ?? NO_SEALING} />
+
       <FindBar {...props} />
 
       {direct && (

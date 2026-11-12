@@ -1,7 +1,7 @@
 import { raw } from 'hono/html';
 import type { FC } from 'hono/jsx';
 
-import { type Stage, STAGES, aggregatePath, cellText, chartOf, columnsOf, formatBody, formatPipeline, moveStage, requestBody, whatOf } from '@/aggregate';
+import { type Stage, STAGES, aggregatePath, cellText, chartOf, columnsOf, formatBody, formatPipeline, maskDeep, moveStage, requestBody, whatOf } from '@/aggregate';
 import { buildCurl } from '@/components/curl';
 import { Layout, type Current } from '@/html/layout';
 import type { Doc } from '@/ndb';
@@ -30,6 +30,8 @@ export interface AggregateResult {
   examined?: number;
   ms: number;
   counts: (number | undefined)[];
+  // sealed says that some values of the rows are still encrypted.
+  sealed?: boolean;
 }
 
 export interface AggregatePageProps {
@@ -38,6 +40,7 @@ export interface AggregatePageProps {
   text: string;
   stages?: Stage[];
   view: AggregateView;
+  decrypt?: boolean;
   result?: AggregateResult;
   error?: string;
   curl: { socket?: string; base?: string };
@@ -57,6 +60,7 @@ export interface AggregateQuery {
   pipeline: string;
   view?: AggregateView;
   run?: boolean;
+  decrypt?: boolean;
 }
 
 export function aggregateHref(name: string, query: AggregateQuery): string {
@@ -64,6 +68,7 @@ export function aggregateHref(name: string, query: AggregateQuery): string {
 
   if (query.view && query.view !== 'chart') params.set('view', query.view);
   if (query.run) params.set('run', '1');
+  if (query.decrypt) params.set('decrypt', '1');
 
   return `c/${encodeURIComponent(name)}/aggregate?${params}`;
 }
@@ -204,14 +209,28 @@ const RowsTable: FC<{ rows: Doc[] }> = ({ rows }) => {
 
 interface ResultCardProps {
   result?: AggregateResult;
+  decrypt: boolean;
   error?: string;
   view: AggregateView;
   hrefOf: (view: AggregateView) => string;
 }
 
-const ResultCard: FC<ResultCardProps> = ({ result, error, view, hrefOf }) => {
+// sealedNote says why values show as [encrypted], or nothing when no value
+// came back encrypted.
+function sealedNote(result: AggregateResult | undefined, decrypt: boolean): string | undefined {
+  if (!result?.sealed) return undefined;
+
+  if (decrypt) return 'This connection cannot decrypt these values.';
+
+  return 'Encrypted values show as [encrypted]. Select Decrypt to ask for the plain values.';
+}
+
+const ResultCard: FC<ResultCardProps> = ({ result, decrypt, error, view, hrefOf }) => {
   const views = (['chart', 'table', 'json'] as const).map(id => ({ id, label: id === 'json' ? 'JSON' : id === 'chart' ? 'Chart' : 'Table', href: hrefOf(id) }));
   const count = result ? (result.total ?? result.rows.length) : 0;
+  const rows = result ? (maskDeep(result.rows) as Doc[]) : [];
+  const sealed = sealedNote(result, decrypt);
+
   const facts = result ? [`${count.toLocaleString('en-US')} ${count === 1 ? 'group' : 'groups'}`, result.examined === undefined ? '' : `examined ${result.examined.toLocaleString('en-US')}`, `${result.ms} ms`].filter(Boolean).join(' · ') : '';
 
   return (
@@ -228,29 +247,38 @@ const ResultCard: FC<ResultCardProps> = ({ result, error, view, hrefOf }) => {
 
       {error && <p class="note bad">{error}</p>}
 
+      {sealed && (
+        <p
+          class={decrypt ? 'note bad' : 'hint'}
+          data-agg-sealed
+        >
+          {sealed}
+        </p>
+      )}
+
       {!result && !error && <Empty title="No result yet" description="Select Run to send the pipeline to ndb." />}
 
       {result && result.rows.length === 0 && <Empty title="No rows" description="The pipeline ran and gave no row." />}
 
-      {result && result.rows.length > 0 && view === 'chart' && <Bars rows={result.rows} />}
+      {rows.length > 0 && view === 'chart' && <Bars rows={rows} />}
 
-      {result && result.rows.length > 0 && view === 'table' && <RowsTable rows={result.rows} />}
+      {rows.length > 0 && view === 'table' && <RowsTable rows={rows} />}
 
-      {result && result.rows.length > 0 && view === 'json' && <CodeBlock code={JSON.stringify(result.rows, null, 2)} />}
+      {rows.length > 0 && view === 'json' && <CodeBlock code={JSON.stringify(rows, null, 2)} />}
 
       {result && count > result.rows.length && <p class="hint">The page shows the first {result.rows.length} rows of {count.toLocaleString('en-US')}.</p>}
     </Card>
   );
 };
 
-export const AggregatePage: FC<AggregatePageProps> = ({ current, on, text, stages, view, result, error, curl, targets = [], match }) => {
+export const AggregatePage: FC<AggregatePageProps> = ({ current, on, text, stages, view, decrypt = false, result, error, curl, targets = [], match }) => {
   const action = `c/${encodeURIComponent(current.name)}/aggregate`;
   const list = stages ?? [];
 
-  const hrefOf = (next: Stage[], run = false) => aggregateHref(current.name, { on, pipeline: formatPipeline(next), view, run });
-  const viewHref = (next: AggregateView) => aggregateHref(current.name, { on, pipeline: text, view: next, run: true });
+  const hrefOf = (next: Stage[], run = false) => aggregateHref(current.name, { on, pipeline: formatPipeline(next), view, run, decrypt });
+  const viewHref = (next: AggregateView) => aggregateHref(current.name, { on, pipeline: text, view: next, run: true, decrypt });
 
-  const path = aggregatePath(on);
+  const path = aggregatePath(on, decrypt);
   const body = stages ? requestBody(stages) : text;
   const curlLine = buildCurl({ method: 'POST', path, body, socket: curl.socket, base: curl.base });
 
@@ -304,6 +332,20 @@ export const AggregatePage: FC<AggregatePageProps> = ({ current, on, text, stage
             <Button type="button" hidden data-agg-saved-open {...openDialog('agg-saved')}>
               Saved pipelines
             </Button>
+
+            <label
+              class="check agg-decrypt"
+              title="Ask for the plain values of the encrypted fields (?decrypt=1)"
+            >
+              <input
+                type="checkbox"
+                name="decrypt"
+                value="1"
+                checked={decrypt}
+                data-agg-decrypt
+              />
+              <span>Decrypt</span>
+            </label>
 
             <Button variant="dark" type="submit">
               Run
@@ -368,7 +410,7 @@ export const AggregatePage: FC<AggregatePageProps> = ({ current, on, text, stage
           </section>
 
           <section class="agg-col" aria-label="Result">
-            <ResultCard result={result} error={error} view={view} hrefOf={viewHref} />
+            <ResultCard result={result} decrypt={decrypt} error={error} view={view} hrefOf={viewHref} />
 
             <Card class="agg-request">
               <div class="agg-request-head">
@@ -401,7 +443,7 @@ export const AggregatePage: FC<AggregatePageProps> = ({ current, on, text, stage
         <StageCard number={0} stage={{ op: '', body: {} }} removeHref={action} />
       </template>
 
-      <Dialog id="agg-saved" title="Saved pipelines" description="Kept in this browser only." closeHref={aggregateHref(current.name, { on, pipeline: text, view })}>
+      <Dialog id="agg-saved" title="Saved pipelines" description="Kept in this browser only." closeHref={aggregateHref(current.name, { on, pipeline: text, view, decrypt })}>
         <div class="stack">
           <ul class="agg-saved-list" data-agg-saved-list />
 

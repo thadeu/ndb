@@ -2,6 +2,7 @@
 // row count of each stage, and the chart data. The server and the browser
 // script both use it, so it imports nothing from the server.
 import { type KeyContext, operatorKeyAt } from '@/components/code-editor-model';
+import { isSealed } from '@/components/json-model';
 
 export interface Stage {
   op: string;
@@ -96,8 +97,35 @@ export function validTarget(target: string): boolean {
   return /^[^\s/?#%\\]+$/.test(target);
 }
 
-export function aggregatePath(target: string): string {
-  return `/${target.split(',').map(encodeURIComponent).join(',')}/_aggregate`;
+// aggregatePath is the path of the request. With decrypt, it asks for the
+// plain values of the encrypted fields (?decrypt=1 in the URL).
+export function aggregatePath(target: string, decrypt = false): string {
+  const path = `/${target.split(',').map(encodeURIComponent).join(',')}/_aggregate`;
+
+  return decrypt ? `${path}?decrypt=1` : path;
+}
+
+// hasSealed says if a value, at any depth, is a stored encrypted value.
+export function hasSealed(value: unknown): boolean {
+  if (isSealed(value)) return true;
+
+  if (Array.isArray(value)) return value.some(hasSealed);
+
+  if (value !== null && typeof value === 'object') return Object.values(value).some(hasSealed);
+
+  return false;
+}
+
+// maskDeep shows each stored encrypted value, at any depth, as "[encrypted]":
+// the page never shows the long ndb:e1: text.
+export function maskDeep(value: unknown): unknown {
+  if (isSealed(value)) return '[encrypted]';
+
+  if (Array.isArray(value)) return value.map(maskDeep);
+
+  if (value !== null && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, maskDeep(item)]));
+
+  return value;
 }
 
 export interface CountRequest {

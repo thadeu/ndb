@@ -2,6 +2,7 @@ import type { Context, Hono } from 'hono';
 
 import { buildWhere, emptyRow, type FindQuery, LIMITS, readFind, searchBody } from '@/components/filter-model';
 import { updateBody } from '@/components/json-model';
+import { checkRows, maskDoc, NO_SEALING, type Sealing, sealingOf, shownValue } from '@/components/sealed-model';
 import { dropLock, heldLock, keepLock, lockKey } from '@/locks';
 import { type Doc, type Ndb, NdbError, type SearchResult, type Stats, type UpdateResult } from '@/ndb';
 import type { Env } from '@/prefix';
@@ -143,6 +144,7 @@ function exportLines(ndb: Ndb, coll: string, body: Record<string, unknown>, firs
 export async function loadDocuments(ndb: Ndb, stats: Stats, coll: string, params: URLSearchParams, message: (error: unknown) => string): Promise<Omit<DocumentsProps, 'current'>> {
   const find = readFind(params);
   const remove = params.get('remove');
+  const known = stats.collections.some(item => item.name === coll);
 
   if (params.get('add')) find.rows.push(emptyRow());
 
@@ -150,16 +152,20 @@ export async function loadDocuments(ndb: Ndb, stats: Stats, coll: string, params
 
   if (find.rows.length === 0) find.rows.push(emptyRow());
 
+  let sealing: Sealing = NO_SEALING;
+
+  if (known) sealing = await ndb.collection(coll).then(answer => sealingOf(answer.definition), () => NO_SEALING);
+
   const built = whereOf(find);
   const where = built.where ?? {};
   const body = searchBody(find, where);
+  const sealError = find.mode === 'builder' ? checkRows(find.rows, sealing) : undefined;
   const trail = find.per ? [] : params.getAll('after').filter(Boolean);
   const after = trail.at(-1);
   const id = params.get('id') || undefined;
-  const known = stats.collections.some(item => item.name === coll);
 
   let found: SearchResult = { rows: [] };
-  let whereError = built.error;
+  let whereError = built.error ?? sealError;
 
   if (known && !whereError) {
     try {
@@ -200,6 +206,7 @@ export async function loadDocuments(ndb: Ndb, stats: Stats, coll: string, params
     insertOpen: params.get('insert') === '1',
     insertError: params.get('err') || undefined,
     findOpen: params.has('add') || remove !== null,
+    sealing,
   };
 }
 
@@ -252,7 +259,7 @@ export function browserRoutes(app: Hono<Env>, deps: RouteDeps): void {
 
       if (result.matched === 0) return c.json({ conflict: true, message: 'Somebody else changed this document; reload.' }, 409);
 
-      return c.json({ ok: true, doc: result.doc });
+      return c.json({ ok: true, doc: result.doc ? maskDoc(result.doc).doc : result.doc });
     } catch (error) {
       if (!lockEnded(error)) return c.json({ message: deps.message(error) }, 400);
 
@@ -260,6 +267,40 @@ export function browserRoutes(app: Hono<Env>, deps: RouteDeps): void {
 
       return c.json({ lockEnded: true, message: LOCK_ENDED }, 409);
     }
+  });
+
+  // The show route reads one document with ?decrypt=1 and answers only the
+  // plain value of one field, never stored. A value that comes back still
+  // sealed means the connection has no decrypt right on the collection.
+  app.post('/c/:name/browser/show', async c => {
+    const connection = connectionOf(deps, c);
+
+    if (!connection) return c.json({ message: 'Not found.' }, 404);
+
+    c.header('cache-control', 'no-store');
+
+    const form = await readForm(c, true);
+    const coll = String(form.coll ?? '');
+    const id = String(form.id ?? '');
+    const field = String(form.field ?? '');
+
+    if (coll === '' || id === '' || field === '') return c.json({ message: 'The show request is not valid.' }, 400);
+
+    let doc: Doc;
+
+    try {
+      doc = await deps.client(connection).call<Doc>('GET', `${docPath(coll, id, '_doc')}?decrypt=1`);
+    } catch (error) {
+      return c.json({ message: deps.message(error) }, 400);
+    }
+
+    const shown = shownValue(doc, field);
+
+    if (shown.missing) return c.json({ message: `The document has no field ${field}.` }, 404);
+
+    if (shown.denied) return c.json({ denied: true }, 403);
+
+    return c.json({ value: shown.value });
   });
 
   // The lock route takes the pessimistic lock of one document for 30 s. The

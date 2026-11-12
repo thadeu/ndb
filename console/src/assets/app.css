@@ -796,6 +796,18 @@ span.tcaret { cursor: default; }
 .ops-row-label { flex: 1 1 140px; font-weight: 500; }
 .ops-note { margin: 0; padding: 10px 12px; border-radius: var(--radius-field); background: var(--neutral-wash); font-size: 13px; }
 
+/* part: settings and encryption key */
+.ops-settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 20px; }
+.ops-settings-grid > div { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.ops-settings-title { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted-strong); }
+.ops-setting .ops-check-value { flex: 1 1 120px; }
+.ops-key-warn { display: flex; gap: 14px; align-items: flex-start; background: var(--amber-wash); border-color: var(--amber-wash); color: var(--amber); }
+.ops-key-icon { flex: none; display: flex; padding-top: 2px; }
+.ops-key-text { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ops-key-text p { margin: 0; font-size: 13px; color: var(--ink, inherit); overflow-wrap: anywhere; }
+.chip-link { display: inline-flex; text-decoration: none; }
+.agg-decrypt { height: 44px; padding: 0 4px; white-space: nowrap; }
+
 /* part: redesign A, narrow screens */
 @media (max-width: 640px) {
   .dash-title { font-size: 24px; }
@@ -838,6 +850,36 @@ span.tcaret { cursor: default; }
 .explorer-star.on { color: var(--pink); }
 .explorer-star.on .icon { fill: currentColor; }
 .explorer-item-link { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; min-height: 46px; padding-left: 4px; color: var(--ink); text-decoration: none; }
+
+/* part: encrypted fields in collections */
+.explorer-item-lock { display: inline-flex; flex: none; color: var(--pink-text); }
+.lock-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; background: var(--pink-wash); color: var(--pink-dark-text); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.index-kind { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+
+.encryption-fields { display: grid; gap: 12px; min-width: 0; margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+.encryption-fields legend { display: inline-flex; align-items: center; gap: 6px; padding: 0 4px; }
+.blind-rows { display: grid; gap: 8px; margin-bottom: 8px; }
+.blind-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 8px; }
+.index-preview[data-create-preview] { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.field-list { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.field-list-item { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; background: var(--neutral-wash); font-size: 13px; }
+
+.field-picks { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.field-pick { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--ink); font-size: 13px; cursor: pointer; }
+.field-pick:hover { background: var(--neutral-wash); }
+.field-pick.blind { border-color: var(--pink); }
+.field-pick.sealed { color: var(--muted); border-style: dashed; }
+.field-pick-mode { color: var(--muted); font-size: 12px; }
+
+.reencrypt-card { display: grid; gap: 12px; }
+.reencrypt-card .card-title { display: inline-flex; align-items: center; gap: 6px; }
+.reencrypt-card.on { border-color: var(--pink); }
+
+@media (max-width: 640px) {
+  .blind-row { grid-template-columns: 1fr; }
+  .field-pick { min-height: 44px; }
+}
 .explorer-item-name { flex: 1; min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .explorer-item.on .explorer-item-name { font-weight: 500; }
 .explorer-item-count { font-size: 12px; color: var(--muted); }
@@ -1342,3 +1384,20 @@ a.seg-item:hover { color: var(--ink); }
   .doc-drawer .tcaret { width: 28px; height: 44px; font-size: 13px; }
   .doc-drawer .ticon { width: 36px; height: 44px; }
 }
+
+/* part: encrypted values in documents (the pill, the shown value, the banner) */
+.sealed { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px 1px 6px; border-radius: 999px; background: var(--neutral-wash); color: var(--muted); font-family: inherit; font-size: 11px; font-weight: 500; line-height: 18px; white-space: nowrap; vertical-align: middle; }
+.sealed-lock { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+.tval-sealed { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 1 1 0; min-width: 0; white-space: normal; overflow: visible; max-width: none; }
+.trow:has(.tval-sealed) { flex-wrap: wrap; row-gap: 4px; min-width: 0; padding-top: 4px; padding-bottom: 4px; }
+.seal-actions { display: contents; }
+.seal-shown { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 1px 6px; border-radius: 6px; background: var(--amber-wash); color: var(--ink); font-size: 12px; word-break: break-all; }
+.seal-replace { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 6px 34px; }
+.seal-replace .tinput { flex: 1 1 160px; min-width: 0; }
+.seal-note { margin: 4px 0 0; }
+
+.seal-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--lead); font-size: 13px; }
+.seal-banner a { color: var(--pink-text); }
+
+.find-row-hint { grid-column: 1 / -1; margin: 0; }

@@ -118,6 +118,7 @@ function mountForm(form: HTMLFormElement): void {
   const pathText = form.querySelector<HTMLElement>('[data-agg-path]');
   const jsonText = form.querySelector<HTMLElement>('[data-agg-json]');
   const curlButton = form.querySelector<HTMLElement>('[data-agg-curl]');
+  const decrypt = form.querySelector<HTMLInputElement>('[data-agg-decrypt]');
 
   const cards = () => [...list.querySelectorAll<HTMLElement>('[data-agg-stage]')];
 
@@ -172,7 +173,7 @@ function mountForm(form: HTMLFormElement): void {
 
     if (!stages) return undefined;
 
-    const path = aggregatePath(on!.value.trim());
+    const path = aggregatePath(on!.value.trim(), decrypt?.checked ?? false);
     const body = requestBody(stages);
 
     raw!.value = formatPipeline(stages);
@@ -234,7 +235,7 @@ function mountForm(form: HTMLFormElement): void {
 
     if (target instanceof HTMLTextAreaElement && target.dataset.aggBody !== undefined) sync(true);
 
-    if (target === on) sync(false);
+    if (target === on || target === decrypt) sync(false);
   });
 
   form.addEventListener('click', event => {

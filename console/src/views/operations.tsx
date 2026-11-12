@@ -2,10 +2,11 @@ import type { FC } from 'hono/jsx';
 
 import { Layout, type Current } from '@/html/layout';
 import { formatBytes, formatCount } from '@/format';
-import { LOG_LEVELS, type LogSettings, type Metrics } from '@/operations';
+import { type ClusterSettings, type EncryptionKey, keyInDataDir, LOG_LEVELS, type LogSettings, type Metrics, type Setting } from '@/operations';
 import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
 import { Card } from '@/ui/card';
+import { Icon } from '@/ui/icon';
 import { Input } from '@/ui/input';
 import { ToggleGroup } from '@/ui/toggle-group';
 
@@ -17,9 +18,22 @@ export interface OperationsPageProps {
   logError?: string;
   logForbidden?: boolean;
   metrics?: Metrics;
+  settings?: SettingsState;
   notice?: string;
+  warnings?: string[];
   error?: string;
 }
+
+// SettingsState is the answer of GET /_cluster/settings, or why the page
+// does not have it.
+export interface SettingsState {
+  settings?: ClusterSettings;
+  older?: boolean;
+  forbidden?: boolean;
+  error?: string;
+}
+
+export const KEY_DOCS = 'https://ndb.clowk.in/security#the-encryption-key';
 
 interface Check {
   label: string;
@@ -72,7 +86,7 @@ function scopeText(props: OperationsPageProps): string | undefined {
 }
 
 export const OperationsPage: FC<OperationsPageProps> = props => {
-  const { current, unix, hasToken, log, logError, metrics, notice, error } = props;
+  const { current, unix, hasToken, log, logError, metrics, settings = {}, notice, warnings = [], error } = props;
 
   const checks = securityChecks(props);
   const open = checks.filter(check => !check.ok).length;
@@ -83,12 +97,18 @@ export const OperationsPage: FC<OperationsPageProps> = props => {
       <header class="dash-head">
         <div class="dash-head-text">
           <h1 class="dash-title">Operations</h1>
-          <p class="dash-lead">Logs, security and limits of this daemon. A change here lasts until the daemon stops; ndb.yml keeps the settings of the next start.</p>
+          <p class="dash-lead">Logs, security and limits of this daemon. Apply stores the log settings in the data dir, so they hold across a restart.</p>
         </div>
       </header>
 
       {notice && <p class="note ok">{notice}</p>}
+      {warnings.map(warning => (
+        <p class="note warn">{warning}</p>
+      ))}
+
       {error && <p class="note bad">{error}</p>}
+
+      {keyInDataDir(settings.settings?.encryption?.source) && <KeyWarning />}
 
       <section class="card flush">
         {log ? (
@@ -100,6 +120,8 @@ export const OperationsPage: FC<OperationsPageProps> = props => {
           </div>
         )}
       </section>
+
+      <SettingsCard state={settings} />
 
       <div class="dash-grid">
         <Card>
@@ -201,6 +223,141 @@ const LogForm: FC<{ log: LogSettings; action: string }> = ({ log, action }) => (
     </div>
   </form>
 );
+
+// KeyWarning shows when the daemon keeps its encryption key in the data
+// dir: a copy of the disk or of a backup has the key with the data.
+const KeyWarning: FC = () => (
+  <section
+    class="card ops-key-warn"
+    role="note"
+    data-key-warning
+  >
+    <span class="ops-key-icon">
+      <Icon name="key" size={20} />
+    </span>
+
+    <div class="ops-key-text">
+      <h2 class="card-title">The encryption key is in the data dir</h2>
+
+      <p>
+        A copy of the disk or of a backup has the key with the data, so it can decrypt the encrypted fields. Set <code class="mono">NDB_ENCRYPTION_KEY</code> (64 hex characters) from a secret store, and keep a copy of the key.
+      </p>
+
+      <a
+        class="dash-link"
+        href={KEY_DOCS}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        Read about the encryption key
+      </a>
+    </div>
+  </section>
+);
+
+const SOURCE_TONE: Record<string, 'neutral' | 'pink' | 'ok' | 'warn'> = {
+  default: 'neutral',
+  stored: 'ok',
+  made: 'warn',
+  env: 'ok',
+  yml: 'pink',
+  flag: 'pink',
+};
+
+const SourceBadge: FC<{ source: string }> = ({ source }) => <Badge tone={SOURCE_TONE[source] ?? 'neutral'}>{source}</Badge>;
+
+const SettingRow: FC<{ name: string; setting?: Setting<string | number> }> = ({ name, setting }) => {
+  if (!setting) return null;
+
+  return (
+    <li class="ops-row ops-setting">
+      <span class="ops-row-label mono">{name}</span>
+      <span class="ops-check-value mono">{String(setting.value)}</span>
+      <SourceBadge source={setting.source} />
+    </li>
+  );
+};
+
+const KeyRow: FC<{ name: string; value?: string }> = ({ name, value }) => {
+  if (!value) return null;
+
+  return (
+    <li class="ops-row ops-setting">
+      <span class="ops-row-label">{name}</span>
+      <span class="ops-check-value mono">{value}</span>
+    </li>
+  );
+};
+
+const KeyRows: FC<{ encryption: EncryptionKey }> = ({ encryption }) => (
+  <ul class="ops-rows">
+    <li class="ops-row ops-setting">
+      <span class="ops-row-label">key</span>
+      <span class="ops-check-value mono">{encryption.key}</span>
+      <SourceBadge source={encryption.source} />
+    </li>
+
+    <KeyRow name="key_id" value={encryption.key_id} />
+    <KeyRow name="fingerprint" value={encryption.fingerprint} />
+    <KeyRow name="created_at" value={encryption.created_at} />
+  </ul>
+);
+
+function settingsHint(state: SettingsState): string {
+  if (state.older) return 'This daemon is older than 1.21: it has no stored settings. A log change lasts until a restart.';
+
+  if (state.forbidden) return 'This token has no admin of *, so the daemon does not show its settings. Use a token with admin of *, or the unix socket.';
+
+  return state.error ?? 'The daemon did not give its settings.';
+}
+
+// SettingsCard shows GET /_cluster/settings: the encryption key, masked,
+// and the log settings with where each one comes from.
+const SettingsCard: FC<{ state: SettingsState }> = ({ state }) => {
+  const settings = state.settings;
+
+  if (!settings) {
+    return (
+      <Card class="ops-settings">
+        <h2 class="card-title">Settings</h2>
+        <span class="hint">{settingsHint(state)}</span>
+      </Card>
+    );
+  }
+
+  const log = settings.log ?? {};
+
+  return (
+    <Card class="ops-settings">
+      <div class="dash-card-head">
+        <h2 class="card-title">Settings</h2>
+        <span class="dash-card-note mono">/_cluster/settings</span>
+      </div>
+
+      <div class="ops-settings-grid">
+        <div>
+          <h3 class="ops-settings-title">Encryption key</h3>
+
+          {settings.encryption ? <KeyRows encryption={settings.encryption} /> : <span class="hint">The daemon gave no key.</span>}
+
+          <span class="hint">The console shows the key masked. The daemon never gives the whole key.</span>
+        </div>
+
+        <div>
+          <h3 class="ops-settings-title">Log settings</h3>
+
+          <ul class="ops-rows">
+            <SettingRow name="level" setting={log.level} />
+            <SettingRow name="body_max" setting={log.body_max} />
+            <SettingRow name="slow_ms" setting={log.slow_ms} />
+          </ul>
+
+          <span class="hint">A value from ndb.yml, the env or a flag wins over a stored value at the next start.</span>
+        </div>
+      </div>
+    </Card>
+  );
+};
 
 const UseRow: FC<{ name: string; text?: string }> = ({ name, text }) => {
   if (text === undefined) return null;

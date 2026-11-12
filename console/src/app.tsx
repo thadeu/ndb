@@ -8,7 +8,7 @@ import { type DiscoverOptions, DiscoverError, discover } from './discover';
 import { formatUptime } from './format';
 import { hostGuard, originGuard, parseAllowedHosts } from './guard';
 import { Ndb, NdbError, type Stats, target } from './ndb';
-import { metrics } from './operations';
+import { clusterSettings, metrics } from './operations';
 import { type Env, readPrefix } from './prefix';
 
 import { explorerRoutes } from '@/routes/explorer';
@@ -266,12 +266,13 @@ export function createApp(connections: Connections, assets: Assets, options: App
     const ndb = client(connection);
 
     try {
-      const [stats, size, definitions, counters, pitr] = await Promise.all([
+      const [stats, size, definitions, counters, pitr, settings] = await Promise.all([
         ndb.stats(),
         ndb.size().catch(() => undefined),
         ndb.collections().catch(() => []),
         metrics(ndb),
         ndb.pitr().catch(() => undefined),
+        clusterSettings(ndb).catch(() => undefined),
       ]);
 
       const updated = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
@@ -287,6 +288,7 @@ export function createApp(connections: Connections, assets: Assets, options: App
           pitrWindow={pitr?.default}
           updated={updated}
           tcpNoToken={tcpNoToken}
+          keySource={settings?.encryption?.source}
         />,
       );
     } catch (error) {

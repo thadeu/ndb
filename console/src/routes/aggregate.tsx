@@ -1,6 +1,6 @@
 import type { Hono } from 'hono';
 
-import { COUNT_STAGES_MAX, DEFAULT_PIPELINE, type Stage, aggregatePath, countRequest, formatPipeline, isMultiTarget, matchText, parsePipeline, toPipeline, validTarget } from '@/aggregate';
+import { COUNT_STAGES_MAX, DEFAULT_PIPELINE, type Stage, aggregatePath, countRequest, formatPipeline, hasSealed, isMultiTarget, matchText, parsePipeline, toPipeline, validTarget } from '@/aggregate';
 import { type Definition, type Doc, type Ndb, NdbError, type Stats, target } from '@/ndb';
 import type { Env } from '@/prefix';
 import type { ComboOption } from '@/ui/combobox';
@@ -21,8 +21,8 @@ interface Answer {
 }
 
 // send runs one _aggregate body and reads the rows and the X-Ndb-* headers.
-async function send(client: Ndb, on: string, body: Record<string, unknown>): Promise<Answer> {
-  const response = await client.forward('POST', aggregatePath(on), JSON.stringify(body));
+async function send(client: Ndb, on: string, body: Record<string, unknown>, decrypt = false): Promise<Answer> {
+  const response = await client.forward('POST', aggregatePath(on, decrypt), JSON.stringify(body));
   const parsed = await response.json().catch(() => null);
 
   if (!response.ok) {
@@ -60,10 +60,12 @@ async function countStage(client: Ndb, on: string, stages: Stage[], index: numbe
 }
 
 // runPipeline runs the pipeline, then counts the rows of each stage with one
-// request for each prefix. A long pipeline is not counted.
-export async function runPipeline(client: Ndb, on: string, stages: Stage[]): Promise<AggregateResult> {
+// request for each prefix. A long pipeline is not counted. With decrypt, the
+// run asks for plain values; sealed says that some values came back
+// encrypted all the same.
+export async function runPipeline(client: Ndb, on: string, stages: Stage[], decrypt = false): Promise<AggregateResult> {
   const started = performance.now();
-  const answer = await send(client, on, { pipeline: toPipeline(stages), count: true, limit: ROWS });
+  const answer = await send(client, on, { pipeline: toPipeline(stages), count: true, limit: ROWS }, decrypt);
   const ms = Math.round(performance.now() - started);
 
   const last = stages.length - 1;
@@ -77,7 +79,7 @@ export async function runPipeline(client: Ndb, on: string, stages: Stage[]): Pro
     }),
   );
 
-  return { rows: answer.rows, total: answer.total, examined: answer.examined, ms, counts };
+  return { rows: answer.rows, total: answer.total, examined: answer.examined, ms, counts, sealed: hasSealed(answer.rows) };
 }
 
 // targetOptions lists the collections for the target field: the name, the
@@ -132,6 +134,7 @@ export function aggregateRoutes(app: Hono<Env>, deps: RouteDeps): void {
     const q = c.req.query();
 
     const view = VIEWS.find(item => item === q.view) ?? 'chart';
+    const decrypt = q.decrypt === '1';
     const parsedTarget = target(connection.url);
     const curl = parsedTarget.unix ? { socket: parsedTarget.unix } : { base: parsedTarget.base };
 
@@ -151,7 +154,7 @@ export function aggregateRoutes(app: Hono<Env>, deps: RouteDeps): void {
 
       if (q.run === '1' && parsed.stages && !error) {
         try {
-          result = await runPipeline(client, on, parsed.stages);
+          result = await runPipeline(client, on, parsed.stages, decrypt);
         } catch (failure) {
           error = deps.message(failure);
         }
@@ -166,6 +169,7 @@ export function aggregateRoutes(app: Hono<Env>, deps: RouteDeps): void {
           text={text}
           stages={parsed.stages}
           view={view}
+          decrypt={decrypt}
           result={result}
           error={error}
           curl={curl}

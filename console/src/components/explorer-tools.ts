@@ -2,7 +2,21 @@
 // list, the field chips and the request preview of the New index form, and
 // the local time of a restore instant.
 // Without it the list shows every collection and the form is a text field.
-import { favoritesKey, fieldsError, indexRequest, parseFields, requestText, toggleFavorite } from '@/collections';
+import {
+  type CollectionDefinition,
+  definitionBody,
+  encryptionDraft,
+  encryptionError,
+  favoritesKey,
+  fieldsError,
+  indexFieldsError,
+  indexRequest,
+  lines,
+  parseFields,
+  requestText,
+  toggleFavorite,
+} from '@/collections';
+import { upgrade as upgradeSelect } from '@/ui/select';
 
 function readFavorites(key: string): string[] {
   try {
@@ -80,6 +94,7 @@ function mountIndexForm(form: HTMLFormElement): void {
   const unique = form.querySelector<HTMLInputElement>('[name="unique"]');
   const preview = form.querySelector<HTMLElement>('[data-index-preview]');
   const hint = form.querySelector<HTMLElement>('[data-index-error]');
+  const locks = readJson<Pick<CollectionDefinition, 'encrypted' | 'blind'>>(form.dataset.indexLocks);
 
   if (!input || !chips || !preview) return;
 
@@ -95,9 +110,11 @@ function mountIndexForm(form: HTMLFormElement): void {
 
   input.value = '';
 
+  const errorOf = (fields: string[]) => (fields.length > 0 ? (fieldsError(fields) ?? indexFieldsError(fields, locks)) : undefined);
+
   const paint = () => {
     const fields = parseFields([...committed, input.value].join(','));
-    const error = fields.length > 0 ? fieldsError(fields) : undefined;
+    const error = errorOf(fields);
 
     value.value = fields.join(',');
     chips.replaceChildren(...committed.map((field, index) => chip(index + 1, field)));
@@ -142,6 +159,112 @@ function mountIndexForm(form: HTMLFormElement): void {
 
   unique?.addEventListener('change', paint);
 
+  form.addEventListener('click', event => {
+    const pick = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-index-pick]') : null;
+
+    if (!pick) return;
+
+    committed = parseFields([...committed, pick.dataset.indexPick ?? ''].join(','));
+    paint();
+    input.focus();
+  });
+
+  form.addEventListener('submit', event => {
+    commit();
+    paint();
+
+    if (errorOf(committed)) event.preventDefault();
+  });
+
+  paint();
+}
+
+function readJson<T>(text: string | undefined): T | undefined {
+  try {
+    return text ? (JSON.parse(text) as T) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function formValues(form: HTMLFormElement): Record<string, string> {
+  const values: Record<string, string> = {};
+
+  for (const [key, value] of new FormData(form)) {
+    if (typeof value === 'string') values[key] = value;
+  }
+
+  return values;
+}
+
+// mountEncryptionFields adds blind rows on a click, checks the encrypted and
+// blind fields as the user types, and shows the real PUT body of a new
+// collection. The server checks the same rules again.
+function mountEncryptionFields(fieldset: HTMLElement): void {
+  const form = fieldset.closest('form');
+  const rows = fieldset.querySelector<HTMLElement>('[data-blind-rows]');
+  const add = fieldset.querySelector<HTMLButtonElement>('[data-blind-add]');
+  const hint = fieldset.querySelector<HTMLElement>('[data-encryption-error]');
+  const preview = form?.querySelector<HTMLElement>('[data-create-preview]');
+  const fixed = readJson<Partial<CollectionDefinition>>(fieldset.closest<HTMLElement>('[data-encryption-target]')?.dataset.encryptionTarget);
+  const known = (fieldset.dataset.encryptionFields ?? '').split(',').filter(Boolean);
+
+  if (!form || !rows || !add) return;
+
+  add.hidden = false;
+
+  add.addEventListener('click', () => {
+    const first = rows.querySelector<HTMLElement>('[data-blind-row]');
+
+    if (!first) return;
+
+    const row = first.cloneNode(true) as HTMLElement;
+    const n = rows.querySelectorAll('[data-blind-row]').length;
+
+    for (const control of row.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input, select')) {
+      control.name = control.name.replace(/_\d+$/, `_${n}`);
+      control.id = control.id.replace(/-\d+$/, `-${n}`);
+      control.value = control instanceof HTMLSelectElement ? 'exact' : '';
+    }
+
+    for (const part of row.querySelectorAll('.dd-button, .dd-list')) part.remove();
+
+    rows.append(row);
+
+    for (const host of row.querySelectorAll<HTMLElement>('[data-dd]')) upgradeSelect(host);
+
+    row.querySelector<HTMLInputElement>('input')?.focus();
+    paint();
+  });
+
+  const paint = () => {
+    const values = formValues(form);
+    const draft = encryptionDraft(values);
+    const target = fixed ?? { time: values.time, expires_field: values.expires_field, write: values.write, indexes: lines(values.indexes ?? ''), unique: lines(values.unique ?? '') };
+    const again = [...draft.encrypted, ...Object.keys(draft.blind)].find(field => known.includes(field) && !(field in draft.blind));
+    const error = encryptionError(draft, target) ?? (again ? `${again} is encrypted already.` : undefined);
+
+    if (hint) {
+      hint.textContent = error ?? '';
+      hint.hidden = !error;
+    }
+
+    if (preview) {
+      const name = (values.collection ?? '').trim() || '{name}';
+
+      preview.textContent = `PUT /${name}\n${JSON.stringify(definitionBody(values))}`;
+    }
+  };
+
+  form.addEventListener('input', paint);
+  form.addEventListener('change', paint);
+
+  form.addEventListener('submit', event => {
+    paint();
+
+    if (hint && !hint.hidden) event.preventDefault();
+  });
+
   paint();
 }
 
@@ -166,4 +289,6 @@ export function mount(): void {
   for (const host of document.querySelectorAll<HTMLElement>('[data-favorites]')) mountFavorites(host);
 
   for (const form of document.querySelectorAll<HTMLFormElement>('form[data-index-form]')) mountIndexForm(form);
+
+  for (const fieldset of document.querySelectorAll<HTMLElement>('[data-encryption-fields]')) mountEncryptionFields(fieldset);
 }

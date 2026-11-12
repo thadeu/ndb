@@ -1,7 +1,10 @@
 import type { FC } from 'hono/jsx';
 import { useEffect, useRef, useState } from 'hono/jsx';
 
+import { Sealed } from '@/ui/sealed';
+
 import { addField, containerIds, deepEqual, flatten, getIn, parseScalar, pathId, removeIn, type Path, type Row, scalarText, setIn } from './json-model';
+import { isMasked } from './sealed-model';
 import { filterRows } from './tree-filter';
 import { noSpelling } from '@/ui/input';
 
@@ -25,6 +28,10 @@ export interface TreeRowsProps {
   onCancel?: () => void;
   onRemove?: (row: Row) => void;
   onAdd?: (row: Row) => void;
+  // sealed names the top-level fields whose value is the mask of an
+  // encrypted value; sealedSlot draws the actions of such a row.
+  sealed?: ReadonlySet<string>;
+  sealedSlot?: (row: Row) => unknown;
 }
 
 const Caret: FC<{ row: Row; onToggle?: (row: Row) => void }> = ({ row, onToggle }) => {
@@ -65,14 +72,15 @@ const ValueInput: FC<{ draft: string; onDraft: (text: string) => void; onCommit:
 // TreeRows draws the rows. It has no state, so the server uses it for the
 // read-only fallback and the island uses it with handlers.
 export const TreeRows: FC<TreeRowsProps> = props => {
-  const { rows, emphasizeTop = false, changed, editable = false, editing = null, draft = '' } = props;
+  const { rows, emphasizeTop = false, changed, editable = false, editing = null, draft = '', sealed = new Set<string>() } = props;
 
   return (
     <div class="tree" role="tree">
       {rows.map(row => {
         const top = emphasizeTop && row.depth === 0;
         const marked = changed?.has(row.id) ?? false;
-        const canEdit = editable && !row.expandable && !lockedRow(row) && Boolean(props.onEdit);
+        const masked = isMasked(row.path, row.value, sealed);
+        const canEdit = editable && !masked && !row.expandable && !lockedRow(row) && Boolean(props.onEdit);
         const canRemove = editable && !lockedRow(row) && row.path.length > 0 && Boolean(props.onRemove);
         const canAdd = editable && row.expandable && Boolean(props.onAdd);
 
@@ -88,7 +96,13 @@ export const TreeRows: FC<TreeRowsProps> = props => {
             {row.key !== '' && <span class={keyClass}>{row.key}</span>}
             {row.key !== '' && !top && <span class="tsep">:</span>}
 
-            {editing === row.id ? (
+            {masked ? (
+              <span class="tval tval-sealed">
+                <Sealed />
+
+                {props.sealedSlot?.(row)}
+              </span>
+            ) : editing === row.id ? (
               <ValueInput draft={draft} onDraft={props.onDraft ?? (() => undefined)} onCommit={() => props.onCommit?.(row)} onCancel={props.onCancel ?? (() => undefined)} />
             ) : (
               <span class={valueClass} title={canEdit ? 'Click to edit' : undefined} onClick={canEdit ? () => props.onEdit?.(row) : undefined}>
@@ -96,7 +110,7 @@ export const TreeRows: FC<TreeRowsProps> = props => {
               </span>
             )}
 
-            <span class="ttype">{row.kind}</span>
+            <span class="ttype">{masked ? 'encrypted' : row.kind}</span>
 
             {(canAdd || canRemove) && (
               <span class="tactions">
@@ -122,7 +136,7 @@ export const TreeRows: FC<TreeRowsProps> = props => {
 
 // StaticTree is the read-only tree with every container open. The server
 // renders it before any script runs.
-export const StaticTree: FC<{ value: unknown; emphasizeTop?: boolean }> = ({ value, emphasizeTop }) => <TreeRows rows={flatten(value, new Set())} emphasizeTop={emphasizeTop} />;
+export const StaticTree: FC<{ value: unknown; emphasizeTop?: boolean; sealed?: readonly string[] }> = ({ value, emphasizeTop, sealed = [] }) => <TreeRows rows={flatten(value, new Set())} emphasizeTop={emphasizeTop} sealed={new Set(sealed)} />;
 
 export interface JsonTreeProps {
   value: unknown;
@@ -132,6 +146,8 @@ export interface JsonTreeProps {
   toolbar?: boolean;
   filterable?: boolean;
   emphasizeTop?: boolean;
+  sealed?: ReadonlySet<string>;
+  sealedSlot?: (row: Row) => unknown;
 }
 
 interface AddState {
@@ -170,7 +186,7 @@ const AddRow: FC<{ state: AddState; onSubmit: (key: string, value: string) => vo
 // starts with a box that narrows the rows to the keys or values that have
 // its text. With editable and onChange, a click on a scalar edits it, and
 // rows can be added or removed. baseline marks the rows that differ from it.
-export const JsonTree: FC<JsonTreeProps> = ({ value, editable = false, onChange, baseline, toolbar = true, filterable = false, emphasizeTop = false }) => {
+export const JsonTree: FC<JsonTreeProps> = ({ value, editable = false, onChange, baseline, toolbar = true, filterable = false, emphasizeTop = false, sealed, sealedSlot }) => {
   const [closed, setClosed] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -274,6 +290,8 @@ export const JsonTree: FC<JsonTreeProps> = ({ value, editable = false, onChange,
         onCancel={cancel}
         onRemove={remove}
         onAdd={add}
+        sealed={sealed}
+        sealedSlot={sealedSlot}
       />
 
       {noMatch && <p class="hint jt-none">No field or value has this text.</p>}

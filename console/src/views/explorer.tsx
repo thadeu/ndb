@@ -1,7 +1,26 @@
 import { raw } from 'hono/html';
 import type { FC } from 'hono/jsx';
 
-import { COLLECTION_NAME, NO_KEY_ROUTE, type CollectionDefinition, type CollectionInfo, type Explain, type IndexRow, type QuarantineRow, indexRequest, indexRows, planText, requestText } from '@/collections';
+import {
+  BLIND_MODE_TEXT,
+  BLIND_MODES,
+  COLLECTION_NAME,
+  EQUALITY_ONLY,
+  NO_KEY_ROUTE,
+  type CollectionDefinition,
+  type CollectionInfo,
+  type Explain,
+  type IndexRow,
+  type QuarantineRow,
+  blindOf,
+  encryptedOnly,
+  hasEncryption,
+  indexRequest,
+  indexRows,
+  planText,
+  reencryptBody,
+  requestText,
+} from '@/collections';
 import { Documents, type DocumentsProps } from '@/components/documents';
 import { RestoreConfirm, RestoreFields, WindowBar, copyName, type RestoreDraft } from '@/components/restore-form';
 import { Layout, type Current } from '@/html/layout';
@@ -55,6 +74,8 @@ export interface ExplorerPageProps {
   documents?: Omit<DocumentsProps, 'current'>;
   explain?: ExplainResult;
   quarantine?: QuarantineRow[];
+  fields?: string[];
+  reencrypt?: boolean;
   restore?: RestoreDraft;
   restored?: string;
   updated: string;
@@ -113,6 +134,7 @@ export const ExplorerPage: FC<ExplorerPageProps> = props => {
   const { current, stats, definitions, query } = props;
 
   const streams = new Set(definitions.filter(definition => definition.stream).map(definition => definition.name));
+  const encrypted = new Set(definitions.filter(definition => hasEncryption(definition)).map(definition => definition.name));
   const find = (query.find ?? '').toLowerCase();
   const matched = props.matched ? new Set(props.matched) : undefined;
 
@@ -131,6 +153,7 @@ export const ExplorerPage: FC<ExplorerPageProps> = props => {
           current={current}
           listed={listed}
           streams={streams}
+          encrypted={encrypted}
           total={stats.collections.length}
           query={query}
           findError={props.findError}
@@ -153,7 +176,11 @@ export const ExplorerPage: FC<ExplorerPageProps> = props => {
         </section>
       </div>
 
-      <NewCollectionDialog current={current} query={query} />
+      <NewCollectionDialog
+        current={current}
+        query={query}
+        error={query.dialog === 'new' ? props.error : undefined}
+      />
       <ConfirmHost />
     </Layout>
   );
@@ -163,12 +190,13 @@ interface CollectionListProps {
   current: Current;
   listed: CollectionInfo[];
   streams: Set<string>;
+  encrypted: Set<string>;
   total: number;
   query: ExplorerQuery;
   findError?: string;
 }
 
-const CollectionList: FC<CollectionListProps> = ({ current, listed, streams, total, query, findError }) => (
+const CollectionList: FC<CollectionListProps> = ({ current, listed, streams, encrypted, total, query, findError }) => (
   <aside class="explorer-list" aria-label="Collections" data-favorites={current.name} data-show={query.show}>
     <div class="explorer-list-head">
       <h2 class="explorer-list-title">
@@ -230,7 +258,13 @@ const CollectionList: FC<CollectionListProps> = ({ current, listed, streams, tot
 
     <ul class="explorer-items">
       {listed.map(collection => (
-        <CollectionItem current={current} collection={collection} stream={streams.has(collection.name)} query={query} />
+        <CollectionItem
+          current={current}
+          collection={collection}
+          stream={streams.has(collection.name)}
+          encrypted={encrypted.has(collection.name)}
+          query={query}
+        />
       ))}
     </ul>
 
@@ -242,7 +276,15 @@ const CollectionList: FC<CollectionListProps> = ({ current, listed, streams, tot
   </aside>
 );
 
-const CollectionItem: FC<{ current: Current; collection: CollectionInfo; stream: boolean; query: ExplorerQuery }> = ({ current, collection, stream, query }) => {
+interface CollectionItemProps {
+  current: Current;
+  collection: CollectionInfo;
+  stream: boolean;
+  encrypted: boolean;
+  query: ExplorerQuery;
+}
+
+const CollectionItem: FC<CollectionItemProps> = ({ current, collection, stream, encrypted, query }) => {
   const on = collection.name === query.coll;
   const className = on ? 'explorer-item on' : 'explorer-item';
   const href = stream ? `${base(current)}/streams?stream=${encodeURIComponent(collection.name)}` : pageHref(current, query, { coll: collection.name });
@@ -262,13 +304,86 @@ const CollectionItem: FC<{ current: Current; collection: CollectionInfo; stream:
 
       <a class="explorer-item-link" href={href} aria-current={on ? 'page' : undefined}>
         <span class="mono explorer-item-name">{collection.name}</span>
+
+        {encrypted && (
+          <span class="explorer-item-lock" title="Has encrypted fields" aria-label="encrypted">
+            <Icon name="lock" size={14} />
+          </span>
+        )}
+
         {stream ? <span class="explorer-item-kind">stream</span> : <span class="explorer-item-count">{formatCount(collection.rows)}</span>}
       </a>
     </li>
   );
 };
 
-const NewCollectionDialog: FC<{ current: Current; query: ExplorerQuery }> = ({ current, query }) => {
+const LockBadge: FC<{ label: string }> = ({ label }) => (
+  <span class="lock-badge">
+    <Icon name="lock" size={12} />
+    {label}
+  </span>
+);
+
+const BLIND_OPTIONS = BLIND_MODES.map(mode => ({ id: mode, label: BLIND_MODE_TEXT[mode] ?? mode }));
+
+const BlindRow: FC<{ prefix: string; row: number }> = ({ prefix, row }) => (
+  <div class="blind-row" data-blind-row>
+    <Input
+      id={`${prefix}-blind-field-${row}`}
+      name={`blind_field_${row}`}
+      mono
+      placeholder="cpf"
+      aria-label="Blind field"
+    />
+
+    <Select
+      id={`${prefix}-blind-mode-${row}`}
+      name={`blind_mode_${row}`}
+      options={BLIND_OPTIONS}
+      value="exact"
+    />
+  </div>
+);
+
+// EncryptionFields is the part of a definition form that adds encrypted
+// and blind fields. The browser script adds blind rows and checks the
+// fields as the user types; the server checks them again.
+const EncryptionFields: FC<{ prefix: string; known?: string[] }> = ({ prefix, known = [] }) => (
+  <fieldset class="encryption-fields" data-encryption-fields={known.join(',')}>
+    <legend class="label">
+      <Icon name="lock" size={14} /> Encrypted fields
+    </legend>
+
+    <p class="hint">ndb encrypts these top-level fields before the WAL. A read shows [encrypted]. Not _id, the time field or expires_field.</p>
+
+    <Field id={`${prefix}-encrypted`} label="Encrypted fields (found only with $exists)">
+      <Input id={`${prefix}-encrypted`} name="encrypted" mono placeholder="pem, card_number" />
+    </Field>
+
+    <div class="form-field">
+      <span class="label">Blind fields (encrypted, and found by value)</span>
+
+      <div class="blind-rows" data-blind-rows>
+        <BlindRow prefix={prefix} row={0} />
+      </div>
+
+      <Button
+        size="sm"
+        type="button"
+        data-blind-add
+        hidden
+      >
+        <Icon name="plus" size={14} /> Add blind field
+      </Button>
+
+      <p class="hint">A blind field also keeps a hash of the value, so {EQUALITY_ONLY}, an index and a unique key work on it. Use numeric for a CPF.</p>
+    </div>
+
+    <p class="hint bad" data-encryption-error hidden />
+  </fieldset>
+);
+
+const NewCollectionDialog: FC<{ current: Current; query: ExplorerQuery; error?: string }> = ({ current, query, error }) => {
   const writes = [
     { id: 'engine', label: 'engine (SDK writes)' },
     { id: 'direct', label: 'direct (apps append files)' },
@@ -282,7 +397,14 @@ const NewCollectionDialog: FC<{ current: Current; query: ExplorerQuery }> = ({ c
       open={query.dialog === 'new'}
       closeHref={pageHref(current, query)}
     >
-      <form class="explorer-form" method="post" action={actionUrl(current, 'create')}>
+      <form
+        class="explorer-form"
+        method="post"
+        action={actionUrl(current, 'create')}
+        data-create-form
+      >
+        {error && <p class="note bad">{error}</p>}
+
         <Field id="new-name" label="Name">
           <Input id="new-name" name="collection" mono required pattern="[a-z0-9][a-z0-9_\-]{0,63}" placeholder="orders" />
         </Field>
@@ -310,6 +432,12 @@ const NewCollectionDialog: FC<{ current: Current; query: ExplorerQuery }> = ({ c
         <Field id="new-ttl" label="TTL (needs the time field)">
           <Input id="new-ttl" name="ttl" mono placeholder="30d" />
         </Field>
+
+        <EncryptionFields prefix="new" />
+
+        <pre class="index-preview mono" data-create-preview data-hl>
+          {'PUT /{name}\n{}'}
+        </pre>
 
         <div class="form-actions">
           <Button variant="dark">Create collection</Button>
@@ -342,7 +470,14 @@ const Detail: FC<DetailProps> = props => {
       {query.tab === 'backups' && <BackupsTab current={current} name={collection.name} pitr={props.pitr} draft={props.restore} />}
 
       <RenameDialog current={current} query={query} name={collection.name} />
-      {definition && <EditDefinitionDialog current={current} query={query} definition={definition} />}
+      {definition && (
+        <EditDefinitionDialog
+          current={current}
+          query={query}
+          definition={definition}
+          error={query.dialog === 'edit' ? props.error : undefined}
+        />
+      )}
     </>
   );
 };
@@ -372,6 +507,7 @@ const CollectionHead: FC<DetailProps> = ({ current, collection, definition, quer
             <h1 class="mono explorer-title">{collection.name}</h1>
             <Badge tone={collection.write === 'direct' ? 'pink' : 'neutral'}>{collection.write}</Badge>
             {definition?.stream && <Badge>stream</Badge>}
+            {hasEncryption(definition) && <LockBadge label="encrypted" />}
             <Badge tone={health.ok ? 'ok' : 'pink'}>{health.label}</Badge>
           </div>
         </div>
@@ -497,7 +633,14 @@ const RenameDialog: FC<{ current: Current; query: ExplorerQuery; name: string }>
   </Dialog>
 );
 
-const EditDefinitionDialog: FC<{ current: Current; query: ExplorerQuery; definition: CollectionDefinition }> = ({ current, query, definition }) => {
+interface EditDialogProps {
+  current: Current;
+  query: ExplorerQuery;
+  definition: CollectionDefinition;
+  error?: string;
+}
+
+const EditDefinitionDialog: FC<EditDialogProps> = ({ current, query, definition, error }) => {
   const durabilities = [
     { id: 'strict', label: 'strict (sync the WAL before the answer)' },
     { id: 'relaxed', label: 'relaxed (200 ms window)' },
@@ -505,6 +648,10 @@ const EditDefinitionDialog: FC<{ current: Current; query: ExplorerQuery; definit
 
   const fromYaml = Boolean(definition.ops_from_yaml);
   const canExpire = !definition.stream && !definition.ttl && !definition.expires_field;
+  const canEncrypt = !definition.stream && definition.write !== 'direct';
+  const known = [...(definition.encrypted ?? []), ...Object.keys(blindOf(definition))];
+
+  const target = JSON.stringify({ time: definition.time, expires_field: definition.expires_field, write: definition.write, indexes: definition.indexes, unique: definition.unique });
 
   return (
     <Dialog
@@ -516,6 +663,8 @@ const EditDefinitionDialog: FC<{ current: Current; query: ExplorerQuery; definit
     >
       <form class="explorer-form" method="post" action={actionUrl(current, 'definition')}>
         <Target name={definition.name} tab={query.tab} />
+
+        {error && <p class="note bad">{error}</p>}
 
         {fromYaml && <p class="hint">ndb.yml sets durability, retention, wal_retention and pitr of this collection. Change them there.</p>}
 
@@ -557,6 +706,16 @@ const EditDefinitionDialog: FC<{ current: Current; query: ExplorerQuery; definit
           </>
         )}
 
+        {canEncrypt && (
+          <div data-encryption-target={target}>
+            <EncryptionFields prefix="edit" known={known} />
+
+            <p class="hint">
+              You can add fields. A field cannot leave encrypted or blind, and the mode of a blind field cannot change: the stored values and hashes would be wrong. An encrypted field can become blind.
+            </p>
+          </div>
+        )}
+
         <div class="form-actions">
           <Button variant="dark">Save definition</Button>
         </div>
@@ -585,9 +744,54 @@ function diskSegments(collection: CollectionInfo): Segment[] {
 
 const Mono: FC<{ value?: string }> = ({ value }) => <span class="mono explorer-mono">{value || '—'}</span>;
 
-const OverviewTab: FC<DetailProps> = ({ current, collection, definition, pitr, query }) => {
+const FieldList: FC<{ fields: string[] }> = ({ fields }) => (
+  <span class="field-list">
+    {fields.map(field => (
+      <code class="mono field-list-item">
+        <Icon name="lock" size={12} /> {field}
+      </code>
+    ))}
+  </span>
+);
+
+// ReencryptCard tells that the old documents keep the plain value of a
+// field added to encrypted later, and writes them all again on a click.
+const ReencryptCard: FC<{ current: Current; name: string; open: boolean }> = ({ current, name, open }) => {
+  const body = JSON.stringify(reencryptBody(new Date().toISOString().slice(0, 10)));
+
+  const ask = confirm({
+    title: `Encrypt the old documents of ${name}?`,
+    body: 'ndb writes every document again with $set of encrypted_at, so each encrypted field gets encrypted. The old plain values stay in the WAL files and in older backups until wal_retention and your backup rotation drop them.',
+    action: 'Encrypt old documents',
+    tone: 'default',
+  });
+
+  const className = open ? 'card reencrypt-card on' : 'card reencrypt-card';
+
+  return (
+    <section class={className} aria-label="Encrypt old documents">
+      <h2 class="card-title">
+        <Icon name="lock" size={16} /> Old documents
+      </h2>
+
+      <p class="hint">A field that you add to encrypted or blind later is encrypted from the next write of each document. The other documents keep the plain value until then.</p>
+
+      <CodeBlock code={`POST /${name}/_update_by_query\n${body}`} />
+
+      <form method="post" action={actionUrl(current, 'reencrypt')} {...ask}>
+        <Target name={name} tab="overview" />
+        <Button variant={open ? 'dark' : 'secondary'}>Encrypt old documents now</Button>
+      </form>
+    </section>
+  );
+};
+
+const OverviewTab: FC<DetailProps> = ({ current, collection, definition, pitr, query, reencrypt }) => {
   const average = collection.rows > 0 ? formatBytes(Math.round(collection.total / collection.rows)) : '—';
-  const rows = indexRows(collection.indexes, definition?.unique).filter(row => row.kind !== 'built in');
+  const rows = indexRows(collection.indexes, definition?.unique, blindOf(definition)).filter(row => row.kind !== 'built in');
+
+  const sealed = encryptedOnly(definition);
+  const blind = Object.entries(blindOf(definition)).map(([field, mode]) => `${field} · ${mode}`);
 
   const general = [
     { label: 'Documents', value: formatCount(collection.rows) },
@@ -609,6 +813,8 @@ const OverviewTab: FC<DetailProps> = ({ current, collection, definition, pitr, q
     ...(definition?.pitr ? [{ label: 'pitr', value: <Mono value={definition.pitr} /> }] : []),
     ...(definition?.partition_by ? [{ label: 'partition_by', value: <Mono value={definition.partition_by} /> }] : []),
     ...(definition?.partition_of ? [{ label: 'partition_of', value: <Mono value={definition.partition_of} /> }] : []),
+    ...(sealed.length > 0 ? [{ label: 'encrypted', value: <FieldList fields={sealed} /> }] : []),
+    ...(blind.length > 0 ? [{ label: 'blind', value: <FieldList fields={blind} /> }] : []),
   ];
 
   const edit = (
@@ -649,6 +855,8 @@ const OverviewTab: FC<DetailProps> = ({ current, collection, definition, pitr, q
         </Card>
       </div>
 
+      {hasEncryption(definition) && collection.rows > 0 && <ReencryptCard current={current} name={collection.name} open={Boolean(reencrypt)} />}
+
       <Card>
         <div class="explorer-storage-head">
           <h2 class="card-title">Storage</h2>
@@ -683,13 +891,14 @@ const KeyRow: FC<{ row: IndexRow }> = ({ row }) => (
   <li class="explorer-key">
     <code class="mono explorer-mono">{row.fields}</code>
     <Badge tone={row.kind === 'compound' ? 'pink' : 'neutral'}>{kindLabel(row)}</Badge>
+    {row.blind && <LockBadge label={`blind · ${row.blind}`} />}
     <span class={row.ready ? 'index-state ready' : 'index-state'}>{row.state}</span>
   </li>
 );
 
-const IndexesTab: FC<DetailProps> = ({ current, collection, definition, query, explain }) => {
+const IndexesTab: FC<DetailProps> = ({ current, collection, definition, query, explain, fields = [] }) => {
   const name = collection.name;
-  const rows = indexRows(collection.indexes, definition?.unique);
+  const rows = indexRows(collection.indexes, definition?.unique, blindOf(definition));
   const keys = rows.some(row => row.keyOnly);
 
   return (
@@ -735,7 +944,12 @@ const IndexesTab: FC<DetailProps> = ({ current, collection, definition, query, e
       </div>
 
       <div class="explorer-pair">
-        <NewIndexForm current={current} name={name} />
+        <NewIndexForm
+          current={current}
+          name={name}
+          definition={definition}
+          fields={fields}
+        />
         <ExplainForm current={current} collection={collection} query={query} explain={explain} />
       </div>
     </>
@@ -756,7 +970,10 @@ const IndexLine: FC<{ current: Current; name: string; row: IndexRow }> = ({ curr
       <td class="mono strong index-fields">{row.fields}</td>
 
       <td>
-        <Badge tone={row.kind === 'compound' ? 'pink' : 'neutral'}>{row.kind}</Badge>
+        <span class="index-kind">
+          <Badge tone={row.kind === 'compound' ? 'pink' : 'neutral'}>{row.kind}</Badge>
+          {row.blind && <LockBadge label={`blind · ${row.blind}`} />}
+        </span>
       </td>
 
       {row.unique ? <td data-label="unique">yes</td> : <td class="index-none">—</td>}
@@ -767,7 +984,7 @@ const IndexLine: FC<{ current: Current; name: string; row: IndexRow }> = ({ curr
         {row.droppable && (
           <form method="post" action={actionUrl(current, 'indexes/drop')} {...drop}>
             <Target name={name} tab="indexes" />
-            <input type="hidden" name="index" value={row.fields} />
+            <input type="hidden" name="index" value={row.index} />
 
             <Button
               variant="ghost"
@@ -790,59 +1007,115 @@ const IndexLine: FC<{ current: Current; name: string; row: IndexRow }> = ({ curr
   );
 };
 
-const NewIndexForm: FC<{ current: Current; name: string }> = ({ current, name }) => (
-  <Card>
-    <CardHeader title="New index" />
+interface NewIndexFormProps {
+  current: Current;
+  name: string;
+  definition?: CollectionDefinition;
+  fields: string[];
+}
 
-    <form class="explorer-form" method="post" action={actionUrl(current, 'indexes')} data-index-form={name}>
-      <Target name={name} tab="indexes" />
+const FieldPick: FC<{ field: string; blind?: string; sealed: boolean }> = ({ field, blind, sealed }) => {
+  const className = sealed ? 'field-pick sealed' : blind ? 'field-pick blind' : 'field-pick';
+  const title = sealed ? 'Encrypted, not blind: no index' : blind ? `Blind (${blind}): ${EQUALITY_ONLY}` : undefined;
 
-      <div class="form-field">
-        <label class="label" for="index-fields">
-          Fields, in order (1 to 4)
-        </label>
+  return (
+    <button
+      type="button"
+      class={className}
+      data-index-pick={field}
+      title={title}
+    >
+      {(blind || sealed) && <Icon name="lock" size={12} />}
+      <span class="mono">{field}</span>
+      {blind && <span class="field-pick-mode">blind · {blind}</span>}
+      {sealed && <span class="field-pick-mode">encrypted</span>}
+    </button>
+  );
+};
 
-        <div class="field-chips">
-          <span class="field-chips-list" data-index-chips />
+const NewIndexForm: FC<NewIndexFormProps> = ({ current, name, definition, fields }) => {
+  const blind = blindOf(definition);
+  const sealed = encryptedOnly(definition);
+  const lockInfo = JSON.stringify({ encrypted: definition?.encrypted ?? [], blind });
+  const hasBlind = Object.keys(blind).length > 0;
 
-          <input
-            id="index-fields"
-            class="field-chips-input mono"
-            type="text"
-            name="fields"
-            required
-            placeholder="add a field, such as items.sku"
-            {...noSpelling}
-            autocomplete="off"
-            data-index-input
-          />
+  return (
+    <Card>
+      <CardHeader title="New index" />
+
+      <form
+        class="explorer-form"
+        method="post"
+        action={actionUrl(current, 'indexes')}
+        data-index-form={name}
+        data-index-locks={lockInfo}
+      >
+        <Target name={name} tab="indexes" />
+
+        <div class="form-field">
+          <label class="label" for="index-fields">
+            Fields, in order (1 to 4)
+          </label>
+
+          <div class="field-chips">
+            <span class="field-chips-list" data-index-chips />
+
+            <input
+              id="index-fields"
+              class="field-chips-input mono"
+              type="text"
+              name="fields"
+              required
+              placeholder="add a field, such as items.sku"
+              list="index-field-names"
+              {...noSpelling}
+              autocomplete="off"
+              data-index-input
+            />
+          </div>
+
+          <datalist id="index-field-names">
+            {fields.map(field => (
+              <option value={field} />
+            ))}
+          </datalist>
+
+          {fields.length > 0 && (
+            <div class="field-picks" aria-label="Fields of the collection">
+              {fields.map(field => (
+                <FieldPick field={field} blind={blind[field]} sealed={sealed.includes(field)} />
+              ))}
+            </div>
+          )}
+
+          <p class="hint bad" data-index-error hidden />
+
+          <p class="hint">With 2 or more fields it is one compound index. It serves a filter with equality on the first fields and a range or a sort on the next one.</p>
+
+          {hasBlind && <p class="hint">An index or a unique key on a blind field serves {EQUALITY_ONLY}. A unique blind field, such as a CPF, refuses a second equal value.</p>}
         </div>
 
-        <p class="hint bad" data-index-error hidden />
+        <label class="index-unique">
+          <input type="checkbox" name="unique" value="1" />
 
-        <p class="hint">With 2 or more fields it is one compound index. It serves a filter with equality on the first fields and a range or a sort on the next one.</p>
-      </div>
+          <span>
+            <strong>Unique key</strong>
+            <br />
+            <span class="hint">One live document for each tuple of values. A second one gets 409 unique_violation. {NO_KEY_ROUTE}</span>
+          </span>
+        </label>
 
-      <label class="index-unique">
-        <input type="checkbox" name="unique" value="1" />
+        <pre class="index-preview mono" data-index-preview data-hl>
+          {raw(highlightHtml(requestText(indexRequest(name, ['{field}'], false))))}
+        </pre>
 
-        <span>
-          <strong>Unique key</strong>
-          <br />
-          <span class="hint">One live document for each tuple of values. A second one gets 409 unique_violation. {NO_KEY_ROUTE}</span>
-        </span>
-      </label>
-
-      <pre class="index-preview mono" data-index-preview data-hl>
-        {raw(highlightHtml(requestText(indexRequest(name, ['{field}'], false))))}
-      </pre>
-
-      <div class="form-actions">
-        <Button variant="dark">Create index</Button>
-      </div>
-    </form>
-  </Card>
-);
+        <div class="form-actions">
+          <Button variant="dark">Create index</Button>
+        </div>
+      </form>
+    </Card>
+  );
+};
 
 const ExplainForm: FC<{ current: Current; collection: CollectionInfo; query: ExplorerQuery; explain?: ExplainResult }> = ({ current, collection, query, explain }) => {
   const result = explain?.result;

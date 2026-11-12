@@ -168,7 +168,7 @@ describe('dev tools examples', () => {
   const all = groups.flatMap(group => group.items);
 
   it('has the four groups and the new examples', () => {
-    expect(groups.map(group => group.label)).toEqual(['Read', 'Write', 'Streams', 'System']);
+    expect(groups.map(group => group.label)).toEqual(['Read', 'Write', 'Streams', 'Encrypted fields', 'System']);
     expect(all.filter(example => example.fresh).map(example => example.label)).toEqual([
       'Aggregate with $unwind',
       'Transaction (_tx)',
@@ -176,7 +176,14 @@ describe('dev tools examples', () => {
       'Append and read',
       'Nack with a delay',
       'Claim idle entries',
+      'Declare encrypted fields',
+      'Insert with plain values',
+      'Find by a blind field',
+      'Read with ?decrypt=1',
+      'Group by a blind field',
       'Change the log level',
+      'Settings of the data dir',
+      'Store the log settings',
       'Create a compound index',
     ]);
   });

@@ -6,6 +6,7 @@
 
 export const DEMO_COLLECTION = 'devtools_demo';
 export const DEMO_STREAM = 'devtools_jobs';
+export const VAULT_COLLECTION = 'devtools_vault';
 
 export interface Example {
   id: string;
@@ -178,6 +179,55 @@ export function exampleGroups(collection: string): ExampleGroup[] {
     },
   ];
 
+  const vault = `/${VAULT_COLLECTION}`;
+
+  const encrypted: Example[] = [
+    {
+      id: 'vault',
+      label: 'Declare encrypted fields',
+      note: `cpf is blind (found by value), card_token only encrypted, in ${VAULT_COLLECTION}`,
+      fresh: true,
+      text: lines(`PUT ${vault}`, '{ "blind": { "cpf": "numeric" }, "encrypted": ["card_token"], "unique": ["cpf"] }'),
+    },
+    {
+      id: 'vault-insert',
+      label: 'Insert with plain values',
+      note: 'the daemon encrypts cpf and card_token before the WAL',
+      fresh: true,
+      text: lines(
+        `POST ${vault}/_bulk`,
+        '{',
+        '  "docs": [',
+        '    { "_id": "u1", "name": "Ana", "cpf": "390.533.447-05", "card_token": "tok_4242" },',
+        '    { "_id": "u2", "name": "Bia", "cpf": "111.222.333-44", "card_token": "tok_1881" }',
+        '  ],',
+        '  "upsert": true',
+        '}',
+      ),
+    },
+    {
+      id: 'vault-find',
+      label: 'Find by a blind field',
+      note: 'numeric: only the digits count; the answer stays encrypted',
+      fresh: true,
+      text: lines(`POST ${vault}/_search`, '{ "query": { "cpf": "39053344705" } }'),
+    },
+    {
+      id: 'vault-decrypt',
+      label: 'Read with ?decrypt=1',
+      note: 'plain values for a caller with the decrypt right',
+      fresh: true,
+      text: lines(`GET ${vault}/_doc/u1?decrypt=1`, '', `POST ${vault}/_search?decrypt=1`, '{ "query": { "cpf": { "$in": ["39053344705", "11122233344"] } } }'),
+    },
+    {
+      id: 'vault-group',
+      label: 'Group by a blind field',
+      note: 'each group gets the value of one of its documents',
+      fresh: true,
+      text: lines(`POST ${vault}/_aggregate?decrypt=1`, '{ "pipeline": [{ "$group": { "_id": "$cpf", "n": { "$count": {} } } }] }'),
+    },
+  ];
+
   const system: Example[] = [
     {
       id: 'health',
@@ -193,6 +243,20 @@ export function exampleGroups(collection: string): ExampleGroup[] {
       text: lines('GET /_log', '', 'PUT /_log', '{ "level": "debug" }', '', 'PUT /_log', '{ "level": "info" }'),
     },
     {
+      id: 'settings',
+      label: 'Settings of the data dir',
+      note: 'the encryption key, masked, and the log settings with their source',
+      fresh: true,
+      text: lines('GET /_cluster/settings'),
+    },
+    {
+      id: 'settings-log',
+      label: 'Store the log settings',
+      note: 'they hold across a restart; warnings name what ndb.yml, the env or a flag sets',
+      fresh: true,
+      text: lines('PUT /_cluster/settings', '{ "log": { "level": "debug", "slow_ms": 250 } }', '', 'PUT /_cluster/settings', '{ "log": { "level": "info", "slow_ms": 1000 } }'),
+    },
+    {
       id: 'index',
       label: 'Create a compound index',
       note: 'built in the background; send Bulk insert first',
@@ -205,6 +269,7 @@ export function exampleGroups(collection: string): ExampleGroup[] {
     { label: 'Read', items: read },
     { label: 'Write', items: write },
     { label: 'Streams', items: streams },
+    { label: 'Encrypted fields', items: encrypted },
     { label: 'System', items: system },
   ];
 }

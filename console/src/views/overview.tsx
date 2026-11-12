@@ -3,7 +3,7 @@ import type { FC } from 'hono/jsx';
 import { Layout, type Current } from '@/html/layout';
 import { formatBytes, formatCount, formatUptime, formatVersion } from '@/format';
 import type { CollectionStats, Definition, Size, Stats } from '@/ndb';
-import type { Metrics } from '@/operations';
+import { keyInDataDir, type Metrics } from '@/operations';
 import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
 import { Card } from '@/ui/card';
@@ -22,9 +22,19 @@ export interface OverviewPageProps {
   pitrWindow?: string;
   updated: string;
   tcpNoToken?: boolean;
+  // keySource is where the encryption key comes from (GET
+  // /_cluster/settings): made, stored or env.
+  keySource?: string;
 }
 
-type StreamDefinition = Definition & { stream?: boolean };
+type StreamDefinition = Definition & { stream?: boolean; encrypted?: string[]; blind?: Record<string, string> | string[] };
+
+// hasEncrypted says that a collection has an encrypted or a blind field.
+function hasEncrypted(definition: StreamDefinition): boolean {
+  const blind = Array.isArray(definition.blind) ? definition.blind.length : Object.keys(definition.blind ?? {}).length;
+
+  return (definition.encrypted?.length ?? 0) > 0 || blind > 0;
+}
 type SleepyStats = CollectionStats & { asleep?: boolean };
 
 function sumParts(size: Size) {
@@ -59,7 +69,7 @@ function statusText(collection: SleepyStats): string {
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
 
-export const OverviewPage: FC<OverviewPageProps> = ({ current, stats, size, definitions, metrics, pitrWindow, updated, tcpNoToken = false }) => {
+export const OverviewPage: FC<OverviewPageProps> = ({ current, stats, size, definitions, metrics, pitrWindow, updated, tcpNoToken = false, keySource }) => {
   const base = `c/${encodeURIComponent(current.name)}`;
 
   const byName = new Map<string, StreamDefinition>(definitions.map(definition => [definition.name, definition]));
@@ -68,6 +78,9 @@ export const OverviewPage: FC<OverviewPageProps> = ({ current, stats, size, defi
 
   const quarantined = stats.totals.quarantined;
   const memtable = metrics?.get('ndb_memtable_bytes');
+
+  const encrypted = (definitions as StreamDefinition[]).filter(hasEncrypted).length;
+  const keyWarning = keyInDataDir(keySource);
 
   return (
     <Layout title="Dashboard" current={current} tab="overview">
@@ -95,6 +108,18 @@ export const OverviewPage: FC<OverviewPageProps> = ({ current, stats, size, defi
         <Badge tone="ok" size="lg">Healthy</Badge>
         <Badge tone={quarantined > 0 ? 'warn' : 'neutral'} size="lg">{plural(quarantined, 'quarantined line')}</Badge>
         {tcpNoToken && <Badge tone="warn" size="lg">TCP has no token</Badge>}
+
+        {keyWarning && (
+          <a
+            class="chip-link"
+            href={`${base}/operations`}
+            title="A copy of the disk or of a backup can decrypt. Open Operations."
+          >
+            <Badge tone="warn" size="lg">Encryption key in the data dir</Badge>
+          </a>
+        )}
+
+        {encrypted > 0 && <Badge size="lg">{`${encrypted} encrypted`}</Badge>}
       </section>
 
       <section class="grid-stats" aria-label="Totals">
