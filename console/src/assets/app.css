@@ -386,8 +386,8 @@ td.mono { font-size: 13px; }
 /* part: code box */
 .codebox { position: relative; }
 .codebox-label { display: block; margin-bottom: 6px; font-size: 12px; color: var(--muted); }
-.codebox-pre { margin: 0; padding: 14px 70px 14px 14px; overflow-x: auto; background: var(--code-bg); border: 1px solid var(--code-border); border-radius: var(--radius-field); font: 400 13px/1.6 'JetBrains Mono', monospace; }
-.codebox-copy { position: absolute; top: 8px; right: 8px; }
+.codebox-pre { margin: 0; padding: 14px 52px 14px 14px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--code-bg); border: 1px solid var(--code-border); border-radius: var(--radius-field); font: 400 13px/1.6 'JetBrains Mono', monospace; }
+.codebox-copy { position: absolute; top: 8px; right: 8px; width: 32px; padding: 0; }
 .check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 
 /* part: page without padding */

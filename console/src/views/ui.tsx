@@ -188,7 +188,7 @@ export const UiPage: FC = () => (
     </Block>
 
     <Block title="Icon">
-      {(['refresh', 'plus', 'x', 'chevron-down', 'chevron-right', 'chevron-left', 'chevrons-left', 'arrow-left', 'arrow-up', 'arrow-down', 'columns', 'documents', 'menu', 'search', 'star', 'chevrons-up-down', 'dashboard', 'database', 'streams', 'chart', 'eye', 'code', 'history', 'sliders', 'book', 'external', 'check'] as IconName[]).map(name => (
+      {(['refresh', 'plus', 'x', 'chevron-down', 'chevron-right', 'chevron-left', 'chevrons-left', 'arrow-left', 'arrow-up', 'arrow-down', 'columns', 'documents', 'menu', 'search', 'star', 'chevrons-up-down', 'dashboard', 'database', 'streams', 'chart', 'eye', 'code', 'history', 'sliders', 'book', 'external', 'check', 'copy'] as IconName[]).map(name => (
         <span class="badge" title={name}>
           <Icon name={name} />
         </span>
