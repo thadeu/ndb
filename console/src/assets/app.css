@@ -1129,6 +1129,7 @@ a.seg-item:hover { color: var(--ink); }
 .pitr-row.on { background: var(--pink-wash); }
 .pitr-name { flex: 0 0 150px; min-width: 0; font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
 .pitr-window { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.card > .pitr-window { flex: none; }
 .pitr-bar { position: relative; display: block; height: 10px; border-radius: 999px; background: var(--neutral-wash); }
 .pitr-row.on .pitr-bar { background: var(--bg); }
 .pitr-fill { position: absolute; top: 0; bottom: 0; right: 0; border-radius: 999px; background: var(--ink); }
