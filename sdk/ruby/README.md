@@ -59,7 +59,7 @@ Ndb::Client.new(
 - A bad address raises `ArgumentError` at once.
 - `ready_timeout` is how long a call retries while the daemon is not ready (`not_ready`, or the socket is missing or refuses). It uses exponential backoff (50 ms up to 1 s) with jitter. A write is retried only when the daemon certainly did not process it. A read is also retried after a dropped connection. A timeout is never retried. When the deadline passes, the last error is raised.
 - `health` does not wait: a daemon that is recovering raises `Ndb::NotReady`.
-- A reused keep-alive connection that the server closed is sent again only for a read. A write is never sent twice.
+- Before it uses an idle keep-alive connection again, the client checks that the server did not close it (the idle timeout of the daemon is 60 s, and a proxy can have a shorter one). A closed one is replaced, so a write after a quiet time does not fail. A connection that drops during a request is sent again only for a read. A write is never sent twice.
 - The pool is thread-safe and drops its connections after a `fork`.
 
 ## Collections

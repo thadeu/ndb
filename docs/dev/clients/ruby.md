@@ -69,7 +69,7 @@ Ndb.connect(
 - Every request sends `User-Agent: ndb-ruby/<Ndb::VERSION> (ruby <RUBY_VERSION>; <RUBY_PLATFORM>)`. `user_agent: "myapp/1.2"` adds the token of your app at the end, so the daemon can tell the apps apart.
 - `ready_timeout` is how long a call retries while the daemon is not ready (`not_ready`, or the socket is missing or refuses). It uses exponential backoff (50 ms up to 1 s) with jitter. A write is retried only when the daemon certainly did not process it. A read is also retried after a dropped connection. A timeout is never retried. When the deadline passes, the last error is raised.
 - A read that gets no answer in `timeout` raises `Ndb::TimeoutError`, also on a reused connection. It is not sent again.
-- A reused keep-alive connection that the server closed is sent again only for a read. A write is never sent twice.
+- Before it uses an idle keep-alive connection again, the client checks that the server did not close it (the idle timeout of the daemon is 60 s, and a proxy can have a shorter one). A closed one is replaced, so a write after a quiet time does not fail. A connection that drops during a request is sent again only for a read. A write is never sent twice.
 - The pool is thread-safe and drops its connections after a `fork`. A connection goes back to the pool only after a request that ended with no raise. After any other end (an error, `Timeout.timeout`, `Thread#kill`, `rack-timeout`), it is closed, so the next call never reads the answer of another call.
 
 ## Collections

@@ -140,6 +140,28 @@ class RetryTest < Minitest::Test
 
     assert_equal 2, requests.size
   end
+  # The daemon closes a keep-alive connection after its idle timeout. The
+  # next call, also a write, must not use that connection: it opens a new
+  # one, so nothing fails and nothing is sent twice.
+  def test_a_connection_the_server_closed_while_idle_is_not_used
+    url, calls = fake_server do |sock, count|
+      while (line = sock.gets("\r\n")) && line != "\r\n"; end
+
+      body = count == 1 ? '{"collections":[]}' : '{"results":[{"_id":"a","_v":1}]}'
+
+      sock.write("HTTP/1.1 200 OK\r\nContent-Length: #{body.bytesize}\r\n\r\n#{body}")
+      sock.close if count == 1
+    end
+
+    client = Ndb::Client.new(url: url, ready_timeout: 0)
+    client.collections
+
+    sleep 0.1
+
+    assert_equal [{ "_id" => "a", "_v" => 1 }], client.bulk("c", [{ a: 1 }])
+    assert_equal 2, calls.size
+  end
+
   # A read timeout is Ndb::TimeoutError, and the request is not sent again
   # (also a read on a reused connection).
   def test_a_read_timeout_is_a_timeout_error_and_is_not_sent_again

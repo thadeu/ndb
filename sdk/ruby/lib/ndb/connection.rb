@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "io/wait"
 require "openssl"
 require "socket"
 require "uri"
@@ -110,6 +111,8 @@ module Ndb
     # stream read waits longer than the default). A read timeout
     # (IO::TimeoutError) raises Ndb::TimeoutError and is never sent again.
     def request(method, target, body, headers: {}, idempotent: false, timeout: nil)
+      close if closed_by_server?
+
       reused = !@socket.nil?
 
       begin
@@ -170,6 +173,17 @@ module Ndb
     end
 
     private
+
+    # An idle keep-alive connection has nothing to read. When it is readable,
+    # the server closed it (the idle timeout of the daemon, a proxy): the
+    # next request opens a new one, so a write is never lost on it.
+    def closed_by_server?
+      return false unless @socket
+
+      @socket.to_io.wait_readable(0) ? true : false
+    rescue IOError, SystemCallError
+      true
+    end
 
     def open_socket
       @socket = @endpoint.connect(@timeout)
