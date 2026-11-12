@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { createApp } from '@/app';
 import { Connections } from '@/connections';
 import { Ndb, NdbError } from '@/ndb';
+import { shownHeaders } from '@/routes/devtools';
 
 const BIN = process.env.NDB_BIN ?? '/tmp/ndb-console-test/ndb';
 const dir = mkdtempSync(join(tmpdir(), 'nc-'));
@@ -29,7 +30,7 @@ beforeAll(async () => {
   mkdirSync(join(dir, 'data'));
   writeFileSync(join(dir, 'ndb.yml'), `data_dir: ${join(dir, 'data')}\nlisten:\n  unix: ${sock}\n`);
 
-  daemon = Bun.spawn([BIN, '-config', join(dir, 'ndb.yml')], { stdout: 'ignore', stderr: 'ignore' });
+  daemon = Bun.spawn([BIN, '-config', join(dir, 'ndb.yml'), '-tcp', ''], { stdout: 'ignore', stderr: 'ignore' });
 
   for (let i = 0; i < 200; i++) {
     const ready = await new Ndb({ url }).health().then(() => true).catch(() => false);
@@ -112,8 +113,8 @@ describe('pages', () => {
     const html = await (await page('/')).text();
 
     expect(html).toContain('online');
-    expect(html).toContain('1 collections');
-    expect(html).toContain('2 rows');
+    expect(html).toContain('1 collection · 0 streams');
+    expect(html).toContain('unix socket');
   });
 
   it('never renders the token', async () => {
@@ -131,6 +132,8 @@ describe('pages', () => {
     expect(html).toContain('orders');
     expect(html).toContain('engine');
     expect(html).toContain('Disk');
+    expect(html).toContain('Collections and streams');
+    expect(html).toContain('href="c/local/explorer?coll=orders"');
   });
 
   it('tests a connection and answers json', async () => {
@@ -209,27 +212,268 @@ async function ndbPost(path: string, body: unknown): Promise<Response> {
   return fetch(`http://ndb${path}`, { method: 'POST', body: JSON.stringify(body), unix: sock } as RequestInit);
 }
 
-describe('browser tab', () => {
-  it('lists the documents with _v and shows the selected one as a tree', async () => {
-    const html = await (await page('/c/local/browser?coll=orders')).text();
+describe('explorer documents tab', () => {
+  it('lists the documents in a table and opens the selected one in a bottom drawer', async () => {
+    const list = await (await page('/c/local/explorer?coll=orders&tab=documents')).text();
 
-    expect(html).toContain('docrow');
-    expect(html).toContain('_v 1');
-    expect(html).toContain('2 matches');
+    expect(list).toContain('<span class="find-status">2 matches');
+    expect(list).toContain('1–2 of 2');
+    expect(list).toContain('data-table="docs:orders"');
+    expect(list).toContain('POST /orders/_search {&quot;query&quot;:{},&quot;limit&quot;:25}');
+    expect(list).toContain('aria-label="Select all rows"');
+    expect(list).toContain('name="ids" value="a" form="docs-bulk"');
+    expect(list).toContain('browser/delete-many');
+    expect(list).toContain('data-col="_v"');
+    expect(list).toContain('Export NDJSON');
+    expect(list).toContain('<tr data-doc-href="c/local/explorer?coll=orders&amp;tab=documents&amp;id=a">');
+    expect(list).toContain('href="c/local/explorer?coll=orders&amp;tab=documents&amp;id=a" data-doc-link');
+    expect(list).toContain('<dialog id="doc" class="dialog drawer drawer-bottom doc-drawer" aria-labelledby="doc-title">');
+    expect(list).not.toContain('class="doc-panel"');
+    expect(list).not.toContain('id="doc-editor"');
+
+    const html = await (await page('/c/local/explorer?coll=orders&tab=documents&id=a&sort=_id')).text();
+
+    expect(html).toContain('<dialog id="doc" class="dialog drawer drawer-bottom doc-drawer" open="" aria-labelledby="doc-title">');
+    expect(html).toContain('<tr class="find-row-on" data-doc-href=');
+    expect(html).not.toContain('class="doc-panel"');
+    expect(html).not.toContain('docs-split');
     expect(html).toContain('id="doc-editor"');
+    expect(html).toContain('<nav class="doc-list" aria-label="Documents of this page">');
+    expect(html).toMatch(/class="doc-item find-row-on"[^>]*aria-current="true"/);
+    expect(html.match(/class="doc-item/g)?.length).toBeGreaterThanOrEqual(2);
     expect(html).toContain('class="tkey">status');
-    expect(html.indexOf('>_id<')).toBeLessThan(html.indexOf('>_v<'));
+    expect(html).toContain('Not locked.');
+    expect(html).toContain('Lock for 30 s');
+    expect(html).toContain('<a class="dialog-x" href="c/local/explorer?coll=orders&amp;tab=documents&amp;sort=_id" data-dialog-close="true" aria-label="Close">');
+    expect(html).not.toContain('History');
+    expect(html.indexOf('>_id</span>')).toBeGreaterThan(-1);
+    expect(html.indexOf('>_id</span>')).toBeLessThan(html.indexOf('>_v</span>'));
+
+    const missing = await (await page('/c/local/explorer?coll=orders&tab=documents&id=nope')).text();
+
+    expect(missing).toContain('No document with _id nope.');
+    expect(missing).toContain('<div class="doc-missing">');
+    expect(missing).toContain('drawer-bottom doc-drawer" open=""');
+  });
+
+  it('puts the fields at the left of the drawer and the facts, lock and actions at the right', async () => {
+    const html = await (await page('/c/local/explorer?coll=orders&tab=documents&id=a')).text();
+
+    const fields = html.indexOf('<section class="doc-fields" aria-label="Fields">');
+    const side = html.indexOf('<div class="doc-side">');
+    const tree = html.indexOf('class="tree"', fields);
+
+    expect(fields).toBeGreaterThan(html.indexOf('<dialog id="doc"'));
+    expect(tree).toBeGreaterThan(fields);
+    expect(side).toBeGreaterThan(tree);
+    expect(html.indexOf('<dl class="doc-facts">')).toBeGreaterThan(side);
+    expect(html).toContain('data-copy="a" aria-label="Copy the _id"');
+    expect(html.indexOf('class="doc-lock"')).toBeGreaterThan(side);
+    expect(html.indexOf('<form class="doc-actions" method="post" action="c/local/browser/delete"')).toBeGreaterThan(html.indexOf('class="doc-lock"'));
+    expect(html).not.toContain('&quot;closeHref&quot;');
+  });
+
+  it('shows the message of an action inside the open drawer', async () => {
+    const html = await (await page('/c/local/explorer?coll=orders&tab=documents&id=a&done=saved')).text();
+
+    const side = html.indexOf('<div class="doc-side">');
+
+    expect(html.indexOf('class="note ok"', side)).toBeGreaterThan(side);
+    expect(html).toContain('&quot;notice&quot;');
+  });
+
+  it('shows each filter as an editable row with a remove button', async () => {
+    const html = await (await page('/c/local/explorer?coll=orders&tab=documents&f=status&op=in&t=string&v=paid,new&f=_id&op=gte&t=string&v=a&sort=_id')).text();
+
+    expect(html.match(/<div class="find-row" data-row=/g)).toHaveLength(2);
+    expect(html).toContain('value="paid,new"');
+    expect(html).toContain('name="remove" value="1"');
+    expect(html).toContain('{&quot;query&quot;:{&quot;status&quot;:{&quot;$in&quot;:[&quot;paid&quot;,&quot;new&quot;]},&quot;_id&quot;:{&quot;$gte&quot;:&quot;a&quot;}}');
+    expect(html).toContain('Add condition');
+  });
+
+  it('reads an auto value as a number, a boolean or a text', async () => {
+    const html = await (await page('/c/local/explorer?coll=orders&tab=documents&f=n&op=gte&t=auto&v=10&f=ok&op=eq&t=auto&v=true&f=code&op=eq&t=auto&v=%22123%22')).text();
+
+    expect(html).toContain('{&quot;query&quot;:{&quot;n&quot;:{&quot;$gte&quot;:10},&quot;ok&quot;:true,&quot;code&quot;:&quot;123&quot;}');
+  });
+
+  it('builds the filter from rows and shows the request json', async () => {
+    const html = await (await page('/c/local/explorer?coll=orders&tab=documents&f=status&op=eq&t=string&v=paid')).text();
+
+    expect(html).toContain('1 match');
+    expect(html).toContain('{&quot;query&quot;:{&quot;status&quot;:&quot;paid&quot;},&quot;limit&quot;:25}');
+  });
+
+  it('runs per: the first rows of each value, with no page limit', async () => {
+    await ndbPost('/visits/_bulk', { docs: Array.from({ length: 9 }, (_, i) => ({ _id: `v${i}`, who: `u${i % 3}`, n: i })) });
+
+    const html = await (await page('/c/local/explorer?coll=visits&tab=documents&sort=n&dir=asc&per=who&per_limit=2')).text();
+
+    expect(html).toContain('{&quot;query&quot;:{},&quot;sort&quot;:{&quot;n&quot;:1},&quot;per&quot;:{&quot;field&quot;:&quot;who&quot;,&quot;limit&quot;:2}}');
+    expect(html.match(/name="ids" value="v\d"/g)).toHaveLength(6);
+    expect(html).toContain('name="per" value="who"');
+    expect(html).toContain('first 2 of each who');
+    expect(html).not.toContain('aria-label="Page size"');
+  });
+
+  it('exports the find query as an ndjson file', async () => {
+    await ndbPost('/sheets/_bulk', { docs: Array.from({ length: 30 }, (_, i) => ({ _id: `p${String(i).padStart(2, '0')}` })) });
+
+    const list = await (await page('/c/local/explorer?coll=sheets&tab=documents&f=_id&op=gte&t=string&v=p10')).text();
+    const href = list.match(/href="(c\/local\/browser\/export[^"]*)"/)?.[1]?.replaceAll('&amp;', '&');
+
+    expect(href).toBe('c/local/browser/export?coll=sheets&f=_id&op=gte&t=string&v=p10');
+
+    const response = await page(`/${href}`);
+    const lines = (await response.text()).trim().split('\n');
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('application/x-ndjson');
+    expect(response.headers.get('content-disposition')).toMatch(/^attachment; filename="sheets-\d{8}-\d{6}\.ndjson"$/);
+    expect(lines).toHaveLength(20);
+    expect(JSON.parse(lines[0] ?? '')).toEqual({ _id: 'p10' });
+
+    const bad = await page(`/c/local/browser/export?coll=sheets&mode=json&where=${encodeURIComponent('{oops')}`);
+
+    expect(bad.status).toBe(400);
+    expect((await page('/c/local/browser/export?coll=nope')).status).toBe(400);
+  });
+
+  it('exports more than one page of the cursor', async () => {
+    await ndbPost('/wide/_bulk', { docs: Array.from({ length: 1200 }, (_, i) => ({ _id: `b${String(i).padStart(4, '0')}` })) });
+
+    const text = await (await page('/c/local/browser/export?coll=wide&sort=_id&dir=asc')).text();
+    const lines = text.trim().split('\n');
+
+    expect(lines).toHaveLength(1200);
+    expect(JSON.parse(lines.at(-1) ?? '')).toEqual({ _id: 'b1199' });
+  });
+
+  it('locks a document, saves and deletes with the lock, and never shows the token', async () => {
+    await ndbPost('/vault/_bulk', { docs: [{ _id: 'k1', n: 1 }, { _id: 'k2', n: 1 }] });
+
+    const taken = await page('/c/local/browser/lock', json({ coll: 'vault', id: 'k1' }));
+    const lock = await taken.json();
+
+    expect(taken.status).toBe(200);
+    expect(Object.keys(lock).sort()).toEqual(['_v', 'ok', 'until']);
+    expect(new Date(lock.until).getTime()).toBeGreaterThan(Date.now());
+
+    const other = await fetch('http://ndb/vault/_lock/k1', { method: 'POST', body: JSON.stringify({ wait: 0 }), unix: sock } as RequestInit);
+
+    expect(other.status).toBe(423);
+
+    const html = await (await page('/c/local/explorer?coll=vault&tab=documents&id=k1')).text();
+
+    expect(html).toContain('Locked by this console');
+    expect(html).toContain('browser/unlock');
+    expect(html).toContain('&quot;lockedUntil&quot;');
+    expect(html).not.toContain('token');
+
+    const saved = await page('/c/local/browser/save', json({ coll: 'vault', id: 'k1', _v: lock._v, set: { n: 2 }, unset: [] }));
+
+    expect(saved.status).toBe(200);
+    expect((await ndbGet('/vault/_doc/k1')).n).toBe(2);
+
+    const again = await (await page('/c/local/browser/lock', json({ coll: 'vault', id: 'k1' }))).json();
+
+    expect(again.until).toBe(lock.until);
+
+    const released = await page('/c/local/browser/unlock', json({ coll: 'vault', id: 'k1' }));
+
+    expect(released.status).toBe(200);
+    expect((await fetch('http://ndb/vault/_lock/k1', { method: 'POST', body: JSON.stringify({ wait: 0, ttl: '1s' }), unix: sock } as RequestInit)).status).toBe(200);
+
+    const busy = await page('/c/local/browser/lock', json({ coll: 'vault', id: 'k1' }));
+
+    expect(busy.status).toBe(423);
+    expect((await busy.json()).message).toContain('Another caller');
+
+    const byForm = await page('/c/local/browser/lock', form({ coll: 'vault', id: 'k2', find: 'sort=n' }));
+
+    expect(byForm.status).toBe(303);
+    expect(byForm.headers.get('location')).toContain('explorer?coll=vault&tab=documents&sort=n&id=k2&done=locked');
+
+    const removed = await page('/c/local/browser/delete', form({ coll: 'vault', id: 'k2', find: 'sort=n' }));
+
+    expect(removed.headers.get('location')).toContain('sort=n&done=deleted');
+    expect((await fetch('http://ndb/vault/_doc/k2', { unix: sock } as RequestInit)).status).toBe(404);
+  });
+
+  it('refuses a lock without the right Origin', async () => {
+    const response = await page('/c/local/browser/lock', json({ coll: 'orders', id: 'a' }, { origin: 'http://evil.example' }));
+
+    expect(response.status).toBe(403);
+  });
+
+  it('deletes the selected rows, with the Origin check', async () => {
+    await ndbPost('/trash/_bulk', { docs: [{ _id: 'x1' }, { _id: 'x2' }, { _id: 'x3' }] });
+
+    const body = new URLSearchParams([['coll', 'trash'], ['find', 'sort=_id'], ['ids', 'x1'], ['ids', 'x3'], ['ids', 'gone']]);
+    const headers = { 'content-type': 'application/x-www-form-urlencoded', origin: 'http://ui' };
+
+    const refused = await page('/c/local/browser/delete-many', { method: 'POST', body, headers: { ...headers, origin: 'http://evil.example' } });
+
+    expect(refused.status).toBe(403);
+    expect((await ndbGet('/trash/_doc/x1'))._id).toBe('x1');
+
+    const response = await page('/c/local/browser/delete-many', { method: 'POST', body, headers });
+    const location = response.headers.get('location') ?? '';
+
+    expect(response.status).toBe(303);
+    expect(location).toContain('explorer?coll=trash&tab=documents&sort=_id&done=deleted&n=2');
+
+    const html = await (await page(location)).text();
+
+    expect(html).toContain('Deleted 2 documents.');
+    expect(html).toContain('1 match');
+    expect(html).toContain('name="ids" value="x2"');
+  });
+
+  it('pages forward and back with the cursor trail, and sorts by a column', async () => {
+    const first = await (await page('/c/local/explorer?coll=orders&tab=documents&sort=_id&dir=asc')).text();
+
+    expect(first).toContain('aria-sort="ascending"');
+    expect(first).toContain('dir=asc');
+
+    await ndbPost('/pages/_bulk', { docs: Array.from({ length: 30 }, (_, i) => ({ _id: `p${String(i).padStart(2, '0')}` })) });
+
+    const one = await (await page('/c/local/explorer?coll=pages&tab=documents')).text();
+    const next = one.match(/href="([^"]*after=[^"]*)" aria-label="Next page"/)?.[1]?.replaceAll('&amp;', '&');
+
+    expect(one).toContain('1–25 of 30');
+    expect(next).toBeDefined();
+
+    const two = await (await page(`/${next}`)).text();
+
+    expect(two).toContain('26–30 of 30');
+    expect(two).toContain('Page 2');
+    expect(two).toContain('aria-label="Previous page"');
+    expect(two).toMatch(/<button[^>]*disabled[^>]*aria-label="Next page"/);
+  });
+
+  it('adds and removes a filter row', async () => {
+    const added = await (await page('/c/local/explorer?coll=orders&tab=documents&f=status&op=eq&t=string&v=paid&add=1')).text();
+
+    expect(added.match(/aria-label="Field name"/g)).toHaveLength(2);
+    expect(added).toContain('name="remove" value="0"');
+
+    const removed = await (await page('/c/local/explorer?coll=orders&tab=documents&f=status&op=eq&t=string&v=paid&remove=0')).text();
+
+    expect(removed).toContain('2 matches');
   });
 
   it('redirects to the first collection when none is chosen', async () => {
     const response = await page('/c/local/browser');
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('location')).toContain('coll=orders');
+    expect(response.headers.get('location')).toContain('explorer?coll=orders');
+    expect(response.headers.get('location')).toContain('tab=documents');
   });
 
   it('shows an invalid filter inline and does not crash', async () => {
-    const response = await page(`/c/local/browser?coll=orders&where=${encodeURIComponent('{oops')}`);
+    const response = await page(`/c/local/explorer?coll=orders&tab=documents&mode=json&where=${encodeURIComponent('{oops')}`);
     const html = await response.text();
 
     expect(response.status).toBe(200);
@@ -237,11 +481,12 @@ describe('browser tab', () => {
   });
 
   it('filters with where', async () => {
-    const html = await (await page(`/c/local/browser?coll=orders&where=${encodeURIComponent('{"status":"paid"}')}`)).text();
+    const html = await (await page(`/c/local/explorer?coll=orders&tab=documents&mode=json&where=${encodeURIComponent('{"status":"paid"}')}`)).text();
 
     expect(html).toContain('1 match');
     expect(html).toContain('id=b');
     expect(html).not.toContain('id=a"');
+    expect(html).toContain('>{&quot;status&quot;:&quot;paid&quot;}</textarea>');
   });
 
   it('saves a diff, and a stale _v is a conflict', async () => {
@@ -312,6 +557,19 @@ describe('dev tools tab', () => {
     expect(answer.bytes).toBeGreaterThan(0);
   });
 
+  it('returns every ndb header, also on a route without X-Ndb-*', async () => {
+    const answer = await (await page('/c/local/devtools/send', json({ method: 'GET', path: '/_stats' }))).json();
+
+    expect(answer.headers['content-length']).toBeDefined();
+    expect(answer.headers.date).toBeDefined();
+  });
+
+  it('never returns a header with a credential', () => {
+    const headers = new Headers({ 'x-ndb-total': '3', authorization: 'Bearer x', 'set-cookie': 'a=b', 'x-auth-token': 't' });
+
+    expect(shownHeaders(headers)).toEqual({ 'x-ndb-total': '3' });
+  });
+
   it('passes an ndb error status through', async () => {
     const answer = await (await page('/c/local/devtools/send', json({ method: 'GET', path: '/nope/_stats' }))).json();
 
@@ -334,6 +592,7 @@ describe('watch tab', () => {
 
     expect(html).toContain('id="watch"');
     expect(html).toContain('ndb-ui-xxxxxxxx');
+    expect(html).toContain('value="{&quot;a&quot;:1}"');
   });
 
   it('streams an event after an insert, and closes the upstream when the browser leaves', async () => {
@@ -441,7 +700,7 @@ describe('pitr block of the backups tab', () => {
   it('lists the windows and opens the restore dialog from the url', async () => {
     const html = await (await page('/c/local/backups')).text();
 
-    expect(html).toContain('Point in time recovery (PITR)');
+    expect(html).toContain('Point-in-time recovery');
     expect(html).toContain('orders');
     expect(html).not.toContain('id="pitr-restore"');
 

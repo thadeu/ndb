@@ -1,7 +1,12 @@
-// mount upgrades the backup form: it fetches the file and saves it through a
+import { mount as restoreSlider } from '@/components/restore-slider';
+
+// mount upgrades the Backups page: the slider of the restore card, and the
+// backup form: it fetches the file and saves it through a
 // temporary <a download> link, so the page stays where it is. Without the
 // script, the form posts and the browser handles the attachment.
 export function mount(): void {
+  restoreSlider();
+
   const form = document.querySelector<HTMLFormElement>('[data-backup-form]');
   const status = document.querySelector<HTMLElement>('[data-backup-status]');
   const button = form?.querySelector<HTMLButtonElement>('button[type="submit"]');

@@ -206,6 +206,13 @@ export class Ndb {
     return this.json('POST', `/${encodeURIComponent(collection)}/_rename`, JSON.stringify({ to, replace }), 60_000);
   }
 
+  // call sends one JSON request and returns the parsed answer. A status that
+  // is not 2xx throws an NdbError. Modules for one part of the API (streams,
+  // indexes, logs) use it, so they need no method here.
+  call<T>(method: string, path: string, body?: unknown, timeoutMs?: number): Promise<T> {
+    return this.json(method, path, body === undefined ? undefined : JSON.stringify(body), timeoutMs);
+  }
+
   // forward sends a request as it is and returns the response, even when the
   // status is not 2xx. Only a network failure throws.
   forward(method: string, path: string, body?: string): Promise<Response> {

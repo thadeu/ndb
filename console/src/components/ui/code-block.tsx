@@ -2,6 +2,9 @@ import type { FC } from 'hono/jsx';
 
 import { copyText } from '@/components/copy';
 
+import { Code } from './code';
+import { Icon, iconSvg } from './icon';
+
 // CodeBlock shows a command or a snippet with a Copy button. Without the
 // script the text can still be selected.
 export const CodeBlock: FC<{ code: string; label?: string }> = ({ code, label }) => (
@@ -9,11 +12,11 @@ export const CodeBlock: FC<{ code: string; label?: string }> = ({ code, label })
     {label && <span class="codebox-label">{label}</span>}
 
     <pre class="codebox-pre">
-      <code>{code}</code>
+      <Code text={code} />
     </pre>
 
-    <button type="button" class="btn small codebox-copy" data-copy={code}>
-      Copy
+    <button type="button" class="btn small codebox-copy" data-copy={code} aria-label="Copy" title="Copy">
+      <Icon name="copy" size={16} />
     </button>
   </div>
 );
@@ -26,12 +29,19 @@ export function mount(): void {
     if (!button) return;
 
     const copied = await copyText(button.dataset.copy ?? '');
-    const label = button.textContent;
+    const before = button.innerHTML;
+    const icon = button.querySelector('svg') !== null;
 
-    button.textContent = copied ? 'Copied' : 'Press Ctrl+C';
+    if (icon) {
+      button.innerHTML = copied ? iconSvg('check', 16) : before;
+      button.title = copied ? 'Copied' : 'Press Ctrl+C';
+    } else {
+      button.textContent = copied ? 'Copied' : 'Press Ctrl+C';
+    }
 
     setTimeout(() => {
-      button.textContent = label;
+      button.innerHTML = before;
+      button.title = 'Copy';
     }, 1500);
   });
 }

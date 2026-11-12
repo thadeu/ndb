@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'hono/jsx';
 
 export interface StreamHandlers {
+  onReady?: () => void;
   onMessage: (data: unknown) => void;
   onProblem: (message: string) => void;
   onClose: () => void;
@@ -27,6 +28,8 @@ export function useEventStream(url: string | undefined, handlers: StreamHandlers
         return;
       }
     };
+
+    source.addEventListener('ready', () => latest.current.onReady?.());
 
     source.addEventListener('problem', event => {
       latest.current.onProblem((event as MessageEvent).data || 'The stream failed.');

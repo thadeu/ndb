@@ -1,7 +1,8 @@
 // Pure logic of the Dev Tools editor: split the text into request blocks,
 // find the block under the cursor, format a body, and color a line. A block
 // is a line `METHOD /path`, then an optional JSON body up to a blank line or
-// the next method line.
+// the next method line. A line that starts with # is a comment: it is never
+// part of a body.
 
 export interface Block {
   method: string;
@@ -9,6 +10,10 @@ export interface Block {
   body: string;
   start: number;
   end: number;
+}
+
+export function isComment(line: string): boolean {
+  return line.trimStart().startsWith('#');
 }
 
 const METHOD_LINE = /^\s*(GET|POST|PUT|DELETE|PATCH|HEAD)\s+(\S+)\s*$/i;
@@ -51,7 +56,7 @@ export function parseBlocks(text: string): Block[] {
       return;
     }
 
-    if (!current) return;
+    if (!current || isComment(line)) return;
 
     if (line.trim() === '') {
       close();
@@ -96,8 +101,9 @@ export function formatBlock(text: string, block: Block): string | undefined {
   }
 
   const lines = text.split('\n');
+  const comments = lines.slice(block.start + 1, block.end + 1).filter(isComment);
 
-  lines.splice(block.start + 1, block.end - block.start, ...pretty.split('\n'));
+  lines.splice(block.start + 1, block.end - block.start, ...comments, ...pretty.split('\n'));
 
   return lines.join('\n');
 }
@@ -122,7 +128,7 @@ const JSON_TOKEN = /("(?:[^"\\]|\\.)*")(\s*:)?|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?
 
 // tokenize splits a line into colored parts for the overlay.
 export function tokenize(line: string): Token[] {
-  if (line.trimStart().startsWith('#')) return [{ text: line, tone: 'dim' }];
+  if (isComment(line)) return [{ text: line, tone: 'dim' }];
 
   const match = METHOD_LINE.exec(line);
 
