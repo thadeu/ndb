@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.23.1] - 2026-11-12
+
 ### Added
 
 - **Key rotation:** `ndb key rotate` makes a new encryption key `k2` and seals every encrypted value again in the background, with the reseal job; `ndb key rotate -env` makes the key for `NDB_ENCRYPTION_KEY`, and the next start takes the old one in `NDB_ENCRYPTION_KEY_OLD` (or from the data dir, to move the key to the env). Until it ends, a blind filter matches the hash of both keys. Then the old key is dropped and the settings file is written again with no copy of it. `POST /_cluster/key` and `ndb key status`; the route is unix socket only (`403` over TCP, also with the full token), and no SDK has it. See `docs/dev/encryption.md#key-rotation`.
@@ -735,7 +737,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.23.0...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.23.1...HEAD
+[1.23.1]: https://github.com/thadeu/ndb/compare/v1.23.0...v1.23.1
 [1.23.0]: https://github.com/thadeu/ndb/compare/v1.22.1...v1.23.0
 [1.22.1]: https://github.com/thadeu/ndb/compare/v1.22.0...v1.22.1
 [1.22.0]: https://github.com/thadeu/ndb/compare/v1.21.2...v1.22.0
