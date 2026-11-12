@@ -96,7 +96,7 @@ end
 | `source "glob"` | Declares a read-only direct-mode collection over files. Writes raise `ReadOnlyCollection`. |
 
 - Attributes are ActiveModel attributes, so every ActiveModel type works (`:string`, `:integer`, `:float`, `:boolean`, `:datetime`, `:date`, and so on). Times are sent as RFC 3339 UTC strings with milliseconds. `:blob` is added by this gem.
-- Validations, callbacks (`save`, `create`, `update`, `destroy`), dirty tracking and `as_json` work as in ActiveModel.
+- Validations, callbacks (`validation`, `save`, `create`, `update`, `destroy`), dirty tracking and `as_json` work as in ActiveModel.
 - The model declares its collection on first use, once per process.
 - Mark a base class with `self.abstract_class = true` to share settings.
 
