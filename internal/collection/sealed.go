@@ -33,7 +33,7 @@ import (
 //
 //	000007.parquet      the rows
 //	000007.ids          id → row, version, position, tx, tombstone (bloom)
-//	000007.i.<hex>      secondary index of a field: encoded key → row
+//	000007.k.<hex>      secondary index of a field: encoded key → row
 //	000007.u.<hex>      unique field: canonical value + 0x00 + id → row
 
 // bitset is one bit per row of a segment.
@@ -95,7 +95,16 @@ func sidecarBase(segPath string) string { return strings.TrimSuffix(segPath, ".p
 
 func idsPath(segPath string) string { return sidecarBase(segPath) + ".ids" }
 
+// indexPath is the key file of an index field. "k" is the key encoding in
+// which an RFC 3339 string of any field is a time; the files of the older
+// encoding (".i.") are not read, and each open builds the new ones.
 func indexPath(segPath, field string) string {
+	return sidecarBase(segPath) + ".k." + hex.EncodeToString([]byte(field))
+}
+
+// legacyIndexPath is the key file of the older encoding, removed when the
+// new one is built.
+func legacyIndexPath(segPath, field string) string {
 	return sidecarBase(segPath) + ".i." + hex.EncodeToString([]byte(field))
 }
 

@@ -574,6 +574,7 @@ func (st *rowState) match() (bool, error) {
 		}
 
 		_, cands[slot] = cellValues(cell, st.sc.q.IsTime(st.sc.paths[at]))
+		cands[slot] = query.TextID(st.sc.paths[at], cands[slot])
 	}
 
 	if known {

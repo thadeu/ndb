@@ -229,7 +229,7 @@ Rules:
 - Mixing operators and plain keys in one field object is an error: `{"a": {"$gt": 1, "b": 2}}`.
 - Unknown operators are `invalid_query`.
 - Time: for the collection `time` field, RFC 3339 strings are compared as instants, so offsets do not matter. A string that starts with `now` is [date math](#date-math).
-- Cross-type order (sort, cursors, indexes): `missing < null < number < string < time < object < array < bool`.
+- Cross-type order (sort, cursors, indexes): `missing < null < number < string < time < object < array < bool`. A time is an RFC 3339 string of any field (see [Times](#times)).
 
 ### Indexes
 
@@ -301,6 +301,22 @@ units: s m h d w M y      (m = minute, M = month)
 - `now` is read once per request: every `now` of one query is the same instant. A search cursor keeps the `now` of its first page, so the pages of one walk see the same window. An aggregate reads `now` on each request. A `watch` reads it when the stream opens.
 - On any other field, `"now-1h"` is a plain string.
 - A broken expression (`now-7x`, `now--1d`, `now/`) is `invalid_query`.
+
+### Times
+
+A string in RFC 3339 with a time (`2026-11-12T15:00:05Z`) is an instant on **every** field, not only on the collection `time` field. So two times compare in the right order whatever their width or offset: `"...:05Z"`, `"...:05.1Z"`, `"...:05.100Z"` and `"...12:00:05.100-03:00"` are instants, and the last three are equal.
+
+```json
+{ "next_at": { "$lte": "2026-11-12T15:00:05.300Z" } }
+```
+
+- It works in every filter, sort, cursor, index, `$min` and `$max`, and in `$match` and `$group` of an aggregate. An aggregate gives a time back in UTC (`2026-11-12T15:00:05.1Z`).
+- A string must have the date, `T`, the time with seconds, and an offset or `Z`. `"2026-11-12"`, `"15:00"` and other text stay strings. In the cross-type order a time comes after a string.
+- `_id` is always text: an id that looks like a time is found by its exact text.
+- `$regex` reads the text as it is stored.
+- Date math (`now-1h`) is only for the `time` field and the `expires_field`. On another field, use an RFC 3339 string.
+- The SDKs write a time in UTC with milliseconds, always the same width (`2026-11-12T15:00:05.000Z`): Ruby and Rails with `iso8601(3)`, TypeScript with `Date#toISOString`, Go with `ndb.TimeLayout` (a `time.Time` field, a `time.Time` in a filter, or `ndb.Time`). The stored text stays as it was sent.
+- A data dir of an older version has the index keys of a time string as text. At the first start of this version, each index builds its keys again in the background (the old key files are removed), as for a new index: queries scan until it is `ready`.
 
 ### Array elements
 
@@ -431,7 +447,7 @@ A write operator in `query`, or another key in `update`, is `400 unknown_operato
 | `{"$inc": {"f": n}}` | add a number. A negative number subtracts. A missing field is 0. A field that is not a number is `invalid_field`. Integers stay exact, also above 2^53: a sum of two integers out of the int64 range is `invalid_field` (integer overflow), and the document does not change. A fraction gives a float. |
 | `{"$push": {"f": v}}` | append one value. `{"$push": {"f": {"$each": [a, b]}}}` appends many. A missing field becomes a new array. A field that is not an array is `invalid_field`. |
 | `{"$pull": {"f": v}}` | remove every element equal to `v`. A condition removes the elements that match it: `{"$gte": 5}`, or `{"status": "done"}` for arrays of objects. |
-| `{"$min": {"f": v}}`, `{"$max": {"f": v}}` | set when the field is missing or `v` is lower (higher). Numbers, or strings in lexical order. A different type than the field is `invalid_field`. Numbers compare exactly, also integers above 2^53. |
+| `{"$min": {"f": v}}`, `{"$max": {"f": v}}` | set when the field is missing or `v` is lower (higher). Numbers, times (an RFC 3339 string, see [Times](#times)), or strings in lexical order. A different type than the field is `invalid_field`. Numbers compare exactly, also integers above 2^53. |
 
 Several operators can go in one `update`, on different fields:
 

@@ -1,0 +1,33 @@
+{
+  "name": "find compares RFC 3339 strings as instants on any field, whatever their width or offset",
+  "collection": "jobs",
+  "setup": {
+    "catalog": { "write": "engine" },
+    "writes": [
+      {
+        "op": "bulk",
+        "body": {
+          "docs": [
+            { "_id": "go", "next_at": "2026-11-12T15:00:05Z" },
+            { "_id": "go_frac", "next_at": "2026-11-12T15:00:05.1Z" },
+            { "_id": "ruby", "next_at": "2026-11-12T15:00:05.200Z" },
+            { "_id": "offset", "next_at": "2026-11-12T12:00:05.300-03:00" },
+            { "_id": "late", "next_at": "2026-11-12T15:00:06.000Z" }
+          ]
+        }
+      }
+    ]
+  },
+  "request": {
+    "op": "search",
+    "body": { "query": { "next_at": { "$gt": "2026-11-12T15:00:05.000Z", "$lte": "2026-11-12T15:00:05.300Z" } }, "sort": { "next_at": 1 } }
+  },
+  "expect": {
+    "ordered": true,
+    "rows": [
+      { "_id": "go_frac", "next_at": "2026-11-12T15:00:05.1Z" },
+      { "_id": "ruby", "next_at": "2026-11-12T15:00:05.200Z" },
+      { "_id": "offset", "next_at": "2026-11-12T12:00:05.300-03:00" }
+    ]
+  }
+}

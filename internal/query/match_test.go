@@ -156,7 +156,7 @@ func TestTimeField(t *testing.T) {
 		{"offsets compare as time miss", `{"at":{"$lt":"2026-11-04T12:00:00Z"}}`, `{"at":"2026-11-04T10:00:00+03:00"}`, true},
 		{"same instant eq", `{"at":"2026-11-04T12:00:00Z"}`, `{"at":"2026-11-04T09:00:00-03:00"}`, true},
 		{"string compare would differ", `{"at":{"$gt":"2026-11-04T12:00:00Z"}}`, `{"at":"2026-11-04T10:00:00-03:00"}`, true},
-		{"other field stays string", `{"x":{"$gt":"2026-11-04T12:00:00Z"}}`, `{"x":"2026-11-04T10:00:00-03:00"}`, false},
+		{"other field compares as time too", `{"x":{"$gt":"2026-11-04T12:00:00Z"}}`, `{"x":"2026-11-04T10:00:00-03:00"}`, true},
 		{"unparsable stays string", `{"at":"nope"}`, `{"at":"nope"}`, true},
 		{"unparsable not in time class", `{"at":{"$lt":"2026-11-04T12:00:00Z"}}`, `{"at":"nope"}`, false},
 	}

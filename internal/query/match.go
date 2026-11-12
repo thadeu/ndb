@@ -130,11 +130,18 @@ type fieldNode struct {
 	slot   int
 }
 
+// textID makes the values of a condition on _id text (see TextID).
+func (f *fieldNode) textID() {
+	for i := range f.ops {
+		f.ops[i].vals = TextID(f.path, f.ops[i].vals)
+	}
+}
+
 func (f *fieldNode) match(m map[string]any) bool {
 	var leaves []any
 
 	found := resolve(m, f.parts, &leaves)
-	cands := candidates(leaves, f.isTime)
+	cands := TextID(f.path, candidates(leaves, f.isTime))
 
 	return matchAll(f.ops, cands, found)
 }
@@ -273,5 +280,5 @@ func Elements(m map[string]any, path string, isTime bool) []Value {
 		return nil
 	}
 
-	return elements(leaves, isTime)
+	return TextID(path, elements(leaves, isTime))
 }

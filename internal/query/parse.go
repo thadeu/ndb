@@ -387,6 +387,8 @@ func (q *Query) compileField(path string, v any) (Node, error) {
 
 		f.ops = []op{{name: "eq", vals: []Value{val}}}
 
+		f.textID()
+
 		return f, err
 	}
 
@@ -396,6 +398,8 @@ func (q *Query) compileField(path string, v any) (Node, error) {
 	}
 
 	f.ops = ops
+
+	f.textID()
 
 	return f, nil
 }

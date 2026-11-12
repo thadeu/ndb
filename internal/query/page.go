@@ -214,7 +214,7 @@ func (q *Query) decode(tok, pattern string) (Pos, cursor, error) {
 
 	for i, k := range c.Keys {
 		if len(k) == 2 {
-			p.Keys = append(p.Keys, FromJSON(k[1], q.IsTime(q.Sort[i].Path)))
+			p.Keys = append(p.Keys, TextID(q.Sort[i].Path, []Value{FromJSON(k[1], q.IsTime(q.Sort[i].Path))})[0])
 		} else {
 			p.Keys = append(p.Keys, Value{})
 		}

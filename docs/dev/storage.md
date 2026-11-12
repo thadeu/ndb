@@ -14,7 +14,7 @@
       segments/                 Parquet segments and their key files (derived)
         000007.parquet          the rows
         000007.ids              id → row (sorted, with a bloom filter)
-        000007.i.<hex field>    an index field: key → row
+        000007.k.<hex field>    an index field: key → row
         000007.u.<hex field>    a unique field: value → id
       meta.bolt                 checkpoint, segment list, live bits, file cursors (derived)
       quarantine/<name>.ndjson  lines that could not be applied (direct mode)

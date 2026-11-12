@@ -40,8 +40,11 @@ func Decode(raw []byte) (map[string]any, error) {
 	return jsondoc.Decode(raw)
 }
 
-// FromJSON classifies a decoded JSON value. With isTime, a string in
-// RFC 3339 becomes a Time.
+// FromJSON classifies a decoded JSON value. A string in RFC 3339 with a time
+// (2026-11-12T15:00:05Z, any width, any offset) is a Time on every field, so
+// two SDKs that write a time with a different width compare in the right
+// order. isTime is the collection time field: there a string is always tried
+// as a time. _id stays text (see TextID).
 func FromJSON(v any, isTime bool) Value {
 	switch x := v.(type) {
 	case nil:
@@ -55,7 +58,7 @@ func FromJSON(v any, isTime bool) Value {
 	case int:
 		return Value{Kind: Number, Num: float64(x), Raw: v}
 	case string:
-		if isTime {
+		if isTime || timeShaped(x) {
 			if t, ok := parseTime(x); ok {
 				return Value{Kind: Time, Int: t, Raw: v}
 			}
@@ -71,6 +74,42 @@ func FromJSON(v any, isTime bool) Value {
 	}
 
 	return Value{Kind: Missing}
+}
+
+// timeShaped is a cheap test before the parse: the digits and separators of
+// 2006-01-02T15:04:05. A string that fails it is never parsed, so a long
+// text or an id costs a few byte checks.
+func timeShaped(s string) bool {
+	if len(s) < 20 || s[4] != '-' || s[7] != '-' || (s[10] != 'T' && s[10] != 't') || s[13] != ':' || s[16] != ':' {
+		return false
+	}
+
+	for _, i := range [...]int{0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18} {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+
+	return true
+}
+
+// IDField is the primary key. Its values are always text.
+const IDField = "_id"
+
+// TextID gives the values of path as text when path is _id: an id that
+// looks like a time is still found by its exact text.
+func TextID(path string, vals []Value) []Value {
+	if path != IDField {
+		return vals
+	}
+
+	for i, v := range vals {
+		if s, ok := v.Raw.(string); ok && v.Kind == Time {
+			vals[i] = Value{Kind: String, Str: s, Raw: s}
+		}
+	}
+
+	return vals
 }
 
 func parseTime(s string) (int64, bool) {

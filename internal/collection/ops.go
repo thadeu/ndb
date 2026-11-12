@@ -190,7 +190,7 @@ func newFieldOp(op, path string, val any) (fieldOp, error) {
 	case "$min", "$max":
 		k := query.FromJSON(val, false).Kind
 
-		if k != query.Number && k != query.String {
+		if k != query.Number && k != query.String && k != query.Time {
 			return fo, errf("invalid_field", "%s.%s needs a number or a string", op, path)
 		}
 	}

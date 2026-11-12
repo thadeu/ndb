@@ -470,6 +470,8 @@ func (c *Collection) buildIndexFile(r *segRef, f indexField) error {
 		return err
 	}
 
+	r.fs.Remove(legacyIndexPath(r.path, f.name))
+
 	k, err := segment.OpenKeys(r.fs, path)
 	if err != nil {
 		return err

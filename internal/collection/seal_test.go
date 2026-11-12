@@ -706,10 +706,71 @@ func TestIndexAddedLaterBuildsKeyFilesForSealedSegments(t *testing.T) {
 		t.Fatalf("plan %q total %d, want index:n and 10", page.Plan, *page.Total)
 	}
 
-	files, _ := filepath.Glob(filepath.Join(root, "segments", "*.i.6e"))
+	files, _ := filepath.Glob(filepath.Join(root, "segments", "*.k.6e"))
 
 	if len(files) != 1 {
 		t.Fatalf("key files of n: %v", files)
+	}
+}
+
+// A segment of an older version has its index keys in a ".i." file (an
+// encoding where a time string of a field was text). The open does not read
+// it: it builds the ".k." file, and removes the old one.
+func TestAnOldKeyFileIsBuiltAgain(t *testing.T) {
+	root := t.TempDir()
+	c := openSealed(t, root, collection.Config{})
+
+	if err := c.EnsureIndex("n"); err != nil {
+		t.Fatal(err)
+	}
+
+	insertN(t, c, 0, 40)
+	mustSeal(t, c)
+
+	dir := filepath.Join(root, "segments")
+	current, _ := filepath.Glob(filepath.Join(dir, "*.k.6e"))
+
+	if len(current) != 1 {
+		t.Fatalf("key files of n: %v", current)
+	}
+
+	if err := os.Rename(current[0], strings.Replace(current[0], ".k.", ".i.", 1)); err != nil {
+		t.Fatal(err)
+	}
+
+	c = reopen(t, c, root, collection.Config{})
+
+	if err := c.EnsureIndex("n"); err != nil {
+		t.Fatal(err)
+	}
+
+	waitFor(t, func() bool {
+		for _, ix := range c.Indexes() {
+			if ix.Field == "n" {
+				return ix.State == "ready"
+			}
+		}
+
+		return false
+	})
+
+	q, _ := c.ParseQuery([]byte(`{"query":{"n":{"$gte":5,"$lt":15}},"count":true}`))
+
+	page, err := c.Query(context.Background(), q)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if page.Plan != "index:n" || *page.Total != 10 {
+		t.Fatalf("plan %q total %d, want index:n and 10", page.Plan, *page.Total)
+	}
+
+	legacy, _ := filepath.Glob(filepath.Join(dir, "*.i.6e"))
+	rebuilt, _ := filepath.Glob(filepath.Join(dir, "*.k.6e"))
+
+	if len(legacy) != 0 || len(rebuilt) != 1 {
+		t.Fatalf("old %v, new %v", legacy, rebuilt)
 	}
 }
 
