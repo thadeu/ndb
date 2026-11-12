@@ -9,6 +9,7 @@ require "ndb/rails/errors"
 require "ndb/rails/configuration"
 require "ndb/rails/dynamic_finders"
 require "ndb/rails/relation"
+require "ndb/rails/validations"
 require "ndb/rails/blob"
 require "ndb/rails/persistence"
 require "ndb/rails/locking"
@@ -16,6 +17,8 @@ require "ndb/rails/transactions"
 require "ndb/rails/associations"
 require "ndb/rails/record"
 require "ndb/streams"
+
+I18n.load_path << File.expand_path("rails/locale/en.yml", __dir__)
 
 module Ndb
   module Rails

@@ -7,6 +7,7 @@ module Ndb
     include ActiveModel::Attributes
     include ActiveModel::Validations
     include ActiveModel::Validations::Callbacks
+    include Validations
     include ActiveModel::Callbacks
     include ActiveModel::Dirty
     include ActiveModel::Serializers::JSON
