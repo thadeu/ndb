@@ -234,8 +234,10 @@ module Ndb
         (unique ? own_unique : own_indexed) << names.join(",")
       end
 
+      # The declared indexes, and the foreign keys that has_many and has_one
+      # of other models put here.
       def indexed_fields
-        inherited_list(:indexed_fields) | own_indexed
+        inherited_list(:indexed_fields) | own_indexed | Associations.foreign_keys_of(name.to_s)
       end
 
       def unique_fields
@@ -288,6 +290,11 @@ module Ndb
 
           @ensured_client = client
         end
+      end
+
+      # The next use declares the collection again.
+      def redeclare!
+        @ensured_client = nil
       end
 
       # Every load asks for "_v", so a loaded record can guard its write with it.

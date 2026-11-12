@@ -502,7 +502,7 @@ Order.includes(:customer, items: :product).to_a
 
 ### Index
 
-`has_many` and `has_one` create the index on the foreign key of the other model (`cdrs.user_id`) the first time `includes` uses them; the lookup needs it. Declaring it on the other model also works: `attribute :user_id, :string, index: true`. A `belongs_to` with `pk:` other than `_id` needs that field indexed on the other model (`attribute :code, :string, index: true`).
+`has_many` and `has_one` put the foreign key of the other model (`cdrs.user_id`) in the indexes of that model. So `Cdr.where(user_id: id).delete_all` works from the first use of `Cdr`, when the model with the `has_many` is loaded. With lazy loading (development), declare it on the other model too: `attribute :user_id, :string, index: true`. A `belongs_to` with `pk:` other than `_id` needs that field indexed on the other model (`attribute :code, :string, index: true`).
 
 ### Limits
 

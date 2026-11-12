@@ -18,6 +18,24 @@ module Ndb
   module Associations
     extend ActiveSupport::Concern
 
+    FOREIGN_KEYS = Hash.new { |keys, name| keys[name] = Set.new }
+
+    # The foreign keys that has_many and has_one of other models put on the
+    # model with this class name: they are in its indexes.
+    def self.foreign_keys_of(class_name)
+      FOREIGN_KEYS.key?(class_name) ? FOREIGN_KEYS[class_name].to_a : []
+    end
+
+    # A model that declared its collection before the has_many was read
+    # declares it again on next use, with the new index.
+    def self.add_foreign_key(class_name, field)
+      return if FOREIGN_KEYS[class_name].include?(field)
+
+      FOREIGN_KEYS[class_name] << field
+
+      Record.descendants.each { |model| model.redeclare! if model.name == class_name }
+    end
+
     # One declared association.
     Reflection = Data.define(:name, :kind, :class_name, :foreign_key, :primary_key, :options) do
       def klass = class_name.constantize
@@ -141,6 +159,8 @@ module Ndb
 
       def associate(name, kind, class_name, foreign_key, primary_key, options)
         name = name.to_s
+
+        Associations.add_foreign_key(class_name.to_s, foreign_key.to_s) if kind != :belongs_to && foreign_key.to_s != "_id"
 
         own_reflections[name] = Reflection.new(name: name, kind: kind, class_name: class_name.to_s, foreign_key: foreign_key.to_s,
                                                primary_key: primary_key.to_s, options: options)
