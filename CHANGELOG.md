@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.21.0] - 2026-11-12
+
 ### Added
 
 - **Blind fields**: `PUT /users {"encrypted":["cpf"],"blind":{"cpf":"numeric"},"unique":["cpf"]}`. The daemon keeps an HMAC of the normalized value (`exact`, `lower`, `upper`, `numeric`; `blind` is also a list of exact fields) in `cpf_bidx`, so `{"query":{"cpf":"390.533.447-05"}}`, `$in`, `$ne`, `$nin`, `indexes` and `unique` work on an encrypted field, in every read and in `$match`. A range, `$regex`, a sort, or a stage that reads the value is `400 invalid_query`. The hash field is in no answer. `{"$group":{"_id":"$cpf"}}` groups by the hash and gives each group the value back (plain with the decrypt right, else sealed); `$first` and `$last` of an encrypted field give its value. A field in `blind` is encrypted too. A shared case in `spec/cases` runs in every SDK.
@@ -686,7 +688,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.20.1...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.21.0...HEAD
+[1.21.0]: https://github.com/thadeu/ndb/compare/v1.20.1...v1.21.0
 [1.20.1]: https://github.com/thadeu/ndb/compare/v1.20.0...v1.20.1
 [1.20.0]: https://github.com/thadeu/ndb/compare/v1.19.0...v1.20.0
 [1.19.0]: https://github.com/thadeu/ndb/compare/v1.18.2...v1.19.0
