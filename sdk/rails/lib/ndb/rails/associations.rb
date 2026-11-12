@@ -47,18 +47,24 @@ module Ndb
         associate(name, :belongs_to, class_name || name.to_s.camelize, foreign_key, keys_pk(name, primary_key, pk), {})
       end
 
-      def has_many(name, class_name: nil, foreign_key: nil, fk: nil, primary_key: nil, pk: nil, sort: nil, limit: nil, where: nil)
+      def has_many(name, class_name: nil, foreign_key: nil, fk: nil, primary_key: nil, pk: nil, sort: nil, limit: nil, where: nil, dependent: nil)
+        check_dependent(name, dependent)
+
         options = { sort: sort, limit: limit, query: where }.compact
         foreign_key = either(name, :foreign_key, foreign_key, :fk, fk) || "#{model_name.singular}_id"
 
         associate(name, :has_many, class_name || name.to_s.singularize.camelize, foreign_key, keys_pk(name, primary_key, pk), options)
+        destroy_with(name, dependent)
       end
 
-      def has_one(name, class_name: nil, foreign_key: nil, fk: nil, primary_key: nil, pk: nil, sort: nil, where: nil)
+      def has_one(name, class_name: nil, foreign_key: nil, fk: nil, primary_key: nil, pk: nil, sort: nil, where: nil, dependent: nil)
+        check_dependent(name, dependent)
+
         options = { sort: sort, query: where }.compact
         foreign_key = either(name, :foreign_key, foreign_key, :fk, fk) || "#{model_name.singular}_id"
 
         associate(name, :has_one, class_name || name.to_s.camelize, foreign_key, keys_pk(name, primary_key, pk), options)
+        destroy_with(name, dependent)
       end
 
       def reflections
@@ -96,6 +102,25 @@ module Ndb
       end
 
       private
+
+      DEPENDENT = %i[destroy delete_all].freeze
+
+      def check_dependent(name, dependent)
+        return if dependent.nil? || DEPENDENT.include?(dependent)
+
+        raise ArgumentError, "#{self.name}.#{name}: dependent: takes :destroy or :delete_all, got #{dependent.inspect}"
+      end
+
+      # dependent: :destroy loads the other records and destroys each one
+      # (callbacks run); :delete_all is one delete, no callbacks. Both run
+      # before the destroy of this record.
+      def destroy_with(name, dependent)
+        return unless dependent
+
+        name = name.to_s
+
+        before_destroy { remove_dependents(name, dependent) }
+      end
 
       def keys_pk(name, primary_key, pk)
         either(name, :primary_key, primary_key, :pk, pk) || "_id"
@@ -162,6 +187,20 @@ module Ndb
     end
 
     private
+
+    def remove_dependents(name, dependent)
+      reflection = self.class.reflections.fetch(name)
+      key = association_key(reflection)
+
+      return if key.nil?
+
+      reflection.klass.prepare_lookup(reflection)
+
+      scope = reflection.klass.where(reflection.foreign_key => key)
+      scope = scope.where_raw(reflection.options[:query]) if reflection.options[:query]
+
+      dependent == :destroy ? scope.destroy_all : scope.delete_all
+    end
 
     # The field of this record the association reads: the foreign key of a
     # belongs_to, the primary key of a has_many or has_one.

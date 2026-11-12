@@ -93,6 +93,7 @@ end
 
 - Attributes are ActiveModel attributes, so every ActiveModel type works (`:string`, `:integer`, `:float`, `:boolean`, `:datetime`, `:date`, and so on). Times are sent as RFC 3339 UTC strings with milliseconds. `:blob` is added by this gem.
 - Validations, callbacks (`validation`, `save`, `create`, `update`, `destroy`), dirty tracking and `as_json` work as in ActiveModel.
+- `readonly?` works as in ActiveRecord: when it is true, `save`, `destroy` and `delete` raise `Ndb::ReadOnlyRecord`. Override it in a model (`def readonly? = true`), or call `record.readonly!`.
 - `validates :name, uniqueness: true` (or `uniqueness: { scope: :app_id }`) asks the daemon if another document has the value, and adds `:taken` ("has already been taken") to the field. Two saves at the same time can both pass, so keep `unique: true` on the attribute: the unique index is the real guard (`Ndb::RecordNotUnique`).
 - The model declares its collection on first use, once per process.
 - Mark a base class with `self.abstract_class = true` to share settings.

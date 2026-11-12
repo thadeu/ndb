@@ -16,6 +16,9 @@ module Ndb
     end
   end
 
+  # Raised by save, destroy and delete of a record whose readonly? is true.
+  class ReadOnlyRecord < Error; end
+
   # Raised by save!/create!/update! when validations fail.
   class RecordInvalid < Error
     attr_reader :record

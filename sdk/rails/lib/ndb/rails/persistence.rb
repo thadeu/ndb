@@ -87,6 +87,8 @@ module Ndb
     # set the expires field to now + expire_in in the same write. The model
     # needs an `expires: true` attribute (Ndb::TtlNotEnabled otherwise).
     def save(validate: true, expire_in: nil)
+      raise_if_readonly
+
       return false if validate && !valid?(new_record? ? :create : :update)
 
       @expire_in = wire_duration(expire_in)
@@ -137,6 +139,8 @@ module Ndb
     end
 
     def destroy
+      raise_if_readonly
+
       result = run_callbacks(:destroy) do
         delete_record if persisted?
         @destroyed = true
@@ -151,6 +155,8 @@ module Ndb
 
     # Deletes by _id: no callbacks and no _v guard, like ActiveRecord.
     def delete
+      raise_if_readonly
+
       self.class.ndb_delete({ self.class.primary_key => id }) if persisted?
 
       @destroyed = true
@@ -240,11 +246,28 @@ module Ndb
       self
     end
 
+    # Like ActiveRecord: a record whose readonly? is true raises
+    # Ndb::ReadOnlyRecord on save, destroy and delete. Override readonly? in
+    # a model, or call readonly! on one record.
+    def readonly?
+      @readonly == true
+    end
+
+    def readonly!
+      @readonly = true
+
+      self
+    end
+
     def ==(other)
       other.instance_of?(self.class) && !id.nil? && id == other.id
     end
 
     private
+
+    def raise_if_readonly
+      raise ReadOnlyRecord, "#{self.class.name} is marked as readonly" if readonly?
+    end
 
     def wire_duration(value)
       value.is_a?(ActiveSupport::Duration) ? value.to_i : value
