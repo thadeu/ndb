@@ -255,10 +255,34 @@ The rules:
 
 The wire contract is [`POST /{coll}/_tx`](http/documents.md#post-coll-tx) and [`POST /{coll}/_lock`](http/documents.md#post-coll-lock).
 
+## Writes across collections
+
+ndb has no transaction across collections. An app that comes from Postgres often writes two tables in one transaction: a message and its events, an order and the stock. In ndb, use one of these patterns.
+
+**1. Make it one document.** When the two facts are always read together (an invoice and its items), keep them in one document. One write is atomic.
+
+**2. Side effects first, the status last.** Write the documents in an order that a reader can trust:
+
+1. Write each side effect with a **fixed id**, made from the data (`"#{message_id}:sent"`, `"#{owner}|#{address}"`), not a random one. A retry writes the same id: `upsert` gives the same document, and `insert` gives `409 duplicate_id`, which means "done before".
+2. Write the **status** (the fact that readers look at) last, with one write: `$set` of `status`, guarded by `_v` or by the old status in the query.
+3. Readers wait for the status. A side effect with no status is a write that stopped in the middle; the next retry finishes it.
+
+```ruby
+# 1. the side effects, each with an id from the data: a retry is safe
+Event.upsert(id: "#{msg.id}:sent", message_id: msg.id, kind: "sent")
+
+# 2. the status, last, guarded by the old status
+Message.where(id: msg.id, status: "sending").update("$set" => { "status" => "sent" })
+```
+
+A `$inc` is not idempotent: a retry adds again. Count from documents with fixed ids (`Event.where(kind: "sent").count`), or put the `$inc` and the status in the same document.
+
+**3. An outbox.** Write one document (the fact), and let a consumer do the rest. [watch](watch.md) gives each change to a consumer, at least once, and the consumer acks its position. A consumer that writes with fixed ids (pattern 2) can get a change twice with no harm. Streams (`/_streams`) do the same with groups, retries and a dead letter stream: see [streams.md](streams.md).
+
 ## Which one
 
 - **A counter or a balance with one operator:** no version and no lock. `$inc` is atomic (`increment!` in Rails), and a condition in the query makes it a guarded write: `{"query":{"balance_cents":{"$gte":500}},"update":{"$inc":{"balance_cents":-500}}}`.
 - **A change that depends on what you read:** the version. In Rails it is there on every save. Add `with_retry` when a conflict should try again and not fail.
 - **Code with an effect outside ndb:** `lock`.
 - **A change of many documents of one collection as one step** (a transfer between two accounts): a [transaction](#_4-transaction-many-writes-all-or-none).
-- **A change of two collections as one step:** ndb has no transaction across collections. Make the fact one document (an invoice with its items), or write one document and let [watch](watch.md) update the rest.
+- **A change of two collections as one step:** ndb has no transaction across collections. Make the fact one document, write the side effects first and the status last, or use an outbox. See [Writes across collections](#writes-across-collections).
