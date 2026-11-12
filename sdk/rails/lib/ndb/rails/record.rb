@@ -39,8 +39,42 @@ module Ndb
         @abstract_class == true
       end
 
+      # Inside scoping (a scope or a class method called on a relation), all
+      # is that relation, so where, order... add to it.
       def all
-        Relation.new(self)
+        Thread.current[:ndb_scopes]&.[](self) || Relation.new(self)
+      end
+
+      # Runs the block with relation as all, like ActiveRecord scoping.
+      def scoping(relation)
+        scopes = (Thread.current[:ndb_scopes] ||= {})
+        before = scopes[self]
+
+        scopes[self] = relation
+
+        yield
+      ensure
+        scopes[self] = before
+      end
+
+      # A named query, like ActiveRecord scope. The body runs on the
+      # relation; it can also be called on a relation:
+      # `Message.where(app_id: id).recent`.
+      #
+      #   scope :recent, -> { order(created_at: :desc) }
+      #   scope :top, ->(n) { order(score: :desc).limit(n) }
+      def scope(name, body)
+        raise ArgumentError, "the body of scope #{name} must be callable" unless body.respond_to?(:call)
+
+        if Relation.method_defined?(name) || Relation.private_method_defined?(name)
+          raise ArgumentError, "#{self.name} cannot have a scope named #{name}: a relation already has that method"
+        end
+
+        define_singleton_method(name) do |*args, **kwargs|
+          relation = all
+
+          scoping(relation) { relation.instance_exec(*args, **kwargs, &body) } || relation
+        end
       end
 
       # Writes a document by its _id, like ActiveRecord upsert: it creates

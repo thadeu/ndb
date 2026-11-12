@@ -345,6 +345,20 @@ module Ndb
       { "pipeline" => stages }
     end
 
+    # A scope or a class method of the model, called on this relation: it
+    # runs with this relation as the model's all. Only the methods the model
+    # declares; the methods of Ndb::Record (truncate!, upsert...) are not
+    # run on a relation.
+    def method_missing(name, ...)
+      return super unless model_method?(name)
+
+      klass.scoping(self) { klass.public_send(name, ...) }
+    end
+
+    def respond_to_missing?(name, include_private = false)
+      model_method?(name) || super
+    end
+
     protected
 
     def dynamic_finder_klass = klass
@@ -362,6 +376,10 @@ module Ndb
 
     def sealed_or_plain(&)
       values[:keep_encrypted] ? Rails.client.keep_encrypted(&) : yield
+    end
+
+    def model_method?(name)
+      klass.respond_to?(name) && !Record.respond_to?(name, true)
     end
 
     # id is an alias of _id, as on a record, unless the model has its own

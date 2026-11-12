@@ -218,6 +218,27 @@ Call.where(status: "failed").exists?
 - `pluck` asks the daemon for only those fields.
 - There is no `explain` on a relation. Use the client: `Ndb::Rails.client.search(Call.collection_name, "query" => {...}, "explain" => true)` returns a `Page` with `plan` (the `X-Ndb-Plan` header: `id`, `index:<field>`, `scan`, `snapshot`) and `examined`.
 
+### Scopes
+
+A `scope` is a named query, as in ActiveRecord. A scope and a class method of the model can
+also be called on a relation: the relation is the `all` of the call.
+
+```ruby
+class Message < Ndb::Record
+  scope :recent, -> { order(created_at: :desc) }
+  scope :top, ->(count) { order(score: :desc).limit(count) }
+
+  def self.failed = where(status: "failed")
+end
+
+Message.where(app_id: app.id).recent.top(10)
+Message.recent.failed
+```
+
+- A relation runs only the methods that the model declares. The methods of `Ndb::Record`
+  (`truncate!`, `upsert`, ...) are not run on a relation.
+- A scope cannot have the name of a relation method (`count`, `open`, ...): `ArgumentError`.
+
 ### A query built elsewhere
 
 A query from a search form or a saved search goes to `where_raw`. Its Hash is sent as it is, with no Rails conventions (an Array stays an Array, not `$in`), ANDed with the other clauses:

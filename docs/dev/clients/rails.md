@@ -277,6 +277,27 @@ Call.where(status: "failed").exists?
 - `pluck` asks the daemon for only those fields.
 - There is no `explain` on a relation. Use the client: `Ndb::Rails.client.search(coll, "query" => {...}, "explain" => true)` returns a `Page` with `plan` (the `X-Ndb-Plan` header: `id`, `index:<field>`, `scan`, `snapshot`) and `examined`.
 
+### Scopes
+
+A `scope` is a named query, as in ActiveRecord. A scope and a class method of the model can
+also be called on a relation: the relation is the `all` of the call.
+
+```ruby
+class Message < Ndb::Record
+  scope :recent, -> { order(created_at: :desc) }
+  scope :top, ->(count) { order(score: :desc).limit(count) }
+
+  def self.failed = where(status: "failed")
+end
+
+Message.where(app_id: app.id).recent.top(10)
+Message.recent.failed
+```
+
+- A relation runs only the methods that the model declares. The methods of `Ndb::Record`
+  (`truncate!`, `upsert`, ...) are not run on a relation.
+- A scope cannot have the name of a relation method (`count`, `open`, ...): `ArgumentError`.
+
 ### Regular expressions
 
 A Ruby `Regexp` works in `where`, `where.not` and `or`. The gem `ndb` turns it into `$regex` and `$options` (the daemon uses RE2). Ruby `^` and `$` match at each line, so `m` is always sent. `/i` is `i`, `/m` is `s`, `/x` is `x`. Look-around, backreferences, atomic groups, possessive quantifiers, `\h`, `\G`, `\R` and `\X` raise `Ndb::InvalidQuery` before the request.
