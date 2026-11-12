@@ -53,7 +53,7 @@ func (s *Server) lookupWith(split func([]byte) ([]byte, []lookup.Spec, []string,
 		}
 
 		for i := range page.Rows {
-			page.Rows[i] = lookup.Without(page.Rows[i], added)
+			page.Rows[i] = openLookups(r, db, lookup.Without(page.Rows[i], added), specs)
 		}
 
 		return page, nil

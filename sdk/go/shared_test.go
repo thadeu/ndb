@@ -154,7 +154,7 @@ func runSharedCase(t *testing.T, db *DB, c sharedCase) {
 
 	switch c.request.Op {
 	case "search", "aggregate":
-		resp, err = db.do(ctx, http.MethodPost, collPath(name)+"/_"+c.request.Op, c.request.Body)
+		resp, err = db.do(ctx, http.MethodPost, collPath(name)+"/_"+c.request.Op+"?decrypt=1", c.request.Body)
 	default:
 		t.Fatalf("%s: request op %q is not supported", c.file, c.request.Op)
 	}

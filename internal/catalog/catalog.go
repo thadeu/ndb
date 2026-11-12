@@ -18,6 +18,7 @@ import (
 
 	"github.com/thadeu/ndb/internal/crypt"
 	"github.com/thadeu/ndb/internal/index"
+	"go.yaml.in/yaml/v3"
 )
 
 var (
@@ -68,16 +69,16 @@ type Def struct {
 	Unique    []string  `json:"unique,omitempty" yaml:"unique"`
 	Encrypted []string  `json:"encrypted,omitempty" yaml:"encrypted"`
 
-	// Blind maps an encrypted field to its normalization (exact, digits,
+	// Blind maps an encrypted field to its normalization (exact, numeric, upper,
 	// lower). The doc also stores <field>_bidx, the hash of the value, and
 	// an index or a unique key on the field uses it.
-	Blind        map[string]string `json:"blind,omitempty" yaml:"blind"`
-	Durability   Durability        `json:"durability,omitempty" yaml:"durability"`
-	Retention    string            `json:"retention,omitempty" yaml:"retention"`
-	WALRetention string            `json:"wal_retention,omitempty" yaml:"wal_retention"`
-	TTL          string            `json:"ttl,omitempty" yaml:"ttl"`
-	ExpiresField string            `json:"expires_field,omitempty" yaml:"expires_field"`
-	MaxLineSize  int64             `json:"max_line_size,omitempty" yaml:"-"`
+	Blind        Blind      `json:"blind,omitempty" yaml:"blind"`
+	Durability   Durability `json:"durability,omitempty" yaml:"durability"`
+	Retention    string     `json:"retention,omitempty" yaml:"retention"`
+	WALRetention string     `json:"wal_retention,omitempty" yaml:"wal_retention"`
+	TTL          string     `json:"ttl,omitempty" yaml:"ttl"`
+	ExpiresField string     `json:"expires_field,omitempty" yaml:"expires_field"`
+	MaxLineSize  int64      `json:"max_line_size,omitempty" yaml:"-"`
 
 	// PITR is the point in time recovery window ("off", "6h", at most 7d).
 	// Empty uses the daemon default (pitr in ndb.yml, 1d). A partition uses
@@ -600,6 +601,60 @@ func mergeOps(next *Def, decl Def, src Source) {
 	}
 }
 
+// Blind maps each blind field to its normalization. In JSON and YAML it is
+// an object ({"cpf":"numeric"}) or a list of fields, each one exact.
+type Blind map[string]string
+
+func (b *Blind) UnmarshalJSON(data []byte) error {
+	var list []string
+
+	if json.Unmarshal(data, &list) == nil {
+		*b = blindOf(list)
+
+		return nil
+	}
+
+	var m map[string]string
+
+	if err := json.Unmarshal(data, &m); err != nil {
+		return fmt.Errorf("%w: blind is an object of field: normalization or a list of fields", ErrInvalid)
+	}
+
+	*b = m
+
+	return nil
+}
+
+func (b *Blind) UnmarshalYAML(value *yaml.Node) error {
+	var list []string
+
+	if value.Decode(&list) == nil {
+		*b = blindOf(list)
+
+		return nil
+	}
+
+	var m map[string]string
+
+	if err := value.Decode(&m); err != nil {
+		return fmt.Errorf("%w: blind is a map of field: normalization or a list of fields", ErrInvalid)
+	}
+
+	*b = m
+
+	return nil
+}
+
+func blindOf(fields []string) Blind {
+	out := Blind{}
+
+	for _, f := range fields {
+		out[f] = "exact"
+	}
+
+	return out
+}
+
 // BlindSuffix ends the name of the hash field of a blind field.
 const BlindSuffix = crypt.HashSuffix
 
@@ -800,7 +855,7 @@ func checkEncrypted(d Def) error {
 
 	for f, norm := range d.Blind {
 		switch {
-		case norm != "exact" && norm != "digits" && norm != "lower":
+		case norm != "exact" && norm != "numeric" && norm != "lower":
 			return fmt.Errorf("%w: blind.%s must be exact, digits or lower", ErrInvalid, f)
 		}
 	}

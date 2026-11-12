@@ -10,7 +10,7 @@ describe('encrypted fields', () => {
   it('declares encrypted and blind fields and finds by the blind value', async () => {
     const people = db.collection(collName(), {
       fields: {
-        cpf: { type: 'string', blind: 'digits', unique: true },
+        cpf: { type: 'string', blind: 'numeric', unique: true },
         pem: { type: 'string', encrypted: true, optional: true },
       },
     })
@@ -23,5 +23,19 @@ describe('encrypted fields', () => {
 
     expect(found).toHaveLength(1)
     expect(found[0]).toMatchObject({ _id: 'p1', cpf: '390.533.447-05', pem: 'PRIVATE' })
+  })
+})
+
+describe('noDecrypt', () => {
+  it('keeps the values sealed on a list and opens them on a show', async () => {
+    const vault = db.collection(collName(), { fields: { secret: { type: 'string', encrypted: true } } })
+
+    await vault.insert({ _id: 's1', secret: 'PRIVATE' })
+
+    const list = await vault.noDecrypt().query().all()
+
+    expect(list[0]?.secret).toMatch(/^ndb:e1:k1:/)
+    expect((await vault.get('s1'))?.secret).toBe('PRIVATE')
+    expect((await vault.noDecrypt().get('s1'))?.secret).toMatch(/^ndb:e1:k1:/)
   })
 })

@@ -3,7 +3,7 @@
   "collection": "people",
   "daemon": true,
   "setup": {
-    "catalog": { "write": "engine", "encrypted": ["cpf"], "blind": { "cpf": "digits" } },
+    "catalog": { "write": "engine", "encrypted": ["cpf"], "blind": { "cpf": "numeric" } },
     "writes": [{ "op": "bulk", "body": { "docs": [{ "_id": "p1", "cpf": "1" }] } }]
   },
   "request": { "op": "search", "body": { "query": { "cpf": { "$gt": "0" } } } },

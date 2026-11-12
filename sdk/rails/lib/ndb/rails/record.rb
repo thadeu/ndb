@@ -26,7 +26,7 @@ module Ndb
 
     class << self
       QUERY_METHODS = %i[
-        where where_raw order limit offset page after group unwind includes lock find find_by find_by! first last count pluck exists?
+        where where_raw order limit offset page after group unwind includes lock no_decrypt find find_by find_by! first last count pluck exists?
         find_each in_batches sum average minimum maximum to_a each destroy_all delete_all to_ndb
       ].freeze
 
@@ -151,7 +151,7 @@ module Ndb
       end
 
       # encrypted: true makes the daemon encrypt the attribute before it
-      # stores it; blind: :digits (or :exact, :lower) also lets where and
+      # stores it; blind: :numeric (or :exact, :lower, :upper) also lets where and
       # find_by find it by value, and index or unique name it.
       def attribute(name, *args, index: false, unique: false, time: false, expires: false, encrypted: false, blind: nil, **options)
         own_indexed << name.to_s if index

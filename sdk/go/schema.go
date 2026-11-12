@@ -37,6 +37,9 @@ type schema struct {
 	encrypted []string
 	blind     map[string]string
 
+	// sealed keeps the encrypted fields sealed on reads (decrypt=0).
+	sealed bool
+
 	// version is the field that holds "_v". It is filled on reads and
 	// never sent on writes.
 	version string

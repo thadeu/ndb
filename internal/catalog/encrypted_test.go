@@ -1,6 +1,7 @@
 package catalog_test
 
 import (
+	"encoding/json"
 	"errors"
 	"slices"
 	"testing"
@@ -52,7 +53,7 @@ func TestBlindFieldsIndexTheirHash(t *testing.T) {
 	def, err := c.Ensure(catalog.Def{
 		Name:      "users",
 		Encrypted: []string{"cpf", "email"},
-		Blind:     map[string]string{"cpf": "digits", "email": ""},
+		Blind:     map[string]string{"cpf": "numeric", "email": ""},
 		Unique:    []string{"cpf", "org,email"},
 	}, catalog.FromCode)
 	if err != nil {
@@ -76,7 +77,7 @@ func TestBlindFieldsIndexTheirHash(t *testing.T) {
 func TestBlindIsEncryptedAndNeedsAKnownNorm(t *testing.T) {
 	c, _ := open(t, catalog.Options{})
 
-	def, err := c.Ensure(catalog.Def{Name: "a", Blind: map[string]string{"cpf": "digits"}}, catalog.FromCode)
+	def, err := c.Ensure(catalog.Def{Name: "a", Blind: map[string]string{"cpf": "numeric"}}, catalog.FromCode)
 	if err != nil || !slices.Equal(def.Encrypted, []string{"cpf"}) {
 		t.Fatalf("encrypted %v, err %v", def.Encrypted, err)
 	}
@@ -90,5 +91,21 @@ func TestBlindIsEncryptedAndNeedsAKnownNorm(t *testing.T) {
 		if _, err := c.Ensure(d, catalog.FromCode); !errors.Is(err, catalog.ErrInvalid) {
 			t.Errorf("%s: %v, want ErrInvalid", d.Name, err)
 		}
+	}
+}
+
+func TestBlindIsAnObjectOrAList(t *testing.T) {
+	var list, obj catalog.Def
+
+	if err := json.Unmarshal([]byte(`{"blind":["token"]}`), &list); err != nil || list.Blind["token"] != "exact" {
+		t.Fatalf("list %v %v", list.Blind, err)
+	}
+
+	if err := json.Unmarshal([]byte(`{"blind":{"plate":"upper"}}`), &obj); err != nil || obj.Blind["plate"] != "upper" {
+		t.Fatalf("object %v %v", obj.Blind, err)
+	}
+
+	if err := json.Unmarshal([]byte(`{"blind":"cpf"}`), &obj); err == nil {
+		t.Fatal("a string was taken")
 	}
 }

@@ -72,26 +72,30 @@ func TestOpenRefusesAnotherPlaceOrABadValue(t *testing.T) {
 func TestHashNormalizesAndSeparatesPlaces(t *testing.T) {
 	b := testBox(t)
 
-	a, err := b.Hash("users/cpf", Digits, json.RawMessage(`"123.456.789-09"`))
+	a, err := b.Hash("users/cpf", Numeric, json.RawMessage(`"123.456.789-09"`))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	same, _ := b.Hash("users/cpf", Digits, json.RawMessage(`"12345678909"`))
-	other, _ := b.Hash("admins/cpf", Digits, json.RawMessage(`"12345678909"`))
+	same, _ := b.Hash("users/cpf", Numeric, json.RawMessage(`"12345678909"`))
+	other, _ := b.Hash("admins/cpf", Numeric, json.RawMessage(`"12345678909"`))
 	mail1, _ := b.Hash("users/email", Lower, json.RawMessage(`"A@B.com"`))
 	mail2, _ := b.Hash("users/email", Lower, json.RawMessage(`"a@b.com"`))
 	exact, _ := b.Hash("users/email", Exact, json.RawMessage(`"A@B.com"`))
+	plate1, _ := b.Hash("cars/plate", Upper, json.RawMessage(`" abc1d23"`))
+	plate2, _ := b.Hash("cars/plate", Upper, json.RawMessage(`"ABC1D23"`))
 
 	switch {
 	case !strings.HasPrefix(a, "ndb:h1:k1:") || len(a) != len("ndb:h1:k1:")+32:
 		t.Fatalf("hash %q", a)
 	case a != same:
-		t.Fatal("digits did not normalize")
+		t.Fatal("numeric did not normalize")
 	case a == other:
 		t.Fatal("two collections share a hash")
 	case mail1 != mail2 || exact == mail2:
 		t.Fatal("lower or exact is wrong")
+	case plate1 != plate2:
+		t.Fatal("upper did not normalize")
 	}
 }
 
@@ -147,14 +151,14 @@ func TestSealDocWithNoFieldIsTheSameDoc(t *testing.T) {
 
 func TestHashDocSetsKeepsAndDropsTheHashField(t *testing.T) {
 	b := testBox(t)
-	blind := map[string]Norm{"cpf": Digits}
+	blind := map[string]Norm{"cpf": Numeric}
 
 	out, err := b.HashDoc("users", blind, json.RawMessage(`{"_id":"u1","cpf":"123.4","cpf_bidx":"forged"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	want, _ := b.Hash("users/cpf", Digits, json.RawMessage(`"1234"`))
+	want, _ := b.Hash("users/cpf", Numeric, json.RawMessage(`"1234"`))
 	if !strings.Contains(string(out), `"cpf_bidx":"`+want+`"`) || strings.Contains(string(out), "forged") {
 		t.Fatalf("set %s", out)
 	}

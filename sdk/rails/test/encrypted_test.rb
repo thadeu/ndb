@@ -5,12 +5,12 @@ require "test_helper"
 class EncryptedTest < Minitest::Test
   def test_encrypted_and_blind_attributes
     person = model do
-      attribute :cpf, :string, blind: :digits, unique: true
+      attribute :cpf, :string, blind: :numeric, unique: true
       attribute :pem, :string, encrypted: true
     end
 
     assert_equal ["pem"], person.collection_definition["encrypted"]
-    assert_equal({"cpf" => "digits"}, person.collection_definition["blind"])
+    assert_equal({"cpf" => "numeric"}, person.collection_definition["blind"])
 
     person.create!(_id: "p1", cpf: "390.533.447-05", pem: "PRIVATE")
 
@@ -20,5 +20,20 @@ class EncryptedTest < Minitest::Test
 
     assert_equal "390.533.447-05", found.cpf
     assert_equal "PRIVATE", found.pem
+  end
+end
+
+class NoDecryptTest < Minitest::Test
+  def test_no_decrypt_keeps_the_values_sealed
+    secret = model do
+      attribute :owner, :string
+      attribute :value, :string, encrypted: true
+    end
+
+    secret.create!(_id: "s1", owner: "u1", value: "PRIVATE")
+
+    assert_match(/\Andb:e1:k1:/, secret.no_decrypt.where(owner: "u1").first.value)
+    assert_match(/\Andb:e1:k1:/, secret.no_decrypt.find("s1").value)
+    assert_equal "PRIVATE", secret.find("s1").value
   end
 end

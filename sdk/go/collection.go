@@ -19,6 +19,32 @@ type Coll[T any] struct {
 	schema *schema
 }
 
+// NoDecrypt is a handle on the same collection whose reads keep the
+// encrypted fields sealed ("ndb:e1:k1:..."): a list of secrets that shows
+// none of them. The reads of c still get the plain values.
+func (c *Coll[T]) NoDecrypt() *Coll[T] {
+	s := *c.schema
+	s.sealed = true
+
+	return &Coll[T]{db: c.db, name: c.name, schema: &s}
+}
+
+// withDecrypt adds decrypt=1 to a path, or decrypt=0 for a NoDecrypt
+// handle. The daemon gives the plain value only with decrypt=1 and the
+// decrypt right; else the stored, sealed one.
+func (c *Coll[T]) withDecrypt(path string) string {
+	flag := "decrypt=1"
+	if c.schema.sealed {
+		flag = "decrypt=0"
+	}
+
+	if strings.Contains(path, "?") {
+		return path + "&" + flag
+	}
+
+	return path + "?" + flag
+}
+
 // Collection returns the collection name for documents of type T. It sends
 // nothing: the first call on the collection declares it (PUT /{coll}) with
 // the time, expires, unique and index tags of T, once per name and DB.
@@ -398,7 +424,7 @@ func (c *Coll[T]) send(ctx context.Context, method, path string, body []byte, ou
 		target += "/" + path
 	}
 
-	resp, err := c.db.do(ctx, method, target, body)
+	resp, err := c.db.do(ctx, method, c.withDecrypt(target), body)
 	if err != nil {
 		return err
 	}
@@ -413,7 +439,7 @@ func (c *Coll[T]) stream(ctx context.Context, path string, body []byte) (*http.R
 		return nil, err
 	}
 
-	return c.db.do(ctx, http.MethodPost, collPath(c.name)+"/"+path, body)
+	return c.db.do(ctx, http.MethodPost, c.withDecrypt(collPath(c.name)+"/"+path), body)
 }
 
 // docPath is "{action}/{id}", with the id escaped.
@@ -612,9 +638,20 @@ func Encrypted(fields ...string) CollOption {
 	}
 }
 
+// NoDecrypt makes every read of the collection keep the encrypted fields
+// sealed. Coll.NoDecrypt does the same for one handle.
+func NoDecrypt() CollOption {
+	return func(s *schema) error {
+		s.sealed = true
+
+		return nil
+	}
+}
+
 // Blind declares an encrypted field that a filter finds by value (Eq, In,
 // Ne, Nin), and that an index or a unique key may name. norm is "exact",
-// "digits" (a CPF with or without dots) or "lower" (an email).
+// "lower" (an email), "upper" (a car plate) or "numeric" (only the digits:
+// a CPF with or without dots).
 func Blind(field, norm string) CollOption {
 	return func(s *schema) error {
 		if s.blind == nil {

@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,15 +43,15 @@ func TestEncryptedFieldIsSealedOnDiskAndPlainForTheSocket(t *testing.T) {
 	expectStatus(t, call(h, "PUT", "/users", `{"encrypted":["cpf","pem"]}`), http.StatusOK)
 	expectStatus(t, call(h, "POST", "/users/_doc", `{"_id":"u1","cpf":"`+cpf+`","pem":{"k":"PRIVATE"},"name":"Ana"}`), http.StatusOK)
 
-	if rec := call(h, "GET", "/users/_doc/u1", ""); !strings.Contains(rec.Body.String(), `"cpf":"`+cpf+`"`) || !strings.Contains(rec.Body.String(), `"pem":{"k":"PRIVATE"}`) {
+	if rec := call(h, "GET", "/users/_doc/u1?decrypt=1", ""); !strings.Contains(rec.Body.String(), `"cpf":"`+cpf+`"`) || !strings.Contains(rec.Body.String(), `"pem":{"k":"PRIVATE"}`) {
 		t.Fatalf("get %s", rec.Body.String())
 	}
 
-	if rec := call(h, "POST", "/users/_search", `{}`); !strings.Contains(rec.Body.String(), cpf) {
+	if rec := call(h, "POST", "/users/_search?decrypt=1", `{}`); !strings.Contains(rec.Body.String(), cpf) {
 		t.Fatalf("search %s", rec.Body.String())
 	}
 
-	rec := call(h, "POST", "/users/_update/u1", `{"update":{"$set":{"name":"Bia"}}}`)
+	rec := call(h, "POST", "/users/_update/u1?decrypt=1", `{"update":{"$set":{"name":"Bia"}}}`)
 	if !strings.Contains(rec.Body.String(), cpf) {
 		t.Fatalf("update %s", rec.Body.String())
 	}
@@ -71,7 +70,7 @@ func TestEncryptedFieldIsSealedOnDiskAndPlainForTheSocket(t *testing.T) {
 	noPlainOnDisk(t, srv.DB().Dir(), cpf)
 	noPlainOnDisk(t, srv.DB().Dir(), "PRIVATE")
 
-	if rec := call(h, "GET", "/users/_doc/u1", ""); !strings.Contains(rec.Body.String(), cpf) || !strings.Contains(rec.Body.String(), `"name":"Bia"`) {
+	if rec := call(h, "GET", "/users/_doc/u1?decrypt=1", ""); !strings.Contains(rec.Body.String(), cpf) || !strings.Contains(rec.Body.String(), `"name":"Bia"`) {
 		t.Fatalf("get after seal %s", rec.Body.String())
 	}
 }
@@ -99,7 +98,7 @@ func TestEncryptedFieldNeedsTheDecryptRight(t *testing.T) {
 	}
 
 	get := func(token string) string {
-		req, _ := http.NewRequest("GET", "http://"+addr+"/users/_doc/u1", nil)
+		req, _ := http.NewRequest("GET", "http://"+addr+"/users/_doc/u1?decrypt=1", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 
 		resp, err := tcp.Do(req)
@@ -164,11 +163,11 @@ func TestEveryWriteSealsTheField(t *testing.T) {
 
 	noPlainOnDisk(t, srv.DB().Dir(), cpf)
 
-	if rec := call(h, "POST", "/users/_search", `{}`); strings.Count(rec.Body.String(), cpf) != 3 || !strings.Contains(rec.Body.String(), cpf+"4") {
+	if rec := call(h, "POST", "/users/_search?decrypt=1", `{}`); strings.Count(rec.Body.String(), cpf) != 3 || !strings.Contains(rec.Body.String(), cpf+"4") {
 		t.Fatalf("search %s", rec.Body.String())
 	}
 
-	if rec := call(h, "POST", "/events/_search", `{}`); !strings.Contains(rec.Body.String(), cpf+"5") {
+	if rec := call(h, "POST", "/events/_search?decrypt=1", `{}`); !strings.Contains(rec.Body.String(), cpf+"5") {
 		t.Fatalf("partition search %s", rec.Body.String())
 	}
 }
@@ -187,7 +186,7 @@ func TestEncryptedAddedLaterReachesAnOpenPartition(t *testing.T) {
 func TestBlindFieldIsFoundByItsValue(t *testing.T) {
 	srv, h := newHandler(t)
 
-	expectStatus(t, call(h, "PUT", "/users", `{"encrypted":["cpf"],"blind":{"cpf":"digits"},"unique":["cpf"],"indexes":["cpf"]}`), http.StatusOK)
+	expectStatus(t, call(h, "PUT", "/users", `{"encrypted":["cpf"],"blind":{"cpf":"numeric"},"unique":["cpf"],"indexes":["cpf"]}`), http.StatusOK)
 	call(h, "POST", "/users/_doc", `{"_id":"u1","cpf":"390.533.447-05","name":"Ana"}`)
 	call(h, "POST", "/users/_doc", `{"_id":"u2","cpf":"11122233344","name":"Bia"}`)
 
@@ -241,7 +240,7 @@ func TestBlindFieldIsFoundByItsValue(t *testing.T) {
 
 	expectCode(t, call(h, "POST", "/users/_aggregate", `{"pipeline":[{"$group":{"_id":null,"m":{"$max":"$cpf"}}}]}`), http.StatusBadRequest, "invalid_query")
 
-	if rows := aggOf(t, h, "users", `[{"$match":{"cpf":"`+cpf+`"}},{"$project":{"name":1}}]`); len(rows) != 1 || !strings.Contains(rows[0], "Ana") {
+	if rows := aggOf(t, h, "users?decrypt=1", `[{"$match":{"cpf":"`+cpf+`"}},{"$project":{"name":1}}]`); len(rows) != 1 || !strings.Contains(rows[0], "Ana") {
 		t.Errorf("aggregate %v", rows)
 	}
 
@@ -259,7 +258,7 @@ func TestBlindFieldIsFoundByItsValue(t *testing.T) {
 		t.Errorf("the old value still matches: %s", got)
 	}
 
-	if rec := call(h, "GET", "/users/_doc/u1", ""); strings.Contains(rec.Body.String(), "_bidx") || !strings.Contains(rec.Body.String(), "222.333.444-55") {
+	if rec := call(h, "GET", "/users/_doc/u1?decrypt=1", ""); strings.Contains(rec.Body.String(), "_bidx") || !strings.Contains(rec.Body.String(), "222.333.444-55") {
 		t.Errorf("get %s", rec.Body.String())
 	}
 
@@ -280,31 +279,27 @@ func TestEncryptedFieldWithoutBlindRefusesAValueFilter(t *testing.T) {
 	}
 }
 
-func TestDecryptFalseHeaderKeepsTheValueSealed(t *testing.T) {
+func TestAValueIsSealedUnlessTheCallAsks(t *testing.T) {
 	_, h := newHandler(t)
 
 	expectStatus(t, call(h, "PUT", "/users", `{"encrypted":["cpf"]}`), http.StatusOK)
 	call(h, "POST", "/users/_doc", `{"_id":"u1","cpf":"`+cpf+`"}`)
 
-	req := httptest.NewRequest("GET", "/users/_doc/u1", nil)
-	req.Header.Set("X-Ndb-Decrypt", "false")
-
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-
-	if strings.Contains(rec.Body.String(), cpf) || !strings.Contains(rec.Body.String(), "ndb:e1:k1:") {
-		t.Fatalf("get %s", rec.Body.String())
+	for _, path := range []string{"/users/_doc/u1", "/users/_doc/u1?decrypt=0"} {
+		if rec := call(h, "GET", path, ""); strings.Contains(rec.Body.String(), cpf) || !strings.Contains(rec.Body.String(), "ndb:e1:k1:") {
+			t.Fatalf("%s: %s", path, rec.Body.String())
+		}
 	}
 
 	var doc struct {
 		CPF string `json:"cpf"`
 	}
 
-	_ = json.Unmarshal(rec.Body.Bytes(), &doc)
+	_ = json.Unmarshal(call(h, "GET", "/users/_doc/u1", "").Body.Bytes(), &doc)
 
 	call(h, "POST", "/users/_update/u1", `{"update":{"$set":{"cpf":"`+doc.CPF+`","name":"Ana"}}}`)
 
-	if rec := call(h, "GET", "/users/_doc/u1", ""); !strings.Contains(rec.Body.String(), `"cpf":"`+cpf+`"`) {
+	if rec := call(h, "GET", "/users/_doc/u1?decrypt=1", ""); !strings.Contains(rec.Body.String(), `"cpf":"`+cpf+`"`) {
 		t.Fatalf("a sealed value sent back changed the field: %s", rec.Body.String())
 	}
 }
@@ -313,7 +308,7 @@ func TestAnyWriteEncryptsAnOldDocument(t *testing.T) {
 	srv, h := newHandler(t)
 
 	call(h, "POST", "/users/_doc", `{"_id":"u1","cpf":"`+cpf+`"}`)
-	expectStatus(t, call(h, "PUT", "/users", `{"blind":{"cpf":"digits"}}`), http.StatusOK)
+	expectStatus(t, call(h, "PUT", "/users", `{"blind":{"cpf":"numeric"}}`), http.StatusOK)
 	expectStatus(t, call(h, "POST", "/users/_update_by_query", `{"query":{"_id":{"$exists":true}},"update":{"$set":{"encrypted_at":"now"}}}`), http.StatusOK)
 
 	if rec := call(h, "POST", "/users/_count", `{"query":{"cpf":"`+cpf+`"}}`); !strings.Contains(rec.Body.String(), `"count":1`) {
@@ -335,18 +330,18 @@ func TestAnyWriteEncryptsAnOldDocument(t *testing.T) {
 func TestGroupByABlindFieldGivesTheValue(t *testing.T) {
 	_, h := newHandler(t)
 
-	expectStatus(t, call(h, "PUT", "/orders", `{"blind":{"cpf":"digits"}}`), http.StatusOK)
+	expectStatus(t, call(h, "PUT", "/orders", `{"blind":{"cpf":"numeric"}}`), http.StatusOK)
 	call(h, "POST", "/orders/_bulk", `{"docs":[
 		{"_id":"o1","cpf":"390.533.447-05","total":10,"st":"paid"},
 		{"_id":"o2","cpf":"39053344705","total":5,"st":"paid"},
 		{"_id":"o3","cpf":"11122233344","total":7,"st":"open"}]}`)
 
-	rows := aggOf(t, h, "orders", `[{"$group":{"_id":"$cpf","total":{"$sum":"$total"}}},{"$sort":{"total":-1}}]`)
+	rows := aggOf(t, h, "orders?decrypt=1", `[{"$group":{"_id":"$cpf","total":{"$sum":"$total"}}},{"$sort":{"total":-1}}]`)
 	if len(rows) != 2 || !strings.Contains(rows[0], `"total":15`) || !strings.Contains(rows[0], `"_id":"390.533.447-05"`) && !strings.Contains(rows[0], `"_id":"39053344705"`) {
 		t.Fatalf("rows %v", rows)
 	}
 
-	rows = aggOf(t, h, "orders", `[{"$group":{"_id":{"c":"$cpf","st":"$st"},"n":{"$sum":1}}},{"$sort":{"n":-1}}]`)
+	rows = aggOf(t, h, "orders?decrypt=1", `[{"$group":{"_id":{"c":"$cpf","st":"$st"},"n":{"$sum":1}}},{"$sort":{"n":-1}}]`)
 	if len(rows) != 2 || !strings.Contains(rows[0], `"st":"paid"`) || !strings.Contains(rows[0], `"c":"39053344705"`) && !strings.Contains(rows[0], `"c":"390.533.447-05"`) {
 		t.Fatalf("compound rows %v", rows)
 	}
@@ -366,7 +361,7 @@ func TestGroupByABlindFieldStaysSealedWithoutDecrypt(t *testing.T) {
 	})
 
 	for _, c := range []struct{ method, path, body string }{
-		{"PUT", "/orders", `{"blind":{"cpf":"digits"}}`},
+		{"PUT", "/orders", `{"blind":{"cpf":"numeric"}}`},
 		{"POST", "/orders/_doc", `{"_id":"o1","cpf":"` + cpf + `"}`},
 	} {
 		req, _ := http.NewRequest(c.method, "http://ndb"+c.path, strings.NewReader(c.body))
@@ -379,7 +374,7 @@ func TestGroupByABlindFieldStaysSealedWithoutDecrypt(t *testing.T) {
 		resp.Body.Close()
 	}
 
-	req, _ := http.NewRequest("POST", "http://"+addr+"/orders/_aggregate", strings.NewReader(`{"pipeline":[{"$group":{"_id":"$cpf","n":{"$sum":1}}}]}`))
+	req, _ := http.NewRequest("POST", "http://"+addr+"/orders/_aggregate?decrypt=1", strings.NewReader(`{"pipeline":[{"$group":{"_id":"$cpf","n":{"$sum":1}}}]}`))
 	req.Header.Set("Authorization", "Bearer bi-secret")
 
 	resp, err := tcp.Do(req)
@@ -399,13 +394,62 @@ func TestGroupByABlindFieldStaysSealedWithoutDecrypt(t *testing.T) {
 func TestGroupByABlindFieldAcrossPartitions(t *testing.T) {
 	_, h := newHandler(t)
 
-	expectStatus(t, call(h, "PUT", "/sales", `{"time":"at","partition_by":"month","blind":{"cpf":"digits"}}`), http.StatusOK)
+	expectStatus(t, call(h, "PUT", "/sales", `{"time":"at","partition_by":"month","blind":{"cpf":"numeric"}}`), http.StatusOK)
 	call(h, "POST", "/sales/_bulk", `{"docs":[
 		{"_id":"s1","at":"2026-10-03T00:00:00Z","cpf":"390.533.447-05","v":1},
 		{"_id":"s2","at":"2026-11-03T00:00:00Z","cpf":"39053344705","v":2}]}`)
 
-	rows := aggOf(t, h, "sales", `[{"$group":{"_id":"$cpf","v":{"$sum":"$v"}}}]`)
+	rows := aggOf(t, h, "sales?decrypt=1", `[{"$group":{"_id":"$cpf","v":{"$sum":"$v"}}}]`)
 	if len(rows) != 1 || !strings.Contains(rows[0], `"v":3`) || strings.Contains(rows[0], "ndb:") || strings.Contains(rows[0], "_ndb") {
 		t.Fatalf("rows %v", rows)
+	}
+}
+
+func TestLookupOpensTheDocumentsOfTheSourceCollection(t *testing.T) {
+	unix, tcp, addr := authServer(t, func(srv *server.Server) {
+		srv.SetTokens([]server.Token{{Name: "shop", Secret: "shop-secret", Read: []string{"orders", "customers", "cards"}, Decrypt: []string{"orders"}}})
+	})
+
+	send := func(client *http.Client, method, url, body, token string) string {
+		req, _ := http.NewRequest(method, url, strings.NewReader(body))
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		defer resp.Body.Close()
+
+		out, _ := io.ReadAll(resp.Body)
+
+		return string(out)
+	}
+
+	for _, c := range []struct{ method, path, body string }{
+		{"PUT", "/customers", `{"blind":{"cpf":"numeric"}}`},
+		{"PUT", "/cards", `{"encrypted":["number"],"indexes":["customer_id"]}`},
+		{"POST", "/customers/_doc", `{"_id":"c1","cpf":"` + cpf + `"}`},
+		{"POST", "/cards/_doc", `{"_id":"k1","customer_id":"c1","number":"4111111111111111"}`},
+		{"POST", "/orders/_doc", `{"_id":"o1","customer_id":"c1"}`},
+	} {
+		send(unix, c.method, "http://ndb"+c.path, c.body, "")
+	}
+
+	body := `{"lookup":{"customer":{"belongs_to":"customers","fk":"customer_id","lookup":{"cards":{"has_many":"cards","fk":"customer_id"}}}}}`
+
+	plain := send(unix, "POST", "http://ndb/orders/_search?decrypt=1", body, "")
+	if !strings.Contains(plain, `"cpf":"`+cpf+`"`) || !strings.Contains(plain, `"number":"4111111111111111"`) || strings.Contains(plain, "_bidx") {
+		t.Fatalf("socket: %s", plain)
+	}
+
+	if sealed := send(unix, "POST", "http://ndb/orders/_search", body, ""); strings.Contains(sealed, cpf) || strings.Contains(sealed, "_bidx") {
+		t.Fatalf("socket without decrypt=1: %s", sealed)
+	}
+
+	if shop := send(tcp, "POST", "http://"+addr+"/orders/_search?decrypt=1", body, "shop-secret"); strings.Contains(shop, cpf) || strings.Contains(shop, "4111") {
+		t.Fatalf("a right on orders opened customers: %s", shop)
 	}
 }

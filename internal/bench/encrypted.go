@@ -45,7 +45,7 @@ func encryptedPart(dir string) []string {
 
 	for i := range encryptedDocs {
 		for k, coll := range []string{"keys_plain", "keys_sealed"} {
-			_, _, _, took := d.do("GET", fmt.Sprintf("/%s/_doc/k%05d", coll, i), nil)
+			_, _, _, took := d.do("GET", fmt.Sprintf("/%s/_doc/k%05d?decrypt=1", coll, i), nil)
 			reads[k] = append(reads[k], took)
 		}
 	}

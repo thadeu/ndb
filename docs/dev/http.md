@@ -150,7 +150,7 @@ A row is the document. `_v` is added with `"versions": true`, and `_coll` on a r
 | `X-Ndb-Took-Ms` | always | time spent by the daemon, in ms |
 | `X-Ndb-Explain` | `"explain": true` | JSON of the plan counters, see [Search](query.md#search) |
 
-**Decrypt:** a request with `X-Ndb-Decrypt: false` reads the [encrypted fields](security.md#encrypted-fields) as their stored `"ndb:e1:k1:..."` value, whatever the right of the caller. The console sends it on every request, so it never shows a plain value. A sealed value sent back in a write stays as it is.
+**Decrypt:** an answer has the [encrypted fields](security.md#encrypted-fields) as their stored `"ndb:e1:k1:..."` value. Add `?decrypt=1` to a read to get the plain values; it works only for a caller with the `decrypt` right (else the stored value comes back). `?decrypt=0` is the default. A sealed value sent back in a write stays as it is.
 
 **Request id:** every answer has `X-Request-Id`: the one of the request when it is 1 to 128 of `A-Z a-z 0-9 - _ . :`, else a new one. The log lines of the request have it as `request_id` (see [Logs](operations.md#logs)).
 

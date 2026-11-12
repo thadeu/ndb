@@ -19,8 +19,9 @@ export interface FieldDef {
   encrypted?: boolean
 
   // An encrypted field that a filter finds by value ($eq, $in, $ne, $nin),
-  // after this normalization: 'digits' for a CPF, 'lower' for an email.
-  blind?: 'exact' | 'digits' | 'lower'
+  // after this normalization: 'lower' for an email, 'upper' for a car
+  // plate, 'numeric' (only the digits) for a CPF.
+  blind?: 'exact' | 'lower' | 'upper' | 'numeric'
 }
 
 export type Fields = Record<string, FieldDef>

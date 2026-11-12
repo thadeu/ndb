@@ -128,7 +128,14 @@ curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/users -d '{"encrypted":["
 ```
 
 - `e1` is the format and `k1` the key. Each value is bound to its collection and field: a value copied to another field or collection does not decrypt.
-- **Who reads the value:** the unix socket, the token of `-token-file`, and a token with `decrypt` on the collection get the plain value, on every read (`_doc`, `_search`, `_aggregate`, `_watch`, the `doc` of `_update` and `_lock`). Any other token gets the stored `"ndb:e1:k1:..."`.
+- **Who reads the value:** an answer has the stored `"ndb:e1:k1:..."` by default. It has the plain value only when the call asks with `?decrypt=1` **and** the caller has the right: the unix socket, the token of `-token-file`, or a token with `decrypt` on the collection. A caller without the right that sends `?decrypt=1` gets the stored value, not an error. This applies to every read: `_doc`, `_search`, `_count`, `_aggregate`, `_watch`, the `doc` of `_update` and `_lock`, and the documents that a lookup adds (with the right on the collection they come from).
+
+  ```bash
+  curl --unix-socket /run/ndb/ndb.sock http://ndb/users/_doc/u1             # "cpf":"ndb:e1:k1:..."
+  curl --unix-socket /run/ndb/ndb.sock 'http://ndb/users/_doc/u1?decrypt=1' # "cpf":"390.533.447-05"
+  ```
+
+- **SDKs** send `decrypt=1` on every read, so an app with the right reads the values. `NoDecrypt` (Go `vault.NoDecrypt()`, TS `vault.noDecrypt()`, Ruby `vault.no_decrypt`, Rails `Secret.no_decrypt`) sends `decrypt=0`: for a list of secrets that shows none of them, and a second read with the value when the user asks for it.
 - **Writes:** `_doc`, `_bulk`, upsert, `_tx` and `$set` encrypt the field. `$inc`, `$push` and the other operators on it are `400 invalid_query`: they need the value.
 - **Filters:** only `$exists`. Any other filter on the field is `400 invalid_query`, unless the field is [blind](#blind-fields).
 - **Aggregate:** `$match` follows the filter rules. `$first` and `$last` of the field give its value. Any other use (`$sum`, `$max`, `$project`) is `400 invalid_query`; a `$group` by the field needs it to be [blind](#blind-fields).
@@ -141,7 +148,7 @@ curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/users -d '{"encrypted":["
   ```
 
   The old plain values stay in the WAL files and in older backups until `wal_retention` and your backup rotation drop them.
-- **Console:** it sends `X-Ndb-Decrypt: false`, so it shows `[encrypted]`, never the value. An edit of the document keeps the stored value.
+- **Console:** it never sends `decrypt=1`, so it shows `[encrypted]`, never the value. An edit of the document keeps the stored value.
 - **Cost:** a write of a document with a 2 KB `.pem` takes about 10% more time, a read about 8% more (`make bench`, with a check at 25%).
 - The key protects the files only when it is in `NDB_ENCRYPTION_KEY` (see [The encryption key](#the-encryption-key)). With the default key, encrypted fields keep the value out of the API for tokens with no `decrypt`, the logs and the console.
 
@@ -151,15 +158,18 @@ A blind field is an encrypted field that a filter can find by its value. A field
 
 ```bash
 curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/users \
-  -d '{"encrypted":["cpf"],"blind":{"cpf":"digits"},"unique":["cpf"],"indexes":["cpf"]}'
+  -d '{"encrypted":["cpf"],"blind":{"cpf":"numeric"},"unique":["cpf"],"indexes":["cpf"]}'
 curl --unix-socket /run/ndb/ndb.sock http://ndb/users/_search -d '{"query":{"cpf":"390.533.447-05"}}'
 ```
 
 | Normalization | The hash of | For |
 |---|---|---|
 | `exact` (default) | the value as sent | tokens, ids |
-| `digits` | only the digits | a CPF or a phone, with or without dots and dashes |
 | `lower` | the value in lower case, with no spaces at the ends | an email |
+| `upper` | the value in upper case, with no spaces at the ends | a car plate, a code |
+| `numeric` | only the digits (a zero at the start stays) | a CPF, a card, a phone, with or without dots and dashes |
+
+`blind` is an object of field and normalization, or a list of fields that are all `exact`: `"blind":["card_token"]`.
 
 - **Filters:** `$eq` (or a plain value), `$in`, `$ne`, `$nin` and `$exists`, also inside `$and`, `$or`, `$nor`, in `_count`, `_update_by_query`, `_delete_by_query` and in `$match`. A range, `$regex` or a sort need the value: `400 invalid_query`.
 - **Indexes:** `indexes` and `unique` on the field (also in a compound key) use `<field>_bidx`; the definition shows that name.
@@ -167,6 +177,12 @@ curl --unix-socket /run/ndb/ndb.sock http://ndb/users/_search -d '{"query":{"cpf
 - `<field>_bidx` is in no answer. A value sent in it is replaced.
 - The hash of a value is the same for each document, so who reads the files sees which documents have the same value. It does not show the value: the HMAC key is derived from the master key.
 - A field made blind later has a hash from the next write of each document.
+
+## What to encrypt
+
+- **A user password:** do not encrypt it. Keep a hash (bcrypt or argon2) made by the app. Nobody needs to read a password back, the daemon too.
+- **A card number, a CPF, a document number:** `encrypted`, and `blind` when the app finds the record by it. Give `decrypt` only to the service that must show or send the value.
+- **A key or a certificate (`.pem`, `.pfx`), an API token of a third party:** `encrypted`.
 
 ## Logs
 

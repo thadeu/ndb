@@ -11,7 +11,7 @@ value is in no file.
 
 ```json
 PUT /servers   {"encrypted": ["private_key"]}
-PUT /users     {"encrypted": ["cpf"], "blind": {"cpf": "digits"}, "unique": ["cpf"]}
+PUT /users     {"encrypted": ["cpf"], "blind": {"cpf": "numeric"}, "unique": ["cpf"]}
 POST /users/_search   {"query": {"cpf": "123.456.789-09"}}
 ```
 
@@ -33,7 +33,7 @@ POST /users/_search   {"query": {"cpf": "123.456.789-09"}}
 - **Blind hash:** for a field in `blind`, the doc also has `<field>_bidx` =
   `"ndb:h1:k1:<hex(HMAC-SHA256(collection/field + 0x00 + normalized value))[:32]>"`. The
   collection and field are in the HMAC, so equal CPFs in two collections do not match.
-- **Normalization** per field in `blind`: `exact` (default), `digits`, `lower`.
+- **Normalization** per field in `blind`: `exact` (default), `lower`, `upper`, `numeric`. `blind` is also a list of exact fields.
 - **Where it runs:** one place, the write path of the collection, before the writer sees the
   doc (insert, `_bulk`, `_tx`, upsert, the result of an update). Decrypt on the way out of the
   server (`_search`, get, `watch`, `_aggregate`, lookup), for a caller with `decrypt`.
@@ -88,14 +88,21 @@ The stored value is about 35% bigger.
 
 ### E28.3 Clients and tools
 - [x] SDKs: collection option `encrypted` / `blind` (Go, Ruby, TS); Rails
-  `attribute :cpf, encrypted: true, blind: :digits`
-- [x] the console shows "[encrypted]", never the value (`X-Ndb-Decrypt: false` on each request)
+  `attribute :cpf, encrypted: true, blind: :numeric`
+- [x] the console shows "[encrypted]", never the value (it never sends `decrypt=1`)
 - [ ] `ndb encrypt <coll>`: out of this round. To encrypt old documents, write them again
   (any write does it: `_update_by_query` with `{"query":{"_id":{"$exists":true}},"update":{"$set":{"encrypted_at":"..."}}}`)
 - [x] docs: `collections.md`, `security.md`, `http.md`, `http/`, `clients/`, `llms-agents.md`, CHANGELOG
 - [x] bench check: the extra time of a write and a read with an encrypted 2 KB `.pem` is at
   most 25% (measured about 10%; the first read was 30%, from a JSON decoder walk, now a
   byte scanner)
+
+### E28.4 Decrypt on request (done)
+- [x] answers are sealed by default; `?decrypt=1` and the right give the plain value (no 403 without
+  the right: the stored value)
+- [x] SDKs send `decrypt=1`; `NoDecrypt` sends `decrypt=0` (a vault list, then a show)
+- [x] the documents of a lookup follow the right on their own collection; no `_bidx` in them
+- [x] `upper` normalization; `digits` renamed `numeric`; `X-Ndb-Decrypt` header removed
 
 ## Exit criteria
 

@@ -9,16 +9,18 @@ import (
 	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/crypt"
 	"github.com/thadeu/ndb/internal/engine"
+	"github.com/thadeu/ndb/internal/lookup"
 )
 
 var sealedMark = []byte(`"ndb:e1:`)
 
-// mayDecrypt tells if the caller gets the plain value of the encrypted
-// fields of coll: the unix socket, a daemon with no tokens, the full token
-// and a token whose decrypt list covers coll. X-Ndb-Decrypt: false keeps
-// the values sealed for any caller (the console sends it).
+// mayDecrypt tells if the answer has the plain value of the encrypted
+// fields of coll: the call asks with ?decrypt=1, and the caller has the
+// right (the unix socket, a daemon with no tokens, the full token, or a
+// token whose decrypt list covers coll). Any other call gets the stored,
+// sealed value.
 func mayDecrypt(r *http.Request, coll string) bool {
-	if r.Header.Get("X-Ndb-Decrypt") == "false" {
+	if r.URL.Query().Get("decrypt") != "1" {
 		return false
 	}
 
@@ -68,6 +70,54 @@ func hashFields(def catalog.Def) []string {
 
 	for f := range def.Blind {
 		out = append(out, f+crypt.HashSuffix)
+	}
+
+	return out
+}
+
+// openLookups opens the documents that a lookup put in a row, each with
+// the definition and the right of the collection it comes from.
+func openLookups(r *http.Request, db *engine.DB, row json.RawMessage, specs []lookup.Spec) json.RawMessage {
+	if !bytes.Contains(row, sealedMark) {
+		return row
+	}
+
+	var m map[string]json.RawMessage
+
+	if json.Unmarshal(row, &m) != nil {
+		return row
+	}
+
+	for _, sp := range specs {
+		v, ok := m[sp.Name]
+		if !ok {
+			continue
+		}
+
+		if sp.Many {
+			var list []json.RawMessage
+
+			if json.Unmarshal(v, &list) != nil {
+				continue
+			}
+
+			for i, d := range list {
+				list[i] = openDoc(r, db, sp.From, openLookups(r, db, d, sp.Nested))
+			}
+
+			m[sp.Name], _ = json.Marshal(list)
+
+			continue
+		}
+
+		if string(v) != "null" {
+			m[sp.Name] = openDoc(r, db, sp.From, openLookups(r, db, v, sp.Nested))
+		}
+	}
+
+	out, err := json.Marshal(m)
+	if err != nil {
+		return row
 	}
 
 	return out

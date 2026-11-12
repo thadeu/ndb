@@ -29,9 +29,10 @@ type Norm string
 
 // The normalizations of a blind field.
 const (
-	Exact  Norm = "exact"
-	Digits Norm = "digits"
-	Lower  Norm = "lower"
+	Exact   Norm = "exact"
+	Numeric Norm = "numeric"
+	Lower   Norm = "lower"
+	Upper   Norm = "upper"
 )
 
 const (
@@ -123,7 +124,7 @@ func IsSealed(value json.RawMessage) bool {
 
 func normalize(norm Norm, s string) string {
 	switch norm {
-	case Digits:
+	case Numeric:
 		return strings.Map(func(r rune) rune {
 			if unicode.IsDigit(r) {
 				return r
@@ -133,6 +134,8 @@ func normalize(norm Norm, s string) string {
 		}, s)
 	case Lower:
 		return strings.ToLower(strings.TrimSpace(s))
+	case Upper:
+		return strings.ToUpper(strings.TrimSpace(s))
 	}
 
 	return s

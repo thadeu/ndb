@@ -258,14 +258,14 @@ tokens:
   - name: kyc
     file: /etc/ndb/kyc.token
     read: [users]
-    decrypt: [users]              # reads the encrypted fields as plain values
+    decrypt: [users]              # reads the encrypted fields as plain values, with ?decrypt=1
 ```
 
 | Level | Routes |
 |---|---|
 | `read` | `GET /{coll}`, `_search`, `_count`, `_aggregate`, `_watch`, `GET _doc/{id}`, `_ttl`, `_stats`, `_quarantine`; the system reads (`/_health`, `/_metrics`, `/_stats`, `/_collections`, `/_size`, `/_pitr`, `GET /_blobs/{ref}`) with any read right |
 | `write` | `POST _doc`, `_bulk`, `_update`, `_update_by_query`, `_delete_by_query`, `DELETE _doc/{id}`, `_expire`, `_persist`, `_ack`; `POST /_blobs` with any write right; and all of `read` |
-| `decrypt` | read the plain value of the [encrypted fields](security.md#encrypted-fields). Not part of `admin`: give it on its own. Without it a token reads `"ndb:e1:k1:..."` |
+| `decrypt` | read the plain value of the [encrypted fields](security.md#encrypted-fields). Not part of `admin`: give it on its own. A read gets the plain value with this right and `?decrypt=1`; else `"ndb:e1:k1:..."` |
 | `admin` | `PUT /{coll}` (declare), `DELETE /{coll}` (drop), `_truncate`, `_compact`, `_indexes`; and all of `write`. `GET` and `PUT /_log` need admin of `*` |
 
 - Each list holds collection names or globs: `calls*` covers `calls` and its partitions (`calls-2026-11`), `*` covers every collection. A pattern read (`/logs-2026-*/_search`) needs a glob that covers the whole pattern (`logs*` or `*`).

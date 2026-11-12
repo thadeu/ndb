@@ -87,7 +87,8 @@ end
 | `index: true` | Index this field. For a [compound index](../query.md#indexes), call `index :account_id, :created_at` in the class; with `unique: true` it is a compound unique key (`index :account_id, :email, unique: true`). `index "items.sku"` indexes a path that is not an attribute. |
 | `unique: true` | Unique value. A second one raises `RecordNotUnique`. |
 | `encrypted: true` | The daemon encrypts the attribute before it stores it. A filter on it is only `exists`. See [Encrypted fields](../security.md#encrypted-fields). |
-| `blind: :digits` | An encrypted attribute that `where` and `find_by` find by value, after this normalization (`:exact`, `:digits`, `:lower`). It may also be `unique: true`. |
+| `blind: :numeric` | An encrypted attribute that `where` and `find_by` find by value, after this normalization (`:exact`, `:lower`, `:upper`, `:numeric`). It may also be `unique: true`. |
+| `Secret.no_decrypt` | Reads that keep the encrypted fields sealed (`"ndb:e1:k1:..."`); the other reads get the values (the gem sends `decrypt=1`). |
 | `time: true` | The collection time field. Used by zone maps, `$dateTrunc` and TTL. |
 | `expires: true` | The field holds the time the document expires. |
 | `ttl 24.hours` | Documents expire this long after the time field. Use `ttl` or `expires:`, not both: the daemon returns `catalog_invalid`. |
