@@ -3,19 +3,22 @@ import type { FC } from 'hono/jsx';
 import { defaultText } from '@/components/devtools-blocks';
 import { Layout, type Current } from '@/html/layout';
 import { Card } from '@/ui/card';
+import { Code } from '@/ui/code';
 
 export interface DevtoolsPageProps {
   current: Current;
   collection: string;
+  collections?: string[];
   curl: { kind: 'unix' | 'tcp'; socket?: string; base?: string };
 }
 
-export const DevtoolsPage: FC<DevtoolsPageProps> = ({ current, collection, curl }) => {
+export const DevtoolsPage: FC<DevtoolsPageProps> = ({ current, collection, collections = [], curl }) => {
   const base = `c/${encodeURIComponent(current.name)}`;
 
   const props = {
     name: current.name,
     collection,
+    collections,
     sendUrl: `${base}/devtools/send`,
     curl,
     browserHref: `${base}/explorer?${new URLSearchParams({ coll: collection, tab: 'documents' })}`,
@@ -25,11 +28,9 @@ export const DevtoolsPage: FC<DevtoolsPageProps> = ({ current, collection, curl 
     <Layout title="Dev Tools" current={current} tab="devtools" scripts={['devtools']}>
       <div id="devtools" data-props={JSON.stringify(props)}>
         <div class="dt">
-          <header class="page-head">
-            <div class="page-head-text">
-              <h1>Dev Tools</h1>
-              <p class="lead">Send any request of the HTTP API. Start from an example, then change it.</p>
-            </div>
+          <header class="dt-bar">
+            <h1 class="dt-title">Dev Tools</h1>
+            <span class="hint">Send any request of the HTTP API. Start from an example, then change it.</span>
           </header>
 
           <Card>
@@ -37,7 +38,7 @@ export const DevtoolsPage: FC<DevtoolsPageProps> = ({ current, collection, curl 
             <p class="hint">Write a request as a line with the method and the path, then a JSON body. Run it with Ctrl+Enter or Cmd+Enter. These are the first examples:</p>
 
             <pre class="codebox-pre">
-              <code>{defaultText(collection)}</code>
+              <Code text={defaultText(collection)} />
             </pre>
           </Card>
         </div>

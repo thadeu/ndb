@@ -1,8 +1,8 @@
 import { buildWhere, readFind, searchBody } from '@/components/filter-model';
 
 // The find bar of the Documents tab shows the _search request that a run
-// sends, on one line. The server renders it for the last run; this script
-// keeps it in step while the user types, before the run.
+// sends. The server renders it for the last run; this script keeps it in
+// step while the user types, before the run.
 function refresh(form: HTMLFormElement): void {
   const preview = form.querySelector<HTMLElement>('[data-find-preview]');
 
@@ -15,28 +15,31 @@ function refresh(form: HTMLFormElement): void {
   const query = readFind(params);
 
   let text: string;
+  let body: unknown;
 
   if (query.mode === 'json') {
     try {
       const where = query.json.trim() === '' ? {} : JSON.parse(query.json);
 
-      text = JSON.stringify(searchBody(query, where));
+      body = searchBody(query, where);
+      text = JSON.stringify(body, null, 2);
     } catch {
       text = 'The filter is not valid JSON.';
     }
   } else {
     const built = buildWhere(query.rows);
 
-    text = built.error ?? JSON.stringify(searchBody(query, built.where));
+    body = built.error ? undefined : searchBody(query, built.where);
+    text = built.error ?? JSON.stringify(body, null, 2);
   }
 
-  const code = `${preview.dataset.findPreview} ${text}`;
+  const code = `${preview.dataset.findPreview}\n${text}`;
   const pre = preview.querySelector('code');
   const copy = preview.querySelector<HTMLElement>('[data-copy]');
 
   if (pre) pre.textContent = code;
 
-  if (copy) copy.dataset.copy = code;
+  if (copy) copy.dataset.copy = body === undefined ? code : `${preview.dataset.findPreview} ${JSON.stringify(body)}`;
 }
 
 export function mount(): void {
@@ -44,6 +47,15 @@ export function mount(): void {
     form.addEventListener('input', () => refresh(form));
     form.addEventListener('change', () => refresh(form));
   }
+
+  // The request panel closes on a click outside it.
+  document.addEventListener('click', event => {
+    const inside = event.target instanceof Element ? event.target.closest('.find-request') : null;
+
+    for (const panel of document.querySelectorAll<HTMLDetailsElement>('.find-request[open]')) {
+      if (panel !== inside) panel.open = false;
+    }
+  });
 
   document.addEventListener('change', event => {
     const control = event.target;

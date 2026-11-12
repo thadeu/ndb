@@ -198,7 +198,7 @@ describe('collection list', () => {
 });
 
 describe('collection header and tabs', () => {
-  it('shows the name, the badges, the actions, and six tabs', async () => {
+  it('shows the name, the badges, the actions, and five tabs', async () => {
     const text = await html('/c/local/explorer?coll=orders');
 
     expect(text).toContain('class="explorer has-coll"');
@@ -213,7 +213,18 @@ describe('collection header and tabs', () => {
     expect(text).toContain('action="c/local/explorer/rename"');
     expect(text).toContain('Explore documents');
 
-    for (const tab of ['Overview', 'Documents', 'Indexes', 'Storage', 'Locks', 'Backups']) expect(text).toContain(`${tab}</a>`);
+    for (const tab of ['Overview', 'Indexes', 'Storage', 'Locks', 'Backups']) expect(text).toContain(`${tab}</a>`);
+
+    expect(text).not.toContain('>Documents</a>');
+  });
+
+  it('shows only the name and View collection details on the documents', async () => {
+    const text = await html('/c/local/explorer?coll=orders&tab=documents');
+
+    expect(text).toContain('View collection details');
+    expect(text).toMatch(/href="c\/local\/explorer\?coll=orders"[^>]*>View collection details/);
+    expect(text).not.toContain('data-popover-open="collection-actions"');
+    expect(text).not.toContain('class="explorer-tabs"');
   });
 
   it('shows the overview with real values', async () => {
@@ -269,7 +280,8 @@ describe('indexes tab', () => {
     expect(text).toContain('name="index" value="status"');
     expect(text).not.toContain('name="index" value="_id"');
     expect(text).not.toContain('name="index" value="account_id,email"');
-    expect(text).toContain('PUT /orders/_indexes/{field}');
+    expect(text.replace(/<[^>]+>/g, '')).toContain('PUT /orders/_indexes/{field}');
+    expect(text).toContain('<span class="hl-method">PUT</span>');
     expect(text).toContain('Which index serves a filter?');
   });
 

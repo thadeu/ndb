@@ -17,6 +17,20 @@ export interface SendRequest {
   body?: string;
 }
 
+const SECRET_HEADERS = /^(authorization|proxy-authorization|cookie|set-cookie|www-authenticate)$|token/;
+
+// shownHeaders gives every response header of ndb for the Headers view, but
+// never a header that can carry a token or a credential.
+export function shownHeaders(headers: Headers): Record<string, string> {
+  const shown: Record<string, string> = {};
+
+  headers.forEach((value, key) => {
+    if (!SECRET_HEADERS.test(key)) shown[key] = value;
+  });
+
+  return shown;
+}
+
 // checkRequest says why a request may not go to ndb, or returns undefined.
 // Every route of the API passes, except the backup (it has its own tab) and a
 // watch (a stream that Dev Tools cannot show).
@@ -96,7 +110,9 @@ export function devtoolsRoutes(app: Hono<Env>, deps: RouteDeps): void {
       const stats = await deps.client(connection).stats();
       const first = stats.collections.find(item => item.name !== DEMO_COLLECTION && item.name !== DEMO_STREAM);
 
-      return c.html(<DevtoolsPage current={deps.currentOf(connection, stats)} collection={first?.name ?? 'orders'} curl={curlTarget(connection.url)} />);
+      const names = stats.collections.map(item => item.name);
+
+      return c.html(<DevtoolsPage current={deps.currentOf(connection, stats)} collection={first?.name ?? 'orders'} collections={names} curl={curlTarget(connection.url)} />);
     } catch (error) {
       return c.html(<OfflinePage current={deps.currentOf(connection)} message={deps.message(error)} />, 502);
     }
@@ -122,11 +138,7 @@ export function devtoolsRoutes(app: Hono<Env>, deps: RouteDeps): void {
       const response = await deps.client(connection).forward(request.method, request.path, request.method === 'GET' || request.method === 'DELETE' ? undefined : request.body);
       const read = await readCapped(response);
 
-      const headers: Record<string, string> = {};
-
-      response.headers.forEach((value, key) => {
-        if (key.startsWith('x-ndb-') || key === 'content-type' || key === 'x-request-id') headers[key] = value;
-      });
+      const headers = shownHeaders(response.headers);
 
       return c.json({ status: response.status, ms: Math.round(performance.now() - started), bytes: read.bytes, headers, body: read.text, truncated: read.truncated });
     } catch (error) {

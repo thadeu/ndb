@@ -21,7 +21,7 @@ import { operationsRoutes } from '@/routes/operations';
 import { streamsRoutes } from '@/routes/streams';
 import { watchRoutes } from '@/routes/watch';
 
-import type { Current } from '@/html/layout';
+import { BOOT_SCRIPT, type Current } from '@/html/layout';
 import { suggestName } from '@/components/discover';
 import { ConnectionsPage, type ConnectionStatus } from '@/views/connections';
 import { OfflinePage } from '@/views/offline';
@@ -92,6 +92,7 @@ export function createApp(connections: Connections, assets: Assets, options: App
       online: stats !== undefined,
       version: stats?.version,
       uptime: stats ? formatUptime(stats.uptime_seconds) : undefined,
+      saved: connections.list().map(item => ({ name: item.name, url: item.url })),
     };
   }
 
@@ -130,6 +131,7 @@ export function createApp(connections: Connections, assets: Assets, options: App
   app.get('/assets/app.css', () => assets.css());
   app.get('/assets/date-picker.css', () => assets.libCss());
   app.get('/assets/ui.js', () => assets.ui());
+  app.get('/assets/boot.js', c => c.body(BOOT_SCRIPT, 200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' }));
   app.get('/assets/favicon.svg', () => assets.favicon());
   app.get('/assets/:file{[a-z-]+\\.js}', c => {
     const render = assets.islands?.[c.req.param('file').replace(/\.js$/, '')];

@@ -2,6 +2,8 @@ import type { FC } from 'hono/jsx';
 
 import { copyText } from '@/components/copy';
 
+import { Code } from './code';
+
 // CodeBlock shows a command or a snippet with a Copy button. Without the
 // script the text can still be selected.
 export const CodeBlock: FC<{ code: string; label?: string }> = ({ code, label }) => (
@@ -9,7 +11,7 @@ export const CodeBlock: FC<{ code: string; label?: string }> = ({ code, label })
     {label && <span class="codebox-label">{label}</span>}
 
     <pre class="codebox-pre">
-      <code>{code}</code>
+      <Code text={code} />
     </pre>
 
     <button type="button" class="btn small codebox-copy" data-copy={code}>

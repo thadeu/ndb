@@ -1,3 +1,4 @@
+import { raw } from 'hono/html';
 import type { FC } from 'hono/jsx';
 
 import { COLLECTION_NAME, NO_KEY_ROUTE, type CollectionDefinition, type CollectionInfo, type Explain, type IndexRow, type QuarantineRow, indexRequest, indexRows, planText, requestText } from '@/collections';
@@ -12,6 +13,7 @@ import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
 import { Card, CardHeader } from '@/ui/card';
 import { CodeBlock } from '@/ui/code-block';
+import { highlightHtml } from '@/ui/json-highlight';
 import { DescriptionList } from '@/ui/description-list';
 import { Dialog, openDialog } from '@/ui/dialog';
 import { Empty } from '@/ui/empty';
@@ -64,7 +66,6 @@ type DetailProps = ExplorerPageProps & { collection: CollectionInfo; definition?
 
 const TABS: { id: ExplorerTab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
-  { id: 'documents', label: 'Documents' },
   { id: 'indexes', label: 'Indexes' },
   { id: 'storage', label: 'Storage' },
   { id: 'locks', label: 'Locks' },
@@ -346,8 +347,13 @@ const Detail: FC<DetailProps> = props => {
   );
 };
 
+// CollectionHead is the head of a collection. On the details tabs it has
+// Actions, Explore documents and the tabs. On the documents it is only the
+// name with a way back to the details, so the page is about the filter and
+// the documents.
 const CollectionHead: FC<DetailProps> = ({ current, collection, definition, query, updated }) => {
   const health = healthOf(collection);
+  const exploring = query.tab === 'documents';
 
   return (
     <>
@@ -377,27 +383,35 @@ const CollectionHead: FC<DetailProps> = ({ current, collection, definition, quer
             <Icon name="refresh" />
           </Button>
 
-          <MenuButton menu="collection-actions">Actions</MenuButton>
+          {exploring ? (
+            <Button href={pageHref(current, query, { tab: 'overview' })}>View collection details</Button>
+          ) : (
+            <>
+              <MenuButton menu="collection-actions">Actions</MenuButton>
 
-          <Button variant="dark" href={pageHref(current, query, { tab: 'documents' })}>
-            Explore documents
-          </Button>
+              <Button variant="dark" href={pageHref(current, query, { tab: 'documents' })}>
+                Explore documents
+              </Button>
+            </>
+          )}
         </div>
       </header>
 
-      <ActionsMenu current={current} collection={collection} definition={definition} query={query} />
+      {!exploring && <ActionsMenu current={current} collection={collection} definition={definition} query={query} />}
 
-      <nav class="explorer-tabs" aria-label="Collection">
-        {TABS.map(item => (
-          <a
-            class={item.id === query.tab ? 'explorer-tab on' : 'explorer-tab'}
-            href={pageHref(current, query, { tab: item.id })}
-            aria-current={item.id === query.tab ? 'page' : undefined}
-          >
-            {item.label}
-          </a>
-        ))}
-      </nav>
+      {!exploring && (
+        <nav class="explorer-tabs" aria-label="Collection">
+          {TABS.map(item => (
+            <a
+              class={item.id === query.tab ? 'explorer-tab on' : 'explorer-tab'}
+              href={pageHref(current, query, { tab: item.id })}
+              aria-current={item.id === query.tab ? 'page' : undefined}
+            >
+              {item.label}
+            </a>
+          ))}
+        </nav>
+      )}
     </>
   );
 };
@@ -819,8 +833,8 @@ const NewIndexForm: FC<{ current: Current; name: string }> = ({ current, name })
         </span>
       </label>
 
-      <pre class="index-preview mono" data-index-preview>
-        {requestText(indexRequest(name, ['{field}'], false))}
+      <pre class="index-preview mono" data-index-preview data-hl>
+        {raw(highlightHtml(requestText(indexRequest(name, ['{field}'], false))))}
       </pre>
 
       <div class="form-actions">

@@ -1,3 +1,4 @@
+import { raw } from 'hono/html';
 import type { FC } from 'hono/jsx';
 
 import { type Stage, STAGES, aggregatePath, cellText, chartOf, columnsOf, formatBody, formatPipeline, moveStage, requestBody, whatOf } from '@/aggregate';
@@ -8,6 +9,7 @@ import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
 import { Card } from '@/ui/card';
 import { CodeBlock } from '@/ui/code-block';
+import { highlightHtml } from '@/ui/json-highlight';
 import { CodeEditor } from '@/ui/code-editor';
 import { Combobox, type ComboOption } from '@/ui/combobox';
 import { Dialog, openDialog } from '@/ui/dialog';
@@ -386,7 +388,9 @@ export const AggregatePage: FC<AggregatePageProps> = ({ current, on, text, stage
               <pre class="agg-request-pre">
                 <span class="agg-method">POST</span> <span data-agg-path>{path}</span>
                 {'\n'}
-                <span data-agg-json>{body}</span>
+                <span data-agg-json data-hl>
+                  {raw(highlightHtml(body))}
+                </span>
               </pre>
             </Card>
           </section>

@@ -137,8 +137,8 @@ function exportLines(ndb: Ndb, coll: string, body: Record<string, unknown>, firs
 }
 
 // loadDocuments runs the find query of the Documents tab and reads the open
-// document. Add and remove of a filter row come from the same form, and the
-// rows always end with an empty one, for the next filter. A bad
+// document. Add and remove of a filter row come from the same form. With no
+// filter the form shows one empty row, ready to fill in. A bad
 // filter or a missing _id becomes a message on the page, never an error page.
 export async function loadDocuments(ndb: Ndb, stats: Stats, coll: string, params: URLSearchParams, message: (error: unknown) => string): Promise<Omit<DocumentsProps, 'current'>> {
   const find = readFind(params);
@@ -148,7 +148,7 @@ export async function loadDocuments(ndb: Ndb, stats: Stats, coll: string, params
 
   if (remove !== null) find.rows.splice(Number(remove), 1);
 
-  if (find.rows.at(-1)?.field.trim() !== '') find.rows.push(emptyRow());
+  if (find.rows.length === 0) find.rows.push(emptyRow());
 
   const built = whereOf(find);
   const where = built.where ?? {};

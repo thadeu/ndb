@@ -3,6 +3,21 @@
 // and a rail, and keeps the choice in the browser. The layout reads the
 // choices before the first paint.
 export function mount(): void {
+  // The connection menu closes on a click outside it, and on Esc.
+  document.addEventListener('click', event => {
+    const inside = event.target instanceof Element ? event.target.closest('.switcher-menu') : null;
+
+    for (const menu of document.querySelectorAll<HTMLDetailsElement>('.switcher-menu[open]')) {
+      if (menu !== inside) menu.open = false;
+    }
+  });
+
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+
+    for (const menu of document.querySelectorAll<HTMLDetailsElement>('.switcher-menu[open]')) menu.open = false;
+  });
+
   document.addEventListener('click', event => {
     const button = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-collapse]') : null;
     const part = button?.dataset.collapse;

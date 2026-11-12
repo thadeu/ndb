@@ -4,13 +4,14 @@ import { render } from 'hono/jsx/dom';
 
 import { copyText } from '@/components/copy';
 import { DocFacts } from '@/components/document-facts';
-import { DOC_READY } from '@/components/document-drawer';
+import { DOC_READY, DOC_SAVED } from '@/components/document-drawer';
 import { byteSize, describeDiff, diffDocs, isEmptyDiff } from '@/components/json-model';
+import { JsonEditor } from '@/components/json-editor';
+import { jsonMark } from '@/components/devtools-model';
 import { JsonTree } from '@/components/json-tree';
 import { useSend } from '@/hooks/useSend';
 import { confirm } from '@/ui/alert-dialog';
 import { Button } from '@/ui/button';
-import { noSpelling } from '@/ui/input';
 import { Segmented } from '@/ui/segmented';
 
 export interface EditorProps {
@@ -110,9 +111,10 @@ function startNotice(notice?: string, problem?: string): Notice | null {
 // messages, and the actions. Save sends the difference as $set and $unset,
 // guarded by the _v that the page was loaded with.
 export const DocumentEditor: FC<EditorProps> = props => {
-  const { coll, id, doc, saveUrl, lockUrl, unlockUrl, deleteUrl, find, lockedUntil, writable, reason } = props;
+  const { coll, id, doc: loaded, saveUrl, lockUrl, unlockUrl, deleteUrl, find, lockedUntil, writable, reason } = props;
 
   const [mode, setMode] = useState<Mode>('tree');
+  const [doc, setDoc] = useState<Record<string, unknown>>(loaded);
   const [draft, setDraft] = useState<Record<string, unknown>>(doc);
   const [text, setText] = useState(pretty(doc));
   const [notice, setNotice] = useState<Notice | null>(startNotice(props.notice, props.problem));
@@ -216,16 +218,18 @@ export const DocumentEditor: FC<EditorProps> = props => {
 
     setSaving(true);
 
-    const answer = await send<{ message?: string; conflict?: boolean; lockEnded?: boolean }>({ coll, id, _v: version, set: diff.set, unset: diff.unset });
+    const answer = await send<{ message?: string; conflict?: boolean; lockEnded?: boolean; doc?: Record<string, unknown> }>({ coll, id, _v: version, set: diff.set, unset: diff.unset });
 
     setSaving(false);
 
-    if (answer.ok) {
-      const url = new URL(window.location.href);
+    if (answer.ok && answer.body.doc) {
+      const saved = { _id: answer.body.doc._id, _v: answer.body.doc._v, ...answer.body.doc };
 
-      url.searchParams.set('done', 'saved');
-      url.searchParams.delete('insert');
-      window.location.assign(url);
+      setDoc(saved);
+      setDraft(saved);
+      setText(pretty(saved));
+      setNotice({ tone: 'ok', text: `Saved. Now _v ${String(saved._v)}.` });
+      document.dispatchEvent(new CustomEvent(DOC_SAVED, { detail: { id } }));
 
       return;
     }
@@ -244,6 +248,7 @@ export const DocumentEditor: FC<EditorProps> = props => {
   const label = dirty && !isEmptyDiff(diff) ? `Save · ${describeDiff(diff)}` : 'Save';
   const canSave = writable && dirty && !saving && typeof parsed !== 'string';
   const hint = hintOf(writable, reason, dirty, diff.set, diff.unset);
+  const notObject = mode === 'json' && typeof parsed === 'string' && jsonMark(text) === undefined;
   const ask = confirm({ title: 'Delete this document?', body: `${id} is removed from ${coll}. A watch consumer sees a del event.`, action: 'Delete' });
 
   return (
@@ -262,17 +267,16 @@ export const DocumentEditor: FC<EditorProps> = props => {
             onChange={next => setDraft(next as Record<string, unknown>)}
           />
         ) : (
-          <textarea
-            class="textarea mono doc-json"
-            {...noSpelling}
-            aria-label="Document JSON"
-            readOnly={!writable}
+          <JsonEditor
             value={text}
-            onInput={(event: Event) => setText((event.target as HTMLTextAreaElement).value)}
+            label="Document JSON"
+            readOnly={!writable}
+            onChange={setText}
+            onSubmit={() => canSave && save()}
           />
         )}
 
-        {typeof parsed === 'string' && mode === 'json' && <p class="note bad">{parsed}</p>}
+        {notObject && <p class="note bad">{parsed}</p>}
       </section>
 
       <div class="doc-side">
@@ -285,33 +289,37 @@ export const DocumentEditor: FC<EditorProps> = props => {
         <p class="hint">{hint}</p>
 
         <div class="doc-actions">
-          {writable && (
-            <Button variant="dark" type="button" disabled={!canSave} onClick={save}>
-              {label}
+          <div class="doc-actions-row">
+            <Button type="button" size="sm" variant="ghost" onClick={copy}>
+              Copy JSON
             </Button>
-          )}
 
-          {writable && dirty && (
-            <Button type="button" onClick={discard}>
-              Discard
-            </Button>
-          )}
+            {writable && (
+              <form class="doc-delete" method="post" action={deleteUrl} {...ask}>
+                <input type="hidden" name="coll" value={coll} />
+                <input type="hidden" name="id" value={id} />
+                <input type="hidden" name="find" value={find} />
 
-          <Button type="button" onClick={copy}>
-            Copy JSON
-          </Button>
+                <Button variant="ghost" size="sm" class="doc-delete-btn" type="submit">
+                  Delete
+                </Button>
+              </form>
+            )}
+          </div>
 
           {writable && (
-            <form class="doc-delete" method="post" action={deleteUrl} {...ask}>
-              <input type="hidden" name="coll" value={coll} />
-              <input type="hidden" name="id" value={id} />
-              <input type="hidden" name="find" value={find} />
-
-              <Button variant="destructive" type="submit">
-                Delete
+            <div class="doc-actions-main">
+              <Button type="button" disabled={!dirty} onClick={discard}>
+                Discard
               </Button>
-            </form>
+
+              <Button variant="dark" type="button" class="doc-save" disabled={!canSave} onClick={save}>
+                {saving ? 'Saving…' : 'Save'}
+              </Button>
+            </div>
           )}
+
+          {writable && dirty && <p class="doc-change">{label.replace('Save · ', 'Changes: ')}</p>}
         </div>
       </div>
     </>

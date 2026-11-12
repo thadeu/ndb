@@ -160,6 +160,21 @@ describe('connections', () => {
   });
 });
 
+describe('connection switcher', () => {
+  it('lists the saved connections, keeps the section, and links to Connections', async () => {
+    store.add({ name: 'second', url: 'tcp://127.0.0.1:1' });
+
+    const html = await (await page('/c/local/watch')).text();
+
+    expect(html).toContain('<details class="switcher-menu">');
+    expect(html).toContain('href="c/local/watch" role="menuitem" aria-current="true"');
+    expect(html).toContain('href="c/second/watch" role="menuitem"');
+    expect(html).toContain('href="./?new=1"');
+    expect(html).toContain('Manage connections');
+    expect(html).not.toContain('hunter2-token');
+  });
+});
+
 describe('operations', () => {
   it('shows the log settings of the daemon and the cards', async () => {
     const response = await page('/c/local/operations');

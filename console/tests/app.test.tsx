@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { createApp } from '@/app';
 import { Connections } from '@/connections';
 import { Ndb, NdbError } from '@/ndb';
+import { shownHeaders } from '@/routes/devtools';
 
 const BIN = process.env.NDB_BIN ?? '/tmp/ndb-console-test/ndb';
 const dir = mkdtempSync(join(tmpdir(), 'nc-'));
@@ -281,14 +282,20 @@ describe('explorer documents tab', () => {
     expect(html).toContain('&quot;notice&quot;');
   });
 
-  it('shows each filter as a chip with a link that removes it', async () => {
+  it('shows each filter as an editable row with a remove button', async () => {
     const html = await (await page('/c/local/explorer?coll=orders&tab=documents&f=status&op=in&t=string&v=paid,new&f=_id&op=gte&t=string&v=a&sort=_id')).text();
 
-    expect(html).toContain('status <strong>in</strong> paid, new');
-    expect(html).toContain('href="c/local/explorer?coll=orders&amp;tab=documents&amp;f=_id&amp;op=gte&amp;t=string&amp;v=a&amp;sort=_id" aria-label="Remove the filter on status"');
-    expect(html).toContain('aria-label="Remove the filter on _id"');
+    expect(html.match(/<div class="find-row" data-row=/g)).toHaveLength(2);
+    expect(html).toContain('value="paid,new"');
+    expect(html).toContain('name="remove" value="1"');
     expect(html).toContain('{&quot;query&quot;:{&quot;status&quot;:{&quot;$in&quot;:[&quot;paid&quot;,&quot;new&quot;]},&quot;_id&quot;:{&quot;$gte&quot;:&quot;a&quot;}}');
-    expect(html).toContain('Add filter');
+    expect(html).toContain('Add condition');
+  });
+
+  it('reads an auto value as a number, a boolean or a text', async () => {
+    const html = await (await page('/c/local/explorer?coll=orders&tab=documents&f=n&op=gte&t=auto&v=10&f=ok&op=eq&t=auto&v=true&f=code&op=eq&t=auto&v=%22123%22')).text();
+
+    expect(html).toContain('{&quot;query&quot;:{&quot;n&quot;:{&quot;$gte&quot;:10},&quot;ok&quot;:true,&quot;code&quot;:&quot;123&quot;}');
   });
 
   it('builds the filter from rows and shows the request json', async () => {
@@ -450,7 +457,7 @@ describe('explorer documents tab', () => {
     const added = await (await page('/c/local/explorer?coll=orders&tab=documents&f=status&op=eq&t=string&v=paid&add=1')).text();
 
     expect(added.match(/aria-label="Field name"/g)).toHaveLength(2);
-    expect(added).toMatch(/<input class="find-toggle" type="checkbox" checked/);
+    expect(added).toContain('name="remove" value="0"');
 
     const removed = await (await page('/c/local/explorer?coll=orders&tab=documents&f=status&op=eq&t=string&v=paid&remove=0')).text();
 
@@ -548,6 +555,19 @@ describe('dev tools tab', () => {
     expect(answer.headers['content-type']).toBe('application/json');
     expect(answer.body).toContain('"_id"');
     expect(answer.bytes).toBeGreaterThan(0);
+  });
+
+  it('returns every ndb header, also on a route without X-Ndb-*', async () => {
+    const answer = await (await page('/c/local/devtools/send', json({ method: 'GET', path: '/_stats' }))).json();
+
+    expect(answer.headers['content-length']).toBeDefined();
+    expect(answer.headers.date).toBeDefined();
+  });
+
+  it('never returns a header with a credential', () => {
+    const headers = new Headers({ 'x-ndb-total': '3', authorization: 'Bearer x', 'set-cookie': 'a=b', 'x-auth-token': 't' });
+
+    expect(shownHeaders(headers)).toEqual({ 'x-ndb-total': '3' });
   });
 
   it('passes an ndb error status through', async () => {

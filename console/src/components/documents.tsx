@@ -4,7 +4,7 @@ import type { Current } from '@/html/layout';
 import { DocFacts } from '@/components/document-facts';
 import { StaticTree } from '@/components/json-tree';
 import { byteSize } from '@/components/json-model';
-import { cellText, chipsOf, columnsOf, type FilterRow, type FindQuery, findParams, DEFAULT_LIMIT, DEFAULT_PER_LIMIT, LIMITS, needsValue, OPERATORS, TYPES, withoutRow } from '@/components/filter-model';
+import { cellText, columnsOf, type FilterRow, type FindQuery, findParams, DEFAULT_LIMIT, DEFAULT_PER_LIMIT, LIMITS, needsValue, OPERATORS } from '@/components/filter-model';
 import { heldLock, lockKey } from '@/locks';
 import type { CollectionStats, Doc } from '@/ndb';
 import { ConfirmHost, confirm } from '@/ui/alert-dialog';
@@ -14,6 +14,7 @@ import { Dialog, openDialog } from '@/ui/dialog';
 import { DataTable, RowCheck } from '@/ui/data-table';
 import { Drawer } from '@/ui/drawer';
 import { Empty } from '@/ui/empty';
+import { Code } from '@/ui/code';
 import { Icon } from '@/ui/icon';
 import { Input, noSpelling } from '@/ui/input';
 import { Pagination } from '@/ui/pagination';
@@ -116,51 +117,51 @@ function base(current: Current): string {
   return `c/${encodeURIComponent(current.name)}`;
 }
 
-const FilterRowFields: FC<{ row: FilterRow }> = ({ row }) => {
-  const valueHint = needsValue(row.op) ? 'Enter a value' : 'No value';
+const FilterRowFields: FC<{ row: FilterRow; index: number; only: boolean }> = ({ row, index, only }) => {
+  const hint = needsValue(row.op) ? 'Value, such as paid or 10' : 'No value';
 
   return (
-    <div class="find-row">
-      <Input mono name="f" value={row.field} placeholder="Field, such as customer.tier" aria-label="Field name" />
+    <div class="find-row" data-row={String(index)}>
+      <Input mono name="f" value={row.field} placeholder="Field, such as status" aria-label="Field name" />
 
       <Select name="op" value={row.op} options={OPERATORS} aria-label="Condition" />
 
-      <Select name="t" value={row.type} options={TYPES} aria-label="Type" />
+      <input type="hidden" name="t" value={row.type} />
 
-      <Input mono name="v" value={row.value} placeholder={valueHint} aria-label="Value" />
+      <Input mono name="v" value={row.value} placeholder={hint} aria-label="Value" disabled={!needsValue(row.op)} />
+
+      {only ? (
+        <span class="find-row-x" />
+      ) : (
+        <Button
+          variant="ghost"
+          size="sm"
+          class="icon-only find-row-x"
+          type="submit"
+          name="remove"
+          value={String(index)}
+          aria-label="Remove this condition"
+        >
+          <Icon name="x" />
+        </Button>
+      )}
     </div>
   );
 };
 
-const FilterChips: FC<{ current: Current; coll: string; find: FindQuery }> = ({ current, coll, find }) => (
-  <>
-    {chipsOf(find.rows).map(chip => (
-      <span class="find-chip mono">
-        <span>
-          {chip.field} <strong>{chip.op}</strong> {chip.value}
-        </span>
-
-        <a class="find-chip-x" href={docsHref(current.name, coll, withoutRow(find, chip.index))} aria-label={`Remove the filter on ${chip.field}`}>
-          <Icon name="x" size={14} />
-        </a>
-      </span>
-    ))}
-  </>
-);
-
-const FilterEditor: FC<{ rows: FilterRow[] }> = ({ rows }) => (
-  <div class="find-editor">
-    <p class="hint">All filters must match. For In list, put commas between the values. A row without a field is left out.</p>
-
-    {rows.map(row => (
-      <FilterRowFields row={row} />
+const FilterRows: FC<{ rows: FilterRow[] }> = ({ rows }) => (
+  <div class="find-rows">
+    {rows.map((row, index) => (
+      <FilterRowFields row={row} index={index} only={rows.length === 1} />
     ))}
 
-    <div>
+    <div class="find-rows-foot">
       <Button variant="ghost" size="sm" type="submit" name="add" value="1">
         <Icon name="plus" />
-        Another row
+        Add condition
       </Button>
+
+      <span class="hint">All conditions must match. Numbers, true, false and null are read as such; quotes keep a text.</span>
     </div>
   </div>
 );
@@ -175,79 +176,94 @@ const JsonFilter: FC<{ json: string }> = ({ json }) => (
   </div>
 );
 
-const Options: FC<{ find: FindQuery; coll: string; body: Record<string, unknown> }> = ({ find, coll, body }) => {
+const Options: FC<{ find: FindQuery }> = ({ find }) => (
+  <div class="find-options">
+    <div class="find-option">
+      <label for="find-sort">Sort by</label>
+      <Input mono id="find-sort" name="sort" value={find.sort} placeholder="none" />
+      <Select name="dir" value={find.dir} options={DIRECTIONS} aria-label="Sort order" />
+    </div>
+
+    <div class="find-option">
+      <label for="find-fields">Fields</label>
+      <Input mono id="find-fields" name="fields" value={find.fields} placeholder="all" />
+    </div>
+
+    <div class="find-option" title="The first N rows of each value of a field">
+      <label for="find-per">Per value of</label>
+      <Input mono id="find-per" name="per" value={find.per} placeholder="off" />
+      <Input class="find-num" type="number" min="1" name="per_limit" value={String(find.perLimit)} aria-label="Rows of each value" />
+    </div>
+  </div>
+);
+
+const RequestPanel: FC<{ coll: string; body: Record<string, unknown> }> = ({ coll, body }) => {
   const request = `POST /${coll}/_search`;
-  const code = `${request} ${JSON.stringify(body)}`;
+  const code = `${request}\n${JSON.stringify(body, null, 2)}`;
+  const line = `${request} ${JSON.stringify(body)}`;
 
   return (
-    <div class="find-options">
-      <div class="find-option">
-        <label for="find-sort">Sort</label>
-        <Input mono id="find-sort" name="sort" value={find.sort} placeholder="none" />
-        <Select name="dir" value={find.dir} options={DIRECTIONS} aria-label="Sort order" />
-      </div>
+    <details class="find-request">
+      <summary class="btn small ghost">
+        <Icon name="code" />
+        Request
+      </summary>
 
-      <div class="find-option">
-        <label for="find-fields">Fields</label>
-        <Input mono id="find-fields" name="fields" value={find.fields} placeholder="all" />
-      </div>
+      <div class="find-request-panel" data-find-preview={request}>
+        <div class="find-request-head">
+          <span class="hint">What a run sends to ndb</span>
 
-      <div class="find-option">
-        <label for="find-per">Per</label>
-        <Input mono id="find-per" name="per" value={find.per} placeholder="off" />
-        <Input class="find-num" type="number" min="1" name="per_limit" value={String(find.perLimit)} aria-label="Rows of each value" />
-        <span>(first N rows of each value)</span>
-      </div>
+          <button type="button" class="btn small" data-copy={line}>
+            Copy
+          </button>
+        </div>
 
-      <div class="find-request" data-find-preview={request}>
-        <code class="mono">{code}</code>
-
-        <button type="button" class="btn small" data-copy={code}>
-          Copy
-        </button>
+        <pre class="mono">
+          <Code text={code} />
+        </pre>
       </div>
-    </div>
+    </details>
   );
 };
 
-// FindBar is the find query of the page as a form: the filters as chips, the
-// row editor behind Add filter, the Builder / JSON switch, and Run. The
-// second line has the sort, the fields, per, and the request that a run
-// sends. Plain CSS opens the editor and switches the mode, so the bar works
-// without the script.
-const FindBar: FC<DocumentsProps & { open: boolean }> = ({ current, coll, find, body, whereError, open }) => (
+// FindBar is the find query of the page as one form: the conditions as
+// rows (field, condition, value) or a JSON filter, then sort, fields and
+// per, then the request that a run sends, Reset and Run. Every part is
+// always in view, and plain CSS switches the mode, so it works without the
+// script.
+const FindBar: FC<DocumentsProps> = ({ current, coll, find, body, whereError }) => (
   <form class="find" method="get" action={`${base(current)}/explorer`} aria-label="Find documents" data-find-form>
     <input type="hidden" name="coll" value={coll} />
     <input type="hidden" name="tab" value="documents" />
     <input type="hidden" name="limit" value={String(find.limit)} />
 
-    <div class="find-top">
-      <span class="find-label">Where</span>
-
-      <FilterChips current={current} coll={coll} find={find} />
-
-      <label class="find-add">
-        <input class="find-toggle" type="checkbox" checked={open} />
-        <Icon name="plus" size={16} />
-        Add filter
-      </label>
-
-      <span class="grow" />
+    <div class="find-head">
+      <h2 class="card-title">Filter</h2>
 
       <ToggleGroup name="mode" label="Filter mode" items={MODES} value={find.mode} />
-
-      <Button variant="dark" type="submit">
-        Run
-      </Button>
     </div>
 
-    <FilterEditor rows={find.rows} />
+    <FilterRows rows={find.rows} />
 
     <JsonFilter json={find.json} />
 
     {whereError && <p class="note bad">{whereError}</p>}
 
-    <Options find={find} coll={coll} body={body} />
+    <Options find={find} />
+
+    <div class="find-foot">
+      <RequestPanel coll={coll} body={body} />
+
+      <span class="grow" />
+
+      <Button variant="ghost" href={docsHref(current.name, coll, undefined)}>
+        Reset
+      </Button>
+
+      <Button variant="dark" type="submit">
+        Run
+      </Button>
+    </div>
   </form>
 );
 
@@ -577,7 +593,9 @@ const DocListItem: FC<{ doc: Doc; href: string; on: boolean }> = ({ doc, href, o
           <span class="doc-item-v">_v {cellText(_v)}</span>
         </span>
 
-        <span class="doc-item-preview mono">{cellText(rest, 120)}</span>
+        <span class="doc-item-preview mono">
+          <Code text={cellText(rest, 120)} />
+        </span>
       </a>
     </li>
   );
@@ -598,12 +616,11 @@ export const Documents: FC<DocumentsProps> = props => {
   const reason = direct ? 'This collection is in direct mode: ndb reads the files of another app, so documents cannot be written here.' : undefined;
 
   const closeHref = docsHref(current.name, coll, find, { trail });
-  const editorOpen = find.mode === 'builder' && (Boolean(whereError) || props.findOpen === true);
   const drawerOpen = Boolean(id && (selected || selectedError));
 
   return (
     <>
-      <FindBar {...props} open={editorOpen} />
+      <FindBar {...props} />
 
       {direct && (
         <p class="hint">

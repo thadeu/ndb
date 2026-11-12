@@ -46,6 +46,7 @@ export const OPERATORS: { id: string; label: string }[] = [
 ];
 
 export const TYPES: { id: string; label: string }[] = [
+  { id: 'auto', label: 'Auto' },
   { id: 'string', label: 'String' },
   { id: 'number', label: 'Number' },
   { id: 'boolean', label: 'Boolean' },
@@ -80,7 +81,7 @@ export function needsValue(op: string): boolean {
 }
 
 export function emptyRow(): FilterRow {
-  return { field: '', op: 'eq', type: 'string', value: '' };
+  return { field: '', op: 'eq', type: 'auto', value: '' };
 }
 
 // readFind reads the find form from the query string. The arrays f, op, t
@@ -91,7 +92,7 @@ export function readFind(params: URLSearchParams): FindQuery {
   const types = params.getAll('t');
   const values = params.getAll('v');
 
-  const rows = fields.map((field, i) => ({ field, op: ops[i] ?? 'eq', type: types[i] ?? 'string', value: values[i] ?? '' }));
+  const rows = fields.map((field, i) => ({ field, op: ops[i] ?? 'eq', type: types[i] || 'auto', value: values[i] ?? '' }));
 
   const limit = Number(params.get('limit'));
   const perLimit = Number(params.get('per_limit'));
@@ -182,7 +183,25 @@ export function withoutRow(query: FindQuery, index: number): FindQuery {
   return { ...query, rows: query.rows.filter((_, i) => i !== index) };
 }
 
+// autoTyped reads the value as the user means it: a number, true or false,
+// null, or else a string. Quotes force a string, such as "123".
+export function autoTyped(text: string): unknown {
+  const value = text.trim();
+
+  if (/^".*"$/.test(value)) return value.slice(1, -1);
+
+  if (value === 'true' || value === 'false') return value === 'true';
+
+  if (value === 'null') return null;
+
+  if (/^-?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(value)) return Number(value);
+
+  return text;
+}
+
 function typed(text: string, type: string): unknown {
+  if (type === 'auto') return autoTyped(text);
+
   if (type === 'null') return null;
 
   if (type === 'boolean') {

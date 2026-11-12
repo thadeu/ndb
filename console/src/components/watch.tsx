@@ -3,6 +3,7 @@ import { useState } from 'hono/jsx';
 import { render } from 'hono/jsx/dom';
 
 import { JsonTree } from '@/components/json-tree';
+import { highlightHtml } from '@/ui/json-highlight';
 import { agoText, FROM_OPTIONS, preview, readFrom, sameSettings, settingsQuery, watchSnippet, type WatchSettings } from '@/components/watch-model';
 import { useEventStream } from '@/hooks/useEventStream';
 import { useNow } from '@/hooks/useNow';
@@ -92,7 +93,7 @@ const EventRow: FC<{ event: WatchEvent; open: boolean; href: string; onToggle: (
 
         {event.v !== undefined && <span class="wev-dim">_v {event.v}</span>}
 
-        <span class="wev-preview">{preview(event.doc)}</span>
+        <span class="wev-preview" dangerouslySetInnerHTML={{ __html: highlightHtml(preview(event.doc)) }} />
       </div>
 
       {open && event.doc && (
@@ -109,10 +110,7 @@ const Snippet: FC<{ text: string }> = ({ text }) => {
   const [method = '', path = ''] = first.split(' ');
 
   return (
-    <pre class="snippet mono">
-      <span class="tok-method">{method}</span> {path}
-      {`\n${rest.join('\n')}`}
-    </pre>
+    <pre class="snippet mono" dangerouslySetInnerHTML={{ __html: highlightHtml(`${method} ${path}\n${rest.join('\n')}`) }} />
   );
 };
 

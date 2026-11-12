@@ -14,6 +14,10 @@ const CONTROLS = 'a, button, input, select, textarea, label, summary';
 // DOC_READY tells the editor island that the drawer has a new document.
 export const DOC_READY = 'ndb:doc-ready';
 
+// DOC_SAVED tells this script that the editor saved the open document, so
+// the table and the list of the drawer show its new values.
+export const DOC_SAVED = 'ndb:doc-saved';
+
 // rowTarget gives the row that a click opens, or null when the click was on
 // a control of the row (its checkbox, a link, a button) or on a cell with a
 // checkbox. The _id link is the exception: it opens the document.
@@ -82,6 +86,31 @@ async function show(drawer: HTMLDialogElement, row: HTMLElement, href: string): 
   document.dispatchEvent(new Event(DOC_READY));
 }
 
+// refresh reads this page again and puts the new rows of the table and of
+// the list of the drawer in place, as a morph: the drawer, the editor and
+// the scroll do not move. A failure leaves the old rows; they are only stale.
+async function refresh(): Promise<void> {
+  try {
+    const response = await fetch(window.location.href, { headers: { Accept: 'text/html' } });
+
+    if (!response.ok) return;
+
+    const page = new DOMParser().parseFromString(await response.text(), 'text/html');
+    const open = document.querySelector<HTMLElement>(`${ROW}.${ROW_ON}`)?.dataset.docHref ?? null;
+
+    for (const selector of ['.dtable tbody', `#${DRAWER} .doc-items`]) {
+      const now = document.querySelector(selector);
+      const next = page.querySelector(selector);
+
+      if (now && next) now.replaceChildren(...Array.from(next.childNodes).map(node => document.importNode(node, true)));
+    }
+
+    mark(open);
+  } catch {
+    // The rows stay as they were.
+  }
+}
+
 export function mount(): void {
   const drawer = document.getElementById(DRAWER);
 
@@ -104,6 +133,8 @@ export function mount(): void {
 
   // The dialog script closes and opens a drawer that the server rendered
   // open, to make it a modal. Only a drawer that stays closed loses its mark.
+  document.addEventListener(DOC_SAVED, () => void refresh());
+
   drawer.addEventListener('close', () => {
     if (!drawer.open) mark(null);
   });

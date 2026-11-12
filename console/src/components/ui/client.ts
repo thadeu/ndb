@@ -19,13 +19,16 @@ import { mount as combobox } from './combobox';
 import { mount as dataTable } from './data-table';
 import { mount as datePicker } from './date-picker';
 import { mount as dialog } from './dialog';
+import { mount as drawerDrag } from './drawer-drag';
+import { mount as jsonHighlight } from './json-highlight';
+import { mount as noAutofill } from './no-autofill';
 import { mount as formValidation } from './form-validation';
 import { mount as menu } from './menu';
 import { mount as popover } from './popover';
 import { mount as select } from './select';
 
 export function mountAll(): void {
-  for (const mount of [connectionTest, discover, dialog, alertDialog, popover, datePicker, codeBlock, insertForm, backupDownload, findForm, select, dataTable, fold, menu, explorerTools, combobox, aggregateForm, codeEditor, sideCollapse, formValidation, documentDrawer]) mount();
+  for (const mount of [connectionTest, discover, dialog, alertDialog, popover, datePicker, codeBlock, insertForm, backupDownload, findForm, select, dataTable, fold, menu, explorerTools, combobox, aggregateForm, codeEditor, sideCollapse, formValidation, documentDrawer, drawerDrag, jsonHighlight, noAutofill]) mount();
 }
 
 if (typeof document !== 'undefined') mountAll();
