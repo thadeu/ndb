@@ -20,6 +20,16 @@ class UpdateTest < Minitest::Test
     assert_equal({ "k" => "v" }, res["doc"]["meta"])
   end
 
+  # A Time in an operator goes out in RFC 3339, UTC, with ms, as in a filter.
+  def test_a_time_in_an_operator_is_rfc3339
+    at = Time.new(2026, 11, 12, 17, 31, 33.5r, "-03:00")
+    doc = client.update_by(@coll, { _id: "a" }, { "$set" => { at: at, list: [at] }, "$max" => { top: at } })["doc"]
+
+    assert_equal "2026-11-12T20:31:33.500Z", doc["at"]
+    assert_equal ["2026-11-12T20:31:33.500Z"], doc["list"]
+    assert_equal "2026-11-12T20:31:33.500Z", doc["top"]
+  end
+
   def test_version_guard_is_a_filter
     assert_equal 0, client.update_by(@coll, { _id: "a", _v: 9 }, { "$set" => { qty: 2 } })["matched"]
     assert_equal 1, client.update_by(@coll, { _id: "a", _v: 1 }, { "$set" => { qty: 2 } })["matched"]

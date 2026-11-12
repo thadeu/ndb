@@ -103,6 +103,7 @@ calls.update("c1", { "$set" => { status: "done" }, "$unset" => { caller: true } 
 # => {"matched" => 1, "modified" => 1, "doc" => {...with "_v"}}
 
 calls.update("c1", { "$set" => { duration: 50 } }, guard: { _v: 2 })   # only if the version is still 2
+calls.update("c1", { "$set" => { ended_at: Time.now } })   # a Time goes out in UTC with ms: "2026-11-12T20:31:33.000Z"
 
 # with_retry: read, yield, write the changed fields with the _v guard; on a
 # conflict read again and yield again (5 tries, retries:), then

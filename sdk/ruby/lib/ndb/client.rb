@@ -402,7 +402,7 @@ module Ndb
         raise ArgumentError, "update operator #{key.to_s.inspect} must start with $ (for example \"$set\")"
       end
 
-      ops
+      Conditions.json_value(ops)
     end
 
     def post(coll, action, body)

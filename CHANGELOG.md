@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- **Ruby and Rails: a `Time` in an update operator** (`$set`, `$max`, ... of `update`, `update_by` and `Relation#update`) goes out in RFC 3339, UTC, with milliseconds, as in a filter. Before, it went out as `Time#to_s` (`"2026-11-12 17:31:33 -0300"`), which the daemon compared as text.
+
 ## [1.22.0] - 2026-11-12
 
 ### Changed

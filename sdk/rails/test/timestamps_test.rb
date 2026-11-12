@@ -50,6 +50,17 @@ class TimestampsTest < Minitest::Test
     assert_operator @post.find("p1").updated_at, :>, post.updated_at
   end
 
+  def test_a_time_in_relation_update_is_rfc3339
+    @post.create!(id: "p1", status: "a")
+
+    at = Time.new(2026, 11, 12, 17, 31, 33, "-03:00")
+
+    @post.where(id: "p1").update("$set" => { "sent_at" => at })
+
+    assert_equal "2026-11-12T20:31:33.000Z", client.get(@post.collection_name, "p1")["sent_at"]
+    assert_equal 1, @post.where(id: "p1").where("sent_at" => { "$lt" => at + 1 }).count
+  end
+
   def test_increment_sets_updated_at
     post = @post.create!(id: "p1", status: "a", n: 1)
     before = post.updated_at
