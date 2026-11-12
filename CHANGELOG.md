@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.23.2] - 2026-11-12
+
 ### Added
 
 - **Rails: `Relation#update` takes attributes, as Active Record:** `where(...).update(queued_at: Time.current)` is a `$set`, cast by the attribute types. Attributes and operators go together (`update(status: "x", "$inc" => { tries: 1 })`); a field in both is an `ArgumentError`. It runs no callbacks, as `update_all`.
@@ -741,7 +743,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.23.1...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.23.2...HEAD
+[1.23.2]: https://github.com/thadeu/ndb/compare/v1.23.1...v1.23.2
 [1.23.1]: https://github.com/thadeu/ndb/compare/v1.23.0...v1.23.1
 [1.23.0]: https://github.com/thadeu/ndb/compare/v1.22.1...v1.23.0
 [1.22.1]: https://github.com/thadeu/ndb/compare/v1.22.0...v1.22.1
