@@ -360,22 +360,27 @@ h3:hover .header-anchor {
   transform: scale(0.96);
 }
 
-/* part: image zoom on a phone: full width, pan to read */
+/* part: image zoom on a phone: fit first, a tap shows full width to pan */
 @media (max-width: 860px) {
-  .image-zoom {
+  .image-zoom img {
+    cursor: zoom-in;
+  }
+
+  .image-zoom.zoomed {
     align-items: flex-start;
     justify-content: flex-start;
     overflow: auto;
     padding-top: calc(64px + env(safe-area-inset-top));
   }
 
-  .image-zoom img {
+  .image-zoom.zoomed img {
     width: 1100px;
     max-width: none;
     max-height: none;
+    cursor: zoom-out;
   }
 
-  .image-zoom-caption {
+  .image-zoom.zoomed .image-zoom-caption {
     position: sticky;
     left: 0;
     width: calc(100vw - 32px);

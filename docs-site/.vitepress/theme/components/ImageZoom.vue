@@ -10,6 +10,7 @@ const route = useRoute()
 
 const src = ref<string | null>(null)
 const alt = ref('')
+const zoomed = ref(false)
 
 function open(event: MouseEvent) {
   const img = (event.target as HTMLElement).closest<HTMLImageElement>(SELECTOR)
@@ -20,12 +21,18 @@ function open(event: MouseEvent) {
 
   src.value = img.currentSrc || img.src
   alt.value = img.alt
+  zoomed.value = false
   document.body.style.overflow = 'hidden'
 }
 
 function close() {
   src.value = null
   document.body.style.overflow = ''
+}
+
+// toggle shows the image at its full width on a phone, to pan and read it.
+function toggle() {
+  zoomed.value = !zoomed.value
 }
 
 function onKey(event: KeyboardEvent) {
@@ -52,6 +59,7 @@ watch(() => route.path, close)
     <div
       v-if="src"
       class="image-zoom"
+      :class="{ zoomed }"
       role="dialog"
       aria-modal="true"
       :aria-label="alt"
@@ -59,7 +67,7 @@ watch(() => route.path, close)
     >
       <button class="image-zoom-close" type="button" aria-label="Close">×</button>
 
-      <img :src="src" :alt="alt" @click.stop />
+      <img :src="src" :alt="alt" @click.stop="toggle" />
 
       <p v-if="alt" class="image-zoom-caption">{{ alt }}</p>
     </div>
