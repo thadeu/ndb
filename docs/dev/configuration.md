@@ -23,7 +23,7 @@ ndb backup [-config f] [-data-dir d] [-url unix://sock] <dest> [-gzip]
 | `-unix` | overrides `listen.unix`. |
 | `-tcp` | overrides `listen.tcp`, for example `10.10.0.1:7070`. |
 | `-unix-mode` | overrides `listen.unix_mode`: permission of the socket file, octal. Default `0660` (owner and group). |
-| `-token-file` | file with the bearer token that the TCP listener requires. See [Authentication](#authentication). |
+| `-token-file` | file with the bearer token that the TCP listener requires. Without it, `NDB_TOKEN_FILE` or `NDB_TOKEN`. See [Authentication](#authentication). |
 | `-cors-origin` | overrides `cors_origins`. Give it once for each origin. |
 | `-allowed-host` | overrides `allowed_hosts`. Give it once for each name. |
 | `-max-conns` | overrides `max_conns`. |
@@ -227,6 +227,12 @@ NDB_ENCRYPTION_KEY=$(cat /run/secrets/ndb_key) ndb serve
 ## Authentication
 
 `-token-file /etc/ndb/token` makes the TCP listener require `Authorization: Bearer <token>` on every request, `/_health` and `/_metrics` included. A missing or wrong token is `401 unauthorized`. The file holds one token; ndb trims the spaces around it, and an empty file stops the start. The token is compared in constant time.
+
+Without `-token-file`, the daemon reads the token from the env: `NDB_TOKEN_FILE` (the path of a file, with the same rules), else `NDB_TOKEN` (the token itself). Use the env when a secret store gives env vars and the image has no shell to write a file (Kubernetes, Voodu). `-token-file` wins over both, and `NDB_TOKEN_FILE` wins over `NDB_TOKEN`. A var that is set but empty stops the start, as an empty file does. The CLI commands (`ndb stats`, `ndb query`) read the same `NDB_TOKEN`, so a shell with it set talks to a daemon with that token.
+
+```bash
+NDB_TOKEN=$(cat /run/secrets/ndb_token) ndb serve -tcp 10.0.0.5:7070
+```
 
 The unix socket never asks for a token: file permissions guard it (`listen.unix_mode`, default `0660`). `POST /_backup` stays unix-only.
 

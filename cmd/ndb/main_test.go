@@ -363,6 +363,53 @@ func TestReadTokenFile(t *testing.T) {
 	}
 }
 
+// serve takes the token from -token-file, then NDB_TOKEN_FILE, then
+// NDB_TOKEN. An empty value is an error, as an empty file is.
+func TestServeToken(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "token")
+
+	os.WriteFile(file, []byte("from-file\n"), 0o600)
+
+	cases := []struct {
+		name string
+		flag string
+		env  map[string]string
+		want string
+		fail bool
+	}{
+		{name: "none", want: ""},
+		{name: "env", env: map[string]string{"NDB_TOKEN": " from-env\n"}, want: "from-env"},
+		{name: "env file", env: map[string]string{"NDB_TOKEN_FILE": file, "NDB_TOKEN": "x"}, want: "from-file"},
+		{name: "flag wins", flag: file, env: map[string]string{"NDB_TOKEN": "x"}, want: "from-file"},
+		{name: "empty env", env: map[string]string{"NDB_TOKEN": " "}, fail: true},
+		{name: "empty env file", env: map[string]string{"NDB_TOKEN_FILE": ""}, fail: true},
+		{name: "missing env file", env: map[string]string{"NDB_TOKEN_FILE": filepath.Join(dir, "absent")}, fail: true},
+	}
+
+	for _, c := range cases {
+		lookup := func(key string) (string, bool) {
+			v, ok := c.env[key]
+
+			return v, ok
+		}
+
+		got, err := serveToken(c.flag, lookup)
+
+		if c.fail {
+			if err == nil {
+				t.Errorf("%s: want an error, got %q", c.name, got)
+			}
+
+			continue
+		}
+
+		if err != nil || got != c.want {
+			t.Errorf("%s: got %q %v, want %q", c.name, got, err, c.want)
+		}
+	}
+}
+
 // The daemon with -token-file asks for the token on TCP only.
 func TestDaemonTokenFileOnTCP(t *testing.T) {
 	dir := t.TempDir()

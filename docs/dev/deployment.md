@@ -18,5 +18,5 @@ After it runs, the day-to-day work (health, metrics, backup, recovery, upgrade) 
 - One ndb process owns the data dir. A second one fails on the lock. Never run 2 replicas.
 - Stop with SIGTERM and wait at least 30 s, so running requests finish.
 - Unix socket for apps on the same host: share the socket dir and a group (the socket is `0660` by default).
-- TCP only on a private address (for example WireGuard), always with `-token-file`. The apps send the token with `NDB_TOKEN`.
+- TCP only on a private address (for example WireGuard), always with a token (`-token-file`, or `NDB_TOKEN` from the secret store). The apps send the token with `NDB_TOKEN`.
 - Direct mode only for files on the same machine as ndb.

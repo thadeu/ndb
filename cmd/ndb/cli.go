@@ -179,7 +179,8 @@ Daemon flags (ndb serve):
   -unix PATH        unix socket ('' turns it off)
   -unix-mode MODE   permission of the socket, octal (default 0660)
   -tcp ADDR         TCP listener, e.g. 127.0.0.1:7070 ('' turns it off)
-  -token-file FILE  bearer token the TCP listener requires
+  -token-file FILE  bearer token the TCP listener requires (default the file
+                    of NDB_TOKEN_FILE, then NDB_TOKEN)
   -cors-origin URL  browser origin that may call ndb (repeat it; default none)
   -allowed-host H   Host name a TCP request with no token may use (repeat it)
   -max-conns N      most open TCP connections (default 0 = no limit)

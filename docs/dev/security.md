@@ -18,7 +18,7 @@ ndb listens on a unix socket and, optionally, on TCP.
 
 ## Tokens and scopes
 
-- `-token-file` or `tokens:` in `ndb.yml` make every TCP request send `Authorization: Bearer <token>`. A missing or wrong token is `401 unauthorized`.
+- `-token-file` (or `NDB_TOKEN_FILE`, `NDB_TOKEN`) or `tokens:` in `ndb.yml` make every TCP request send `Authorization: Bearer <token>`. A missing or wrong token is `401 unauthorized`.
 - A scoped token can read, write or administer only some collections. A token without the right is `403 forbidden`. See [Scoped tokens](configuration.md#scoped-tokens).
 - ndb compares tokens in constant time. Logs show the token name, never the secret.
 - Make each token from 32 random bytes. Give each app its own token with the smallest scope.

@@ -69,7 +69,7 @@ func run(args []string) error {
 	unixMode := fl.String("unix-mode", "", "permission of the unix socket, octal (default 0660, or listen.unix_mode)")
 	showVersion := fl.Bool("version", false, "print the version and exit")
 
-	tokenFile := fl.String("token-file", "", "file with the bearer token the TCP listener requires (unix socket stays open)")
+	tokenFile := fl.String("token-file", "", "file with the bearer token the TCP listener requires (default NDB_TOKEN_FILE, then NDB_TOKEN; unix socket stays open)")
 
 	logLevel := fl.String("log-level", "", "debug, info, warn, error or quiet (default NDB_LOG_LEVEL, then log_level, then info)")
 	logFormat := fl.String("log-format", "", "text or json (default NDB_LOG_FORMAT, then log_format, then text)")
@@ -182,12 +182,10 @@ func run(args []string) error {
 
 	defer stop()
 
-	token := ""
+	token, err := serveToken(*tokenFile, os.LookupEnv)
 
-	if *tokenFile != "" {
-		if token, err = readTokenFile(*tokenFile); err != nil {
-			return err
-		}
+	if err != nil {
+		return err
 	}
 
 	// The log lines go out from one goroutine, in blocks: a debug log does
@@ -235,6 +233,38 @@ func security(cfg config.Config) server.Security {
 		AuthLockout:  cfg.AuthLockout,
 		MaxWatches:   cfg.MaxWatches,
 	}
+}
+
+// serveToken is the bearer token of the TCP listener: the file of
+// -token-file, else the file of NDB_TOKEN_FILE, else NDB_TOKEN (for a
+// secret store that gives env vars, in an image with no shell). A set but
+// empty value is an error: it would turn the protection off without a word.
+func serveToken(flagFile string, lookup func(string) (string, bool)) (string, error) {
+	if flagFile != "" {
+		return readTokenFile(flagFile)
+	}
+
+	if file, ok := lookup("NDB_TOKEN_FILE"); ok {
+		if strings.TrimSpace(file) == "" {
+			return "", fmt.Errorf("NDB_TOKEN_FILE is empty")
+		}
+
+		return readTokenFile(file)
+	}
+
+	value, ok := lookup("NDB_TOKEN")
+
+	if !ok {
+		return "", nil
+	}
+
+	token := strings.TrimSpace(value)
+
+	if token == "" {
+		return "", fmt.Errorf("NDB_TOKEN is empty")
+	}
+
+	return token, nil
 }
 
 // readTokenFile returns the trimmed token. An empty file is an error: it
