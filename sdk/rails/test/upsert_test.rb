@@ -13,6 +13,25 @@ class UpsertTest < Minitest::Test
     @user.create!(_id: "u1", name: "Ana", plan: "free", visits: 1)
   end
 
+  def test_upsert_all_writes_times_in_utc_with_milliseconds
+    timed = model do
+      attribute :sent_at, :datetime
+    end
+
+    at = Time.utc(2026, 11, 12, 15, 0, 5)
+
+    Time.use_zone("America/Sao_Paulo") do
+      timed.upsert_all([{ id: "m1", sent_at: at.in_time_zone, seen_at: at.in_time_zone }])
+      timed.upsert(id: "m2", sent_at: at.getlocal("-03:00"))
+    end
+
+    raw = client.get(timed.collection_name, "m1")
+
+    assert_equal "2026-11-12T15:00:05.000Z", raw["sent_at"]
+    assert_equal "2026-11-12T15:00:05.000Z", raw["seen_at"]
+    assert_equal "2026-11-12T15:00:05.000Z", client.get(timed.collection_name, "m2")["sent_at"]
+  end
+
   def test_upsert_merges_the_given_attributes
     assert_equal({ "_id" => "u1", "_v" => 2 }, @user.upsert(id: "u1", plan: "pro"))
 
