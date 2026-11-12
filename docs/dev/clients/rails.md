@@ -86,6 +86,8 @@ end
 | `_id` / `id` | The primary key is always `_id` (a string; the daemon makes a UUIDv7 when it is empty). `id` is an alias of `_id`. For a natural key (email, SKU) keep `_id` and use `unique: true` on that attribute. |
 | `index: true` | Index this field. For a [compound index](../query.md#indexes), call `index :account_id, :created_at` in the class; with `unique: true` it is a compound unique key (`index :account_id, :email, unique: true`). `index "items.sku"` indexes a path that is not an attribute. |
 | `unique: true` | Unique value. A second one raises `RecordNotUnique`. |
+| `encrypted: true` | The daemon encrypts the attribute before it stores it. A filter on it is only `exists`. See [Encrypted fields](../security.md#encrypted-fields). |
+| `blind: :digits` | An encrypted attribute that `where` and `find_by` find by value, after this normalization (`:exact`, `:digits`, `:lower`). It may also be `unique: true`. |
 | `time: true` | The collection time field. Used by zone maps, `$dateTrunc` and TTL. |
 | `expires: true` | The field holds the time the document expires. |
 | `ttl 24.hours` | Documents expire this long after the time field. Use `ttl` or `expires:`, not both: the daemon returns `catalog_invalid`. |
@@ -1007,7 +1009,7 @@ Every public method of the gem, grouped. The names and return values follow Acti
 
 | Method | |
 |---|---|
-| `attribute :name, :type, index:, unique:, time:, expires:` | an ActiveModel attribute; `index`/`unique` declare an index or a unique key; `time` is the time field; `expires` holds the expiry of each document |
+| `attribute :name, :type, index:, unique:, time:, expires:, encrypted:, blind:` | an ActiveModel attribute; `index`/`unique` declare an index or a unique key; `time` is the time field; `expires` holds the expiry of each document; `encrypted`/`blind` make it an [encrypted field](../security.md#encrypted-fields) |
 | `self.collection_name = "calls"` / `collection_name` | the collection (default: the plural model name). A pattern (`"logs-2026-*"`) reads many collections and writes none |
 | `ttl 24.hours` | documents expire this long after the time field |
 | `source "/var/log/app/*.ndjson"` | a direct collection: the app files are the data, ndb only reads |

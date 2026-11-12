@@ -73,10 +73,17 @@ func TestBlindFieldsIndexTheirHash(t *testing.T) {
 	}
 }
 
-func TestBlindNeedsAnEncryptedFieldAndAKnownNorm(t *testing.T) {
+func TestBlindIsEncryptedAndNeedsAKnownNorm(t *testing.T) {
+	c, _ := open(t, catalog.Options{})
+
+	def, err := c.Ensure(catalog.Def{Name: "a", Blind: map[string]string{"cpf": "digits"}}, catalog.FromCode)
+	if err != nil || !slices.Equal(def.Encrypted, []string{"cpf"}) {
+		t.Fatalf("encrypted %v, err %v", def.Encrypted, err)
+	}
+
 	for _, d := range []catalog.Def{
-		{Name: "a", Blind: map[string]string{"cpf": "digits"}},
 		{Name: "b", Encrypted: []string{"cpf"}, Blind: map[string]string{"cpf": "upper"}},
+		{Name: "c", Blind: map[string]string{"_id": "exact"}},
 	} {
 		c, _ := open(t, catalog.Options{})
 

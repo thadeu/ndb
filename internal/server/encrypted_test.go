@@ -2,10 +2,12 @@ package server_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -276,4 +278,56 @@ func TestEncryptedFieldWithoutBlindRefusesAValueFilter(t *testing.T) {
 	if rec := call(h, "POST", "/keys/_count", `{"query":{"pem":{"$exists":true}}}`); !strings.Contains(rec.Body.String(), `"count":1`) {
 		t.Fatalf("exists %s", rec.Body.String())
 	}
+}
+
+func TestDecryptFalseHeaderKeepsTheValueSealed(t *testing.T) {
+	_, h := newHandler(t)
+
+	expectStatus(t, call(h, "PUT", "/users", `{"encrypted":["cpf"]}`), http.StatusOK)
+	call(h, "POST", "/users/_doc", `{"_id":"u1","cpf":"`+cpf+`"}`)
+
+	req := httptest.NewRequest("GET", "/users/_doc/u1", nil)
+	req.Header.Set("X-Ndb-Decrypt", "false")
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if strings.Contains(rec.Body.String(), cpf) || !strings.Contains(rec.Body.String(), "ndb:e1:k1:") {
+		t.Fatalf("get %s", rec.Body.String())
+	}
+
+	var doc struct {
+		CPF string `json:"cpf"`
+	}
+
+	_ = json.Unmarshal(rec.Body.Bytes(), &doc)
+
+	call(h, "POST", "/users/_update/u1", `{"update":{"$set":{"cpf":"`+doc.CPF+`","name":"Ana"}}}`)
+
+	if rec := call(h, "GET", "/users/_doc/u1", ""); !strings.Contains(rec.Body.String(), `"cpf":"`+cpf+`"`) {
+		t.Fatalf("a sealed value sent back changed the field: %s", rec.Body.String())
+	}
+}
+
+func TestAnyWriteEncryptsAnOldDocument(t *testing.T) {
+	srv, h := newHandler(t)
+
+	call(h, "POST", "/users/_doc", `{"_id":"u1","cpf":"`+cpf+`"}`)
+	expectStatus(t, call(h, "PUT", "/users", `{"blind":{"cpf":"digits"}}`), http.StatusOK)
+	expectStatus(t, call(h, "POST", "/users/_update_by_query", `{"query":{"_id":{"$exists":true}},"update":{"$set":{"encrypted_at":"now"}}}`), http.StatusOK)
+
+	if rec := call(h, "POST", "/users/_count", `{"query":{"cpf":"`+cpf+`"}}`); !strings.Contains(rec.Body.String(), `"count":1`) {
+		t.Fatalf("count %s", rec.Body.String())
+	}
+
+	col, _ := srv.DB().Get("users")
+	if err := col.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := col.Compact(); err != nil {
+		t.Fatal(err)
+	}
+
+	noPlainOnDisk(t, filepath.Join(srv.DB().Dir(), "collections", "users", "segments"), cpf)
 }

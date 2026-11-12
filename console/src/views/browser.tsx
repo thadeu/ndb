@@ -2,7 +2,7 @@ import type { FC } from 'hono/jsx';
 
 import { Layout, type Current } from '@/html/layout';
 import { StaticTree } from '@/components/json-tree';
-import { byteSize } from '@/components/json-model';
+import { byteSize, maskSealed } from '@/components/json-model';
 import { formatCount } from '@/format';
 import type { CollectionStats, Doc } from '@/ndb';
 import { ConfirmHost, confirm } from '@/ui/alert-dialog';
@@ -63,7 +63,7 @@ export function browserHref(name: string, query: Partial<BrowserQuery> & { inser
 function preview(doc: Doc): string {
   const { _id, _v, ...rest } = doc;
 
-  return JSON.stringify(rest);
+  return JSON.stringify(maskSealed(rest));
 }
 
 const Sidebar: FC<{ current: Current; collections: CollectionStats[]; query: BrowserQuery }> = ({ current, collections, query }) => {

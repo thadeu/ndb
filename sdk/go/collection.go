@@ -508,7 +508,7 @@ func (db *DB) ensure(ctx context.Context, name string, s *schema) error {
 		return nil
 	}
 
-	body, err := json.Marshal(ensureBody{Time: s.time, ExpiresField: s.expires, Indexes: s.indexes, Unique: s.unique})
+	body, err := json.Marshal(ensureBody{Time: s.time, ExpiresField: s.expires, Indexes: s.indexes, Unique: s.unique, Encrypted: s.encrypted, Blind: s.blind})
 	if err != nil {
 		return err
 	}
@@ -547,6 +547,9 @@ type ensureBody struct {
 	ExpiresField string   `json:"expires_field,omitempty"`
 	Indexes      []string `json:"indexes,omitempty"`
 	Unique       []string `json:"unique,omitempty"`
+
+	Encrypted []string          `json:"encrypted,omitempty"`
+	Blind     map[string]string `json:"blind,omitempty"`
 }
 
 type bulkBody struct {
@@ -595,6 +598,33 @@ func Unique(fields ...string) CollOption {
 		s.unique = append(s.unique, name)
 
 		return err
+	}
+}
+
+// Encrypted declares fields that the daemon encrypts before it stores
+// them. A token with the decrypt right reads the plain value; any other reads
+// "ndb:e1:k1:...". A filter on the field is only $exists: see Blind.
+func Encrypted(fields ...string) CollOption {
+	return func(s *schema) error {
+		s.encrypted = append(s.encrypted, fields...)
+
+		return nil
+	}
+}
+
+// Blind declares an encrypted field that a filter finds by value (Eq, In,
+// Ne, Nin), and that an index or a unique key may name. norm is "exact",
+// "digits" (a CPF with or without dots) or "lower" (an email).
+func Blind(field, norm string) CollOption {
+	return func(s *schema) error {
+		if s.blind == nil {
+			s.blind = map[string]string{}
+		}
+
+		s.encrypted = append(s.encrypted, field)
+		s.blind[field] = norm
+
+		return nil
 	}
 }
 

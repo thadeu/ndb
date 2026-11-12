@@ -162,9 +162,8 @@ func (b *Box) SealDoc(coll string, fields []string, doc json.RawMessage) (json.R
 // does not open stays sealed.
 func (b *Box) OpenDoc(coll string, fields []string, doc json.RawMessage) json.RawMessage {
 	out, err := rewrite(doc, fields, func(name string, v json.RawMessage) (json.RawMessage, error) {
-		var s string
-
-		if !IsSealed(v) || json.Unmarshal(v, &s) != nil {
+		s, ok := sealedText(v)
+		if !ok {
 			return v, nil
 		}
 
@@ -181,10 +180,19 @@ func (b *Box) OpenDoc(coll string, fields []string, doc json.RawMessage) json.Ra
 	return out
 }
 
-func (b *Box) opens(place string, v json.RawMessage) bool {
-	var s string
+// sealedText is the text of a sealed JSON string. A sealed value is ASCII
+// with no escape, so the quotes are cut off with no decoding.
+func sealedText(v json.RawMessage) (string, bool) {
+	if !IsSealed(v) || len(v) < 2 || v[len(v)-1] != '"' || bytes.IndexByte(v, '\\') >= 0 {
+		return "", false
+	}
 
-	if !IsSealed(v) || json.Unmarshal(v, &s) != nil {
+	return string(v[1 : len(v)-1]), true
+}
+
+func (b *Box) opens(place string, v json.RawMessage) bool {
+	s, ok := sealedText(v)
+	if !ok {
 		return false
 	}
 
@@ -281,34 +289,145 @@ func DropFields(doc json.RawMessage, names []string) json.RawMessage {
 	return encode(ms)
 }
 
-func members(doc json.RawMessage) ([]member, error) {
-	dec := json.NewDecoder(bytes.NewReader(doc))
-	dec.UseNumber()
+var errNotObject = errors.New("crypt: the document is not a JSON object")
 
-	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
-		return nil, fmt.Errorf("crypt: the document is not an object")
+// members splits a JSON object into its top-level members, in order, in one
+// pass over the bytes. The values are slices of doc.
+func members(doc json.RawMessage) ([]member, error) {
+	i := skipSpace(doc, 0)
+	if i >= len(doc) || doc[i] != '{' {
+		return nil, errNotObject
 	}
 
-	var ms []member
+	ms := make([]member, 0, 8)
+	i = skipSpace(doc, i+1)
 
-	for dec.More() {
-		tok, err := dec.Token()
+	if i < len(doc) && doc[i] == '}' {
+		return ms, nil
+	}
+
+	for {
+		if i >= len(doc) || doc[i] != '"' {
+			return nil, errNotObject
+		}
+
+		end, err := scanString(doc, i)
 		if err != nil {
 			return nil, err
 		}
 
-		name, _ := tok.(string)
-
-		var v json.RawMessage
-
-		if err := dec.Decode(&v); err != nil {
+		name, err := keyOf(doc[i:end])
+		if err != nil {
 			return nil, err
 		}
 
-		ms = append(ms, member{name: name, val: v})
+		i = skipSpace(doc, end)
+		if i >= len(doc) || doc[i] != ':' {
+			return nil, errNotObject
+		}
+
+		i = skipSpace(doc, i+1)
+
+		vend, err := scanValue(doc, i)
+		if err != nil {
+			return nil, err
+		}
+
+		ms = append(ms, member{name: name, val: doc[i:vend]})
+		i = skipSpace(doc, vend)
+
+		switch {
+		case i < len(doc) && doc[i] == ',':
+			i = skipSpace(doc, i+1)
+		case i < len(doc) && doc[i] == '}':
+			return ms, nil
+		default:
+			return nil, errNotObject
+		}
+	}
+}
+
+func keyOf(quoted []byte) (string, error) {
+	if !bytes.ContainsRune(quoted, '\\') {
+		return string(quoted[1 : len(quoted)-1]), nil
 	}
 
-	return ms, nil
+	var name string
+
+	return name, json.Unmarshal(quoted, &name)
+}
+
+func skipSpace(doc []byte, i int) int {
+	for i < len(doc) && (doc[i] == ' ' || doc[i] == '\t' || doc[i] == '\n' || doc[i] == '\r') {
+		i++
+	}
+
+	return i
+}
+
+// scanString gives the index after the closing quote of the string at i.
+func scanString(doc []byte, i int) (int, error) {
+	for j := i + 1; j < len(doc); j++ {
+		switch doc[j] {
+		case '\\':
+			j++
+		case '"':
+			return j + 1, nil
+		}
+	}
+
+	return 0, errNotObject
+}
+
+// scanValue gives the index after the JSON value at i.
+func scanValue(doc []byte, i int) (int, error) {
+	if i >= len(doc) {
+		return 0, errNotObject
+	}
+
+	switch doc[i] {
+	case '"':
+		return scanString(doc, i)
+	case '{', '[':
+		return scanNested(doc, i)
+	}
+
+	j := i
+	for j < len(doc) && !strings.ContainsRune(",}] \t\n\r", rune(doc[j])) {
+		j++
+	}
+
+	if j == i {
+		return 0, errNotObject
+	}
+
+	return j, nil
+}
+
+func scanNested(doc []byte, i int) (int, error) {
+	depth := 0
+
+	for j := i; j < len(doc); j++ {
+		switch doc[j] {
+		case '"':
+			end, err := scanString(doc, j)
+			if err != nil {
+				return 0, err
+			}
+
+			j = end - 1
+		case '{', '[':
+			depth++
+		case '}', ']':
+			depth--
+
+			if depth == 0 {
+				return j + 1, nil
+			}
+		}
+	}
+
+	return 0, errNotObject
 }
 
 func encode(ms []member) json.RawMessage {

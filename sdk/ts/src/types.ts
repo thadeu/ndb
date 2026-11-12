@@ -13,6 +13,14 @@ export interface FieldDef {
   index?: boolean
   unique?: boolean
   optional?: boolean
+
+  // The daemon encrypts the field before it stores it. A filter on it is
+  // only $exists, unless it is blind.
+  encrypted?: boolean
+
+  // An encrypted field that a filter finds by value ($eq, $in, $ne, $nin),
+  // after this normalization: 'digits' for a CPF, 'lower' for an email.
+  blind?: 'exact' | 'digits' | 'lower'
 }
 
 export type Fields = Record<string, FieldDef>

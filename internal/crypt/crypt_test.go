@@ -171,3 +171,39 @@ func TestHashDocSetsKeepsAndDropsTheHashField(t *testing.T) {
 		t.Fatalf("drop %s", dropped)
 	}
 }
+
+func TestMembersScansNestedAndEscapedValues(t *testing.T) {
+	doc := json.RawMessage(` {"a":"x\"}{,","b" : {"c":[1,{"d":"]"}]},"e":-1.5e3,"f":true,"g":null} `)
+
+	ms, err := members(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []member{{"a", json.RawMessage(`"x\"}{,"`)}, {"b", json.RawMessage(`{"c":[1,{"d":"]"}]}`)}, {"e", json.RawMessage(`-1.5e3`)}, {"f", json.RawMessage(`true`)}, {"g", json.RawMessage(`null`)}}
+
+	if len(ms) != len(want) {
+		t.Fatalf("members %q", ms)
+	}
+
+	for i := range want {
+		if ms[i].name != want[i].name || string(ms[i].val) != string(want[i].val) {
+			t.Fatalf("member %d: %q=%s, want %q=%s", i, ms[i].name, ms[i].val, want[i].name, want[i].val)
+		}
+	}
+
+	for _, bad := range []string{`[1]`, `{"a"}`, `{"a":1`, `{"a":"x`} {
+		if _, err := members(json.RawMessage(bad)); err == nil {
+			t.Errorf("%s: no error", bad)
+		}
+	}
+}
+
+func BenchmarkOpenDoc(b *testing.B) {
+	box, _ := New("k1", bytes.Repeat([]byte{1}, 32), bytes.Repeat([]byte{2}, 32))
+	doc, _ := box.SealDoc("keys", []string{"pem"}, json.RawMessage(`{"_id":"k1","pem":"`+strings.Repeat("A", 2048)+`"}`))
+
+	for b.Loop() {
+		box.OpenDoc("keys", []string{"pem"}, doc)
+	}
+}

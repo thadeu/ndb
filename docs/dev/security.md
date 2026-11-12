@@ -133,12 +133,21 @@ curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/users -d '{"encrypted":["
 - **Filters:** only `$exists`. Any other filter on the field is `400 invalid_query`, unless the field is [blind](#blind-fields).
 - **Aggregate:** a stage that reads the field (`"$cpf"` in `$group`, `$project`, `$sum`) is `400 invalid_query`. `$match` follows the filter rules.
 - **Logs:** no request body or document of a collection with encrypted fields goes in a log line, at any level.
-- A field added to `encrypted` later is encrypted from the next write of each document; the documents that are not written again stay as they are.
+- A field added to `encrypted` (or `blind`) later is encrypted from the next write of each document; the documents that are not written again stay as they are. To encrypt them all now, write each one again, for example:
+
+  ```bash
+  curl --unix-socket /run/ndb/ndb.sock http://ndb/users/_update_by_query \
+    -d '{"query":{"_id":{"$exists":true}},"update":{"$set":{"encrypted_at":"2026-11-12"}}}'
+  ```
+
+  The old plain values stay in the WAL files and in older backups until `wal_retention` and your backup rotation drop them.
+- **Console:** it sends `X-Ndb-Decrypt: false`, so it shows `[encrypted]`, never the value. An edit of the document keeps the stored value.
+- **Cost:** a write of a document with a 2 KB `.pem` takes about 10% more time, a read about 8% more (`make bench`, with a check at 25%).
 - The key protects the files only when it is in `NDB_ENCRYPTION_KEY` (see [The encryption key](#the-encryption-key)). With the default key, encrypted fields keep the value out of the API for tokens with no `decrypt`, the logs and the console.
 
 ## Blind fields
 
-A blind field is an encrypted field that a filter can find by its value. The daemon keeps a second value in the document, `<field>_bidx`: an HMAC-SHA256 of the normalized value (`"ndb:h1:k1:<hex>"`), with a key of its own. A filter on the field is changed to a filter on that hash.
+A blind field is an encrypted field that a filter can find by its value. A field in `blind` is also encrypted: you do not have to put it in `encrypted` too. The daemon keeps a second value in the document, `<field>_bidx`: an HMAC-SHA256 of the normalized value (`"ndb:h1:k1:<hex>"`), with a key of its own. A filter on the field is changed to a filter on that hash.
 
 ```bash
 curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/users \

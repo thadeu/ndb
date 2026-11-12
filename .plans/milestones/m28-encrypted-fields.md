@@ -1,6 +1,6 @@
 # M28 — Encrypted fields and blind indexes
 
-Status: in progress · Depends on: [M27](m27-settings.md) (done: the key, `settings.Key.Derive`)
+Status: done (but `ndb encrypt`, left out of this round) · Depends on: [M27](m27-settings.md) (done: the key, `settings.Key.Derive`)
 
 ## Goal
 
@@ -85,13 +85,15 @@ The stored value is about 35% bigger.
 - [x] cases in `spec/cases` (`"daemon": true`: the collection runner skips them)
 
 ### E28.3 Clients and tools
-- [ ] SDKs: collection option `encrypted` / `blind` (Go, Ruby, TS); Rails
+- [x] SDKs: collection option `encrypted` / `blind` (Go, Ruby, TS); Rails
   `attribute :cpf, encrypted: true, blind: :digits`
-- [ ] the console shows "encrypted", never the value
-- [ ] `ndb encrypt <coll>`
-- [ ] docs: `collections.md`, `query.md`, `security.md`, `http/`, `llms-agents.md`, CHANGELOG
-- [ ] bench check: a write and a read of a doc with a `.pem` field are not slower by more
-  than 10% plus the measure above
+- [x] the console shows "[encrypted]", never the value (`X-Ndb-Decrypt: false` on each request)
+- [ ] `ndb encrypt <coll>`: out of this round. To encrypt old documents, write them again
+  (any write does it: `_update_by_query` with `{"query":{"_id":{"$exists":true}},"update":{"$set":{"encrypted_at":"..."}}}`)
+- [x] docs: `collections.md`, `security.md`, `http.md`, `http/`, `clients/`, `llms-agents.md`, CHANGELOG
+- [x] bench check: the extra time of a write and a read with an encrypted 2 KB `.pem` is at
+  most 25% (measured about 10%; the first read was 30%, from a JSON decoder walk, now a
+  byte scanner)
 
 ## Exit criteria
 

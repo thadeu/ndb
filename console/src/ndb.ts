@@ -237,7 +237,7 @@ export class Ndb {
 
   private async open(method: string, path: string, init: { body?: string; timeoutMs?: number; signal?: AbortSignal } = {}): Promise<Response> {
     const { base, unix } = target(this.endpoint.url);
-    const headers: Record<string, string> = { accept: 'application/json' };
+    const headers: Record<string, string> = { accept: 'application/json', 'x-ndb-decrypt': 'false' };
 
     if (this.endpoint.token) headers.authorization = `Bearer ${this.endpoint.token}`;
 

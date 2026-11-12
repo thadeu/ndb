@@ -497,7 +497,6 @@ func withDefaults(d Def, src Source) Def {
 
 	d.Indexes = normIndexes(d.Indexes)
 	d.Unique = normIndexes(d.Unique)
-	d.Encrypted = normIndexes(d.Encrypted)
 	blindIndexes(&d)
 	d.OpsFromYAML = src == FromYAML && (d.Durability != Strict || d.Retention != "" || d.WALRetention != "" || d.PITR != "")
 
@@ -629,12 +628,16 @@ func mergeBlind(next *Def, cur, decl Def) error {
 	return nil
 }
 
-// blindIndexes sets the default normalization and makes each index and
-// unique key on a blind field use its hash field.
+// blindIndexes sets the default normalization, makes a blind field an
+// encrypted one, and makes each index and unique key on a blind field use
+// its hash field.
 func blindIndexes(d *Def) {
 	for f, norm := range d.Blind {
 		d.Blind[f] = blindNorm(norm)
+		d.Encrypted = append(d.Encrypted, f)
 	}
+
+	d.Encrypted = normIndexes(d.Encrypted)
 
 	hashed := func(names []string) []string {
 		out := make([]string, len(names))
@@ -797,8 +800,6 @@ func checkEncrypted(d Def) error {
 
 	for f, norm := range d.Blind {
 		switch {
-		case !slices.Contains(d.Encrypted, f):
-			return fmt.Errorf("%w: blind field %s is not in encrypted", ErrInvalid, f)
 		case norm != "exact" && norm != "digits" && norm != "lower":
 			return fmt.Errorf("%w: blind.%s must be exact, digits or lower", ErrInvalid, f)
 		}

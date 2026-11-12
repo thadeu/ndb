@@ -519,6 +519,8 @@ export class Collection<F extends Fields> {
       expires_field: this.schema.expires,
       indexes: [...entries.filter(([, d]) => d.index).map(([n]) => n), ...(this.schema.indexes ?? []).map((f) => f.join(','))],
       unique: [...entries.filter(([, d]) => d.unique).map(([n]) => n), ...(this.schema.unique ?? []).map((f) => f.join(','))],
+      encrypted: entries.filter(([, d]) => d.encrypted || d.blind).map(([n]) => n),
+      blind: Object.fromEntries(entries.filter(([, d]) => d.blind).map(([n, d]) => [n, d.blind])),
     }
   }
 }

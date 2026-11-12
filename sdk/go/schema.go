@@ -32,6 +32,11 @@ type schema struct {
 	indexes []string
 	unique  []string
 
+	// encrypted and blind are the encrypted fields and the blind ones with
+	// their normalization.
+	encrypted []string
+	blind     map[string]string
+
 	// version is the field that holds "_v". It is filled on reads and
 	// never sent on writes.
 	version string

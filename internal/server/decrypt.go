@@ -15,8 +15,13 @@ var sealedMark = []byte(`"ndb:e1:`)
 
 // mayDecrypt tells if the caller gets the plain value of the encrypted
 // fields of coll: the unix socket, a daemon with no tokens, the full token
-// and a token whose decrypt list covers coll.
+// and a token whose decrypt list covers coll. X-Ndb-Decrypt: false keeps
+// the values sealed for any caller (the console sends it).
 func mayDecrypt(r *http.Request, coll string) bool {
+	if r.Header.Get("X-Ndb-Decrypt") == "false" {
+		return false
+	}
+
 	t, ok := r.Context().Value(tokenKey{}).(Token)
 	if !ok || t.Full {
 		return true
