@@ -119,7 +119,11 @@ call = Call.find("c1")         # by id, raises Ndb::NotFound
 
 Call.first                     # the lowest _id; Call.last: the highest (limit 1, not the whole list)
 Call.order(:created_at).last(3) # the last 3 in that order, oldest first
+```
 
+`first` and `last` with no `order` follow `_id`. An `_id` that the daemon makes (a UUIDv7) grows with time, so `last` is the newest. An `_id` that the app makes (`SecureRandom.hex`, an email) does not, so `last` is not the newest: use `order(:created_at).last`.
+
+```ruby
 call.update!(status: "done")  # $set of the changed fields only, filtered by id and version
 call.version                   # the document version
 
