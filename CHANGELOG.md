@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.22.0] - 2026-11-12
+
 ### Changed
 
 - **An RFC 3339 string is an instant on every field**, not only on the collection `time` field: `"...:05Z"`, `"...:05.1Z"` and `"...:05.100Z"` compare in the right order, and two offsets of one instant are equal, in filters, sorts, cursors, indexes, `$min`, `$max` and aggregates. `_id` stays text. A data dir of an older version builds its index keys again at the first start (the `.i.` key files become `.k.`), and queries scan until each index is `ready`. Shared cases in `spec/cases`. See `docs/dev/query.md#times`.
@@ -713,7 +715,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.21.2...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.22.0...HEAD
+[1.22.0]: https://github.com/thadeu/ndb/compare/v1.21.2...v1.22.0
 [1.21.2]: https://github.com/thadeu/ndb/compare/v1.21.1...v1.21.2
 [1.21.1]: https://github.com/thadeu/ndb/compare/v1.21.0...v1.21.1
 [1.21.0]: https://github.com/thadeu/ndb/compare/v1.20.1...v1.21.0
