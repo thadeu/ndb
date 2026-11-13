@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.24.0] - 2026-11-12
+
 ### Added
 
 - **Rails, more of Active Record on a relation:** `update_all`, `new`/`build`/`create`/`create!` with the attributes of the where, `find_or_create_by`/`find_or_initialize_by` on a relation, `first!`, `last!`, `take`, `take!`, `sole`, `find_sole_by`, `ids`, `pick`, `none`, `destroy_by`, `delete_by`, `reorder`, `rewhere`, `unscope`, `distinct` and `select` (the daemon `fields` projection).
@@ -759,7 +761,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.23.3...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.24.0...HEAD
+[1.24.0]: https://github.com/thadeu/ndb/compare/v1.23.3...v1.24.0
 [1.23.3]: https://github.com/thadeu/ndb/compare/v1.23.2...v1.23.3
 [1.23.2]: https://github.com/thadeu/ndb/compare/v1.23.1...v1.23.2
 [1.23.1]: https://github.com/thadeu/ndb/compare/v1.23.0...v1.23.1
