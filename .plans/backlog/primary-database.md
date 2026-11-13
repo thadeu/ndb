@@ -7,7 +7,7 @@ each one has the reason, so the talk does not start from zero.
 
 ## 1. Transactions across collections
 
-One collection is planned: [M25](../milestones/m25-transactions.md). Many collections (a commit log and a redo at recovery) is high risk and waits for a real case; its design is at the end of M25.
+One collection is done (M25: `POST /{coll}/_tx`, `Model.transaction`). Many collections (a commit log and a redo at recovery) is high risk and waits for a real case; its design is at the end of `.plans/milestones/m25-transactions.md` in the git history (removed in 45755db).
 
 ## 2. Decimal type
 
@@ -24,15 +24,15 @@ must speak the S3 API with a custom endpoint (R2, MinIO, B2).
 
 ## 4. Encryption
 
-No TLS (a proxy, the unix socket or WireGuard give it; Postgres in Docker
-runs the same way). No encryption at rest (disk encryption gives it).
-Encrypted backups and encrypted fields (with a blind index for `$eq`) were
-looked at and are not needed now.
+Encrypted fields, blind indexes and key rotation are done
+(`docs/dev/encryption.md`). Still left out: TLS (a proxy, the unix socket or
+WireGuard give it; Postgres in Docker runs the same way), encryption at rest
+of the whole data dir (disk encryption gives it) and encrypted backup files
+(`age` or `gpg` on the `.ndb` file).
 
 ## 5. Locks: what is not done
 
 - Waiters of a lock are not served in arrival order (no fair queue).
-- A lock is one document: no lock of many documents in one call.
 - A `many` write that meets a locked document stops with `locked`; it
   does not wait.
 - No shared case in `spec/` (the cases there are reads).
