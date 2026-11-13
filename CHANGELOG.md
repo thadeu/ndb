@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **Rails, more of Active Record on a relation:** `update_all`, `new`/`build`/`create`/`create!` with the attributes of the where, `find_or_create_by`/`find_or_initialize_by` on a relation, `first!`, `last!`, `take`, `take!`, `sole`, `find_sole_by`, `ids`, `pick`, `none`, `destroy_by`, `delete_by`, `reorder`, `rewhere`, `unscope`, `distinct` and `select` (the daemon `fields` projection).
+- **Rails, more of Active Record on a record:** `touch` (and `after_touch`), `update_column(s)` (no callbacks, `updated_at` stays), `toggle`, `toggle!`, `update_attribute`, `saved_change_to_<attr>?` and the other saved-changes methods, `after_commit` (`on:`), `after_create_commit`, `after_update_commit`, `after_save_commit`, `after_destroy_commit`, `after_rollback` (after `Model.transaction` commits or rolls back), `insert_all`, `update_counters`, `increment_counter`, `decrement_counter`, `cache_key` and `cache_version`.
+
+### Fixed
+
+- **Rails: `limit`, `offset` and `after` are respected by `update`, `delete_all` and `count`.** Before, `where(...).limit(2).delete_all` deleted every match, and a batch of `in_batches` wrote and counted the whole match. Now such a relation writes only the ids of its rows.
+- **Rails: `order("n DESC")` works.** A String order (`"n"`, `"n desc"`, `"a asc, b desc"`) was ignored with no error; another SQL expression is now an `ArgumentError`.
+
 ## [1.23.3] - 2026-11-12
 
 ### Fixed

@@ -1,9 +1,6 @@
 # frozen_string_literal: true
 
 module Ndb
-  # Raised by sole and find_sole_by when more than one record matches.
-  class SoleRecordExceeded < Error; end
-
   # A lazy, immutable query. Every builder returns a new relation; the
   # request goes to the daemon on each, to_a, first, count, pluck, ...
   class Relation

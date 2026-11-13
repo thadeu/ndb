@@ -29,4 +29,7 @@ module Ndb
       super("Validation failed: #{record.errors.full_messages.join(', ')}")
     end
   end
+
+  # Raised by sole and find_sole_by when more than one record matches.
+  class SoleRecordExceeded < Error; end
 end
