@@ -131,6 +131,24 @@ call.version                   # the document version
 call.increment!(:duration)     # atomic $inc on the daemon, refreshes the attribute and the version
 call.decrement!(:duration, 5)
 
+call.touch                     # updated_at = now, one atomic write, no validations; after_touch runs
+call.touch(:seen_at, time: t)  # also the named datetime attributes
+call.update_columns(status: "x", tries: 2)  # atomic $set, cast; no validations, no callbacks, updated_at stays
+call.update_column(:status, "x")
+call.toggle(:active)           # flips a boolean (not saved); toggle! saves it without validations
+call.update_attribute(:status, "x")         # save without validations, with callbacks
+
+call.saved_change_to_status?   # after a save: saved_changes, status_before_last_save, too
+call.will_save_change_to_status?
+
+call.cache_key                 # "calls/c1" ("calls/new" for a new record)
+call.cache_key_with_version    # "calls/c1-<updated_at>-<_v>": changes on every write
+
+Call.insert_all([{ id: "c7", status: "new" }, { id: "c8", status: "new" }])  # one _bulk, no validations/callbacks
+Call.update_counters(["c1", "c2"], tries: 1, credits: -1)  # atomic $inc by id, sets updated_at
+Call.increment_counter(:tries, "c1")
+Call.decrement_counter(:tries, "c1")
+
 call.destroy                   # callbacks, filtered by id and version
 call.destroy!                  # raises Ndb::RecordNotDestroyed when a before_destroy callback aborts
 call.delete                    # by id only: no callbacks, no version guard
@@ -203,6 +221,8 @@ Call.where(status: "retry").destroy_all  # loads and destroys each record with i
     to.update!(balance: to.balance + amount)
   end
   ```
+- `after_commit`, `after_create_commit`, `after_update_commit`, `after_save_commit`, `after_destroy_commit` (and `on:`) run when the write is durable: after the write, or after the `Model.transaction` block commits. `after_rollback` runs when the block writes nothing. `touch` and `update_columns` run no commit callbacks.
+- `insert_all` (and `insert_all!`, the same) stamps `created_at` and `updated_at`. An `_id` that exists raises `RecordNotUnique` (code `duplicate_id`).
 - `find_or_create_by` is atomic. It checks validations and runs the `save` and `create` callbacks, then sends one upsert: the attributes you pass are the filter, and the other attributes go in `$setOnInsert`, so a writer that created the document first is never overwritten and you get that document. An invalid record is returned unsaved (the `!` form raises `Ndb::RecordInvalid`). Only the attributes you pass must be equality values.
 - `delete_all` and `destroy_all` on a model without a `where` are refused by the daemon (`Ndb::EmptyFilter`); `delete_all` needs the id or an indexed field in the `where`. To empty the whole collection, use `Call.truncate!`.
 - `Call.truncate!` removes every document, with no callbacks, and keeps the definition and indexes. `Call.drop!` removes the collection, its definition and its watch consumers; the next use of the model declares it again. Both take the same time for 10 or 10 million documents, and watch consumers get one `"truncate"` event.

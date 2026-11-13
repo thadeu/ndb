@@ -10,6 +10,9 @@ module Ndb
 
     included do
       define_model_callbacks :save, :create, :update, :destroy
+
+      include CommitCallbacks
+      include RecordWrites
     end
 
     class_methods do
@@ -46,6 +49,7 @@ module Ndb
         record = new(row.slice(*attribute_names))
 
         record.send(:loaded!, version, source)
+        record.send(:clear_changes_information)
         record.load_associations(row) if record.respond_to?(:load_associations)
 
         record
@@ -92,8 +96,13 @@ module Ndb
       return false if validate && !valid?(new_record? ? :create : :update)
 
       @expire_in = wire_duration(expire_in)
+      action = new_record? ? :create : :update
 
-      run_callbacks(:save) { new_record? ? create_record : update_record } ? true : false
+      saved = run_callbacks(:save) { action == :create ? create_record : update_record } ? true : false
+
+      committed(action) if saved
+
+      saved
     ensure
       @expire_in = nil
     end
@@ -145,6 +154,8 @@ module Ndb
         delete_record if persisted?
         @destroyed = true
       end
+
+      committed(:destroy) if result
 
       result ? self : false
     end

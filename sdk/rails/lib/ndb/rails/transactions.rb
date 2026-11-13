@@ -53,19 +53,25 @@ module Ndb
           tx.lock_records(Array(lock), ttl: ttl, wait: wait) if lock
           result = yield
           tx.commit!
-
-          result
         rescue Rollback
           tx.abort!
+          RecordTransaction.current = nil
+          tx.run_commit_callbacks(:rollback)
 
-          nil
+          return nil
         rescue Exception # rubocop:disable Lint/RescueException
           tx.abort!
+          RecordTransaction.current = nil
+          tx.run_commit_callbacks(:rollback)
 
           raise
         ensure
           RecordTransaction.current = nil
         end
+
+        tx.run_commit_callbacks(:commit)
+
+        result
       end
     end
 
@@ -99,6 +105,7 @@ module Ndb
       @tokens = []
       @guarded = {}
       @locked = {}
+      @commits = []
     end
 
     def collection = @klass.collection_name
@@ -152,17 +159,21 @@ module Ndb
       add({ op: "delete", id: record.id, query: guard(record) }.compact, record)
     end
 
+    # A save or destroy of the block: its after_commit callbacks run after
+    # the commit, its after_rollback callbacks after an abort.
+    def on_commit(record, action)
+      @commits << [record, action]
+    end
+
     def commit!
       if @ops.empty?
         release
+      else
+        results = Rails.client.tx(collection, @ops.map(&:first), locks: @tokens, unlock: true)["results"]
 
-        return
-      end
-
-      results = Rails.client.tx(collection, @ops.map(&:first), locks: @tokens, unlock: true)["results"]
-
-      @ops.zip(results).each do |(_, record), result|
-        record.send(:written_in_transaction!, result["_v"]) if result["_v"]
+        @ops.zip(results).each do |(_, record), result|
+          record.send(:written_in_transaction!, result["_v"]) if result["_v"]
+        end
       end
     ensure
       finish
@@ -171,6 +182,11 @@ module Ndb
     def abort!
       release
       finish
+    end
+
+    # Runs after the block ends, so a write in a callback is a new write.
+    def run_commit_callbacks(kind)
+      @commits.each { |record, action| record.send(:run_commit_callbacks, kind, action) }
     end
 
     private
