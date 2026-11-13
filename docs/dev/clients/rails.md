@@ -174,6 +174,11 @@ Call.where(status: "failed").update("$set" => { "status" => "retry" })   # the b
 Call.where(id: "c1").update(status: "retry", "$inc" => { "tries" => 1 })   # the attributes join the $set
 Call.where(status: "retry").delete_all   # one delete, no callbacks, returns how many (delete is an alias)
 Call.where(status: "retry").destroy_all  # loads and destroys each record with its callbacks, returns them
+
+# A limit, offset, page or cursor narrows a write to those rows, as in Active Record:
+# the relation reads their ids, then writes with the where and "_id" $in those ids.
+Call.where(status: "retry").order(:created_at).limit(100).delete_all   # at most 100
+Call.where(status: "retry").in_batches(of: 500) { |batch| batch.update(status: "queued") }
 ```
 
 - Every load asks for the version (`_v`). `save`, `update` and `destroy` put the id and `_v` in the filter of the write. If another writer changed the document first, the filter matches nothing and you get `Ndb::StaleObjectError` (code `stale_object`).
@@ -1083,7 +1088,7 @@ Every public method of the gem, grouped. The names and return values follow Acti
 |---|---|
 | `all` | a relation of every document |
 | `where(hash)`, `where.not(hash)`, `where_raw(hash)`, `or(relation)` | a relation. A Range is `$gte`/`$lte`, an Array is `$in`, `nil` is a missing field; `where_raw` sends the Hash as is |
-| `order(:a, b: :desc)`, `limit(n)`, `offset(n)`, `page(n)`, `per(n)`, `after(cursor)` | a relation |
+| `order(:a, b: :desc)`, `order("a, b DESC")`, `limit(n)`, `offset(n)`, `page(n)`, `per(n)`, `after(cursor)` | a relation. A String order takes only `"field"` and `"field asc\|desc"`, split by commas; a SQL expression raises `ArgumentError` |
 | `includes(:a, b: :c)` | a relation that loads associations in the same call |
 | `group(*fields)` | a relation for `count`/`sum`/... by group |
 | `find(id)`, `find(id1, id2)` | a record, or an Array; `Ndb::NotFound` when missing |
@@ -1092,7 +1097,7 @@ Every public method of the gem, grouped. The names and return values follow Acti
 | `first`, `first(n)`, `last`, `last(n)` | a record or `nil`, or an Array. The daemon gives only `n` rows. With no `order`, the order is `_id` (first and last are its two ends). On a relation with `limit`, `offset` or `page`, or a loaded one, `last` uses the loaded rows. |
 | `to_a`, `each`, `map`... (Enumerable), `load`, `loaded?`, `records` | the records (one call, then memory) |
 | `size`, `length`, `empty?` | from the loaded records, else a count |
-| `count`, `exists?`, `pluck(:a, :b)` | a number, a boolean, an Array of values |
+| `count`, `exists?`, `pluck(:a, :b)` | a number, a boolean, an Array of values. On a relation with `limit`, `offset`, `page` or `after`, `count` counts only those rows (`limit(2).count` is at most 2) |
 | `sum(:f)`, `average(:f)`, `minimum(:f)`, `maximum(:f)` | a number (or a Hash by group) |
 | `find_each(batch_size:)`, `in_batches(of:)` | every record, page by page with the cursor |
 | `next_cursor` | the cursor of the next page |
@@ -1111,7 +1116,7 @@ Every public method of the gem, grouped. The names and return values follow Acti
 | `Model.find_or_initialize_by(hash)` | a found record, or a new one not saved |
 | `Model.destroy(id)`, `Model.delete(id)` | by id, with or without callbacks |
 | `relation.update(attrs or ops)` | one atomic update on every match: attributes (`status: "x"`, a `$set`), operators (`"$inc" => { "n" => 1 }`), or both; no callbacks; the number modified |
-| `relation.delete_all`, `relation.destroy_all` | delete every match (no callbacks / with callbacks) |
+| `relation.delete_all`, `relation.destroy_all` | delete every match (no callbacks / with callbacks). With `limit`, `offset`, `page` or `after`, `update` and `delete_all` write only those rows |
 | `Model.truncate!`, `Model.drop!` | empty the collection / remove it (keeps / removes the definition) |
 
 :::

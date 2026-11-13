@@ -44,9 +44,16 @@ module Ndb
       with(where: [{ "$or" => clauses }])
     end
 
+    # order(:n), order(n: :desc) or the Active Record String forms "n",
+    # "n DESC" and "n asc, m desc". Any other String (a SQL expression)
+    # raises ArgumentError.
     def order(*args)
       sort = args.each_with_object(values[:order].dup) do |arg, out|
-        arg.is_a?(Hash) ? arg.each { |f, dir| out[f.to_s] = direction(dir) } : out[arg.to_s] = 1
+        case arg
+        when Hash then arg.each { |f, dir| out[f.to_s] = direction(dir) }
+        when String then out.merge!(parse_order(arg))
+        else out[arg.to_s] = 1
+        end
       end
 
       with(order: sort)
@@ -153,14 +160,23 @@ module Ndb
 
       ops = with_attributes(ops, attrs) unless attrs.empty?
 
-      klass.ndb_update(Conditions.combine(values[:where]), with_updated_at(ops), many: true, expire_in: expire_in).fetch("modified")
+      where = write_where
+
+      return 0 unless where
+
+      klass.ndb_update(where, with_updated_at(ops), many: true, expire_in: expire_in).fetch("modified")
     end
 
     # One daemon delete on every match, no callbacks (same rule as update).
     # Returns how many. An unfiltered relation is refused by the daemon
-    # (Ndb::EmptyFilter).
+    # (Ndb::EmptyFilter). A limit, offset, page or cursor narrows it to
+    # those rows, as for update.
     def delete_all
-      klass.ndb_delete(Conditions.combine(values[:where]), many: true).fetch("deleted")
+      where = write_where
+
+      return 0 unless where
+
+      klass.ndb_delete(where, many: true).fetch("deleted")
     end
 
     alias delete delete_all
@@ -289,7 +305,18 @@ module Ndb
       return where(conditions).exists? if conditions.is_a?(Hash)
       return where(klass.primary_key => conditions).exists? unless conditions == :none
 
-      fetch(to_query.slice("query").merge("limit" => 1, "fields" => [klass.primary_key])).rows.any?
+      limit = [window["limit"], 1].compact.min
+
+      return false if limit.zero?
+
+      fetch(to_query.except("lookup").merge("limit" => limit, "fields" => [klass.primary_key])).rows.any?
+    end
+
+    # The primary keys of the relation, in its order (one request).
+    def ids
+      return records.map { |record| record.public_send(klass.primary_key) } if loaded?
+
+      fetch(to_query.except("lookup").merge("fields" => [klass.primary_key])).rows.map { |row| row[klass.primary_key] }
     end
 
     def pluck(*fields)
@@ -307,6 +334,7 @@ module Ndb
 
     def count
       return calculate(:count) unless values[:group].empty? && values[:unwind].nil?
+      return ids.size if narrowed?
 
       fetch(to_query.slice("query").merge("count" => true, "limit" => 1, "fields" => [klass.primary_key])).total
     end
@@ -437,6 +465,36 @@ module Ndb
 
     def windowed?
       values[:limit] || values[:offset] || values[:page]
+    end
+
+    # A window or a cursor: the relation is fewer rows than its where.
+    def narrowed?
+      windowed? || values[:after]
+    end
+
+    # The filter of update and delete_all: the where, and the ids of the
+    # rows when the relation is narrowed (the daemon writes every match of
+    # a filter). nil when a narrowed relation has no row.
+    def write_where
+      return Conditions.combine(values[:where]) unless narrowed?
+
+      found = ids
+
+      return nil if found.empty?
+
+      Conditions.combine(values[:where] + [{ klass.primary_key => { "$in" => found } }])
+    end
+
+    ORDER_PART = /\A([\w.]+)(?:\s+(asc|desc))?\z/i
+
+    def parse_order(text)
+      text.split(",").to_h do |part|
+        match = ORDER_PART.match(part.strip)
+
+        raise ArgumentError, "order takes \"field\" or \"field asc|desc\", got #{text.inspect}" unless match
+
+        [match[1], direction(match[2])]
+      end
     end
 
     def direction(value)
