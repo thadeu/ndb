@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 module Ndb
+  # Raised by sole and find_sole_by when more than one record matches.
+  class SoleRecordExceeded < Error; end
+
   # A lazy, immutable query. Every builder returns a new relation; the
   # request goes to the daemon on each, to_a, first, count, pluck, ...
   class Relation
@@ -11,6 +14,7 @@ module Ndb
     BATCH_SIZE = 1000
     EMPTY = { where: [].freeze, order: {}.freeze, group: [].freeze }.freeze
     PRELOADED = Data.define(:rows, :next, :total).new(rows: [].freeze, next: nil, total: nil)
+    NONE = PRELOADED.with(total: 0)
 
     attr_reader :klass, :values
 
@@ -116,6 +120,57 @@ module Ndb
       with(unwind: field.to_s)
     end
 
+    # The order replaced, not added to: order(:a).reorder(b: :desc).
+    def reorder(*args)
+      with(order: {}).order(*args)
+    end
+
+    # The where of these attributes replaced: where(n: 1).rewhere(n: 2).
+    # Only the equality clauses of these fields are removed.
+    def rewhere(attrs)
+      keys = alias_id(attrs).keys.map(&:to_s)
+      kept = values[:where].map { |clause| clause.except(*keys) }.reject(&:empty?)
+
+      with(where: kept).where(attrs)
+    end
+
+    UNSCOPE = {
+      where: { where: [].freeze }, order: { order: {}.freeze }, limit: { limit: nil }, offset: { offset: nil },
+      page: { page: nil, per: nil }, after: { after: nil }, group: { group: [].freeze }, includes: { includes: nil },
+      select: { select: nil }, distinct: { distinct: nil }
+    }.freeze
+
+    # The relation without these parts: unscope(:where, :order, :limit...).
+    def unscope(*types)
+      changes = types.reduce({}) do |out, type|
+        out.merge(UNSCOPE.fetch(type.to_sym) { raise ArgumentError, "unscope takes #{UNSCOPE.keys.join(", ")}, got #{type.inspect}" })
+      end
+
+      with(changes)
+    end
+
+    # Makes pluck give each value (or row of values) once.
+    def distinct(value = true)
+      with(distinct: value)
+    end
+
+    # select(:a, :b): the records with only these attributes loaded (the
+    # daemon projection; the primary key is always read). With a block, it
+    # is Enumerable#select.
+    def select(*fields, &block)
+      return super(&block) if block
+
+      raise ArgumentError, "select needs at least one field" if fields.empty?
+
+      with(select: fields.map(&:to_s))
+    end
+
+    # An empty relation: it sends no request. to_a is [], count is 0, and
+    # update and delete_all write nothing.
+    def none
+      with(none: true)
+    end
+
     # The JSON body that this relation sends to the daemon, as a String,
     # with no request (like to_sql of ActiveRecord). It is the body of
     # POST /{collection}/_search; pretty: true gives it on many lines.
@@ -140,6 +195,7 @@ module Ndb
       query.merge!(window)
       query["after"] = values[:after] if values[:after]
       query["lookup"] = klass.lookup_for(values[:includes]) if values[:includes]&.any?
+      query["fields"] = ([klass.primary_key] + values[:select]).uniq if values[:select]
 
       query
     end
@@ -180,6 +236,43 @@ module Ndb
     end
 
     alias delete delete_all
+    alias update_all update
+
+    # A new record with the equality attributes of the where, as the
+    # scoping of Active Record: Call.where(status: "new").new(caller: "a").
+    def new(attrs = {}, &block)
+      klass.new(scope_attributes.merge(attrs.transform_keys(&:to_s))).tap { |record| block&.call(record) }
+    end
+
+    alias build new
+
+    def create(attrs = {}, &)
+      new(attrs, &).tap(&:save)
+    end
+
+    def create!(attrs = {}, &)
+      new(attrs, &).tap(&:save!)
+    end
+
+    def find_or_initialize_by(attrs, &)
+      klass.find_or_initialize_by(scope_attributes.merge(attrs.transform_keys(&:to_s)), &)
+    end
+
+    def find_or_create_by(attrs, &)
+      klass.find_or_create_by(scope_attributes.merge(attrs.transform_keys(&:to_s)), &)
+    end
+
+    def find_or_create_by!(attrs, &)
+      klass.find_or_create_by!(scope_attributes.merge(attrs.transform_keys(&:to_s)), &)
+    end
+
+    def destroy_by(attrs)
+      where(attrs).destroy_all
+    end
+
+    def delete_by(attrs)
+      where(attrs).delete_all
+    end
 
     # Loads the matches and destroys each one, with its callbacks. Returns
     # the records.
@@ -270,6 +363,43 @@ module Ndb
       count ? found : found.last
     end
 
+    def first!
+      first || raise(not_found)
+    end
+
+    def last!
+      last || raise(not_found)
+    end
+
+    # A record (or count of them) in no given order: the order of the
+    # relation, else the order of the daemon.
+    def take(count = nil)
+      return count ? records.first(count) : records.first if loaded?
+
+      found = limit(count || 1).to_a
+
+      count ? found : found.first
+    end
+
+    def take!
+      take || raise(not_found)
+    end
+
+    # The one record of the relation: Ndb::NotFound when none,
+    # Ndb::SoleRecordExceeded when more than one.
+    def sole
+      found = limit(2).to_a
+
+      raise not_found if found.empty?
+      raise SoleRecordExceeded, "Wanted only one #{klass.name}" if found.size > 1
+
+      found.first
+    end
+
+    def find_sole_by(attrs)
+      where(attrs).sole
+    end
+
     # The relation with its order turned around (asc and desc swap). With no
     # order, it is the primary key in descending order.
     def reverse_order
@@ -325,11 +455,18 @@ module Ndb
       names = fields.map(&:to_s)
       rows = fetch(to_query.merge("fields" => names)).rows
 
-      rows.map do |row|
+      plucked = rows.map do |row|
         values = names.map { |name| klass.attribute_types[name].cast(row.dig(*name.split("."))) }
 
         values.size == 1 ? values.first : values
       end
+
+      values[:distinct] ? plucked.uniq : plucked
+    end
+
+    # pluck of the first row: a value, an Array of values, or nil.
+    def pick(*fields)
+      limit(1).pluck(*fields).first
     end
 
     def count
@@ -410,7 +547,21 @@ module Ndb
     private
 
     def fetch(body)
+      return NONE if values[:none]
+
       sealed_or_plain { klass.ndb_find(body) }
+    end
+
+    def not_found
+      NotFound.new("Couldn't find #{klass.name}", code: "not_found")
+    end
+
+    # The fields of the equality clauses of the where (status: "x"), for
+    # new and create. Operators ($in, $gte...) are not values.
+    def scope_attributes
+      values[:where].each_with_object({}) do |clause, out|
+        clause.each { |key, value| out[key] = value unless key.start_with?("$") || value.is_a?(Hash) || value.is_a?(Array) }
+      end
     end
 
     def sealed_or_plain(&)
@@ -476,6 +627,7 @@ module Ndb
     # rows when the relation is narrowed (the daemon writes every match of
     # a filter). nil when a narrowed relation has no row.
     def write_where
+      return nil if values[:none]
       return Conditions.combine(values[:where]) unless narrowed?
 
       found = ids
@@ -557,7 +709,7 @@ module Ndb
 
     def calculate(op, field = nil)
       key = op.to_s
-      rows = sealed_or_plain { klass.ndb_aggregate(aggregate_body(op, field)) }.rows
+      rows = values[:none] ? [] : sealed_or_plain { klass.ndb_aggregate(aggregate_body(op, field)) }.rows
 
       return rows.to_h { |row| [group_key(row["_id"]), row[key]] } unless values[:group].empty?
 

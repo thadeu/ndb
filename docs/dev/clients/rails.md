@@ -179,6 +179,21 @@ Call.where(status: "retry").destroy_all  # loads and destroys each record with i
 # the relation reads their ids, then writes with the where and "_id" $in those ids.
 Call.where(status: "retry").order(:created_at).limit(100).delete_all   # at most 100
 Call.where(status: "retry").in_batches(of: 500) { |batch| batch.update(status: "queued") }
+Call.where(status: "retry").update_all(status: "queued")   # update_all is an alias of update
+
+# More Active Record relation methods.
+Call.where(status: "new").new(caller: "a")     # status "new" comes from the where (also build, create, create!)
+Call.where(status: "new").find_or_create_by(caller: "a")
+Call.first!; Call.last!; Call.take; Call.take!  # ! raises Ndb::NotFound
+Call.find_sole_by(caller: "a")                  # NotFound, or Ndb::SoleRecordExceeded for more than one
+Call.where(status: "x").ids                     # the ids
+Call.order(created_at: :desc).pick(:status)     # pluck of the first row
+Call.distinct.pluck(:status)                    # each value once
+Call.select(:status).to_a                       # records with only status (and _id) loaded
+Call.none                                       # no request: [], count 0, writes 0
+Call.destroy_by(status: "x"); Call.delete_by(status: "x")
+Call.order(:a).reorder(b: :desc); Call.where(status: "a").rewhere(status: "b")
+Call.where(status: "a").limit(5).unscope(:where, :limit)
 ```
 
 - Every load asks for the version (`_v`). `save`, `update` and `destroy` put the id and `_v` in the filter of the write. If another writer changed the document first, the filter matches nothing and you get `Ndb::StaleObjectError` (code `stale_object`).
@@ -1090,9 +1105,15 @@ Every public method of the gem, grouped. The names and return values follow Acti
 | `where(hash)`, `where.not(hash)`, `where_raw(hash)`, `or(relation)` | a relation. A Range is `$gte`/`$lte`, an Array is `$in`, `nil` is a missing field; `where_raw` sends the Hash as is |
 | `order(:a, b: :desc)`, `order("a, b DESC")`, `limit(n)`, `offset(n)`, `page(n)`, `per(n)`, `after(cursor)` | a relation. A String order takes only `"field"` and `"field asc\|desc"`, split by commas; a SQL expression raises `ArgumentError` |
 | `includes(:a, b: :c)` | a relation that loads associations in the same call |
+| `reorder(...)`, `rewhere(hash)`, `unscope(:where, :order, :limit, :offset, :page, :after, :group, :includes, :select, :distinct)` | a relation with that part replaced or removed |
+| `select(:a, :b)`, `distinct` | records with only these attributes (and `_id`) loaded; `distinct.pluck` gives each value once. `select { }` with a block is `Enumerable#select` |
+| `none` | an empty relation: no request, `[]`, `0`, writes `0` |
 | `group(*fields)` | a relation for `count`/`sum`/... by group |
 | `find(id)`, `find(id1, id2)` | a record, or an Array; `Ndb::NotFound` when missing |
 | `find_by(hash)`, `find_by!(hash)`, `find_by_<attr>[_and_<attr>](values)` | a record or `nil` (`!`: `Ndb::NotFound`) |
+| `first!`, `last!`, `take`, `take(n)`, `take!` | as `first`/`last`; `take` is in no given order; `!` raises `Ndb::NotFound` |
+| `sole`, `find_sole_by(hash)` | the one record; `Ndb::NotFound` for none, `Ndb::SoleRecordExceeded` for more |
+| `ids`, `pick(:a, :b)` | the primary keys; the `pluck` of the first row (or `nil`) |
 | `to_ndb`, `to_ndb(pretty: true)` | the JSON body of the search, as a String; no request |
 | `first`, `first(n)`, `last`, `last(n)` | a record or `nil`, or an Array. The daemon gives only `n` rows. With no `order`, the order is `_id` (first and last are its two ends). On a relation with `limit`, `offset` or `page`, or a loaded one, `last` uses the loaded rows. |
 | `to_a`, `each`, `map`... (Enumerable), `load`, `loaded?`, `records` | the records (one call, then memory) |
@@ -1115,7 +1136,9 @@ Every public method of the gem, grouped. The names and return values follow Acti
 | `Model.find_or_create_by(hash)`, `find_or_create_by!(hash)` | atomic (an upsert) |
 | `Model.find_or_initialize_by(hash)` | a found record, or a new one not saved |
 | `Model.destroy(id)`, `Model.delete(id)` | by id, with or without callbacks |
-| `relation.update(attrs or ops)` | one atomic update on every match: attributes (`status: "x"`, a `$set`), operators (`"$inc" => { "n" => 1 }`), or both; no callbacks; the number modified |
+| `relation.new(attrs)`, `build`, `create`, `create!`, `find_or_create_by`, `find_or_initialize_by` | a record with the equality attributes of the `where`, merged with `attrs` |
+| `Model.destroy_by(hash)`, `Model.delete_by(hash)` | `where(hash).destroy_all` / `.delete_all` |
+| `relation.update(attrs or ops)`, `update_all` | one atomic update on every match: attributes (`status: "x"`, a `$set`), operators (`"$inc" => { "n" => 1 }`), or both; no callbacks; the number modified |
 | `relation.delete_all`, `relation.destroy_all` | delete every match (no callbacks / with callbacks). With `limit`, `offset`, `page` or `after`, `update` and `delete_all` write only those rows |
 | `Model.truncate!`, `Model.drop!` | empty the collection / remove it (keeps / removes the definition) |
 
