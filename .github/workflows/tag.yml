@@ -1,0 +1,120 @@
+name: tag
+
+# Releases ndb from a commit message: when CI passes on main and a commit since
+# the last tag has a subject like (the most recent one wins, merged commits
+# count):
+#
+#   tag(patch): fix a typo in the stream docs
+#   tag(minor): add claim due
+#   tag(major): drop the v1 routes
+#
+# this workflow runs scripts/release.sh, the same script as make tag: it bumps
+# every version, closes the Unreleased section of CHANGELOG.md, and pushes the
+# commit "release: X.Y.Z" and the tag vX.Y.Z. A push with the workflow token
+# does not start other workflows, so this one runs the release jobs that ci.yml
+# runs for a tag: release.yml, ghcr.yml, publish.yml and docs.yml.
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: tag
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  tag:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: write
+
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      # A newer push to main has its own CI run and its own turn here.
+      - name: Check that main is the tested commit
+        id: fresh
+        run: |
+          if [ "$(git rev-parse HEAD)" = "${{ github.event.workflow_run.head_sha }}" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "main moved on; the next CI run decides"
+          fi
+
+      - name: Read the bump from the commit subjects
+        id: bump
+        if: steps.fresh.outputs.ok == 'true'
+        run: |
+          last=$(git describe --tags --abbrev=0 --match 'v*' HEAD 2>/dev/null || true)
+
+          bump=$(git log --format=%s "${last:+$last..}HEAD" | sed -nE 's/^tag\((patch|minor|major)\): .+/\1/p' | head -n1)
+
+          echo "value=$bump" >> "$GITHUB_OUTPUT"
+
+      - name: Run the release script
+        id: release
+        if: steps.bump.outputs.value != ''
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          scripts/release.sh "${{ steps.bump.outputs.value }}" --yes
+
+          echo "tag=$(git describe --tags --exact-match HEAD)" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: [tag]
+    if: needs.tag.outputs.tag != ''
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    permissions:
+      contents: write
+    secrets: inherit
+
+  ghcr:
+    needs: [tag]
+    if: needs.tag.outputs.tag != ''
+    uses: ./.github/workflows/ghcr.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    permissions:
+      contents: read
+      packages: write
+    secrets: inherit
+
+  publish:
+    needs: [tag]
+    if: needs.tag.outputs.tag != ''
+    uses: ./.github/workflows/publish.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    permissions:
+      contents: read
+      id-token: write
+    secrets: inherit
+
+  docs:
+    needs: [tag]
+    if: needs.tag.outputs.tag != ''
+    uses: ./.github/workflows/docs.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
+    permissions:
+      contents: read
+      deployments: write
+    secrets: inherit

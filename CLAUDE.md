@@ -116,13 +116,21 @@ test/smoke.sh
     `docs: link the docs site in the README`, `ci: run the tests once`.
   - A breaking change of the HTTP API adds `!` (`feat(server)!: ...`) and a `BREAKING CHANGE:`
     line in the body.
-  - `release: X.Y.Z` is made only by `make tag`. CI matches the prefix `release: ` to keep a
-    release run from being cancelled, so do not use it for anything else.
+  - `tag(patch|minor|major): summary` ships a release once CI passes on `main` (see below). Use
+    it only when the maintainer asks for a release.
+  - `release: X.Y.Z` is made only by `scripts/release.sh` (`make tag` or the tag workflow). CI
+    matches the prefix `release: ` to keep a release run from being cancelled, so do not use it
+    for anything else.
 - Fixes and small changes go directly on `main`. Larger features use a branch and a PR; the
   maintainer merges with squash.
 - **Do not watch CI** (no `gh run watch`, no polling): the maintainer follows it.
-- **Do not create tags.** The maintainer runs `make tag patch|minor`: it bumps every version
-  (`scripts/release.sh`, also `sdk/go/ndbredis/go.mod`), pushes `main` and the tag, and ends.
+- **Do not create tags by hand.** A release starts in one of two ways, both through
+  `scripts/release.sh` (it bumps every version, also `sdk/go/ndbredis/go.mod`, and pushes `main`
+  and the tag):
+  - a commit on `main` whose subject starts with `tag(patch|minor|major):`. When CI passes,
+    `.github/workflows/tag.yml` runs the script and then the release jobs (release, ghcr,
+    publish, docs) for the new tag;
+  - the maintainer runs `make tag patch|minor` on a machine.
 - CI (`.github/workflows/ci.yml`) is the only place with tests. On a `v*` tag, its `tag` job
   calls `release.yml` (binaries, GitHub Release, Go tags), `ghcr.yml` (images `ndb`, `ndb-ui`,
   `ndb-stack`) and `publish.yml` (gems, npm). `docs.yml` deploys the site when docs change.
