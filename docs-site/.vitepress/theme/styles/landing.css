@@ -442,6 +442,17 @@
   }
 }
 
+/* part: family */
+.family {
+  margin: 64px 0 0;
+  color: var(--ndb-muted);
+  font-size: 14px;
+}
+
+.family a {
+  color: var(--ndb-accent);
+}
+
 /* part: card sections */
 .card-section {
   margin-top: 64px;

@@ -528,5 +528,9 @@ const reasons: Reason[] = [
         </a>
       </div>
     </section>
+
+    <p class="family">
+      ndb is a <a href="https://clowk.in/ndb/">Clowk</a> product.
+    </p>
   </main>
 </template>

@@ -103,6 +103,8 @@ function activeByOrder(links: string[]): string | undefined {
 
       <a class="side-item" :href="repo" target="_blank" rel="noopener">GitHub</a>
 
+      <a class="side-item" href="https://clowk.in/ndb/">A Clowk product</a>
+
       <a v-if="theme.version" class="side-item" :href="`${repo}/blob/main/CHANGELOG.md`" target="_blank" rel="noopener">
         Changelog · v{{ theme.version }}
       </a>
