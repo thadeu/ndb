@@ -502,6 +502,26 @@ production:
 
 A broadcast appends one entry to the stream. Each process has one thread that reads the stream without a group, so every process gets every broadcast (a fan-out, as Redis PUBLISH/SUBSCRIBE). Delivery is at most once. ActionCable loads the adapter only for `adapter: ndb`: the gem does not need `actioncable` for anything else. A change made by another service (in Go, for example) gets to the browser through an `Ndb::Streams` consumer in the app that calls `ActionCable.server.broadcast`. See [ActionCable](https://ndb.clowk.in/clients/rails#actioncable).
 
+## Turbo Streams
+
+With turbo-rails in the app, the railtie loads `Ndb::Turbo` (the gem does not need turbo-rails). Every record has a GlobalID, so `turbo_stream_from @domain` works as with ActiveRecord.
+
+```erb
+<%= turbo_refreshes_with method: :morph, scroll: :preserve %>
+<%= turbo_stream_from @domain %>
+```
+
+```ruby
+Ndb::Turbo.refresh(domain)                  # where the data changes
+Ndb::Turbo.refresh("credits", account.id)   # the stream "credits:<id>"
+
+class Domain < Ndb::Record
+  broadcasts_live_refreshes                 # refresh after each commit
+end
+```
+
+`Ndb::Turbo.refresh` sends at most one refresh per stream every `Ndb::Turbo.window` seconds (2; 0 in the test environment, so a test can count the broadcasts). The first call goes at once, and the calls inside the window leave one refresh for its end, so the page shows the last change. The window is per process. A failed refresh only writes a warning to the log. See [Turbo Streams](https://ndb.clowk.in/clients/rails#turbo-streams).
+
 ## Errors
 
 The transport and daemon errors are defined by the gem `ndb`. They all live in the `Ndb` module (`Ndb::Error`, `Ndb::NotFound`, ...). For an ActiveRecord-like `rescue`, this gem adds one alias: `Ndb::RecordNotUnique` is `Ndb::UniqueViolation` (the same class). `Ndb::StaleObjectError`, `Ndb::RecordInvalid` and `Ndb::RecordNotSaved` exist only here, and they inherit from `Ndb::Error`. Every error has `code` (the daemon code) and `status` (the HTTP status).
@@ -547,7 +567,7 @@ ndb -config /nonexistent.yml -data-dir "$(mktemp -d)" -unix /tmp/ndb-test.sock
 Ndb::Rails.configure { |c| c.socket = "/tmp/ndb-test.sock" }
 ```
 
-Use a new collection name per test (`self.collection_name = ...`). Run the suite with `bundle exec rake test` in `sdk/rails`. Its Gemfile uses the gem `ndb` from `../ruby`.
+Use a new collection name per test (`self.collection_name = ...`). Run the suite with `bundle exec rake test` in `sdk/rails` (`test:core` without turbo-rails, then `test:turbo` in its own process). Its Gemfile uses the gem `ndb` from `../ruby`.
 
 ## License
 

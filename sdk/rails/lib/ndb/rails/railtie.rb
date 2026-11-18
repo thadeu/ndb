@@ -8,6 +8,7 @@ module Ndb
     # boot when the app eager loads (production). In development a model
     # declares its collection on first use. It also loads app/streams and
     # makes the groups of the stream consumers, in a background thread.
+    # With turbo-rails in the app, it loads Ndb::Turbo before the models.
     class Railtie < ::Rails::Railtie
       initializer "ndb.configure" do |app|
         path = app.root.join("config", "ndb.yml")
@@ -16,6 +17,10 @@ module Ndb
           Ndb::Rails.configuration.load_file(path, ::Rails.env)
           Ndb::Rails.configure { |_| }
         end
+      end
+
+      initializer "ndb.turbo" do
+        require "ndb/turbo" if defined?(::Turbo::Engine)
       end
 
       config.after_initialize do |app|

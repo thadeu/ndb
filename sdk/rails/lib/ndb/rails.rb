@@ -4,6 +4,14 @@ require "active_model"
 require "active_support/all"
 require "ndb"
 
+# GlobalID comes with Rails. When it is there, every record has one (see
+# Ndb::Record); the gem works without it.
+begin
+  require "globalid"
+rescue LoadError
+  nil
+end
+
 require "ndb/rails/version"
 require "ndb/rails/errors"
 require "ndb/rails/configuration"
