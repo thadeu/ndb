@@ -487,6 +487,21 @@ assert_streamed OrderEvent, order_id: 42
 expect(OrderEvent).to have_streamed(order_id: 42)
 ```
 
+## ActionCable
+
+`adapter: ndb` in `config/cable.yml` makes ndb the pub/sub of ActionCable, in place of Redis.
+
+```yaml
+# config/cable.yml
+production:
+  adapter: ndb
+  stream: cable          # default "cable"
+  max_len: 10000         # default 10 000 (approximate trim on each broadcast)
+  channel_prefix: myapp_production
+```
+
+A broadcast appends one entry to the stream. Each process has one thread that reads the stream without a group, so every process gets every broadcast (a fan-out, as Redis PUBLISH/SUBSCRIBE). Delivery is at most once. ActionCable loads the adapter only for `adapter: ndb`: the gem does not need `actioncable` for anything else. A change made by another service (in Go, for example) gets to the browser through an `Ndb::Streams` consumer in the app that calls `ActionCable.server.broadcast`. See [ActionCable](https://ndb.clowk.in/clients/rails#actioncable).
+
 ## Errors
 
 The transport and daemon errors are defined by the gem `ndb`. They all live in the `Ndb` module (`Ndb::Error`, `Ndb::NotFound`, ...). For an ActiveRecord-like `rescue`, this gem adds one alias: `Ndb::RecordNotUnique` is `Ndb::UniqueViolation` (the same class). `Ndb::StaleObjectError`, `Ndb::RecordInvalid` and `Ndb::RecordNotSaved` exist only here, and they inherit from `Ndb::Error`. Every error has `code` (the daemon code) and `status` (the HTTP status).

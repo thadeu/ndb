@@ -1057,6 +1057,62 @@ expect(OrderEvent).not_to have_streamed(order_id: 0)
 - An unknown option or a bad value of `stream` raises `ArgumentError` when the class loads.
 - The errors of the daemon are the `Ndb::Error` classes of the gem `ndb`: see [Stream errors](ruby.md#stream-errors) of the Ruby SDK.
 
+## ActionCable
+
+`adapter: ndb` in `config/cable.yml` makes ndb the pub/sub of ActionCable, in place of Redis or PostgreSQL. The app needs no other server.
+
+```yaml
+# config/cable.yml
+development:
+  adapter: ndb
+
+production:
+  adapter: ndb
+  stream: cable          # the stream of the broadcasts (default "cable")
+  max_len: 10000         # entries kept in the stream (default 10 000)
+  channel_prefix: myapp_production
+```
+
+- The connection is the one of `config/ndb.yml` (`Ndb::Rails.client`).
+- ActionCable loads the adapter only when `cable.yml` has `adapter: ndb`. The gem `ndb-rails` does not need `actioncable` for anything else.
+
+### What it does
+
+- A broadcast appends one entry, `{"channel", "payload"}`, to the stream. The append trims the stream to about `max_len` entries (`approx: true`: whole blocks of 1 024 entries).
+- Each process (Puma, a worker) has one thread that reads the stream without a group (XREAD). Every process gets every entry, and gives it to its own subscribers. This is a fan-out, as Redis PUBLISH/SUBSCRIBE.
+- A subscription does not go to ndb. Only the thread reads.
+- The thread reads after the last ID that it saw, so an entry appended between two reads is not lost. At start, it reads after the last entry of the stream: old entries are not sent again. A stream that does not exist yet is made by the first broadcast.
+- Delivery is at most once, as in Redis pub/sub. A process that is down misses the broadcasts of that time. A browser that must not miss a change reads the state again when it connects.
+- An error of ndb (for example, the daemon restarts) goes to the ActionCable logger. The thread waits one second and reads again, after the same ID.
+- `channel_prefix` works as in the Redis adapter: two apps on one stream do not get each other's broadcasts.
+
+| Key | Default | What |
+|---|---|---|
+| `stream` | `"cable"` | The name of the stream. |
+| `max_len` | `10000` | The approximate number of entries that the stream keeps. |
+| `channel_prefix` | none | A prefix of each channel name (`prefix:channel`). |
+
+### Changes made outside Rails
+
+Turbo Streams and `ActionCable.server.broadcast` run in the Rails app. A change made by another service (in Go, in TypeScript, or with `curl`) gets to the browser through a stream consumer in the app, that broadcasts it:
+
+```ruby
+# app/streams/order_changed.rb
+class OrderChanged
+  include Ndb::Streams
+
+  stream :order_events, group: :cable
+
+  def perform(event)
+    ActionCable.server.broadcast("orders:#{event[:order_id]}", { status: event[:status] })
+  end
+end
+```
+
+- The Go service appends to `order_events`. `bundle exec ndb streams` runs the consumer (see [Run the consumers](#run-the-consumers)).
+- The group gives each entry to one process of the app. The broadcast then goes to every process through the `cable` stream.
+- Do not append to the `cable` stream from another service: the format of the payload belongs to ActionCable.
+
 ## Blobs
 
 Large values live in the blob store. The document keeps only a reference (`$blob`, `size`, `type`).
