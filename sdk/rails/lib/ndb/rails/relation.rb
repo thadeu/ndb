@@ -51,9 +51,9 @@ module Ndb
     def order(*args)
       sort = args.each_with_object(values[:order].dup) do |arg, out|
         case arg
-        when Hash then arg.each { |f, dir| out[f.to_s] = direction(dir) }
-        when String then out.merge!(parse_order(arg))
-        else out[arg.to_s] = 1
+        when Hash then arg.each { |f, dir| out[field_name(f)] = direction(dir) }
+        when String then parse_order(arg).each { |f, dir| out[field_name(f)] = dir }
+        else out[field_name(arg)] = 1
         end
       end
 
@@ -104,7 +104,7 @@ module Ndb
     end
 
     def group(*fields)
-      with(group: fields.flatten.map(&:to_s))
+      with(group: fields.flatten.map { |field| field_name(field) })
     end
 
     # Makes the aggregates of the relation (count, sum, average, minimum,
@@ -159,7 +159,7 @@ module Ndb
 
       raise ArgumentError, "select needs at least one field" if fields.empty?
 
-      with(select: fields.map(&:to_s))
+      with(select: fields.map { |field| field_name(field) })
     end
 
     # An empty relation: it sends no request. to_a is [], count is 0, and
@@ -449,7 +449,7 @@ module Ndb
     def pluck(*fields)
       raise ArgumentError, "pluck needs at least one field" if fields.empty?
 
-      names = fields.map(&:to_s)
+      names = fields.map { |field| field_name(field) }
       rows = fetch(to_query.merge("fields" => names)).rows
 
       plucked = rows.map do |row|
@@ -598,6 +598,14 @@ module Ndb
       return attrs if klass.attribute_names.include?("id")
 
       attrs.transform_keys { |key| key.to_s == "id" ? klass.primary_key : key }
+    end
+
+    # One field name of pluck, pick, select, order or group: id is _id here too, unless the
+    # model has its own id attribute.
+    def field_name(field)
+      name = field.to_s
+
+      name == "id" && !klass.attribute_names.include?("id") ? klass.primary_key : name
     end
 
     def add_clause(clause)

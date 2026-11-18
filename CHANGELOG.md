@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- **Rails, `id` in `pluck`, `pick`, `select`, `order` and `group`:** `id` is an alias of `_id` there too, as in `where`. Before, `pluck(:id)` read a field named `id` and gave `nil` for each row with no error, so a scope built from it (`where(app_id: App.pluck(:id))`) matched nothing.
+
 ## [1.25.0] - 2026-11-18
 
 ### Added

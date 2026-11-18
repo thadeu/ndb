@@ -37,6 +37,28 @@ class IdAliasTest < Minitest::Test
     assert @post.exists?
   end
 
+  # pluck, pick, select, order and group read id as _id too: pluck(:id) gave nil for each row,
+  # and a scope built from it (where(app_id: App.pluck(:id))) matched nothing.
+  def test_pluck_and_pick_read_id
+    assert_equal %w[p1 p2], @post.order(:_id).pluck(:id)
+    assert_equal [%w[p1 open], %w[p2 done]], @post.order(:_id).pluck(:id, :status)
+    assert_equal "p2", @post.where(status: "done").pick(:id)
+  end
+
+  def test_order_by_id
+    assert_equal %w[p2 p1], @post.order(id: :desc).pluck(:id)
+    assert_equal %w[p2 p1], @post.order("id DESC").pluck(:id)
+    assert_equal %w[p1 p2], @post.order(:id).pluck(:id)
+  end
+
+  def test_select_id
+    assert_equal %w[p1 p2], @post.select(:id, :status).order(:id).map(&:id)
+  end
+
+  def test_group_by_id
+    assert_equal({ "p1" => 1, "p2" => 1 }, @post.group(:id).count)
+  end
+
   def test_a_model_with_an_id_attribute_keeps_it
     legacy = model do
       attribute :id, :string, index: true
@@ -45,5 +67,7 @@ class IdAliasTest < Minitest::Test
     legacy.create!(_id: "a", id: "x")
 
     assert_equal ["a"], legacy.where(id: "x").pluck(:_id)
+    assert_equal ["x"], legacy.pluck(:id)
+    assert_equal ["x"], legacy.order(:id).pluck(:id)
   end
 end
