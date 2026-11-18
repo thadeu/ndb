@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.25.1] - 2026-11-18
+
 ### Fixed
 
 - **Rails, `id` in `pluck`, `pick`, `select`, `order` and `group`:** `id` is an alias of `_id` there too, as in `where`. Before, `pluck(:id)` read a field named `id` and gave `nil` for each row with no error, so a scope built from it (`where(app_id: App.pluck(:id))`) matched nothing.
@@ -771,7 +773,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.25.0...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.25.1...HEAD
+[1.25.1]: https://github.com/thadeu/ndb/compare/v1.25.0...v1.25.1
 [1.25.0]: https://github.com/thadeu/ndb/compare/v1.24.0...v1.25.0
 [1.24.0]: https://github.com/thadeu/ndb/compare/v1.23.3...v1.24.0
 [1.23.3]: https://github.com/thadeu/ndb/compare/v1.23.2...v1.23.3
