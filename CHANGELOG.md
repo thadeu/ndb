@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **Rails, a GlobalID on every record:** `Ndb::Record` includes `GlobalID::Identification` when the gem `globalid` is loaded (it comes with Rails), so `to_gid_param` and `GlobalID::Locator.locate` work, as with ActiveRecord. turbo-rails names the stream of a record by it.
+- **Rails, `Ndb::Turbo.refresh(*streamables)`:** a Turbo refresh of the stream of a record or of names (`("credits", id)`), at most once per `Ndb::Turbo.window` (2 s; 0 in the test environment) for each stream and process. The calls inside the window leave one refresh for its end, so the page shows the last change. A failed refresh writes a warning and never raises. The model macro `broadcasts_live_refreshes` calls it after each commit. The railtie loads it only when the app has turbo-rails, which is not a dependency of the gem.
+
 ## [1.25.1] - 2026-11-18
 
 ### Fixed

@@ -16,6 +16,10 @@ module Ndb
     include Transactions
     include Associations
 
+    # to_global_id and to_gid_param, as an ActiveRecord model. The locator
+    # calls find(id). turbo-rails names the stream of a record by it.
+    include GlobalID::Identification if defined?(::GlobalID::Identification)
+
     extend ActiveSupport::DescendantsTracker
     extend DynamicFinders
 

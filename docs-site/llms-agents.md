@@ -42,7 +42,7 @@ ndb is one Go daemon. It stores documents (JSON objects) in collections and answ
 
 ### Pick the SDK page
 
-- **Rails app**: `ndb-rails`. Models with `Ndb::Record` (`where` for a list, `find_by` for one, `find(id)` by id, `to_ndb` gives the JSON body). Each model has `created_at` and `updated_at` with an index, and `scope`, `uniqueness:`, `dependent:` and `readonly?` work as in ActiveRecord. Streams with `include Ndb::Streams` in `app/streams`, run with `bundle exec ndb streams`, test with `Ndb::Streams.inline!` or `perform_now`. ActionCable on ndb: `adapter: ndb` in `config/cable.yml` (a stream `cable`, read without a group by each process: fan-out, at most once).
+- **Rails app**: `ndb-rails`. Models with `Ndb::Record` (`where` for a list, `find_by` for one, `find(id)` by id, `to_ndb` gives the JSON body). Each model has `created_at` and `updated_at` with an index, and `scope`, `uniqueness:`, `dependent:` and `readonly?` work as in ActiveRecord. Streams with `include Ndb::Streams` in `app/streams`, run with `bundle exec ndb streams`, test with `Ndb::Streams.inline!` or `perform_now`. ActionCable on ndb: `adapter: ndb` in `config/cable.yml` (a stream `cable`, read without a group by each process: fan-out, at most once). Turbo: each record has a GlobalID (`turbo_stream_from @record`); `Ndb::Turbo.refresh(record)` or `("name", id)` sends a throttled Turbo refresh (one per 2 s per stream and process, 0 s in tests), `broadcasts_live_refreshes` on a model does it after each commit.
 - **Plain Ruby**: the gem `ndb` (`Ndb::Client`).
 - **Go**: `github.com/thadeu/ndb/sdk/go` (standard library only).
 - **TypeScript (Node, Bun, Hono)**: `@thadeu/ndb`.

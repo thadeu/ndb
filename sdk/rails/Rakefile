@@ -2,10 +2,21 @@
 
 require "rake/testtask"
 
-Rake::TestTask.new(:test) do |t|
+Rake::TestTask.new("test:core") do |t|
   t.libs << "test" << "lib"
-  t.pattern = "test/**/*_test.rb"
+  t.test_files = FileList["test/**/*_test.rb"].exclude("test/turbo/**/*")
   t.warning = false
 end
+
+# turbo-rails loads a Rails engine: its tests run in their own process, so
+# test:core proves that the gem works without it.
+Rake::TestTask.new("test:turbo") do |t|
+  t.libs << "test" << "lib"
+  t.pattern = "test/turbo/**/*_test.rb"
+  t.warning = false
+end
+
+desc "Run the core and the turbo tests"
+task test: %w[test:core test:turbo]
 
 task default: :test

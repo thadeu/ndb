@@ -1112,6 +1112,106 @@ end
 - The Go service appends to `order_events`. `bundle exec ndb streams` runs the consumer (see [Run the consumers](#run-the-consumers)).
 - The group gives each entry to one process of the app. The broadcast then goes to every process through the `cable` stream.
 - Do not append to the `cable` stream from another service: the format of the payload belongs to ActionCable.
+- For a page that shows the state again, the consumer can call `Ndb::Turbo.refresh` in place of a broadcast: see [Turbo Streams](#turbo-streams).
+
+## Turbo Streams
+
+With [turbo-rails](https://github.com/hotwired/turbo-rails) and the ActionCable adapter, a page shows each change live, with no Redis. The gem `ndb-rails` does not need `turbo-rails`: the railtie loads `Ndb::Turbo` only when the app has it (or `require "ndb/turbo"`).
+
+1. ActionCable on ndb:
+
+   ```yaml
+   # config/cable.yml
+   production:
+     adapter: ndb
+   ```
+
+2. The page listens to the stream of a record, and refreshes with a morph that keeps the scroll:
+
+   ```erb
+   <%# app/views/domains/show.html.erb %>
+   <%= turbo_refreshes_with method: :morph, scroll: :preserve %>
+   <%= turbo_stream_from @domain %>
+   ```
+
+3. The code that changes the data tells the pages to refresh:
+
+   ```ruby
+   Ndb::Turbo.refresh(domain)                    # the stream of a record (its GlobalID)
+   Ndb::Turbo.refresh("credits", account.id)     # the stream "credits:<id>"
+   ```
+
+   The page of `"credits", account.id` listens with `turbo_stream_from "credits", account.id`.
+
+### The refresh window
+
+A burst of changes (a job that writes 50 documents a second) would reload every open tab many times a second. `Ndb::Turbo.refresh` sends at most one refresh per window (2 seconds) for each stream:
+
+- The first call sends at once.
+- The calls inside the window leave one pending refresh. It goes at the end of the window, so the page always shows the last change.
+- Each stream has its own window. The stream name is the one of `turbo_stream_from` (`Turbo::StreamsChannel`), so a record and `("credits", id)` both work.
+- The window is per process: two Puma workers can each send one. There is no window across processes.
+- A refresh that fails (for example, ndb is down) never raises: it writes a warning to the log (`Ndb::Streams.logger`, the Rails logger). The work that made the change does not fail because of a page.
+- The pending refresh waits in a thread. When the process stops in the window, it is not sent.
+
+| Setting | Default | What |
+|---|---|---|
+| `Ndb::Turbo.window` | `2` (seconds), `0` in the test environment | The time between two refreshes of one stream. |
+
+In the test environment (`Rails.env.test?`, or `RAILS_ENV`/`RACK_ENV` = `test`) the window is 0: each call sends one refresh at once, so a test can count them with the helpers of turbo-rails:
+
+```ruby
+assert_turbo_stream_broadcasts domain, count: 1 do
+  domain.update!(name: "b.test")
+end
+```
+
+Set `Ndb::Turbo.window = 0.5` (in an initializer) for another window, and `nil` for the default again. `Ndb::Turbo.reset!` forgets the windows.
+
+### A model that refreshes its pages
+
+`broadcasts_live_refreshes` calls `Ndb::Turbo.refresh` after each commit (create, update, destroy) of the model. With no block, it refreshes the stream of the record. A block gives other streams; it runs on the record:
+
+```ruby
+class Domain < Ndb::Record
+  broadcasts_live_refreshes
+end
+
+class Usage < Ndb::Record
+  broadcasts_live_refreshes { ["credits", account_id] }
+end
+```
+
+### GlobalID
+
+Every `Ndb::Record` has a GlobalID, as an ActiveRecord model (when the gem `globalid` is loaded; it comes with Rails). `turbo_stream_from @domain` and `Ndb::Turbo.refresh(domain)` name the stream by it, and Active Job passes a record to a job by it.
+
+```ruby
+domain.to_gid_param                       # "Z2lkOi8v..."
+GlobalID::Locator.locate(domain.to_gid)   # Domain.find(id)
+```
+
+- The locator calls `find(id)` (and `where(_id: ids)` for `locate_many` with `ignore_missing: true`). The id is the `_id`, a string. A missing record raises `Ndb::NotFound`.
+- A new record has no id, so it has no GlobalID (`URI::GID::MissingModelIdError`).
+
+### A change made by another service
+
+A change that a Go or TypeScript service makes in ndb does not run Ruby code in the app. The service appends an event to a stream, and a consumer in the app refreshes the pages:
+
+```ruby
+# app/streams/domain_changed.rb
+class DomainChanged
+  include Ndb::Streams
+
+  stream :domain_events, group: :pages
+
+  def perform(event)
+    Ndb::Turbo.refresh(Domain.find(event[:domain_id]))
+  end
+end
+```
+
+The consumer runs in `bundle exec ndb streams`. The refresh goes to every web process through the `cable` stream.
 
 ## Blobs
 
@@ -1366,4 +1466,4 @@ ndb serve -config test/ndb.yml -data-dir "$(mktemp -d)" -unix /tmp/ndb-test.sock
 
 ### The tests of this gem
 
-The tests of this gem build the daemon from the repository (`go build ./cmd/ndb`), start it on a short temp unix socket (macOS allows 104 bytes), wait for `GET /_health` to return 200, and stop it at exit. Run them with `bundle exec rake test` in `sdk/rails`; its Gemfile uses the gem `ndb` from `../ruby`.
+The tests of this gem build the daemon from the repository (`go build ./cmd/ndb`), start it on a short temp unix socket (macOS allows 104 bytes), wait for `GET /_health` to return 200, and stop it at exit. Run them with `bundle exec rake test` in `sdk/rails`; its Gemfile uses the gem `ndb` from `../ruby`. `rake test` runs two processes: `test:core` (all the tests, without turbo-rails, so they prove the gem works without it) and `test:turbo` (`test/turbo`, a small Rails app with turbo-rails).
