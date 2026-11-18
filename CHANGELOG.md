@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **Rails, an ActionCable adapter on ndb streams:** `adapter: ndb` in `config/cable.yml` (keys `stream`, `max_len`, `channel_prefix`). A broadcast appends one entry to a stream; each process reads it without a group, so every process gets every broadcast, as Redis PUBLISH/SUBSCRIBE. `actioncable` is not a dependency of the gem.
+
 ## [1.24.0] - 2026-11-12
 
 ### Added
