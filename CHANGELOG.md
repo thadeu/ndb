@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.26.0] - 2026-11-18
+
 ### Added
 
 - **Rails, a GlobalID on every record:** `Ndb::Record` includes `GlobalID::Identification` when the gem `globalid` is loaded (it comes with Rails), so `to_gid_param` and `GlobalID::Locator.locate` work, as with ActiveRecord. turbo-rails names the stream of a record by it.
@@ -778,7 +780,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.25.1...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.26.0...HEAD
+[1.26.0]: https://github.com/thadeu/ndb/compare/v1.25.1...v1.26.0
 [1.25.1]: https://github.com/thadeu/ndb/compare/v1.25.0...v1.25.1
 [1.25.0]: https://github.com/thadeu/ndb/compare/v1.24.0...v1.25.0
 [1.24.0]: https://github.com/thadeu/ndb/compare/v1.23.3...v1.24.0
