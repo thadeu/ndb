@@ -269,7 +269,7 @@ ndb -config /etc/ndb/ndb.yml -token-file /etc/ndb/token
 
 ### Scoped tokens
 
-`tokens:` in `ndb.yml` gives each app its own token, limited to some collections. The token of `-token-file` keeps every right; both can be set.
+`tokens:` in `ndb.yml` gives each app its own token, limited to some collections of the default database (a scoped token may not use another [database](databases.md)). The token of `-token-file` keeps every right; both can be set.
 
 ```yaml
 tokens:

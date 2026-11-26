@@ -67,6 +67,10 @@ func codeOf(err error) string {
 		return coded.Code()
 	}
 
+	if code := databaseCode(err); code != "" {
+		return code
+	}
+
 	switch {
 	case errors.Is(err, catalog.ErrConflict):
 		return "catalog_conflict"
@@ -103,7 +107,7 @@ func codeOf(err error) string {
 
 func statusOf(code string) int {
 	switch code {
-	case "not_found", "unknown_collection", "unknown_route", "unknown_group":
+	case "not_found", "unknown_collection", "unknown_route", "unknown_group", "database_not_found":
 		return http.StatusNotFound
 	case "duplicate_id", "unique_violation", "catalog_conflict", "direct_collection", "collection_exists", "group_exists", "lock_expired", "tx_conflict", "key_rotating":
 		return http.StatusConflict

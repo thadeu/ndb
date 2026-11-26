@@ -101,7 +101,10 @@ The file is readable with `head`, `grep` and `jq`:
 | `wal` | the WAL lines of one collection, as stored, each with its `_crc` |
 | `snapshot` | only when `wal_retention` deleted the first WAL files: one line per live document at the backup point, then an empty `wal` section |
 | `blob` | the blobs that the saved documents use, in base64 (1 MiB per line for big ones). `-no-blobs` leaves them out. |
+| `database` | format 2 only: the lines after it, up to the next `database` line, are of that [database](databases.md) (catalog, cursors, WAL, streams, blobs) |
 | `end` | the line count and CRC of everything before it. A file without it is cut and is refused. |
+
+A daemon with other [databases](databases.md) writes format 2 (`"ndb_backup":2`), and `ndb restore` puts every database back. Older daemons refuse format 2 with a clear error, so they never restore half of it. A daemon with no other database writes format 1, as before.
 
 - **Daemon running:** the CLI asks the daemon on the unix socket (`-url unix://...`, `NDB_URL`, or `listen.unix` of `ndb.yml`). The daemon takes a mark between two commits, so the file never holds half a transaction. Online backup is refused over TCP.
 - **Daemon stopped:** the CLI opens the data dir itself, under the lock, like a short daemon start.

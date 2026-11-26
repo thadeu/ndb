@@ -514,7 +514,7 @@ func (s *Server) removeID(w http.ResponseWriter, r *http.Request, db *engine.DB)
 	}
 
 	if stream && n > 0 {
-		s.streams.Deleted(r.Context(), r.PathValue("coll"), id)
+		s.streamsFor(r).Deleted(r.Context(), r.PathValue("coll"), id)
 	}
 
 	s.metrics.writes.Add(int64(n))

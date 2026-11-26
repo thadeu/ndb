@@ -32,7 +32,7 @@ type router struct {
 }
 
 // param names the third segment of an action.
-var param = map[string]string{"_indexes": "field", "_blobs": "ref"}
+var param = map[string]string{"_indexes": "field", "_blobs": "ref", "_databases": "database"}
 
 func (rt *router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	segs, ok := segments(r.URL.EscapedPath())

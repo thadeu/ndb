@@ -140,6 +140,11 @@ module Ndb
   class UnknownGroup < StreamError; end
   class GroupExists < StreamError; end
 
+  # A database name that is not [a-z0-9][a-z0-9_-]{0,62}, or a read of a
+  # database that does not exist.
+  class InvalidDatabase < Error; end
+  class DatabaseNotFound < Error; end
+
   # The daemon error code -> the Ruby class.
   CODE_TO_ERROR = {
     "unauthorized" => Unauthorized,
@@ -207,7 +212,9 @@ module Ndb
     "invalid_stream_id" => InvalidStreamID,
     "stream_id_too_small" => StreamIDTooSmall,
     "unknown_group" => UnknownGroup,
-    "group_exists" => GroupExists
+    "group_exists" => GroupExists,
+    "invalid_database" => InvalidDatabase,
+    "database_not_found" => DatabaseNotFound
   }.freeze
 
   def self.error_for(code, message, status)

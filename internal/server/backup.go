@@ -48,7 +48,9 @@ func (s *Server) backup(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	began := time.Now()
 	out := &firstWrite{w: w}
 
-	err = db.Backup(r.Context(), out, backup.Options{Version: s.version, NoBlobs: req.NoBlobs, Streams: s.streams.Snapshot})
+	opts := backup.Options{Version: s.version, NoBlobs: req.NoBlobs, Streams: s.streamsFor(r).Snapshot, DatabaseStreams: s.snapshotsOf(db)}
+
+	err = db.Backup(r.Context(), out, opts)
 
 	if err == nil {
 		s.logInfo(w, r, "backup done", slog.Int64("ms", time.Since(began).Milliseconds()))

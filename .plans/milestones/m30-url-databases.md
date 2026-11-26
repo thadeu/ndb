@@ -1,6 +1,6 @@
 # M30 — One URL: token and database
 
-Status: in progress (E30.1 done) · Depends on: nothing · Docs: `docs/dev/configuration.md`, `docs/dev/http.md`, `docs/dev/clients/`, `docs-site/llms-agents.md`
+Status: in progress (E30.1 and E30.2 done) · Depends on: nothing · Docs: `docs/dev/configuration.md`, `docs/dev/http.md`, `docs/dev/clients/`, `docs-site/llms-agents.md`
 
 ## Goal
 
@@ -50,9 +50,12 @@ database: a write makes it (as a write makes a collection today), a read
 answers `404 database_not_found`.
 
 **On disk.** `<data_dir>/` is `default` (as today).
-`<data_dir>/_databases/<name>/` holds the others, each with its own
-catalog. One WAL per database (open question: one shared WAL is cheaper on
-fsync; decide with a bench in E30.3).
+`<data_dir>/_databases/<name>/` holds the others, each a data dir of its own
+(catalog, cursors, blobs, collections). Each collection already has its own
+WAL, so a database adds no WAL. Built (E30.2): a database is an engine of
+its own, opened by the default one at start; it shares the lock, the
+settings, the encryption key and the write budget. Docs:
+`docs/dev/databases.md`.
 
 **Admin.** `GET /_databases`, `DELETE /_databases/{name}` (with
 `?confirm=<name>`), in `_stats` and in the console.
@@ -80,14 +83,21 @@ query `?db=` is also accepted on tcp and https.
 
 ### E30.2 — Databases in the daemon
 
-- [ ] Tests first: two databases with a `users` collection each; no header
+- [x] Tests first: two databases with a `users` collection each; no header
       is `default`; a 1.26 data dir starts and answers the same (golden).
-- [ ] Engine: a database is a set of collections with its own catalog and
-      dir; `default` is the root of today.
-- [ ] Server: the `Ndb-Database` header on every collection route;
-      `/_databases` routes; `database_not_found` in `docs/dev/http/errors.md`.
-- [ ] Backup, restore and PITR take one database or all.
-- [ ] Limits and memory: `memory_limit` is for the daemon (all databases).
+- [x] Engine: a database is a set of collections with its own catalog and
+      dir; `default` is the root of today. Key rotation reaches every
+      database; a broken database stops the start.
+- [x] Server: the `Ndb-Database` header on every collection route;
+      `/_databases` routes; `invalid_database` and `database_not_found` in
+      `docs/dev/http/errors.md`; a streams service per database; scoped
+      tokens stay in the default database; logs name the database.
+- [x] Backup takes one database (header) or all (format 2; a daemon with no
+      database still writes format 1). Restore puts every database back.
+      PITR works per database. A restore of one database into a running
+      daemon: later.
+- [x] Limits and memory: the write budget and `memory_limit` are for the
+      daemon (all databases).
 
 ### E30.3 — Databases in the SDKs and the console
 
@@ -96,7 +106,6 @@ query `?db=` is also accepted on tcp and https.
 - [ ] Go, Ruby, Rails, TS send the header from the URL path or `?db=`.
 - [ ] CLI: `ndb query`, `stats`, `backup` take the database of the URL.
 - [ ] Console: a database selector; a connection URL with a database.
-- [ ] Bench: one WAL per database versus one shared WAL; record the choice.
 
 ## Exit criteria
 

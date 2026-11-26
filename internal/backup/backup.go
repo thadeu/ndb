@@ -11,7 +11,15 @@
 //	<WAL lines of the collection, byte for byte, each with its _crc>
 //	{"_section":"stream","collection":"jobs","data":"<base64>"}
 //	{"_section":"blob","ref":"sha256:...","type":"...","size":N,"data":"<base64>"}
+//	{"_section":"database","name":"billion","collections":["users"]}
+//	<the catalog, cursor, wal, stream and blob lines of that database>
 //	{"_section":"end","lines":N,"crc":"<crc32 hex>"}
+//
+// The first lines are of the default database (the data dir itself). A
+// daemon with other databases writes format 2: a database line, then the
+// lines of that database, for each one. The settings are of the whole
+// daemon and come once, at the top. A daemon with no other database writes
+// format 1, the format of every ndb before databases.
 //
 // The end line counts the lines before it and carries the CRC-32 (IEEE) of
 // every byte before it, so a cut or damaged file is found before a restore
@@ -39,6 +47,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"time"
@@ -53,8 +62,13 @@ import (
 	"github.com/thadeu/ndb/internal/wal"
 )
 
-// FormatVersion is the value of "ndb_backup" in the header line.
-const FormatVersion = 1
+// FormatVersion is the value of "ndb_backup" in the header line of a backup
+// with databases. A backup with none is FormatPlain, so older daemons can
+// restore it.
+const (
+	FormatPlain   = 1
+	FormatVersion = 2
+)
 
 // blobChunk is the raw size of one blob line. A blob over it is split into
 // lines with "part" and "parts", so neither the backup nor the restore holds
@@ -100,6 +114,16 @@ type Source struct {
 	// Streams gives a consistent copy of the group store of a stream, or
 	// nil when it has none.
 	Streams func(name string) ([]byte, error)
+
+	// Databases are the other databases of the daemon (Settings is not used
+	// in them), in the order they are written.
+	Databases []Database
+}
+
+// Database is one database of the daemon other than the default one.
+type Database struct {
+	Name   string
+	Source Source
 }
 
 // Snapshot is the state of one collection at tx Tx.
@@ -121,6 +145,9 @@ type Options struct {
 	// Streams gives a consistent copy of the group store of a stream while
 	// the daemon holds it open. Nil reads the file (a stopped daemon).
 	Streams func(name string) ([]byte, error)
+
+	// DatabaseStreams gives Streams for another database of the daemon.
+	DatabaseStreams func(database string) func(name string) ([]byte, error)
 }
 
 type lineWriter struct {
@@ -211,6 +238,12 @@ type streamLine struct {
 // StreamFile is the group store of a stream in its collection dir.
 const StreamFile = "streams.bolt"
 
+type databaseLine struct {
+	Section     string   `json:"_section"`
+	Name        string   `json:"name"`
+	Collections []string `json:"collections"`
+}
+
 type endLine struct {
 	Section string `json:"_section"`
 	Lines   int    `json:"lines"`
@@ -221,17 +254,17 @@ type endLine struct {
 func Write(w io.Writer, src Source, opts Options) error {
 	lw := &lineWriter{bw: bufio.NewWriterSize(w, 256<<10), crc: crc32.NewIEEE()}
 
-	names := make([]string, 0, len(src.Defs))
+	format := FormatPlain
 
-	for _, d := range src.Defs {
-		names = append(names, d.Name)
+	if len(src.Databases) > 0 {
+		format = FormatVersion
 	}
 
 	err := lw.section(header{
-		NdbBackup:   FormatVersion,
+		NdbBackup:   format,
 		Version:     opts.Version,
 		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
-		Collections: names,
+		Collections: namesOf(src.Defs),
 	})
 	if err != nil {
 		return err
@@ -243,6 +276,36 @@ func Write(w io.Writer, src Source, opts Options) error {
 		}
 	}
 
+	if err := writeBody(lw, src, opts); err != nil {
+		return err
+	}
+
+	for _, d := range src.Databases {
+		if err := lw.section(databaseLine{Section: "database", Name: d.Name, Collections: namesOf(d.Source.Defs)}); err != nil {
+			return err
+		}
+
+		if err := writeBody(lw, d.Source, opts); err != nil {
+			return fmt.Errorf("database %s: %w", d.Name, err)
+		}
+	}
+
+	return finish(lw)
+}
+
+func namesOf(defs []catalog.Def) []string {
+	names := make([]string, 0, len(defs))
+
+	for _, d := range defs {
+		names = append(names, d.Name)
+	}
+
+	return names
+}
+
+// writeBody writes the lines of one database: its catalog, watch
+// positions, WAL (or snapshot), stream stores and blobs.
+func writeBody(lw *lineWriter, src Source, opts Options) error {
 	for _, d := range src.Defs {
 		if err := lw.section(catalogLine{Section: "catalog", Name: d.Name, Definition: d}); err != nil {
 			return err
@@ -283,7 +346,7 @@ func Write(w io.Writer, src Source, opts Options) error {
 		}
 	}
 
-	return finish(lw)
+	return nil
 }
 
 // writeStream saves the group store of a stream.
@@ -564,7 +627,7 @@ func Extract(r io.Reader, stage string) error {
 		return err
 	}
 
-	x := &extractor{stage: stage, crc: crc32.NewIEEE(), seen: map[string]bool{}, defs: map[string]catalog.Def{}}
+	x := &extractor{stage: stage, crc: crc32.NewIEEE()}
 
 	defer x.close()
 
@@ -586,8 +649,16 @@ func openInput(r io.Reader) (io.Reader, error) {
 type extractor struct {
 	stage    string
 	settings *settings.Store
-	crc      hash.Hash32
-	lines    int
+
+	// dir is the data dir of the database being read: stage, then
+	// stage/_databases/<name> after a database line. format is the one of
+	// the header; databases are the names already read.
+	dir       string
+	format    int
+	databases map[string]bool
+
+	crc   hash.Hash32
+	lines int
 
 	names map[string]bool
 	seen  map[string]bool
@@ -732,34 +803,87 @@ func (x *extractor) header(line []byte) error {
 		return ErrNotBackup
 	}
 
-	if h.NdbBackup != FormatVersion {
-		return fmt.Errorf("backup format %d is not supported (this ndb reads %d)", h.NdbBackup, FormatVersion)
+	if h.NdbBackup != FormatPlain && h.NdbBackup != FormatVersion {
+		return fmt.Errorf("backup format %d is not supported (this ndb reads %d and %d)", h.NdbBackup, FormatPlain, FormatVersion)
 	}
 
-	x.names = map[string]bool{}
+	x.format = h.NdbBackup
+	x.databases = map[string]bool{}
 
-	for _, n := range h.Collections {
+	return x.openDatabase(x.stage, h.Collections, "header")
+}
+
+// openDatabase starts the database of dir: its catalog, watch positions and
+// blob store, and the collection names of its header or database line.
+func (x *extractor) openDatabase(dir string, names []string, where string) error {
+	x.dir = dir
+	x.names = map[string]bool{}
+	x.seen = map[string]bool{}
+	x.defs = map[string]catalog.Def{}
+
+	for _, n := range names {
 		if !safeName(n) {
-			return fmt.Errorf("header: bad collection name %q", n)
+			return fmt.Errorf("%s: bad collection name %q", where, n)
 		}
 
 		x.names[n] = true
 	}
 
+	if err := disk.MkdirAll(dir); err != nil {
+		return err
+	}
+
 	var err error
 
-	if x.cat, err = catalog.Open(filepath.Join(x.stage, "catalog.bolt"), catalog.Options{}); err != nil {
+	if x.cat, err = catalog.Open(filepath.Join(dir, "catalog.bolt"), catalog.Options{}); err != nil {
 		return err
 	}
 
-	if x.cur, err = cursors.Open(filepath.Join(x.stage, "cursors.bolt")); err != nil {
+	if x.cur, err = cursors.Open(filepath.Join(dir, "cursors.bolt")); err != nil {
 		return err
 	}
 
-	x.blobs, err = blob.Open(disk, filepath.Join(x.stage, "blobs"))
+	x.blobs, err = blob.Open(disk, filepath.Join(dir, "blobs"))
 
 	return err
 }
+
+// databaseStart ends the database being read and starts the one of the
+// line, under stage/_databases.
+func (x *extractor) databaseStart(line []byte) error {
+	var d databaseLine
+
+	if err := json.Unmarshal(line, &d); err != nil {
+		return fmt.Errorf("line %d: %w", x.lines, err)
+	}
+
+	if x.format != FormatVersion {
+		return fmt.Errorf("line %d: a database line in a backup of format %d", x.lines, x.format)
+	}
+
+	if !databaseName.MatchString(d.Name) || d.Name == "default" || x.databases[d.Name] {
+		return fmt.Errorf("line %d: database %q is invalid or repeated", x.lines, d.Name)
+	}
+
+	if x.pending != nil {
+		return fmt.Errorf("line %d: a database line inside a split blob", x.lines)
+	}
+
+	x.databases[d.Name] = true
+
+	err := errors.Join(x.cat.Close(), x.cur.Close())
+
+	x.cat, x.cur = nil, nil
+
+	if err != nil {
+		return err
+	}
+
+	return x.openDatabase(filepath.Join(x.stage, "_databases", d.Name), d.Collections, fmt.Sprintf("line %d", x.lines))
+}
+
+// databaseName is the rule of engine.ValidDatabase.
+var databaseName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
 
 func safeName(n string) bool {
 	return n != "" && n != "." && n != ".." && filepath.Base(n) == n && filepath.ToSlash(n) == n
@@ -787,6 +911,8 @@ func (x *extractor) section(sec string, line []byte) error {
 		return x.blobLine(line)
 	case "stream":
 		return x.streamStore(line)
+	case "database":
+		return x.databaseStart(line)
 	}
 
 	return fmt.Errorf("line %d: unknown section %q", x.lines, sec)
@@ -846,7 +972,7 @@ func (x *extractor) streamStore(line []byte) error {
 		return fmt.Errorf("line %d: %w", x.lines, err)
 	}
 
-	dir := filepath.Join(x.stage, "collections", sl.Collection)
+	dir := filepath.Join(x.dir, "collections", sl.Collection)
 
 	if err := disk.MkdirAll(dir); err != nil {
 		return err
@@ -878,7 +1004,7 @@ func (x *extractor) walStart(line []byte) error {
 
 	x.seen[w.Collection] = true
 
-	dir := filepath.Join(x.stage, "collections", w.Collection)
+	dir := filepath.Join(x.dir, "collections", w.Collection)
 	base := uint64(0)
 
 	if x.snap != nil {

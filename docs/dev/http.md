@@ -33,6 +33,8 @@ The query language (operators, date math, `$elemMatch`) is on [Query](query.md),
 | GET | `/_health` | [System](http/system.md#get-health) |
 | GET | `/_metrics` | [System](http/system.md#get-metrics) |
 | GET | `/_collections` | [System](http/system.md#get-collections) |
+| GET | `/_databases` | [System](http/system.md#get-databases) |
+| DELETE | `/_databases/{name}?confirm={name}` | [System](http/system.md#delete-databases-name) |
 | GET | `/_stats` | [System](http/system.md#get-stats) |
 | GET | `/_size` | [System](http/system.md#get-size) |
 | POST | `/_backup` | [System](http/system.md#post-backup) |
@@ -124,6 +126,7 @@ See [Authentication](configuration.md#authentication) and [Security](security.md
 - **Numbers:** JSON numbers. Queries and sorts compare them as 64-bit floats; an integer in a document keeps its exact text.
 - **Times:** on the collection `time` field (and `expires_field`), RFC 3339 strings compare as instants, and a string that starts with `now` is [date math](query.md#date-math) (`now-7d/d`).
 - **Ids:** `_id` is a string. A document without one gets a UUIDv7 (time ordered). See [Document id](configuration.md#document-id).
+- **Database:** the header `Ndb-Database: <name>` picks a [database](databases.md) other than the default one. No header is the default database, as before. A bad name is `400 invalid_database`; a read of a database that does not exist is `404 database_not_found`.
 - **Collection names:** `^[a-z0-9][a-z0-9_-]{0,63}$`. A name with one `*` at the end is a [collection pattern](http/queries.md#collection-patterns), for reads.
 
 ## Answers

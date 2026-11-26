@@ -29,7 +29,8 @@ The SDKs turn each code into a typed error: Go `ndb.ErrUnknownCollection` (`erro
 | `pitr_off` | 400 | A restore of a collection with `pitr: off`. |
 | `lookup_invalid` | 400 | A [lookup](../query.md#lookup) or `$lookup` that is not valid (a relation without a kind or a foreign key, an unknown key, more than two levels, a `$lookup` before another stage). |
 | `lookup_unindexed` | 400 | The other side of a lookup has no index on the field it searches. The message gives the `_indexes` route. |
-| `confirm_required` | 400 | `_truncate` or drop without `confirm` equal to the collection name. |
+| `confirm_required` | 400 | `_truncate` or drop without `confirm` equal to the collection (or database) name. |
+| `invalid_database` | 400 | The `Ndb-Database` header (or the name in `/_databases/{name}`) is not `^[a-z0-9][a-z0-9_-]{0,62}$`. |
 | `catalog_invalid` | 400 | The collection definition or name is not valid (for example, it has `id`). |
 | `ttl_not_enabled` | 400 | `expire_in`, `_expire` or `_persist` on a collection without `expires_field`. |
 | `ttl_derived` | 400 | The same on a collection whose expiry comes from `ttl` + `time`. |
@@ -51,6 +52,7 @@ The SDKs turn each code into a typed error: Go `ndb.ErrUnknownCollection` (`erro
 | `tx_conflict` | 409 | An `update` or a `delete` of a [transaction](documents.md#post-coll-tx) matched nothing: no such document, or its `query` (a `_v` guard) does not match. Nothing of the transaction was written; the message names the op. |
 | `lock_expired` | 409 | A write or an `_unlock` with a `lock` token that holds no lock on the document: the lock expired or was released. Nothing was written. |
 | `unknown_collection` | 404 | The collection does not exist. |
+| `database_not_found` | 404 | A read, or a drop, of a [database](../databases.md) that does not exist. |
 | `collection_exists` | 409 | A rename to a name that exists (without `replace`), or a restore `to` a name that exists. |
 | `unknown_route` | 404 | No route has this path. |
 | `method_not_allowed` | 405 | The path exists with other methods (see `Allow`). |

@@ -94,4 +94,6 @@ var (
 	ErrStreamIDTooSmall  = &Error{Code: "stream_id_too_small"}
 	ErrUnknownGroup      = &Error{Code: "unknown_group"}
 	ErrGroupExists       = &Error{Code: "group_exists"}
+	ErrInvalidDatabase   = &Error{Code: "invalid_database"}
+	ErrDatabaseNotFound  = &Error{Code: "database_not_found"}
 )

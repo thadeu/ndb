@@ -297,7 +297,7 @@ func (s *Server) truncate(w http.ResponseWriter, r *http.Request, db *engine.DB)
 
 	// The hold keeps every stream request out until the group store is
 	// gone: a request that opened it in between would keep the old groups.
-	release := s.streams.Hold(name)
+	release := s.streamsFor(r).Hold(name)
 
 	err := db.Truncate(name, r.URL.Query().Get("confirm"))
 
@@ -319,7 +319,7 @@ func (s *Server) truncate(w http.ResponseWriter, r *http.Request, db *engine.DB)
 func (s *Server) drop(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
 
-	release := s.streams.Hold(name)
+	release := s.streamsFor(r).Hold(name)
 
 	err := db.Drop(name, r.URL.Query().Get("confirm"))
 
@@ -360,7 +360,7 @@ func (s *Server) rename(w http.ResponseWriter, r *http.Request, db *engine.DB) {
 	name := r.PathValue("coll")
 
 	if err == nil {
-		release := s.streams.Hold(name, req.To)
+		release := s.streamsFor(r).Hold(name, req.To)
 
 		err = db.Rename(name, req.To, req.Replace)
 
