@@ -16,7 +16,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
-- **Console:** the path of an `https://host/path` connection URL names a database now, as in the SDKs; it was a proxy prefix before.
+- **Upgrade note, the path of `NDB_URL` is the database now** (Go, Ruby, Rails, TS, the CLI and the console). Before, the SDKs and the CLI dropped the path of a `tcp://` or `https://` URL, and the console kept it as a proxy prefix. An URL with a path, such as `https://host/ndb`, now reads and writes the database `ndb`: remove the path to keep the default database. An URL with no path works as before.
+- **A token without a colon is refused:** `tcp://<token>@host` was dropped with no error; now it is an error that says to write `tcp://:<token>@host`.
 - **`GET /_size` and `/_stats`:** the other databases are not in the bytes of the default one; `databases_bytes` gives them.
 
 ## [1.26.0] - 2026-11-18
