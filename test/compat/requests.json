@@ -1,0 +1,297 @@
+[
+ {
+  "phase": "write",
+  "method": "PUT",
+  "path": "/users",
+  "body": {
+   "indexes": [
+    "account_id",
+    "account_id,created_at"
+   ],
+   "unique": [
+    "account_id,email"
+   ]
+  }
+ },
+ {
+  "phase": "write",
+  "method": "POST",
+  "path": "/users/_bulk",
+  "body": {
+   "docs": [
+    {
+     "_id": "u1",
+     "account_id": "a1",
+     "email": "ana@x.io",
+     "name": "Ana",
+     "created_at": "2026-01-02T10:00:00Z",
+     "credits": 100,
+     "tags": [
+      "admin",
+      "beta"
+     ]
+    },
+    {
+     "_id": "u2",
+     "account_id": "a1",
+     "email": "bia@x.io",
+     "name": "Bia",
+     "created_at": "2026-01-03T10:00:00Z",
+     "credits": 50,
+     "tags": [
+      "beta"
+     ]
+    },
+    {
+     "_id": "u3",
+     "account_id": "a2",
+     "email": "ana@x.io",
+     "name": "Ana B",
+     "created_at": "2026-01-04T10:00:00Z",
+     "credits": 0,
+     "tags": []
+    },
+    {
+     "_id": "u4",
+     "account_id": "a2",
+     "email": "caio@x.io",
+     "name": "Caio",
+     "created_at": "2026-01-05T10:00:00Z",
+     "credits": 7
+    }
+   ]
+  }
+ },
+ {
+  "phase": "write",
+  "method": "POST",
+  "path": "/users/_compact"
+ },
+ {
+  "phase": "write",
+  "method": "POST",
+  "path": "/users/_update/u1",
+  "body": {
+   "update": {
+    "$inc": {
+     "credits": -30
+    },
+    "$set": {
+     "name": "Ana Lima"
+    }
+   }
+  }
+ },
+ {
+  "phase": "write",
+  "method": "POST",
+  "path": "/users/_doc",
+  "body": {
+   "_id": "u5",
+   "account_id": "a1",
+   "email": "duda@x.io",
+   "name": "Duda",
+   "created_at": "2026-01-06T10:00:00Z",
+   "credits": 1
+  }
+ },
+ {
+  "phase": "write",
+  "method": "DELETE",
+  "path": "/users/_doc/u4"
+ },
+ {
+  "phase": "write",
+  "method": "PUT",
+  "path": "/secrets",
+  "body": {
+   "encrypted": [
+    "private_key"
+   ],
+   "blind": {
+    "cpf": "numeric"
+   },
+   "unique": [
+    "cpf"
+   ]
+  }
+ },
+ {
+  "phase": "write",
+  "method": "POST",
+  "path": "/secrets/_doc",
+  "body": {
+   "_id": "k1",
+   "domain": "x.io",
+   "private_key": "-----BEGIN KEY-----abc",
+   "cpf": "123.456.789-00"
+  }
+ },
+ {
+  "phase": "write",
+  "method": "PUT",
+  "path": "/events",
+  "body": {
+   "stream": true
+  }
+ },
+ {
+  "phase": "write",
+  "method": "POST",
+  "path": "/events/_streams/append",
+  "body": {
+   "doc": {
+    "kind": "sent",
+    "n": 1
+   },
+   "id": "1731160000000-1"
+  }
+ },
+ {
+  "phase": "write",
+  "method": "POST",
+  "path": "/events/_streams/append",
+  "body": {
+   "doc": {
+    "kind": "open",
+    "n": 2
+   },
+   "id": "1731160000000-2"
+  }
+ },
+ {
+  "phase": "write",
+  "method": "PUT",
+  "path": "/events/_streams/groups/mailer",
+  "body": {
+   "start": "0"
+  }
+ },
+ {
+  "phase": "read",
+  "method": "GET",
+  "path": "/users/_doc/u1"
+ },
+ {
+  "phase": "read",
+  "method": "GET",
+  "path": "/users/_doc/u4"
+ },
+ {
+  "phase": "read",
+  "method": "POST",
+  "path": "/users/_search",
+  "body": {
+   "query": {
+    "account_id": "a1"
+   },
+   "sort": {
+    "created_at": -1
+   }
+  }
+ },
+ {
+  "phase": "read",
+  "method": "POST",
+  "path": "/users/_search",
+  "body": {
+   "query": {
+    "tags": "beta",
+    "credits": {
+     "$gte": 10
+    }
+   },
+   "sort": {
+    "_id": 1
+   }
+  }
+ },
+ {
+  "phase": "read",
+  "method": "POST",
+  "path": "/users/_count",
+  "body": {
+   "query": {
+    "account_id": {
+     "$in": [
+      "a1",
+      "a2"
+     ]
+    }
+   }
+  }
+ },
+ {
+  "phase": "read",
+  "method": "POST",
+  "path": "/users/_aggregate",
+  "body": {
+   "pipeline": [
+    {
+     "$group": {
+      "_id": "$account_id",
+      "total": {
+       "$sum": "$credits"
+      },
+      "n": {
+       "$sum": 1
+      }
+     }
+    },
+    {
+     "$sort": {
+      "_id": 1
+     }
+    }
+   ]
+  }
+ },
+ {
+  "phase": "read",
+  "method": "POST",
+  "path": "/users/_doc",
+  "body": {
+   "_id": "u9",
+   "account_id": "a1",
+   "email": "bia@x.io"
+  }
+ },
+ {
+  "phase": "read",
+  "method": "GET",
+  "path": "/secrets/_doc/k1"
+ },
+ {
+  "phase": "read",
+  "method": "POST",
+  "path": "/secrets/_search",
+  "body": {
+   "query": {
+    "cpf": "12345678900"
+   }
+  }
+ },
+ {
+  "phase": "read",
+  "method": "POST",
+  "path": "/events/_streams/read",
+  "body": {
+   "after": "0"
+  }
+ },
+ {
+  "phase": "read",
+  "method": "GET",
+  "path": "/events/_streams"
+ },
+ {
+  "phase": "read",
+  "method": "GET",
+  "path": "/events/_streams/groups"
+ },
+ {
+  "phase": "read",
+  "method": "GET",
+  "path": "/users"
+ }
+]
