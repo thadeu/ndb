@@ -1,6 +1,6 @@
 # M30 — One URL: token and database
 
-Status: in progress (E30.1 and E30.2 done) · Depends on: nothing · Docs: `docs/dev/configuration.md`, `docs/dev/http.md`, `docs/dev/clients/`, `docs-site/llms-agents.md`
+Status: done (E30.1, E30.2, E30.3) · Depends on: nothing · Docs: `docs/dev/configuration.md`, `docs/dev/http.md`, `docs/dev/clients/`, `docs-site/llms-agents.md`
 
 ## Goal
 
@@ -101,11 +101,15 @@ query `?db=` is also accepted on tcp and https.
 
 ### E30.3 — Databases in the SDKs and the console
 
-- [ ] Shared cases in `spec/cases`: the same collection name in two
-      databases.
-- [ ] Go, Ruby, Rails, TS send the header from the URL path or `?db=`.
-- [ ] CLI: `ndb query`, `stats`, `backup` take the database of the URL.
-- [ ] Console: a database selector; a connection URL with a database.
+- [x] Shared cases in `spec/cases`: the same collection name in two
+      databases (`find_database_*`, a `database` key on a step); the URL
+      cases in `spec/url/cases.json` give the database too.
+- [x] Go, Ruby, Rails, TS send the header from the URL path or `?db=`.
+- [x] CLI: every command (`query`, `stats`, `backup`, ...) takes the
+      database of the URL.
+- [x] Console: the connection menu lists the databases
+      (`c/<connection>@<database>`); a connection URL with a database; the
+      curl lines and SDK snippets of Dev Tools and Aggregate carry it.
 
 ## Exit criteria
 

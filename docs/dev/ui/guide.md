@@ -1,6 +1,6 @@
 # UI guide
 
-One page per screen of the console. Each screen works on the connection at the top of the side menu; click it to pick another one. Click a screenshot to see it at full size.
+One page per screen of the console. Each screen works on the connection at the top of the side menu; click it to pick another one, or another [database](../databases.md) of the same daemon (the menu lists them when the daemon has more than one). Click a screenshot to see it at full size.
 
 ## Connections
 

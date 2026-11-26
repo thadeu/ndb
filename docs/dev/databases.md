@@ -6,7 +6,14 @@ The **default** database is the data dir itself, as it was before databases exis
 
 ## Choose the database
 
-Send the header `Ndb-Database: <name>` on any collection route. No header, or `Ndb-Database: default`, is the default database.
+In an app, put the database in the [connection URL](configuration.md#connection-url): the SDKs, the CLI and the console send it.
+
+```bash
+NDB_URL=tcp://:<token>@ndb-0.runa.voodu:7070/billion
+NDB_URL=unix:///run/ndb/ndb.sock?db=billion
+```
+
+Over HTTP, send the header `Ndb-Database: <name>` on any collection route. No header, or `Ndb-Database: default`, is the default database.
 
 ```bash
 curl --unix-socket /run/ndb/ndb.sock http://ndb/users/_doc \
@@ -61,9 +68,12 @@ A data dir with no other database has no `_databases` dir. The daemon opens ever
 
 A [scoped token](configuration.md#scoped-tokens) names collections of the default database, so it may not use another database (`403 forbidden`). Use the full token (`-token-file`) for other databases, and for `/_databases`. The unix socket needs no token.
 
+## In the console
+
+The connection menu lists the databases of the daemon. A pick opens the same page in that database; its path is `c/<connection>@<database>`, so a link shows the same view. A connection URL with a database (`tcp://host:7070/billion`) opens that database.
+
 ## Not yet
 
-- The database in the URL of the SDKs (`tcp://host:7070/billion`) and a database selector in the console (milestone M30, E30.3). Until then, send the header.
 - A token scoped to one database.
 - A restore of one database into a running daemon.
 - Metrics per database: `/_metrics` covers the default database.

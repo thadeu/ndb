@@ -47,14 +47,14 @@ class SharedCasesTest < Minitest::Test
 
   def send_request(coll, request)
     case request["op"]
-    when "search" then client.search(coll, request["body"])
-    when "aggregate" then aggregate(coll, request["body"])
+    when "search" then client_in(request["database"]).search(coll, request["body"])
+    when "aggregate" then aggregate(client_in(request["database"]), coll, request["body"])
     else flunk "request op #{request['op'].inspect} is not supported"
     end
   end
 
-  def aggregate(coll, body)
-    client.aggregate(coll, body)
+  def aggregate(db, coll, body)
+    db.aggregate(coll, body)
   rescue Ndb::Error => e
     skip "daemon has no /aggregate endpoint yet (HTTP #{e.status})" if e.code == "http_status" && [404, 405].include?(e.status)
 
@@ -65,7 +65,7 @@ class SharedCasesTest < Minitest::Test
     body = step["body"]
 
     case step["op"]
-    when "bulk" then client.bulk(coll, body["docs"])
+    when "bulk" then client_in(step["database"]).bulk(coll, body["docs"])
     else flunk "#{path}: setup op #{step['op'].inspect} is not supported"
     end
   end
@@ -94,6 +94,15 @@ class SharedCasesTest < Minitest::Test
     when Array then value.any? { |v| contains_null?(v) }
     else false
     end
+  end
+
+  # The client of a database of the case: the same socket with ?db=, the
+  # way an app names its database in NDB_URL. nil is the default database.
+  def client_in(database)
+    return client if database.nil?
+
+    @clients ||= {}
+    @clients[database] ||= Ndb::Client.new(url: "unix://#{TestDaemon.socket}?db=#{database}", timeout: 10)
   end
 
   def compare(expect, rows, path)

@@ -43,7 +43,7 @@ export interface AggregatePageProps {
   decrypt?: boolean;
   result?: AggregateResult;
   error?: string;
-  curl: { socket?: string; base?: string };
+  curl: { socket?: string; base?: string; database?: string };
   // targets are the collections of the daemon, for the list of the target
   // field. match says how many collections a list or a pattern names.
   targets?: ComboOption[];
@@ -280,7 +280,7 @@ export const AggregatePage: FC<AggregatePageProps> = ({ current, on, text, stage
 
   const path = aggregatePath(on, decrypt);
   const body = stages ? requestBody(stages) : text;
-  const curlLine = buildCurl({ method: 'POST', path, body, socket: curl.socket, base: curl.base });
+  const curlLine = buildCurl({ method: 'POST', path, body, socket: curl.socket, base: curl.base, database: curl.database });
 
   return (
     <Layout title="Aggregate" current={current} tab="aggregate">
@@ -293,6 +293,7 @@ export const AggregatePage: FC<AggregatePageProps> = ({ current, on, text, stage
         data-agg-broken={stages ? undefined : true}
         data-socket={curl.socket}
         data-base={curl.base}
+        data-database={curl.database}
       >
         <header class="page-head">
           <div class="page-head-text">

@@ -4,6 +4,9 @@
 export interface Endpoint {
   url: string;
   token?: string;
+
+  // database wins over the database of the URL.
+  database?: string;
 }
 
 export interface IndexState {
@@ -107,24 +110,43 @@ export class NdbError extends Error {
 export interface Target {
   base: string;
   unix?: string;
+  database?: string;
 }
 
 // target turns a connection URL into the base URL for fetch. A unix socket
-// uses a fixed host name and the unix option of Bun fetch.
+// uses a fixed host name and the unix option of Bun fetch. The database is
+// the path of a tcp or http(s) URL (tcp://host:7070/billion), or ?db= (the
+// only way on a unix socket, whose path is the file).
 export function target(url: string): Target {
-  if (url.startsWith('unix://')) {
-    const path = url.slice('unix://'.length);
+  const [address = '', query = ''] = url.split('?', 2);
+  const db = new URLSearchParams(query).get('db') ?? '';
+
+  if (address.startsWith('unix://')) {
+    const path = address.slice('unix://'.length);
 
     if (!path.startsWith('/')) throw new NdbError('invalid_url', 'A unix URL needs an absolute path: unix:///path/to.sock');
 
-    return { base: 'http://ndb', unix: path };
+    return withDatabase({ base: 'http://ndb', unix: path }, '', db);
   }
 
-  if (url.startsWith('tcp://')) return { base: `http://${url.slice('tcp://'.length).replace(/\/+$/, '')}` };
+  const remote = /^(tcp|https?):\/\/([^/]+)(\/.*)?$/.exec(address);
 
-  if (/^https?:\/\/[^/]+/.test(url)) return { base: url.replace(/\/+$/, '') };
+  if (!remote) throw new NdbError('invalid_url', 'Use unix:///path, tcp://host:port, or http(s)://host.');
 
-  throw new NdbError('invalid_url', 'Use unix:///path, tcp://host:port, or http(s)://host.');
+  const [, scheme, host, path = ''] = remote;
+  const base = scheme === 'tcp' ? `http://${host}` : `${scheme}://${host}`;
+
+  return withDatabase({ base }, path.replace(/^\/+|\/+$/g, ''), db);
+}
+
+function withDatabase(parsed: Target, path: string, query: string): Target {
+  if (path.includes('/')) throw new NdbError('invalid_url', 'The path names one database: tcp://host:port/<database>.');
+
+  if (path && query && path !== query) throw new NdbError('invalid_url', 'The path and ?db= name two databases.');
+
+  const database = path || query;
+
+  return database ? { ...parsed, database } : parsed;
 }
 
 export class Ndb {
@@ -135,6 +157,14 @@ export class Ndb {
 
   health(): Promise<{ status: string }> {
     return this.get('/_health');
+  }
+
+  // databases lists the databases of the daemon: default first. A daemon
+  // before databases, or a token that may not list them, gives an error.
+  async databases(): Promise<string[]> {
+    const body = await this.get<{ databases: { name: string }[] }>('/_databases');
+
+    return body.databases.map(item => item.name);
   }
 
   stats(): Promise<Stats> {
@@ -243,10 +273,13 @@ export class Ndb {
   }
 
   private async open(method: string, path: string, init: { body?: string; timeoutMs?: number; signal?: AbortSignal } = {}): Promise<Response> {
-    const { base, unix } = target(this.endpoint.url);
+    const { base, unix, database } = target(this.endpoint.url);
     const headers: Record<string, string> = { accept: 'application/json' };
+    const picked = this.endpoint.database ?? database;
 
     if (this.endpoint.token) headers.authorization = `Bearer ${this.endpoint.token}`;
+
+    if (picked && picked !== 'default') headers['ndb-database'] = picked;
 
     const timeoutMs = init.timeoutMs ?? this.timeoutMs;
     const limit = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;

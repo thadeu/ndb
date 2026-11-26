@@ -1,5 +1,7 @@
 import type { Hono } from 'hono';
 
+import type { Connection } from '@/connections';
+import { databaseOf } from '@/databases';
 import { NdbError, target } from '@/ndb';
 import type { Env } from '@/prefix';
 import { DevtoolsPage } from '@/views/devtools';
@@ -93,10 +95,11 @@ async function readCapped(response: Response): Promise<{ text: string; bytes: nu
   return { text, bytes, truncated };
 }
 
-function curlTarget(url: string): { kind: 'unix' | 'tcp'; socket?: string; base?: string } {
-  const parsed = target(url);
+function curlTarget(connection: Connection): { kind: 'unix' | 'tcp'; socket?: string; base?: string; database: string } {
+  const parsed = target(connection.url);
+  const database = databaseOf(connection);
 
-  return parsed.unix ? { kind: 'unix', socket: parsed.unix } : { kind: 'tcp', base: parsed.base };
+  return parsed.unix ? { kind: 'unix', socket: parsed.unix, database } : { kind: 'tcp', base: parsed.base, database };
 }
 
 export function devtoolsRoutes(app: Hono<Env>, deps: RouteDeps): void {
@@ -111,7 +114,7 @@ export function devtoolsRoutes(app: Hono<Env>, deps: RouteDeps): void {
 
       const names = stats.collections.map(item => item.name);
 
-      return c.html(<DevtoolsPage current={deps.currentOf(connection, stats)} collection={first?.name ?? 'orders'} collections={names} curl={curlTarget(connection.url)} />);
+      return c.html(<DevtoolsPage current={deps.currentOf(connection, stats)} collection={first?.name ?? 'orders'} collections={names} curl={curlTarget(connection)} />);
     } catch (error) {
       return c.html(<OfflinePage current={deps.currentOf(connection)} message={deps.message(error)} />, 502);
     }

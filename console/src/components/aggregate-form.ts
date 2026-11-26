@@ -180,7 +180,7 @@ function mountForm(form: HTMLFormElement): void {
 
     if (pathText) pathText.textContent = path;
     if (jsonText) jsonText.textContent = body;
-    if (curlButton) curlButton.dataset.copy = buildCurl({ method: 'POST', path, body, socket: form.dataset.socket, base: form.dataset.base });
+    if (curlButton) curlButton.dataset.copy = buildCurl({ method: 'POST', path, body, socket: form.dataset.socket, base: form.dataset.base, database: form.dataset.database });
 
     return stages;
   }

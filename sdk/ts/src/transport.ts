@@ -58,6 +58,24 @@ function urlToken(url: URL, shown: string): string | undefined {
   return url.password === '' ? undefined : decodeURIComponent(url.password)
 }
 
+// urlDatabase is the database of the address: the path of a tcp or https
+// address (tcp://host:7070/billion) or the query db (needed for a unix
+// socket, whose path is the file). None is the default database.
+function urlDatabase(url: URL, shown: string): string | undefined {
+  const query = url.searchParams.get('db') ?? ''
+  const path = url.protocol === 'unix:' ? '' : decodeURIComponent(url.pathname).replace(/^\/+|\/+$/g, '')
+
+  if (path.includes('/')) {
+    throw new TypeError(`ndb: address "${shown}": the path names one database: tcp://host:port/<database>`)
+  }
+
+  if (path !== '' && query !== '' && path !== query) {
+    throw new TypeError(`ndb: address "${shown}": the path and ?db= name two databases`)
+  }
+
+  return path || query || undefined
+}
+
 // redactAddr hides the userinfo of addr, for error messages.
 function redactAddr(addr: string): string {
   return addr.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/]*@/i, '$1***@')
@@ -72,6 +90,7 @@ export class Transport {
   private readonly base: string
   private readonly socketPath: string | undefined
   readonly #token: string | undefined
+  readonly #database: string | undefined
   private readonly readyTimeout: number
   private readonly userAgent: string | undefined
 
@@ -79,13 +98,15 @@ export class Transport {
   // a TLS proxy such as Caddy; http:// works too). Default: env NDB_URL.
   // The token can be in the address, as in a Redis URL:
   // tcp://:<token>@host:port. The token is, in order: the token option,
-  // the address, env NDB_TOKEN.
+  // the address, env NDB_TOKEN. The path names a database
+  // (tcp://host:7070/billion; ?db=billion for a unix socket).
   constructor(addr?: string, opts: ConnectOptions = {}) {
     const target = addr || process.env.NDB_URL || ''
     const shown = redactAddr(target)
     const url = parseAddr(target, shown)
 
     this.#token = opts.token || urlToken(url, shown) || process.env.NDB_TOKEN || undefined
+    this.#database = urlDatabase(url, shown)
     this.readyTimeout = opts.readyTimeout ?? defaultReadyTimeoutMs
     this.userAgent = userAgent(opts.userAgent)
 
@@ -179,6 +200,10 @@ export class Transport {
 
     if (this.userAgent) {
       headers['user-agent'] = this.userAgent
+    }
+
+    if (this.#database) {
+      headers['ndb-database'] = this.#database
     }
 
     if (this.#token) {

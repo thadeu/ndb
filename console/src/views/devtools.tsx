@@ -9,7 +9,7 @@ export interface DevtoolsPageProps {
   current: Current;
   collection: string;
   collections?: string[];
-  curl: { kind: 'unix' | 'tcp'; socket?: string; base?: string };
+  curl: { kind: 'unix' | 'tcp'; socket?: string; base?: string; database?: string };
 }
 
 export const DevtoolsPage: FC<DevtoolsPageProps> = ({ current, collection, collections = [], curl }) => {

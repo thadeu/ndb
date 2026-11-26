@@ -93,16 +93,25 @@ func (e *httpEngine) EnsureCollection(ctx context.Context, name string, def json
 }
 
 func (e *httpEngine) Do(ctx context.Context, collection string, step spec.Step) ([]json.RawMessage, error) {
-	return e.send(ctx, "POST", "/"+collection+"/_"+step.Op+"?decrypt=1", step.Body)
+	return e.sendIn(ctx, step.Database, "POST", "/"+collection+"/_"+step.Op+"?decrypt=1", step.Body)
 }
 
 // send returns the rows of a 2xx answer (a JSON array for _search and
 // _aggregate, an object for a write), or a CodeError built from the error
 // body.
 func (e *httpEngine) send(ctx context.Context, method, path string, body []byte) ([]json.RawMessage, error) {
+	return e.sendIn(ctx, "", method, path, body)
+}
+
+// sendIn is send in a database ("" = the default one).
+func (e *httpEngine) sendIn(ctx context.Context, database, method, path string, body []byte) ([]json.RawMessage, error) {
 	req, err := http.NewRequestWithContext(ctx, method, "http://ndb"+path, strings.NewReader(string(body)))
 	if err != nil {
 		return nil, err
+	}
+
+	if database != "" {
+		req.Header.Set("Ndb-Database", database)
 	}
 
 	resp, err := e.client.Do(req)

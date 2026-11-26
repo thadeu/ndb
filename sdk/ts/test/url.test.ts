@@ -10,15 +10,18 @@ interface UrlCase {
   env: string | null
   option: string | null
   secret?: string
-  want: { token?: string | null; error?: boolean }
+  want: { token?: string | null; database?: string | null; error?: boolean }
 }
 
 const file = resolve(import.meta.dirname, '../../../spec/url/cases.json')
 const { cases } = JSON.parse(readFileSync(file, 'utf8')) as { cases: UrlCase[] }
 
+function sent(t: Transport): Record<string, string> {
+  return (t as unknown as { headers(): Record<string, string> }).headers()
+}
+
 function sentToken(t: Transport): string | null {
-  const headers = (t as unknown as { headers(): Record<string, string> }).headers()
-  const auth = headers.authorization
+  const auth = sent(t).authorization
 
   return auth ? auth.replace(/^Bearer /, '') : null
 }
@@ -55,6 +58,7 @@ describe('spec/url/cases.json', () => {
     const t = new Transport(c.url, opts)
 
     expect(sentToken(t)).toBe(c.want.token ?? null)
+    expect(sent(t)['ndb-database'] ?? null).toBe(c.want.database ?? null)
 
     if (c.secret) {
       expect(inspect(t)).not.toContain(c.secret)

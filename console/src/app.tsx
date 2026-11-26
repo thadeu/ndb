@@ -1,9 +1,10 @@
-import { type Context, Hono } from 'hono';
+import { type Context, Hono, type Next } from 'hono';
 import { contextStorage } from 'hono/context-storage';
 import { csrf } from 'hono/csrf';
 import { secureHeaders } from 'hono/secure-headers';
 
-import { type Connection, Connections, NAME } from './connections';
+import { type Connection, Connections, NAME, splitName } from './connections';
+import { databaseOf, openDatabases } from './databases';
 import { type DiscoverOptions, DiscoverError, discover } from './discover';
 import { formatUptime } from './format';
 import { hostGuard, originGuard, parseAllowedHosts } from './guard';
@@ -86,6 +87,8 @@ export function createApp(connections: Connections, assets: Assets, options: App
   }
 
   function currentOf(connection: Connection, stats?: Stats): Current {
+    const { base } = splitName(connection.name);
+
     return {
       name: connection.name,
       url: connection.url,
@@ -93,8 +96,24 @@ export function createApp(connections: Connections, assets: Assets, options: App
       version: stats?.version,
       uptime: stats ? formatUptime(stats.uptime_seconds) : undefined,
       saved: connections.list().map(item => ({ name: item.name, url: item.url })),
+      base,
+      database: databaseOf(connection),
+      databases: openDatabases(),
     };
   }
+
+  // The databases of the open connection, for the switcher of a page.
+  const listDatabases = async (c: Context<Env>, next: Next) => {
+    const connection = c.req.method === 'GET' ? connections.get(c.req.param('name') ?? '') : undefined;
+
+    if (connection) {
+      const ndb = new Ndb({ url: connection.url, token: connection.token }, Math.min(timeoutMs, 1000));
+
+      c.set('databases', await ndb.databases().catch(() => undefined));
+    }
+
+    await next();
+  };
 
   const allowedHosts = options.allowedHosts ?? parseAllowedHosts(process.env.NDB_UI_ALLOWED_HOSTS);
 
@@ -126,6 +145,9 @@ export function createApp(connections: Connections, assets: Assets, options: App
   });
 
   app.use(secureHeaders({ referrerPolicy: 'same-origin', contentSecurityPolicy: { defaultSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'], fontSrc: ['https://fonts.gstatic.com'], formAction: ["'self'"], scriptSrc: ["'self'"] } }));
+
+  app.use('/c/:name', listDatabases);
+  app.use('/c/:name/*', listDatabases);
 
   app.get('/healthz', c => c.json({ status: 'ok' }));
   app.get('/assets/app.css', () => assets.css());
@@ -261,7 +283,7 @@ export function createApp(connections: Connections, assets: Assets, options: App
   app.get('/c/:name', async c => {
     const connection = connections.get(c.req.param('name'));
 
-    if (!connection || !NAME.test(connection.name)) return c.text('Not found', 404);
+    if (!connection || !NAME.test(splitName(connection.name).base)) return c.text('Not found', 404);
 
     const ndb = client(connection);
 

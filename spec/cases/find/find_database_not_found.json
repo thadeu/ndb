@@ -1,0 +1,32 @@
+{
+  "name": "a read of a database that does not exist is database_not_found",
+  "collection": "posts",
+  "daemon": true,
+  "setup": {
+    "catalog": {
+      "write": "engine"
+    },
+    "writes": [
+      {
+        "op": "bulk",
+        "body": {
+          "docs": [
+            {
+              "_id": "p1"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "request": {
+    "op": "search",
+    "database": "spec_nope",
+    "body": {
+      "query": {}
+    }
+  },
+  "expect": {
+    "error": "database_not_found"
+  }
+}

@@ -249,6 +249,54 @@ func TestStatsAsksARunningDaemon(t *testing.T) {
 	}
 }
 
+func TestStatsOfADatabase(t *testing.T) {
+	dir := t.TempDir()
+
+	db, err := engine.Open(config.Config{DataDir: dir, AllowImplicit: true}, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	child, err := db.Database("billion", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := child.Ensure(catalog.Def{Name: "mails"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	sock, _ := startDaemon(t, dir)
+
+	var out strings.Builder
+
+	if err := stats([]string{"-config", "none.yml", "-url", "unix://" + sock + "?db=billion", "-json"}, &out); err != nil {
+		t.Fatal(err)
+	}
+
+	var rep statsReport
+
+	if err := json.Unmarshal([]byte(out.String()), &rep); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(rep.Collections) != 1 || rep.Collections[0].Name != "mails" {
+		t.Fatalf("stats of billion: %+v", rep)
+	}
+
+	out.Reset()
+
+	err = stats([]string{"-config", "none.yml", "-url", "unix://" + sock + "?db=nope", "-json"}, &out)
+
+	if err == nil || !strings.Contains(err.Error(), "database_not_found") {
+		t.Fatalf("stats of an unknown database: %v", err)
+	}
+}
+
 func TestStatsUsesNDBURLAndRefusesBothSources(t *testing.T) {
 	dir := t.TempDir()
 

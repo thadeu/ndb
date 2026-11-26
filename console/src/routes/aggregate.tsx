@@ -1,6 +1,7 @@
 import type { Hono } from 'hono';
 
 import { COUNT_STAGES_MAX, DEFAULT_PIPELINE, type Stage, aggregatePath, countRequest, formatPipeline, hasSealed, isMultiTarget, matchText, parsePipeline, toPipeline, validTarget } from '@/aggregate';
+import { databaseOf } from '@/databases';
 import { type Definition, type Doc, type Ndb, NdbError, type Stats, target } from '@/ndb';
 import type { Env } from '@/prefix';
 import type { ComboOption } from '@/ui/combobox';
@@ -136,7 +137,8 @@ export function aggregateRoutes(app: Hono<Env>, deps: RouteDeps): void {
     const view = VIEWS.find(item => item === q.view) ?? 'chart';
     const decrypt = q.decrypt === '1';
     const parsedTarget = target(connection.url);
-    const curl = parsedTarget.unix ? { socket: parsedTarget.unix } : { base: parsedTarget.base };
+    const database = databaseOf(connection);
+    const curl = parsedTarget.unix ? { socket: parsedTarget.unix, database } : { base: parsedTarget.base, database };
 
     try {
       const stats = await client.stats();

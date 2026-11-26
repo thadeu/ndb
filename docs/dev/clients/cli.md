@@ -32,7 +32,7 @@ The `ndb` binary is the daemon and the CLI. `ndb` with only flags still runs the
 
 Every command except `backup`, `restore`, `serve`, `version` and `help` is a thin client of the [HTTP API](../http.md). They share these flags:
 
-- `-url unix:///run/ndb/ndb.sock` or `tcp://host:7070` picks the daemon. The default is `NDB_URL`, then the `listen.unix` socket of `ndb.yml` when something answers on it. `https://host` works too. The bearer token for TCP is the token of the URL (`tcp://:<token>@host:7070`), else `NDB_TOKEN`; the source line of `ndb stats` shows `tcp://***@host:7070`.
+- `-url unix:///run/ndb/ndb.sock` or `tcp://host:7070` picks the daemon. The default is `NDB_URL`, then the `listen.unix` socket of `ndb.yml` when something answers on it. `https://host` works too. A [database](../databases.md) goes in the path (`tcp://host:7070/billion`) or in `?db=` (`unix:///run/ndb/ndb.sock?db=billion`), for every command, `ndb backup` included. The bearer token for TCP is the token of the URL (`tcp://:<token>@host:7070`), else `NDB_TOKEN`; the source line of `ndb stats` shows `tcp://***@host:7070`.
 - `-config FILE` and `-data-dir DIR`. `-data-dir` and `-url` together are an error.
 - `-json` prints the JSON of the API (`query`: NDJSON rows).
 - Only `stats` and `size` have an offline mode: with `-data-dir`, or when no daemon answers, they read the data dir (no lock, so a running daemon is fine). `collections`, `compact`, `quarantine` and `query` need a daemon and say so when none answers.

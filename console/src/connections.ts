@@ -6,6 +6,23 @@ export interface Connection {
   name: string;
   url: string;
   token?: string;
+
+  // database is a database of the daemon other than the one of the URL,
+  // picked in the switcher: the page path names it as <connection>@<db>.
+  database?: string;
+}
+
+// DATABASE is the rule of a database name in the daemon.
+export const DATABASE = /^[a-z0-9][a-z0-9_-]{0,62}$/;
+
+// splitName reads <connection>@<database>, the name of a page of a saved
+// connection in another database. A plain name has no database.
+export function splitName(name: string): { base: string; database?: string } {
+  const at = name.indexOf('@');
+
+  if (at < 0) return { base: name };
+
+  return { base: name.slice(0, at), database: name.slice(at + 1) };
 }
 
 export const NAME = /^[A-Za-z0-9._-]{1,64}$/;
@@ -70,8 +87,17 @@ export class Connections {
     }
   }
 
+  // get finds a saved connection. <name>@<database> is that connection in
+  // another database of its daemon; "default" is the default database.
   get(name: string): Connection | undefined {
-    return this.list().find(connection => connection.name === name);
+    const { base, database } = splitName(name);
+    const found = this.list().find(connection => connection.name === base);
+
+    if (!found || database === undefined) return found;
+
+    if (!DATABASE.test(database)) return undefined;
+
+    return { ...found, name, database };
   }
 
   add(connection: Connection): void {

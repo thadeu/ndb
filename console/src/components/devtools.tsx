@@ -26,7 +26,7 @@ export interface DevtoolsProps {
   collections?: string[];
   sendUrl: string;
   browserHref: string;
-  curl: { kind: 'unix' | 'tcp'; socket?: string; base?: string };
+  curl: { kind: 'unix' | 'tcp'; socket?: string; base?: string; database?: string };
 }
 
 interface Answer {
@@ -834,7 +834,7 @@ export const Devtools: FC<DevtoolsProps> = ({ name, collection, collections = []
       return;
     }
 
-    const input = { method: target.method, path: target.path, body: target.body, socket: curl.socket, base: curl.base };
+    const input = { method: target.method, path: target.path, body: target.body, socket: curl.socket, base: curl.base, database: curl.database };
     const code = language === 'curl' ? buildCurl(input) : snippetOf(language, input);
 
     if (code === undefined) {

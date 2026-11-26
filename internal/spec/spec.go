@@ -36,10 +36,13 @@ type Setup struct {
 }
 
 // Step is one call: Op is insert, find or aggregate, and Body is the JSON
-// body of the HTTP call of that name.
+// body of the HTTP call of that name. Database, when set, is the database
+// of the call (the Ndb-Database header); a case that uses it is a daemon
+// case.
 type Step struct {
-	Op   string          `json:"op"`
-	Body json.RawMessage `json:"body"`
+	Op       string          `json:"op"`
+	Body     json.RawMessage `json:"body"`
+	Database string          `json:"database,omitempty"`
 }
 
 type Expect struct {

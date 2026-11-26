@@ -44,6 +44,10 @@ class UrlCasesTest < Minitest::Test
 
     want.nil? ? assert_nil(token) : assert_equal(want, token)
 
+    database = c.dig("want", "database")
+
+    database.nil? ? assert_nil(client.endpoint.database) : assert_equal(database, client.endpoint.database)
+
     return unless secret
 
     refute_includes client.inspect, secret

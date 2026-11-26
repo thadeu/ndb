@@ -55,7 +55,7 @@ docs in `docs/dev/` describe what they built.
 | M27 | Server settings and the encryption key | `GET` and `PUT /_cluster/settings`; one master key per daemon (`NDB_ENCRYPTION_KEY`, or made at the first start and kept in a system WAL, so backups hold it); shown masked; key rotation (`ndb key rotate`, 1.23.1) | done (the console view of the settings: later) |
 | M28 | Encrypted fields and blind indexes | `encrypted` and `blind` in a collection: a `.pem` or a CPF encrypted before the WAL; equality, unique and group on a CPF by its hash; the old documents of a field added later are encrypted in the background (1.22.1) | done |
 | [M29](m29-fast-reads.md) | Fast reads | `GET` by `_id` in µs, reads from a snapshot (no wait for writes), small gains in `_search`, read and write limits | not started |
-| [M30](m30-url-databases.md) | One URL: token and database | `tcp://:<token>@host:7070/<db>` in every SDK; many databases in one daemon (the `default` is the data dir of today); base of the replication design (`../backlog/replication.md`) | in progress (E30.1 and E30.2 done) |
+| [M30](m30-url-databases.md) | One URL: token and database | `tcp://:<token>@host:7070/<db>` in every SDK; many databases in one daemon (the `default` is the data dir of today); base of the replication design (`../backlog/replication.md`) | done |
 | M17 | PITR and rename | restore a collection to an instant of the last day; rename to put it in place (1.2.3; at/to 1.2.4) | done |
 
 ## Next (after 0.1.2)

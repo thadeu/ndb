@@ -36,6 +36,10 @@ type DB struct {
 	client *http.Client
 	token  string
 
+	// database is the database of the address (tcp://host:7070/billion),
+	// sent as Ndb-Database; "" is the default database.
+	database string
+
 	// watches is the client of _watch: a watch holds its connection for as
 	// long as it runs, so it is out of the maxConns of the other calls.
 	watches *http.Client
@@ -92,7 +96,9 @@ func WithIdleTimeout(d time.Duration) ConnectOption {
 // Connect returns a handle for addr: unix:///path/to/ndb.sock,
 // tcp://host:port, or https://host[:port] (ndb behind a TLS proxy such as
 // Caddy; http:// works too). An empty addr reads NDB_URL. The token can be
-// in the address, as in a Redis URL: tcp://:<token>@host:port. The token is,
+// in the address, as in a Redis URL: tcp://:<token>@host:port. The path
+// names a database (tcp://host:port/billion; ?db=billion for a unix
+// socket); none is the default database. The token is,
 // in order: WithToken, the address, NDB_TOKEN. NDB_PREFIX is the default of
 // WithPrefix. It does not dial;
 // the first call does, and waits while the daemon starts (WithReadyTimeout).
@@ -119,11 +125,16 @@ func Connect(addr string, opts ...ConnectOption) (*DB, error) {
 		return nil, fmt.Errorf("ndb: address %q: %w", shown, err)
 	}
 
+	database, err := urlDatabase(u)
+	if err != nil {
+		return nil, fmt.Errorf("ndb: address %q: %w", shown, err)
+	}
+
 	if token == "" {
 		token = os.Getenv("NDB_TOKEN")
 	}
 
-	db := &DB{ensured: map[string]bool{}, token: token, prefix: os.Getenv("NDB_PREFIX"), readyTimeout: DefaultReadyTimeout, maxConns: DefaultMaxConns}
+	db := &DB{ensured: map[string]bool{}, token: token, database: database, prefix: os.Getenv("NDB_PREFIX"), readyTimeout: DefaultReadyTimeout, maxConns: DefaultMaxConns}
 
 	for _, opt := range opts {
 		opt(db)
@@ -186,6 +197,32 @@ func urlToken(u *url.URL) (string, error) {
 	return token, nil
 }
 
+// urlDatabase is the database of the address: the path of a tcp or https
+// address (tcp://host:7070/billion) or the query db (needed for a unix
+// socket, whose path is the file). None is the default database.
+func urlDatabase(u *url.URL) (string, error) {
+	query := u.Query().Get("db")
+	path := ""
+
+	if u.Scheme != "unix" {
+		path = strings.Trim(u.Path, "/")
+	}
+
+	if strings.Contains(path, "/") {
+		return "", errors.New("the path names one database: tcp://host:port/<database>")
+	}
+
+	if path != "" && query != "" && path != query {
+		return "", errors.New("the path and ?db= name two databases")
+	}
+
+	if path != "" {
+		return path, nil
+	}
+
+	return query, nil
+}
+
 // redactAddr hides the userinfo of addr, for error messages.
 func redactAddr(addr string) string {
 	scheme, rest, ok := strings.Cut(addr, "://")
@@ -210,8 +247,13 @@ func redactAddr(addr string) string {
 	return shown
 }
 
-// String shows the address of the handle, never its token.
+// String shows the address and the database of the handle, never its
+// token.
 func (db *DB) String() string {
+	if db.database != "" {
+		return "ndb.DB(" + db.base + "/" + db.database + ")"
+	}
+
 	return "ndb.DB(" + db.base + ")"
 }
 
@@ -345,6 +387,10 @@ func (db *DB) doOnce(ctx context.Context, method, path string, body []byte) (*ht
 // one.
 func (db *DB) authorize(req *http.Request) {
 	req.Header.Set("User-Agent", db.userAgent)
+
+	if db.database != "" {
+		req.Header.Set("Ndb-Database", db.database)
+	}
 
 	if db.token != "" {
 		req.Header.Set("Authorization", "Bearer "+db.token)

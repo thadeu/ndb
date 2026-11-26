@@ -25,7 +25,7 @@ Sources are in `sdk/`: `sdk/go`, `sdk/ruby` (gem `ndb`), `sdk/rails` (gem `ndb-r
 
 ## Address and token
 
-Addresses are `unix:///run/ndb/ndb.sock` or `tcp://host:port`. Every SDK and the CLI speak both. Without an address, each SDK reads `NDB_URL`.
+Addresses are `unix:///run/ndb/ndb.sock` or `tcp://host:port`. Every SDK and the CLI speak both. Without an address, each SDK reads `NDB_URL`. A [database](databases.md) goes in the path (`tcp://host:7070/billion`, or `?db=billion` on a unix socket); see [Connection URL](configuration.md#connection-url).
 
 `NDB_PREFIX` goes before every collection name, in Go (`WithPrefix`), TypeScript (`prefix`) and Rails (`collection_prefix`); the option in code wins. A test that starts the whole app from env vars gives each parallel package its own collections with it.
 

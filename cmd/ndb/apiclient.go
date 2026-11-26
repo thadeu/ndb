@@ -24,6 +24,10 @@ type apiClient struct {
 	token string
 	hc    *http.Client
 
+	// database is the database of the URL, sent as Ndb-Database; "" is the
+	// default database.
+	database string
+
 	// timeout bounds one call. A compaction raises it.
 	timeout time.Duration
 }
@@ -53,17 +57,28 @@ type reply struct {
 
 // newAPIClient reads unix:///path/to.sock, tcp://host:port,
 // http://host:port or https://host[:port]. The token is the one of the URL
-// (tcp://:<token>@host:port, as in a Redis URL), else NDB_TOKEN.
+// (tcp://:<token>@host:port, as in a Redis URL), else NDB_TOKEN. The path
+// names a database (tcp://host:port/billion; ?db=billion on a unix socket).
 func newAPIClient(rawURL string) (*apiClient, error) {
 	token := os.Getenv("NDB_TOKEN")
 	shown := redactURL(rawURL)
 
 	if sock, ok := strings.CutPrefix(rawURL, "unix://"); ok {
+		sock, query, _ := strings.Cut(sock, "?")
+
 		if err := checkSocketPath(sock); err != nil {
 			return nil, err
 		}
 
-		return newUnixClient(sock, token), nil
+		values, err := url.ParseQuery(query)
+		if err != nil {
+			return nil, fmt.Errorf("url %q: %w", shown, err)
+		}
+
+		c := newUnixClient(sock, token)
+		c.database = values.Get("db")
+
+		return c, nil
 	}
 
 	u, err := url.Parse(rawURL)
@@ -93,13 +108,53 @@ func newAPIClient(rawURL string) (*apiClient, error) {
 		}
 	}
 
+	database, err := urlDatabase(u)
+	if err != nil {
+		return nil, fmt.Errorf("url %q: %w", shown, err)
+	}
+
 	scheme := "http"
 
 	if u.Scheme == "https" {
 		scheme = "https"
 	}
 
-	return &apiClient{base: scheme + "://" + u.Host, token: token, hc: &http.Client{Transport: withUserAgent(http.DefaultTransport)}, timeout: defaultCallTimeout}, nil
+	c := &apiClient{base: scheme + "://" + u.Host, token: token, hc: &http.Client{Transport: withUserAgent(http.DefaultTransport)}, timeout: defaultCallTimeout}
+	c.database = database
+
+	return c, nil
+}
+
+// urlDatabase is the database of a tcp or https URL: its path
+// (tcp://host:7070/billion) or the query db. None is the default database.
+func urlDatabase(u *url.URL) (string, error) {
+	query := u.Query().Get("db")
+	path := strings.Trim(u.Path, "/")
+
+	if strings.Contains(path, "/") {
+		return "", errors.New("the path names one database: tcp://host:port/<database>")
+	}
+
+	if path != "" && query != "" && path != query {
+		return "", errors.New("the path and ?db= name two databases")
+	}
+
+	if path != "" {
+		return path, nil
+	}
+
+	return query, nil
+}
+
+// authorize adds the token and the database of the client to req.
+func (c *apiClient) authorize(req *http.Request) {
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	if c.database != "" {
+		req.Header.Set("Ndb-Database", c.database)
+	}
 }
 
 // redactURL hides the userinfo (the token) of rawURL, for messages and the
@@ -163,9 +218,7 @@ func (c *apiClient) call(method, path string, body []byte) (reply, error) {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
+	c.authorize(req)
 
 	resp, err := c.hc.Do(req)
 	if err != nil {
@@ -198,9 +251,7 @@ func (c *apiClient) stream(method, path string, body []byte) (io.ReadCloser, err
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
+	c.authorize(req)
 
 	resp, err := c.hc.Do(req)
 	if err != nil {

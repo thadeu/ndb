@@ -34,8 +34,9 @@ type sharedCase struct {
 }
 
 type sharedStep struct {
-	Op   string          `json:"op"`
-	Body json.RawMessage `json:"body"`
+	Op       string          `json:"op"`
+	Body     json.RawMessage `json:"body"`
+	Database string          `json:"database"`
 }
 
 type sharedFile struct {
@@ -113,9 +114,19 @@ func TestSharedCases(t *testing.T) {
 		t.Run(transport.name, func(t *testing.T) {
 			db := openTest(t, transport.addr)
 
+			// in gives the handle of a database: the same address with
+			// ?db=, the way an app names its database in NDB_URL.
+			in := func(name string) *DB {
+				if name == "" {
+					return db
+				}
+
+				return openTest(t, transport.addr+"?db="+name)
+			}
+
 			for _, c := range cases {
 				t.Run(c.name, func(t *testing.T) {
-					runSharedCase(t, db, c)
+					runSharedCase(t, in, c)
 				})
 			}
 		})
@@ -124,11 +135,12 @@ func TestSharedCases(t *testing.T) {
 
 // runSharedCase declares a fresh collection, runs the setup writes and the
 // request, and compares the rows or the error code with the expectation.
-func runSharedCase(t *testing.T, db *DB, c sharedCase) {
+func runSharedCase(t *testing.T, in func(string) *DB, c sharedCase) {
 	t.Helper()
 
 	ctx := context.Background()
 	name := newColl()
+	db := in("")
 
 	if err := db.putCollection(ctx, name, c.catalog); err != nil {
 		t.Fatalf("%s: catalog: %v", c.file, err)
@@ -139,7 +151,7 @@ func runSharedCase(t *testing.T, db *DB, c sharedCase) {
 			t.Fatalf("%s: setup op %q is not supported", c.file, w.Op)
 		}
 
-		resp, err := db.do(ctx, http.MethodPost, collPath(name)+"/_"+w.Op, w.Body)
+		resp, err := in(w.Database).do(ctx, http.MethodPost, collPath(name)+"/_"+w.Op, w.Body)
 		if err != nil {
 			t.Fatalf("%s: write %d: %v", c.file, i, err)
 		}
@@ -154,7 +166,7 @@ func runSharedCase(t *testing.T, db *DB, c sharedCase) {
 
 	switch c.request.Op {
 	case "search", "aggregate":
-		resp, err = db.do(ctx, http.MethodPost, collPath(name)+"/_"+c.request.Op+"?decrypt=1", c.request.Body)
+		resp, err = in(c.request.Database).do(ctx, http.MethodPost, collPath(name)+"/_"+c.request.Op+"?decrypt=1", c.request.Body)
 	default:
 		t.Fatalf("%s: request op %q is not supported", c.file, c.request.Op)
 	}

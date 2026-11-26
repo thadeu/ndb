@@ -242,12 +242,14 @@ The token is defense in depth. Keep the listener on a private address (for examp
 
 ## Connection URL
 
-One URL holds the address and the token, as in a Redis or Postgres URL:
+One URL holds the address, the token and the [database](databases.md), as in a Redis or Postgres URL:
 
 ```bash
 NDB_URL=tcp://:<token>@10.0.0.5:7070
-NDB_URL=https://:<token>@ndb.example.com
+NDB_URL=tcp://:<token>@10.0.0.5:7070/billion
+NDB_URL=https://:<token>@ndb.example.com/billion
 NDB_URL=unix:///run/ndb/ndb.sock
+NDB_URL=unix:///run/ndb/ndb.sock?db=billion
 ```
 
 - The token is the password part of the URL, after the colon. The user part is ignored (`tcp://default:<token>@host` is the same).
@@ -256,6 +258,8 @@ NDB_URL=unix:///run/ndb/ndb.sock
 - The token is, in order: the `token` option in code, the token of the URL, `NDB_TOKEN`. An URL with no token keeps the behavior of `NDB_TOKEN`.
 - The SDKs, the CLI and the console never show the token: errors and the printed client show `tcp://***@host:port`.
 - The unix socket needs no token.
+- **Database:** the path of a `tcp` or `https` URL names a [database](databases.md) (`/billion`); on a unix socket the path is the file, so use `?db=billion` (it works on every scheme). No path is the default database, as before. The client sends it as the `Ndb-Database` header on every request. A path with two parts, or a path and a `?db=` that differ, is an error.
+- An `https://` URL has no path prefix: `https://host/ndb` names the database `ndb`, not a proxy path.
 
 Every client runs the same cases: `spec/url/cases.json`.
 
