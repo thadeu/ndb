@@ -51,6 +51,14 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		segs, _ := segments(r.URL.EscapedPath())
 		coll, need := required(r.Method, segs)
 
+		// The lists of a scoped token name collections of the default
+		// database: another database needs the full token.
+		if name := headerDatabase(r); name != "" && !t.Full {
+			writeError(w, &apiError{status: http.StatusForbidden, code: "forbidden", msg: fmt.Sprintf("token %s may not use database %s: only a full token may use a database other than the default one", t.Name, name)})
+
+			return
+		}
+
 		if !t.allows(coll, need) {
 			writeError(w, &apiError{status: http.StatusForbidden, code: "forbidden", msg: forbidden(t, coll, need)})
 

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/thadeu/ndb/internal/backup"
@@ -34,15 +35,55 @@ import (
 // Left out: segments and meta.bolt. They are derived from the WAL; the
 // restored daemon rebuilds them. Direct-mode collections keep their data in
 // the apps' own files; only their definition is saved.
+//
+// The backup of the default database holds every database of the daemon
+// (format 2 when there is one). The backup of another database holds that
+// database alone, as the default database of a restored daemon.
 func (db *DB) Backup(ctx context.Context, w io.Writer, opts backup.Options) error {
+	var done []func()
+
+	defer func() {
+		for _, fn := range slices.Backward(done) {
+			fn()
+		}
+	}()
+
+	src, err := db.backupSource(ctx, opts.Streams, &done)
+	if err != nil {
+		return err
+	}
+
+	if db.parent == nil {
+		for _, child := range db.databaseList() {
+			var streams func(string) ([]byte, error)
+
+			if opts.DatabaseStreams != nil {
+				streams = opts.DatabaseStreams(child.name)
+			}
+
+			csrc, err := child.backupSource(ctx, streams, &done)
+			if err != nil {
+				return fmt.Errorf("database %s: %w", child.name, err)
+			}
+
+			src.Databases = append(src.Databases, backup.Database{Name: child.name, Source: csrc})
+		}
+	}
+
+	return backup.Write(w, src, opts)
+}
+
+// backupSource is what Backup saves of db alone. Each step that holds a
+// collection (or a snapshot) adds its release to done.
+func (db *DB) backupSource(ctx context.Context, streams func(string) ([]byte, error), done *[]func()) (backup.Source, error) {
 	db.swap.RLock()
-	defer db.swap.RUnlock()
+	*done = append(*done, db.swap.RUnlock)
 
 	defs := db.cat.List()
 
 	entries, err := db.cursors.All()
 	if err != nil {
-		return err
+		return backup.Source{}, err
 	}
 
 	cols := db.engineCollections()
@@ -56,26 +97,26 @@ func (db *DB) Backup(ctx context.Context, w io.Writer, opts backup.Options) erro
 
 		col, ok := cols[d.Name]
 		if !ok {
-			return fmt.Errorf("backup: collection %s is not open", d.Name)
+			return backup.Source{}, fmt.Errorf("backup: collection %s is not open", d.Name)
 		}
 
 		if err := col.enter(); err != nil {
-			return fmt.Errorf("backup: %s: %w", d.Name, err)
+			return backup.Source{}, fmt.Errorf("backup: %s: %w", d.Name, err)
 		}
 
-		defer col.leave()
+		*done = append(*done, col.leave)
 
 		dir := filepath.Join(db.dir, "collections", d.Name)
 
 		first, has, err := backup.FirstTx(dir)
 		if err != nil {
-			return fmt.Errorf("backup: %s: %w", d.Name, err)
+			return backup.Source{}, fmt.Errorf("backup: %s: %w", d.Name, err)
 		}
 
 		if !has || first <= 1 {
 			m, err := col.eng.WALMark()
 			if err != nil {
-				return fmt.Errorf("backup: %s: %w", d.Name, err)
+				return backup.Source{}, fmt.Errorf("backup: %s: %w", d.Name, err)
 			}
 
 			marks[d.Name] = markOf(m)
@@ -85,15 +126,13 @@ func (db *DB) Backup(ctx context.Context, w io.Writer, opts backup.Options) erro
 
 		m, snap, err := col.eng.WALMarkSnapshot()
 		if err != nil {
-			return fmt.Errorf("backup: %s: %w", d.Name, err)
+			return backup.Source{}, fmt.Errorf("backup: %s: %w", d.Name, err)
 		}
 
-		defer snap.Close()
+		*done = append(*done, func() { snap.Close() })
 
 		snaps[d.Name] = backup.Snapshot{Tx: m.Tx, Lines: snapshotLines(ctx, snap)}
 	}
-
-	streams := opts.Streams
 
 	if streams == nil {
 		streams = func(name string) ([]byte, error) {
@@ -107,7 +146,7 @@ func (db *DB) Backup(ctx context.Context, w io.Writer, opts backup.Options) erro
 		}
 	}
 
-	src := backup.Source{
+	return backup.Source{
 		Settings:  db.settings.All(),
 		Streams:   streams,
 		Defs:      defs,
@@ -125,9 +164,16 @@ func (db *DB) Backup(ctx context.Context, w io.Writer, opts backup.Options) erro
 				return emit(line)
 			})
 		},
-	}
+	}, nil
+}
 
-	return backup.Write(w, src, opts)
+// databaseList is the other databases, sorted by name.
+func (db *DB) databaseList() []*DB {
+	var out []*DB
+
+	db.eachDatabase(func(child *DB) { out = append(out, child) })
+
+	return out
 }
 
 func markOf(m collection.WALMark) backup.Mark {

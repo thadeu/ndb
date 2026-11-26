@@ -56,6 +56,10 @@ type Usage struct {
 	Total       int64        `json:"total"`
 	Collections []Collection `json:"collections"`
 	Shared      Parts        `json:"shared"`
+
+	// Databases is the bytes of the other databases (_databases), which a
+	// scan of the default database leaves out of Total.
+	Databases int64 `json:"databases_bytes,omitempty"`
 }
 
 // Scan reads the sizes under a data dir. It only stats files: it takes
@@ -82,6 +86,8 @@ func Scan(dataDir string) (Usage, error) {
 			u.Shared.Cursors, _ = TreeSize(path)
 		case e.Name() == "trash" && e.IsDir():
 			u.Shared.PITR = UniqueSize(path, "")
+		case e.Name() == "_databases" && e.IsDir():
+			u.Databases, _ = TreeSize(path)
 		default:
 			size, _ := TreeSize(path)
 			u.Shared.Meta += size

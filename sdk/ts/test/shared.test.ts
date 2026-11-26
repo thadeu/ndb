@@ -1,12 +1,13 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { afterAll, describe, expect, it } from 'vitest'
-import { NdbError } from '../src/index.js'
+import { afterAll, describe, expect, inject, it } from 'vitest'
+import { NdbError, connect, type Ndb } from '../src/index.js'
 import { collName, tcpDb, unixDb } from './helpers.js'
 
 interface Step {
   op: string
   body: unknown
+  database?: string
 }
 
 interface SharedCase {
@@ -49,28 +50,45 @@ function normalize(rows: unknown[], ordered: boolean): string[] {
 
 const cases = loadCases()
 const transports = [
-  ['unix', unixDb()],
-  ['tcp', tcpDb()],
+  ['unix', unixDb(), inject('unixAddr')],
+  ['tcp', tcpDb(), inject('tcpAddr')],
 ] as const
 
-afterAll(() => Promise.all(transports.map(([, db]) => db.close())))
+const others: Ndb[] = []
+
+// within gives the handle of a database of a case: the same address with
+// ?db=, the way an app names its database in NDB_URL.
+function within(db: Ndb, addr: string, database: string | undefined): Ndb {
+  if (!database) {
+    return db
+  }
+
+  const other = connect(`${addr}?db=${database}`)
+
+  others.push(other)
+
+  return other
+}
+
+afterAll(() => Promise.all([...transports.map(([, db]) => db.close()), ...others.map((db) => db.close())]))
 
 it('finds the shared cases', () => {
   expect(cases.length).toBeGreaterThan(40)
 })
 
-describe.each(transports)('shared cases over %s', (_t, db) => {
+describe.each(transports)('shared cases over %s', (_t, db, addr) => {
   it.each(cases)('%s', async (_file, c) => {
     const base = `/${collName()}`
 
     await db.request('PUT', base, c.setup.catalog)
 
     for (const w of c.setup.writes) {
-      await db.request('POST', `${base}/_${w.op}`, w.body)
+      await within(db, addr, w.database).request('POST', `${base}/_${w.op}`, w.body)
     }
 
     const run = async () => {
-      const res = await db.stream('POST', `${base}/_${c.request.op}?decrypt=1`, c.request.body)
+      const target = within(db, addr, c.request.database)
+      const res = await target.stream('POST', `${base}/_${c.request.op}?decrypt=1`, c.request.body)
       const rows: unknown[] = []
 
       for await (const row of res.rows()) {

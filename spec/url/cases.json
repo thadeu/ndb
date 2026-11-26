@@ -1,0 +1,182 @@
+{
+  "about": "NDB_URL parse cases that every client runs. url is the address; env is NDB_TOKEN (null: unset); option is the token option of the client (null: not given). want.token is the token sent (null: none); want.database is the Ndb-Database header sent (absent or null: none); want.error: the address is refused. secret must never be in an error message or in the inspect text of the client.",
+  "cases": [
+    {
+      "name": "no token anywhere",
+      "url": "tcp://127.0.0.1:7070",
+      "env": null,
+      "option": null,
+      "want": {
+        "token": null
+      }
+    },
+    {
+      "name": "env only",
+      "url": "tcp://127.0.0.1:7070",
+      "env": "envtok",
+      "option": null,
+      "want": {
+        "token": "envtok"
+      }
+    },
+    {
+      "name": "url wins over env",
+      "url": "tcp://:urltok@127.0.0.1:7070",
+      "env": "envtok",
+      "option": null,
+      "want": {
+        "token": "urltok"
+      },
+      "secret": "urltok"
+    },
+    {
+      "name": "option wins over url and env",
+      "url": "tcp://:urltok@127.0.0.1:7070",
+      "env": "envtok",
+      "option": "opttok",
+      "want": {
+        "token": "opttok"
+      },
+      "secret": "urltok"
+    },
+    {
+      "name": "user part is ignored",
+      "url": "tcp://default:urltok@127.0.0.1:7070",
+      "env": null,
+      "option": null,
+      "want": {
+        "token": "urltok"
+      },
+      "secret": "urltok"
+    },
+    {
+      "name": "percent-encoded token",
+      "url": "tcp://:a%2Fb%40c@127.0.0.1:7070",
+      "env": null,
+      "option": null,
+      "want": {
+        "token": "a/b@c"
+      }
+    },
+    {
+      "name": "empty password falls back to env",
+      "url": "tcp://:@127.0.0.1:7070",
+      "env": "envtok",
+      "option": null,
+      "want": {
+        "token": "envtok"
+      }
+    },
+    {
+      "name": "https with token",
+      "url": "https://:httpstok@ndb.example.com",
+      "env": null,
+      "option": null,
+      "want": {
+        "token": "httpstok"
+      },
+      "secret": "httpstok"
+    },
+    {
+      "name": "unix socket takes env",
+      "url": "unix:///run/ndb/ndb.sock",
+      "env": "envtok",
+      "option": null,
+      "want": {
+        "token": "envtok"
+      }
+    },
+    {
+      "name": "token without a colon is refused",
+      "url": "tcp://urltok@127.0.0.1:7070",
+      "env": null,
+      "option": null,
+      "want": {
+        "error": true
+      },
+      "secret": "urltok"
+    },
+    {
+      "name": "bad scheme hides the token",
+      "url": "ftp://:s3cret@127.0.0.1:7070",
+      "env": null,
+      "option": null,
+      "want": {
+        "error": true
+      },
+      "secret": "s3cret"
+    },
+    {
+      "name": "database in the path",
+      "url": "tcp://:urltok@127.0.0.1:7070/billion",
+      "env": null,
+      "option": null,
+      "want": {
+        "token": "urltok",
+        "database": "billion"
+      },
+      "secret": "urltok"
+    },
+    {
+      "name": "database in the query",
+      "url": "tcp://127.0.0.1:7070?db=billion",
+      "env": null,
+      "option": null,
+      "want": {
+        "token": null,
+        "database": "billion"
+      }
+    },
+    {
+      "name": "database of a unix socket",
+      "url": "unix:///run/ndb/ndb.sock?db=billion",
+      "env": "envtok",
+      "option": null,
+      "want": {
+        "token": "envtok",
+        "database": "billion"
+      }
+    },
+    {
+      "name": "https with a database",
+      "url": "https://:httpstok@ndb.example.com/billion",
+      "env": null,
+      "option": null,
+      "want": {
+        "token": "httpstok",
+        "database": "billion"
+      },
+      "secret": "httpstok"
+    },
+    {
+      "name": "a slash alone is no database",
+      "url": "tcp://127.0.0.1:7070/",
+      "env": null,
+      "option": null,
+      "want": {
+        "token": null,
+        "database": null
+      }
+    },
+    {
+      "name": "path and query must agree",
+      "url": "tcp://:urltok@127.0.0.1:7070/billion?db=cronota",
+      "env": null,
+      "option": null,
+      "want": {
+        "error": true
+      },
+      "secret": "urltok"
+    },
+    {
+      "name": "one database only",
+      "url": "tcp://:urltok@127.0.0.1:7070/billion/users",
+      "env": null,
+      "option": null,
+      "want": {
+        "error": true
+      },
+      "secret": "urltok"
+    }
+  ]
+}

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -101,6 +102,17 @@ func TestTokenFromEnvAndOptionWins(t *testing.T) {
 
 	if err := listCatalog(openTest(t, tcp, WithToken("nope"))); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("explicit token must win over env: %v", err)
+	}
+}
+
+func TestTokenInTheURL(t *testing.T) {
+	t.Setenv("NDB_TOKEN", "")
+
+	_, tcp := startTokenDaemon(t)
+	withToken := strings.Replace(tcp, "tcp://", "tcp://:"+testToken+"@", 1)
+
+	if err := listCatalog(openTest(t, withToken)); err != nil {
+		t.Fatalf("token in the URL: %v", err)
 	}
 }
 

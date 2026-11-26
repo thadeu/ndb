@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **Databases:** many sets of collections in one daemon; two apps can each have `users`. The header `Ndb-Database` picks one; no header is the default database, the data dir of today with the same files. `PUT`, `GET` and `DELETE /_databases`. A write makes a database (not with `allow_implicit: false`). Each database has its own catalog, watch positions, blobs and streams; all share the key, the settings and the memory budget. A backup with no header holds every database (format 2; a daemon with no database still writes format 1). Scoped tokens stay in the default database. See `docs/dev/databases.md`.
+- **Token and database in the URL:** `NDB_URL=tcp://:<token>@host:7070/billion` (or `unix:///run/ndb/ndb.sock?db=billion`), as in Redis and Postgres URLs, in Go, Ruby, Rails, TS, the CLI and the console. The order of the token: the option, the URL, `NDB_TOKEN`. Errors and the printed client never show the token.
+- **Console:** the connection menu lists the databases of the daemon (`c/<connection>@<database>`).
+- **CLI:** `https://` URLs.
+- **Compatibility test:** `TestCompat` opens a data dir made by 1.26.0 and checks its answers.
+
+### Changed
+
+- **Upgrade note, the path of `NDB_URL` is the database now** (Go, Ruby, Rails, TS, the CLI and the console). Before, the SDKs and the CLI dropped the path of a `tcp://` or `https://` URL, and the console kept it as a proxy prefix. An URL with a path, such as `https://host/ndb`, now reads and writes the database `ndb`: remove the path to keep the default database. An URL with no path works as before.
+- **A token without a colon is refused:** `tcp://<token>@host` was dropped with no error; now it is an error that says to write `tcp://:<token>@host`.
+- **`GET /_size` and `/_stats`:** the other databases are not in the bytes of the default one; `databases_bytes` gives them.
+
 ## [1.26.0] - 2026-11-18
 
 ### Added

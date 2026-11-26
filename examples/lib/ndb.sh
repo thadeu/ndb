@@ -7,20 +7,59 @@
 #
 # unix:///path is sent with --unix-socket. tcp://host:port is plain HTTP, and
 # NDB_TOKEN becomes a bearer token (the unix socket never needs one).
+#
+# As in the SDKs, the URL can hold the token and the database:
+# tcp://:<token>@host:port/<database>, or unix:///path?db=<database>. The
+# token of the URL wins over NDB_TOKEN; percent-encoding is not decoded here.
 
 NDB_URL="${NDB_URL:-unix:///tmp/ndb-examples.sock}"
 NDB_BODY="$(mktemp)"
 NDB_ARGS=(-sS -H 'Content-Type: application/json')
+NDB_DB=""
 
 trap 'rm -f "$NDB_BODY"' EXIT
 
-case "$NDB_URL" in
+ndb_address="${NDB_URL%%\?*}"
+ndb_query=""
+
+if [[ "$NDB_URL" == *\?* ]]; then
+	ndb_query="${NDB_URL#*\?}"
+fi
+
+if [[ "&$ndb_query" =~ \&db=([^\&]*) ]]; then
+	NDB_DB="${BASH_REMATCH[1]}"
+fi
+
+case "$ndb_address" in
 unix://*)
-	NDB_ARGS+=(--unix-socket "${NDB_URL#unix://}")
+	NDB_ARGS+=(--unix-socket "${ndb_address#unix://}")
 	NDB_BASE="http://ndb"
 	;;
 tcp://*)
-	NDB_BASE="http://${NDB_URL#tcp://}"
+	ndb_authority="${ndb_address#tcp://}"
+	ndb_path=""
+
+	if [[ "$ndb_authority" == */* ]]; then
+		ndb_path="${ndb_authority#*/}"
+		ndb_authority="${ndb_authority%%/*}"
+	fi
+
+	if [[ "$ndb_authority" == *@* ]]; then
+		ndb_userinfo="${ndb_authority%@*}"
+		ndb_authority="${ndb_authority##*@}"
+
+		if [[ "$ndb_userinfo" == *:* && -n "${ndb_userinfo#*:}" ]]; then
+			NDB_TOKEN="${ndb_userinfo#*:}"
+		fi
+	fi
+
+	ndb_path="${ndb_path%/}"
+
+	if [[ -n "$ndb_path" ]]; then
+		NDB_DB="$ndb_path"
+	fi
+
+	NDB_BASE="http://$ndb_authority"
 	;;
 *)
 	echo "NDB_URL must start with unix:// or tcp://" >&2
@@ -30,6 +69,10 @@ esac
 
 if [[ -n "${NDB_TOKEN:-}" ]]; then
 	NDB_ARGS+=(-H "Authorization: Bearer $NDB_TOKEN")
+fi
+
+if [[ -n "$NDB_DB" ]]; then
+	NDB_ARGS+=(-H "Ndb-Database: $NDB_DB")
 fi
 
 ndb() {

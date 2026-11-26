@@ -51,7 +51,9 @@ chown ndb:ndb /etc/ndb/token && chmod 600 /etc/ndb/token
 systemctl edit ndb     # ExecStart=... -token-file /etc/ndb/token
 ```
 
-The SDKs read `NDB_URL` and `NDB_TOKEN` by themselves (Go, Ruby and TypeScript), so the sample apps need no token code. To set them in code: Ruby `Ndb::Client.new(token:)`, Go `ndb.Open(addr, ndb.WithToken(t))`, TypeScript `connect(addr, { token })`.
+The SDKs read `NDB_URL` and `NDB_TOKEN` by themselves (Go, Ruby and TypeScript), so the sample apps need no token code. To set them in code: Ruby `Ndb::Client.new(token:)`, Go `ndb.Connect(addr, ndb.WithToken(t))`, TypeScript `connect(addr, { token })`.
+
+One URL can also hold both, and a [database](../databases.md) for each app: `NDB_URL=tcp://:<token>@ndb.internal:7070/billion`. Then `NDB_TOKEN` is not needed. See [Connection URL](../configuration.md#connection-url).
 
 ## Rules
 

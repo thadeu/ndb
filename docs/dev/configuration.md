@@ -238,7 +238,30 @@ NDB_TOKEN=$(cat /run/secrets/ndb_token) ndb serve -tcp 10.0.0.5:7070
 
 The unix socket never asks for a token: file permissions guard it (`listen.unix_mode`, default `0660`). `POST /_backup` stays unix-only.
 
-The token is defense in depth. Keep the listener on a private address (for example WireGuard) as well. SDKs take a `token` option or `NDB_TOKEN`; see [clients.md](clients.md).
+The token is defense in depth. Keep the listener on a private address (for example WireGuard) as well. SDKs take a `token` option, the token of the URL or `NDB_TOKEN`; see [Connection URL](#connection-url) and [clients.md](clients.md).
+
+## Connection URL
+
+One URL holds the address, the token and the [database](databases.md), as in a Redis or Postgres URL:
+
+```bash
+NDB_URL=tcp://:<token>@10.0.0.5:7070
+NDB_URL=tcp://:<token>@10.0.0.5:7070/billion
+NDB_URL=https://:<token>@ndb.example.com/billion
+NDB_URL=unix:///run/ndb/ndb.sock
+NDB_URL=unix:///run/ndb/ndb.sock?db=billion
+```
+
+- The token is the password part of the URL, after the colon. The user part is ignored (`tcp://default:<token>@host` is the same).
+- A token with `/`, `@` or `:` must be percent-encoded (`a%2Fb`). A token made with `openssl rand -hex 32` needs no encoding.
+- A user with no colon (`tcp://<token>@host`) is an error, so a token in the wrong place is never sent as a user name.
+- The token is, in order: the `token` option in code, the token of the URL, `NDB_TOKEN`. An URL with no token keeps the behavior of `NDB_TOKEN`.
+- The SDKs, the CLI and the console never show the token: errors and the printed client show `tcp://***@host:port`.
+- The unix socket needs no token.
+- **Database:** the path of a `tcp` or `https` URL names a [database](databases.md) (`/billion`); on a unix socket the path is the file, so use `?db=billion` (it works on every scheme). No path is the default database, as before. The client sends it as the `Ndb-Database` header on every request. A path with two parts, or a path and a `?db=` that differ, is an error.
+- An `https://` URL has no path prefix: `https://host/ndb` names the database `ndb`, not a proxy path.
+
+Every client runs the same cases: `spec/url/cases.json`.
 
 Ten failed token checks from one IP in one minute lock that IP out for five minutes (`429 too_many_requests`). The browser guards (`cors_origins`, `allowed_hosts`), the lockout and the limits are on [Security](security.md).
 
@@ -250,7 +273,7 @@ ndb -config /etc/ndb/ndb.yml -token-file /etc/ndb/token
 
 ### Scoped tokens
 
-`tokens:` in `ndb.yml` gives each app its own token, limited to some collections. The token of `-token-file` keeps every right; both can be set.
+`tokens:` in `ndb.yml` gives each app its own token, limited to some collections of the default database (a scoped token may not use another [database](databases.md)). The token of `-token-file` keeps every right; both can be set.
 
 ```yaml
 tokens:

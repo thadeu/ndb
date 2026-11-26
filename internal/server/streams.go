@@ -57,7 +57,7 @@ func answer(w http.ResponseWriter, status int, v any, err error) {
 }
 
 func (s *Server) streamInfo(w http.ResponseWriter, r *http.Request, _ *engine.DB) {
-	info, err := s.streams.Info(r.Context(), r.PathValue("coll"))
+	info, err := s.streamsFor(r).Info(r.Context(), r.PathValue("coll"))
 
 	answer(w, http.StatusOK, info, err)
 }
@@ -88,7 +88,7 @@ func (s *Server) streamAppend(w http.ResponseWriter, r *http.Request, db *engine
 		docs = append([]map[string]any{req.Doc}, docs...)
 	}
 
-	ids, err := s.streams.Append(r.Context(), r.PathValue("coll"), docs, streams.AppendOptions{ID: req.ID, NoCreate: req.NoCreate, Trim: req.Trim})
+	ids, err := s.streamsFor(r).Append(r.Context(), r.PathValue("coll"), docs, streams.AppendOptions{ID: req.ID, NoCreate: req.NoCreate, Trim: req.Trim})
 	if err != nil {
 		writeError(w, err)
 
@@ -125,7 +125,7 @@ func (s *Server) streamTrim(w http.ResponseWriter, r *http.Request, _ *engine.DB
 		return
 	}
 
-	n, err := s.streams.Trim(r.Context(), r.PathValue("coll"), req)
+	n, err := s.streamsFor(r).Trim(r.Context(), r.PathValue("coll"), req)
 
 	if err == nil && s.debugOn(r) {
 		s.logWrite(w, r, "stream_trim", slog.Int("deleted", n), slog.Any("options", req))
@@ -135,7 +135,7 @@ func (s *Server) streamTrim(w http.ResponseWriter, r *http.Request, _ *engine.DB
 }
 
 func (s *Server) streamGroups(w http.ResponseWriter, r *http.Request, _ *engine.DB) {
-	groups, err := s.streams.Groups(r.Context(), r.PathValue("coll"))
+	groups, err := s.streamsFor(r).Groups(r.Context(), r.PathValue("coll"))
 
 	answer(w, http.StatusOK, groups, err)
 }
@@ -153,7 +153,7 @@ func (s *Server) groupCreate(w http.ResponseWriter, r *http.Request, _ *engine.D
 		return
 	}
 
-	head, err := s.streams.CreateGroup(r.Context(), r.PathValue("coll"), r.PathValue("group"), req.Start, req.EntriesRead, req.NoCreate)
+	head, err := s.streamsFor(r).CreateGroup(r.Context(), r.PathValue("coll"), r.PathValue("group"), req.Start, req.EntriesRead, req.NoCreate)
 
 	if err == nil {
 		s.logInfo(w, r, "stream group created", slog.String("group", r.PathValue("group")), slog.String("start", req.Start))
@@ -163,7 +163,7 @@ func (s *Server) groupCreate(w http.ResponseWriter, r *http.Request, _ *engine.D
 }
 
 func (s *Server) groupDestroy(w http.ResponseWriter, r *http.Request, _ *engine.DB) {
-	err := s.streams.DestroyGroup(r.Context(), r.PathValue("coll"), r.PathValue("group"))
+	err := s.streamsFor(r).DestroyGroup(r.Context(), r.PathValue("coll"), r.PathValue("group"))
 
 	if err == nil {
 		s.logInfo(w, r, "stream group destroyed", slog.String("group", r.PathValue("group")))
@@ -184,7 +184,7 @@ func (s *Server) groupSetID(w http.ResponseWriter, r *http.Request, _ *engine.DB
 		return
 	}
 
-	head, err := s.streams.SetID(r.Context(), r.PathValue("coll"), r.PathValue("group"), req.ID, req.EntriesRead)
+	head, err := s.streamsFor(r).SetID(r.Context(), r.PathValue("coll"), r.PathValue("group"), req.ID, req.EntriesRead)
 
 	if err == nil && s.debugOn(r) {
 		s.logWrite(w, r, "stream_group_setid", slog.String("group", r.PathValue("group")), slog.String("id", req.ID))
@@ -194,13 +194,13 @@ func (s *Server) groupSetID(w http.ResponseWriter, r *http.Request, _ *engine.DB
 }
 
 func (s *Server) groupConsumers(w http.ResponseWriter, r *http.Request, _ *engine.DB) {
-	cons, err := s.streams.Consumers(r.Context(), r.PathValue("coll"), r.PathValue("group"))
+	cons, err := s.streamsFor(r).Consumers(r.Context(), r.PathValue("coll"), r.PathValue("group"))
 
 	answer(w, http.StatusOK, cons, err)
 }
 
 func (s *Server) consumerCreate(w http.ResponseWriter, r *http.Request, _ *engine.DB) {
-	created, err := s.streams.CreateConsumer(r.Context(), r.PathValue("coll"), r.PathValue("group"), r.PathValue("consumer"))
+	created, err := s.streamsFor(r).CreateConsumer(r.Context(), r.PathValue("coll"), r.PathValue("group"), r.PathValue("consumer"))
 
 	if err == nil && s.debugOn(r) {
 		s.logWrite(w, r, "stream_consumer_create", slog.String("group", r.PathValue("group")), slog.String("consumer", r.PathValue("consumer")), slog.Bool("created", created))
@@ -210,7 +210,7 @@ func (s *Server) consumerCreate(w http.ResponseWriter, r *http.Request, _ *engin
 }
 
 func (s *Server) consumerDelete(w http.ResponseWriter, r *http.Request, _ *engine.DB) {
-	n, err := s.streams.DeleteConsumer(r.Context(), r.PathValue("coll"), r.PathValue("group"), r.PathValue("consumer"))
+	n, err := s.streamsFor(r).DeleteConsumer(r.Context(), r.PathValue("coll"), r.PathValue("group"), r.PathValue("consumer"))
 
 	if err == nil && s.debugOn(r) {
 		s.logWrite(w, r, "stream_consumer_delete", slog.String("group", r.PathValue("group")), slog.String("consumer", r.PathValue("consumer")), slog.Int("pending", n))
@@ -242,7 +242,7 @@ func (s *Server) groupRead(w http.ResponseWriter, r *http.Request, _ *engine.DB)
 		}
 	}()
 
-	rows, err := s.streams.Read(ctx, r.PathValue("coll"), r.PathValue("group"), req)
+	rows, err := s.streamsFor(r).Read(ctx, r.PathValue("coll"), r.PathValue("group"), req)
 	if err != nil {
 		writeError(w, err)
 
@@ -276,7 +276,7 @@ func (s *Server) streamRead(w http.ResponseWriter, r *http.Request, _ *engine.DB
 		}
 	}()
 
-	rows, err := s.streams.Tail(ctx, r.PathValue("coll"), req)
+	rows, err := s.streamsFor(r).Tail(ctx, r.PathValue("coll"), req)
 	if err != nil {
 		writeError(w, err)
 
@@ -297,7 +297,7 @@ func (s *Server) groupAck(w http.ResponseWriter, r *http.Request, _ *engine.DB) 
 		return
 	}
 
-	n, err := s.streams.Ack(r.Context(), r.PathValue("coll"), r.PathValue("group"), req.IDs)
+	n, err := s.streamsFor(r).Ack(r.Context(), r.PathValue("coll"), r.PathValue("group"), req.IDs)
 
 	if err == nil && s.debugOn(r) {
 		s.logWrite(w, r, "stream_ack", slog.String("group", r.PathValue("group")), slog.Int("acked", n), slog.Int("count", len(req.IDs)), slog.Any("ids", req.IDs[:min(len(req.IDs), writeIDsMax)]))
@@ -316,7 +316,7 @@ func (s *Server) groupNack(w http.ResponseWriter, r *http.Request, _ *engine.DB)
 		return
 	}
 
-	n, err := s.streams.Nack(r.Context(), r.PathValue("coll"), r.PathValue("group"), req)
+	n, err := s.streamsFor(r).Nack(r.Context(), r.PathValue("coll"), r.PathValue("group"), req)
 
 	if err == nil && s.debugOn(r) {
 		ids := req.IDs[:min(len(req.IDs), writeIDsMax)]
@@ -336,7 +336,7 @@ func (s *Server) groupPending(w http.ResponseWriter, r *http.Request, _ *engine.
 		return
 	}
 
-	out, err := s.streams.Pending(r.Context(), r.PathValue("coll"), r.PathValue("group"), req)
+	out, err := s.streamsFor(r).Pending(r.Context(), r.PathValue("coll"), r.PathValue("group"), req)
 
 	answer(w, http.StatusOK, out, err)
 }
@@ -350,7 +350,7 @@ func (s *Server) groupClaim(w http.ResponseWriter, r *http.Request, _ *engine.DB
 		return
 	}
 
-	res, err := s.streams.Claim(r.Context(), r.PathValue("coll"), r.PathValue("group"), req)
+	res, err := s.streamsFor(r).Claim(r.Context(), r.PathValue("coll"), r.PathValue("group"), req)
 
 	if err == nil && s.debugOn(r) {
 		s.logWrite(w, r, "stream_claim", slog.String("group", r.PathValue("group")), slog.Int("claimed", len(res.Entries)), slog.Any("options", req))

@@ -26,9 +26,13 @@ fail() {
 
 # call METHOD PATH [BODY] prints the body; the status goes to $tmp/status.
 call() {
-	local method="$1" path="$2" body="${3-}"
+	local method="$1" path="$2" body="${3-}" hdr=()
 
-	curl -s --unix-socket "$sock" -X "$method" -H 'Content-Type: application/json' \
+	if [[ -n "${NDB_DB-}" ]]; then
+		hdr=(-H "Ndb-Database: $NDB_DB")
+	fi
+
+	curl -s --unix-socket "$sock" -X "$method" -H 'Content-Type: application/json' ${hdr[@]+"${hdr[@]}"} \
 		-d "$body" -o "$tmp/body" -w '%{http_code}' "http://ndb$path" >"$tmp/status"
 	cat "$tmp/body"
 }
@@ -111,6 +115,27 @@ expect 404 "$(cat "$tmp/status")"
 call GET /v1/c >/dev/null
 expect 404 "$(cat "$tmp/status")"
 [[ "$(cat "$tmp/body")" == *'unknown_route'* ]] || fail "old route: want unknown_route"
+
+NDB_DB=billion call POST /posts/_doc '{"_id":"p1","in":"billion"}' >/dev/null
+expect 200 "$(cat "$tmp/status")"
+
+NDB_DB=billion call GET /posts/_doc/p1 >/dev/null
+expect 200 "$(cat "$tmp/status")"
+[[ "$(cat "$tmp/body")" == *'"in":"billion"'* ]] || fail "database: wrong document: $(cat "$tmp/body")"
+
+call GET /posts/_doc/p1 >/dev/null
+[[ "$(cat "$tmp/body")" != *'"in":"billion"'* ]] || fail "database: the default database has the document of billion"
+
+NDB_DB=nope call GET /posts/_doc/p1 >/dev/null
+expect 404 "$(cat "$tmp/status")"
+[[ "$(cat "$tmp/body")" == *'database_not_found'* ]] || fail "unknown database: wrong code"
+
+call GET /_databases >/dev/null
+expect 200 "$(cat "$tmp/status")"
+[[ "$(cat "$tmp/body")" == *'"name":"billion"'* ]] || fail "databases list misses billion"
+
+call DELETE '/_databases/billion?confirm=billion' >/dev/null
+expect 200 "$(cat "$tmp/status")"
 
 call GET /_metrics >/dev/null
 expect 200 "$(cat "$tmp/status")"

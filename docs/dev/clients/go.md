@@ -25,6 +25,12 @@ db, err := ndb.Connect("unix:///run/ndb/ndb.sock")
 // TCP with a bearer token.
 db, err := ndb.Connect("tcp://10.0.0.5:7070", ndb.WithToken("secret"))
 
+// Token and database in the URL: the collections of the database billion.
+db, err := ndb.Connect("tcp://:secret@10.0.0.5:7070/billion")
+
+// A database on the unix socket (its path is the file, so use ?db=).
+db, err := ndb.Connect("unix:///run/ndb/ndb.sock?db=billion")
+
 // Address and token from the environment: NDB_URL and NDB_TOKEN.
 db, err := ndb.Connect("")
 

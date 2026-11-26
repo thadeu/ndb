@@ -61,6 +61,8 @@ export type ErrorCode =
   | 'stream_id_too_small'
   | 'unknown_group'
   | 'group_exists'
+  | 'invalid_database'
+  | 'database_not_found'
   | 'invalid_update'
   | 'locked'
   | 'lock_expired'
@@ -129,6 +131,12 @@ export class UnknownGroupError extends NdbError {}
 // A group create with a name that exists (group_exists).
 export class GroupExistsError extends NdbError {}
 
+// A database name that is not [a-z0-9][a-z0-9_-]{0,62} (invalid_database).
+export class InvalidDatabaseError extends NdbError {}
+
+// A read of a database that does not exist (database_not_found).
+export class DatabaseNotFoundError extends NdbError {}
+
 // withRetry lost the race on every try: the document changed between the
 // read and the write each time.
 export class StaleObjectError extends NdbError {}
@@ -184,6 +192,8 @@ const subclasses: Record<string, typeof NdbError> = {
   stream_id_too_small: StreamIdError,
   unknown_group: UnknownGroupError,
   group_exists: GroupExistsError,
+  invalid_database: InvalidDatabaseError,
+  database_not_found: DatabaseNotFoundError,
 }
 
 export function makeError(code: ErrorCode, message: string, status = 0): NdbError {

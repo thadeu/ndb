@@ -26,6 +26,12 @@ const ndb = connect('unix:///run/ndb/ndb.sock') // or tcp://host:port, https://h
 // TCP with a bearer token.
 const remote = connect('tcp://10.0.0.5:7070', { token: 'secret' })
 
+// Token and database in the URL: the collections of the database billion.
+const billion = connect('tcp://:secret@10.0.0.5:7070/billion')
+
+// A database on the unix socket (its path is the file, so use ?db=).
+const local = connect('unix:///run/ndb/ndb.sock?db=billion')
+
 // Address and token from the environment: NDB_URL and NDB_TOKEN.
 const fromEnv = connect()
 

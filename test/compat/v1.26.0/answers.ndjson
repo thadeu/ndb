@@ -1,0 +1,13 @@
+{"status":200,"body":{"_v":2,"_id":"u1","account_id":"a1","created_at":"2026-01-02T10:00:00Z","credits":70,"email":"ana@x.io","name":"Ana Lima","tags":["admin","beta"]}}
+{"status":404,"body":{"error":{"code":"not_found","message":"no such document"}}}
+{"status":200,"body":[{"_id":"u5","account_id":"a1","email":"duda@x.io","name":"Duda","created_at":"2026-01-06T10:00:00Z","credits":1},{"_id":"u2","account_id":"a1","email":"bia@x.io","name":"Bia","created_at":"2026-01-03T10:00:00Z","credits":50,"tags":["beta"]},{"_id":"u1","account_id":"a1","created_at":"2026-01-02T10:00:00Z","credits":70,"email":"ana@x.io","name":"Ana Lima","tags":["admin","beta"]}]}
+{"status":200,"body":[{"_id":"u1","account_id":"a1","created_at":"2026-01-02T10:00:00Z","credits":70,"email":"ana@x.io","name":"Ana Lima","tags":["admin","beta"]},{"_id":"u2","account_id":"a1","email":"bia@x.io","name":"Bia","created_at":"2026-01-03T10:00:00Z","credits":50,"tags":["beta"]}]}
+{"status":200,"body":{"count":4}}
+{"status":200,"body":[{"_id":"a1","n":3,"total":121},{"_id":"a2","n":1,"total":0}]}
+{"status":409,"body":{"error":{"code":"unique_violation","message":"account_id,email=[\"a1\",\"bia@x.io\"] is used by u2"}}}
+{"status":200,"body":{"_v":1,"_id":"k1","domain":"x.io","private_key":"ndb:e1:k1:HWyEFocWmjRYOp8afsS2SpExtuVk6wwRYr-QZpe9_qEO5gdjSCGEL46gNfg4NtEHjxv7mA","cpf":"ndb:e1:k1:SBcO3cbXlqC9sXWhAFJd47yAwdaACikG_LrpIOGljHLI59datde0rhYUYPk"}}
+{"status":200,"body":[{"_id":"k1","domain":"x.io","private_key":"ndb:e1:k1:HWyEFocWmjRYOp8afsS2SpExtuVk6wwRYr-QZpe9_qEO5gdjSCGEL46gNfg4NtEHjxv7mA","cpf":"ndb:e1:k1:SBcO3cbXlqC9sXWhAFJd47yAwdaACikG_LrpIOGljHLI59datde0rhYUYPk"}]}
+{"status":200,"body":[{"_id":"1731160000000-1","_ts":"2024-11-09T13:46:40Z","kind":"sent","n":1},{"_id":"1731160000000-2","_ts":"2024-11-09T13:46:40Z","kind":"open","n":2}]}
+{"status":200,"body":{"length":2,"first_id":"1731160000000-1","last_id":"1731160000000-2","entries_added":2,"max_deleted_id":"0-0","groups":1}}
+{"status":200,"body":[{"name":"mailer","consumers":0,"pending":0,"last_delivered_id":"0-0","entries_read":null,"lag":2}]}
+{"status":200,"body":{"definition":{"name":"users","write":"engine","indexes":["account_id","account_id,created_at"],"unique":["account_id,email"],"durability":"strict"},"indexes":[{"field":"account_id","state":"ready","done":0,"total":0},{"field":"account_id,created_at","state":"ready","done":0,"total":0}]}}

@@ -1,0 +1,54 @@
+{
+  "name": "the default database does not see the documents of another database",
+  "collection": "posts",
+  "daemon": true,
+  "setup": {
+    "catalog": {
+      "write": "engine"
+    },
+    "writes": [
+      {
+        "op": "bulk",
+        "body": {
+          "docs": [
+            {
+              "_id": "p1",
+              "in": "default"
+            }
+          ]
+        }
+      },
+      {
+        "op": "bulk",
+        "database": "spec_billion",
+        "body": {
+          "docs": [
+            {
+              "_id": "p1",
+              "in": "billion"
+            },
+            {
+              "_id": "p2",
+              "in": "billion"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "request": {
+    "op": "search",
+    "body": {
+      "query": {}
+    }
+  },
+  "expect": {
+    "ordered": false,
+    "rows": [
+      {
+        "_id": "p1",
+        "in": "default"
+      }
+    ]
+  }
+}

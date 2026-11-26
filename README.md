@@ -117,7 +117,7 @@ docker run -p 7070:7070 -p 4321:4321 -v ndb-data:/var/lib/ndb ghcr.io/thadeu/ndb
 
 ```bash
 curl -fsSL https://ndb.clowk.in/install.sh | bash -s -- --ui && ndb-ui     # http://127.0.0.1:4321
-docker run -p 127.0.0.1:4321:4321 -e NDB_URL=tcp://10.10.0.1:7070 -e NDB_TOKEN=... ghcr.io/thadeu/ndb-ui
+docker run -p 127.0.0.1:4321:4321 -e NDB_URL=tcp://:<token>@10.10.0.1:7070 ghcr.io/thadeu/ndb-ui
 ```
 
 A hosted version is planned for later. See [docs/dev/ui.md](docs/dev/ui.md).
@@ -129,6 +129,7 @@ A hosted version is planned for later. See [docs/dev/ui.md](docs/dev/ui.md).
 - Two write modes: direct (apps append NDJSON files, ndb follows them) and engine (insert, atomic update and delete by id or by query, with a WAL).
 - `watch` and `ack` for outbox-style consumers, with an optional `query` filter and `wal_retention` to trim the WAL.
 - Optional bearer token on the TCP listener (`-token-file`); the unix socket needs none.
+- **Databases**: many apps on one daemon, each with its own collections (two apps can each have `users`). One URL holds the address, the token and the database, as in Redis and Postgres: `NDB_URL=tcp://:<token>@host:7070/billion`. See [Databases](docs/dev/databases.md).
 - Secondary and unique indexes, built in the background.
 - **Encrypted fields with native blind indexes**: `{"blind":{"cpf":"numeric"}}` keeps the CPF encrypted in the WAL, segments, backups and logs, and still finds it by value (`{"cpf":"390.533.447-05"}`), with `unique`, indexes and `$group`. Plain values only for a read with `?decrypt=1` and the `decrypt` right. No library in the app. See [Encrypted fields](docs/dev/encryption.md).
 - TTL per document, retention, compaction, and a blob store for large values.

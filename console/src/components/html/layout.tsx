@@ -17,6 +17,12 @@ export interface Current {
   version?: string;
   uptime?: string;
   saved?: { name: string; url: string }[];
+
+  // base is the saved connection of the page, database the one it opens,
+  // and databases every database of its daemon (none: not listed).
+  base?: string;
+  database?: string;
+  databases?: string[];
 }
 
 interface NavItem {
@@ -145,6 +151,9 @@ const Brand: FC = () => (
 const Switcher: FC<{ current: Current; path: string }> = ({ current, path }) => {
   const saved = current.saved ?? [{ name: current.name, url: current.url }];
 
+  const base = current.base ?? current.name;
+  const databases = current.databases ?? [];
+
   return (
     <details class="switcher-menu">
       <summary class="switcher" aria-label="Switch connection">
@@ -164,8 +173,15 @@ const Switcher: FC<{ current: Current; path: string }> = ({ current, path }) => 
         <span class="side-label">Connections</span>
 
         {saved.map(item => (
-          <SwitcherItem item={item} on={item.name === current.name} path={path} />
+          <SwitcherItem item={item} on={item.name === base} path={path} />
         ))}
+
+        {databases.length > 1 && <span class="side-label">Databases</span>}
+
+        {databases.length > 1 &&
+          databases.map(name => (
+            <DatabaseItem base={base} name={name} on={name === current.database} path={path} />
+          ))}
 
         <div class="switcher-foot">
           <a class="switcher-link" href="./?new=1" role="menuitem">
@@ -180,6 +196,27 @@ const Switcher: FC<{ current: Current; path: string }> = ({ current, path }) => 
         </div>
       </div>
     </details>
+  );
+};
+
+// DatabaseItem opens the same section in another database of the daemon:
+// c/<connection>@<database>, or c/<connection> for the default one.
+const DatabaseItem: FC<{ base: string; name: string; on: boolean; path: string }> = ({ base, name, on, path }) => {
+  const page = name === 'default' ? base : `${base}@${name}`;
+
+  return (
+    <a
+      class={on ? 'switcher-item on' : 'switcher-item'}
+      href={`c/${encodeURIComponent(page)}${path}`}
+      role="menuitem"
+      aria-current={on ? 'true' : undefined}
+    >
+      <span class="switcher-text">
+        <span class="switcher-name mono">{name}</span>
+      </span>
+
+      {on && <Icon name="check" size={16} />}
+    </a>
   );
 };
 

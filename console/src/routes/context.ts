@@ -1,7 +1,7 @@
 import type { Context } from 'hono';
 
 import type { Connection, Connections } from '@/connections';
-import { NAME } from '@/connections';
+import { NAME, splitName } from '@/connections';
 import type { Current } from '@/html/layout';
 import type { Ndb, Stats } from '@/ndb';
 import type { Env } from '@/prefix';
@@ -14,11 +14,12 @@ export interface RouteDeps {
   message: (error: unknown) => string;
 }
 
-// connectionOf finds the connection of /c/:name, or undefined.
+// connectionOf finds the connection of /c/:name, or undefined. The name can
+// be <connection>@<database>: that connection in another database.
 export function connectionOf(deps: RouteDeps, c: Context<Env>): Connection | undefined {
   const connection = deps.connections.get(c.req.param('name') ?? '');
 
-  return connection && NAME.test(connection.name) ? connection : undefined;
+  return connection && NAME.test(splitName(connection.name).base) ? connection : undefined;
 }
 
 // pageOrigin is the origin that the browser sees. Behind a proxy that ends

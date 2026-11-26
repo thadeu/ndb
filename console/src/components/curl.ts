@@ -7,6 +7,7 @@ export interface CurlInput {
   body?: string;
   socket?: string;
   base?: string;
+  database?: string;
 }
 
 function quote(text: string): string {
@@ -26,6 +27,8 @@ export function buildCurl(input: CurlInput): string {
 
   if (input.socket) parts.push('--unix-socket', quote(input.socket));
   else parts.push('-H', '"Authorization: Bearer $NDB_TOKEN"');
+
+  if (input.database && input.database !== 'default') parts.push('-H', quote(`Ndb-Database: ${input.database}`));
 
   if (input.method !== 'GET') parts.push('-X', input.method);
 

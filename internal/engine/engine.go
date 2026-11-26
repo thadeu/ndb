@@ -42,6 +42,18 @@ var walSegmentSize int64
 
 // DB is one open data dir. It is safe for concurrent use.
 type DB struct {
+	// parent is the default database of a database under _databases, and
+	// name its name; both are zero for the default database (databases.go).
+	parent *DB
+	name   string
+	cfg    config.Config
+
+	// dbs are the other databases of the default one; dbClosed is set by
+	// Close, after which none opens.
+	dbMu     sync.Mutex
+	dbs      map[string]*DB
+	dbClosed bool
+
 	dir  string
 	log  *slog.Logger
 	lock *lock.Lock
@@ -104,13 +116,21 @@ type DB struct {
 }
 
 // Open takes the lock on cfg.DataDir, opens the catalog, declares the
-// collections of ndb.yml and opens every collection in the catalog.
+// collections of ndb.yml, opens every collection in the catalog and then
+// every database under _databases (databases.go).
 func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
-	began := time.Now()
-
 	if log == nil {
 		log = slog.Default()
 	}
+
+	return open(cfg, log, nil, "")
+}
+
+// open is Open for the default database (parent nil) or for the database
+// name of parent, which shares the settings, the key and the write budget
+// of parent.
+func open(cfg config.Config, log *slog.Logger, parent *DB, name string) (*DB, error) {
+	began := time.Now()
 
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		return nil, err
@@ -121,19 +141,7 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		return nil, err
 	}
 
-	st, key, err := openSettings(cfg, log)
-	if err != nil {
-		lk.Release()
-
-		return nil, err
-	}
-
-	box, err := crypt.New(key.ID, key.Derive("ndb:e1"), key.Derive("ndb:h1"))
-
-	if err == nil && key.Old != nil {
-		err = box.SetOld(key.Old.ID, key.Old.Derive("ndb:e1"), key.Old.Derive("ndb:h1"))
-	}
-
+	st, key, box, err := keysOf(cfg, log, parent)
 	if err != nil {
 		lk.Release()
 
@@ -166,7 +174,17 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	shared := collection.NewShared(cfg.WriteBuffer)
+
+	if parent != nil {
+		shared = parent.shared
+	}
+
 	db := &DB{
+		parent:     parent,
+		name:       name,
+		cfg:        cfg,
+		dbs:        map[string]*DB{},
 		dir:        cfg.DataDir,
 		log:        log,
 		lock:       lk,
@@ -179,7 +197,7 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		ctx:        ctx,
 		cancel:     cancel,
 		groupLimit: cfg.GroupLimit,
-		shared:     collection.NewShared(cfg.WriteBuffer),
+		shared:     shared,
 		locks:      locks.New(),
 		cols:       map[string]*Collection{},
 		pitr:       pitrDefault(cfg),
@@ -204,10 +222,10 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		return nil, err
 	}
 
-	if err := cfg.Apply(cat); err != nil {
-		db.Close()
-
-		return nil, err
+	if parent == nil {
+		if err := cfg.Apply(cat); err != nil {
+			return nil, errors.Join(err, db.Close())
+		}
 	}
 
 	for _, def := range cat.List() {
@@ -218,16 +236,54 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 		}
 	}
 
+	if parent == nil {
+		if err := db.openDatabases(); err != nil {
+			return nil, errors.Join(err, db.Close())
+		}
+	}
+
 	db.log.Info("recovery done", "data_dir", cfg.DataDir, "collections", len(db.cols), "ms", time.Since(began).Milliseconds())
 
-	db.gcWait.Add(4)
+	db.gcWait.Add(3)
 
 	go db.sweepPartitionsLoop()
 	go db.pitrLoop()
 	go db.idleLoop()
-	go db.rotationLoop()
+
+	// One rotation for the whole daemon: the default database ends it for
+	// every database (rotate.go).
+	if parent == nil {
+		db.gcWait.Add(1)
+
+		go db.rotationLoop()
+	}
 
 	return db, nil
+}
+
+// keysOf is the settings, the key and the box of the daemon: read (or made)
+// for the default database, the ones of parent for another database.
+func keysOf(cfg config.Config, log *slog.Logger, parent *DB) (*settings.Store, settings.Key, *crypt.Box, error) {
+	if parent != nil {
+		return parent.settings, parent.Key(), parent.box, nil
+	}
+
+	st, key, err := openSettings(cfg, log)
+	if err != nil {
+		return nil, settings.Key{}, nil, err
+	}
+
+	box, err := crypt.New(key.ID, key.Derive("ndb:e1"), key.Derive("ndb:h1"))
+
+	if err == nil && key.Old != nil {
+		err = box.SetOld(key.Old.ID, key.Old.Derive("ndb:e1"), key.Old.Derive("ndb:h1"))
+	}
+
+	if err != nil {
+		return nil, settings.Key{}, nil, err
+	}
+
+	return st, key, box, nil
 }
 
 // Stop is the first step of a shutdown: the background loops end, and the
@@ -235,6 +291,7 @@ func Open(cfg config.Config, log *slog.Logger) (*DB, error) {
 // returns), so the requests in flight finish soon. Reads and writes still
 // work until Close.
 func (db *DB) Stop() {
+	db.eachDatabase((*DB).Stop)
 	db.cancel()
 
 	db.mu.RLock()
@@ -263,6 +320,12 @@ func (closedError) Is(target error) bool {
 // releases the lock. Writes that were acked are durable before it returns.
 // After Close, every call gives ErrClosed. A second Close does nothing.
 func (db *DB) Close() error {
+	var errs []error
+
+	for _, child := range db.children() {
+		errs = append(errs, child.Close())
+	}
+
 	db.cancel()
 	db.gcWait.Wait()
 	db.trashWait.Wait()
@@ -272,7 +335,7 @@ func (db *DB) Close() error {
 	if db.closed {
 		db.mu.Unlock()
 
-		return nil
+		return errors.Join(errs...)
 	}
 
 	db.closed = true
@@ -283,8 +346,6 @@ func (db *DB) Close() error {
 
 	// Take live of each collection without db.mu (the order of rename is
 	// live, then db.mu), so the calls in flight end first.
-	var errs []error
-
 	for _, col := range cols {
 		errs = append(errs, col.shut())
 	}
@@ -665,6 +726,10 @@ func (db *DB) Box() *crypt.Box {
 
 // Key is the encryption key of the daemon.
 func (db *DB) Key() settings.Key {
+	if db.parent != nil {
+		return db.parent.Key()
+	}
+
 	db.keyMu.Lock()
 	defer db.keyMu.Unlock()
 

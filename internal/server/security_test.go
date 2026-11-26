@@ -209,7 +209,7 @@ func TestAllowedOriginGetsCORS(t *testing.T) {
 		t.Fatalf("preflight headers: %v", hdr)
 	}
 
-	for _, want := range []string{"Authorization", "Content-Type"} {
+	for _, want := range []string{"Authorization", "Content-Type", "Ndb-Database"} {
 		if !strings.Contains(hdr.Get("Access-Control-Allow-Headers"), want) {
 			t.Fatalf("Allow-Headers %q has no %s", hdr.Get("Access-Control-Allow-Headers"), want)
 		}

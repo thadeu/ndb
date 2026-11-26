@@ -3,7 +3,9 @@ import { getContext } from 'hono/context-storage';
 import type { Connections } from './connections';
 
 export interface Env {
-  Variables: { prefix: string; connections: Connections };
+  // databases are the databases of the open connection, for the switcher;
+  // undefined when the daemon cannot list them.
+  Variables: { prefix: string; connections: Connections; databases?: string[] };
 }
 
 const PREFIX = /^(\/[A-Za-z0-9._~-]+)*$/;

@@ -20,6 +20,9 @@
       quarantine/<name>.ndjson  lines that could not be applied (direct mode)
     <name>~new/                 a truncate in progress (finished or removed at start)
   trash/                        dirs of truncated and dropped collections, deleted in the background
+  _databases/                   only when the daemon has other databases (databases.md)
+    <name>/                     one database: the same layout, from catalog.bolt to trash/
+    .<name>-<time>/             a dropped database, deleted in the background
 ```
 
 Look at it with `ls`; do not edit it by hand while the daemon runs.

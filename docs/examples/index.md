@@ -26,13 +26,16 @@ If no daemon answers, `make` starts `bin/ndb` with `examples/ndb.yml`: data in `
 
 ```sh
 NDB_URL=tcp://127.0.0.1:7070 NDB_TOKEN=secret make run-crud LANG=ts
+
+# the same, with the token and a database in the URL
+NDB_URL=tcp://:secret@127.0.0.1:7070/examples make run-crud LANG=ts
 ```
 
 A program can run again and again. It removes what it created, or it checks first.
 
 ## The curl helper
 
-Every `curl.sh` loads one small helper, `examples/lib/ndb.sh`. It reads `NDB_URL` and `NDB_TOKEN`, picks `--unix-socket` or TCP, and adds the bearer token. `jq` formats the answers.
+Every `curl.sh` loads one small helper, `examples/lib/ndb.sh`. It reads `NDB_URL` and `NDB_TOKEN` (also the token and the database of the URL, as the SDKs do), picks `--unix-socket` or TCP, and adds the bearer token and the `Ndb-Database` header. `jq` formats the answers.
 
 <<< @/examples/lib/ndb.sh{bash}
 

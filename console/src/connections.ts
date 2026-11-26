@@ -6,6 +6,23 @@ export interface Connection {
   name: string;
   url: string;
   token?: string;
+
+  // database is a database of the daemon other than the one of the URL,
+  // picked in the switcher: the page path names it as <connection>@<db>.
+  database?: string;
+}
+
+// DATABASE is the rule of a database name in the daemon.
+export const DATABASE = /^[a-z0-9][a-z0-9_-]{0,62}$/;
+
+// splitName reads <connection>@<database>, the name of a page of a saved
+// connection in another database. A plain name has no database.
+export function splitName(name: string): { base: string; database?: string } {
+  const at = name.indexOf('@');
+
+  if (at < 0) return { base: name };
+
+  return { base: name.slice(0, at), database: name.slice(at + 1) };
 }
 
 export const NAME = /^[A-Za-z0-9._-]{1,64}$/;
@@ -18,11 +35,38 @@ export function defaultPath(env: Record<string, string | undefined> = process.en
   return join(base, 'ndb', 'console.json');
 }
 
-// fixedFromEnv gives the one connection of NDB_URL, or undefined.
+// fixedFromEnv gives the one connection of NDB_URL, or undefined. The token
+// of the URL (tcp://:<token>@host:port) wins over NDB_TOKEN, and it is taken
+// out of the URL, so the page never shows it.
 export function fixedFromEnv(env: Record<string, string | undefined> = process.env): Connection | undefined {
   if (!env.NDB_URL) return undefined;
 
-  return { name: env.NDB_NAME || 'default', url: env.NDB_URL, token: env.NDB_TOKEN || undefined };
+  const { url, token } = splitToken(env.NDB_URL);
+
+  return { name: env.NDB_NAME || 'default', url, token: token || env.NDB_TOKEN || undefined };
+}
+
+// stored is the connection as the file keeps it: a token typed in the URL
+// (tcp://:<token>@host) moves to the token field, so no page shows it.
+function stored(connection: Connection): Connection {
+  const { url, token } = splitToken(connection.url);
+  const kept = token ?? connection.token;
+
+  return { name: connection.name, url, ...(kept ? { token: kept } : {}) };
+}
+
+// splitToken takes the userinfo out of url: the password is the token, the
+// user part is ignored.
+export function splitToken(url: string): { url: string; token?: string } {
+  const match = /^([a-z][a-z0-9+.-]*:\/\/)([^/@]*)@(.*)$/i.exec(url);
+
+  if (!match) return { url };
+
+  const [, scheme = '', userinfo = '', rest = ''] = match;
+  const colon = userinfo.indexOf(':');
+  const password = colon < 0 ? '' : decodeURIComponent(userinfo.slice(colon + 1));
+
+  return { url: scheme + rest, token: password || undefined };
 }
 
 // Connections is the list of ndb daemons that the console can open. It lives
@@ -52,8 +96,17 @@ export class Connections {
     }
   }
 
+  // get finds a saved connection. <name>@<database> is that connection in
+  // another database of its daemon; "default" is the default database.
   get(name: string): Connection | undefined {
-    return this.list().find(connection => connection.name === name);
+    const { base, database } = splitName(name);
+    const found = this.list().find(connection => connection.name === base);
+
+    if (!found || database === undefined) return found;
+
+    if (!DATABASE.test(database)) return undefined;
+
+    return { ...found, name, database };
   }
 
   add(connection: Connection): void {
@@ -63,7 +116,7 @@ export class Connections {
 
     const rest = this.list().filter(item => item.name !== connection.name);
 
-    this.write([...rest, { name: connection.name, url: connection.url, ...(connection.token ? { token: connection.token } : {}) }]);
+    this.write([...rest, stored(connection)]);
   }
 
   // update replaces the connection `name` in place, so the list keeps its
@@ -82,7 +135,7 @@ export class Connections {
       throw new Error(`A connection named ${connection.name} already exists.`);
     }
 
-    list[index] = { name: connection.name, url: connection.url, ...(connection.token ? { token: connection.token } : {}) };
+    list[index] = stored(connection);
 
     this.write(list);
   }

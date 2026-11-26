@@ -24,6 +24,10 @@ var ErrEnvKey = errors.New("the key comes from NDB_ENCRYPTION_KEY: rotate it wit
 // settings. With env, it makes the env key of the next start instead and
 // gives it in hex (shown once, never kept).
 func (db *DB) RotateKey(env bool) (string, error) {
+	if db.parent != nil {
+		return "", ErrNotDefaultDatabase
+	}
+
 	db.keyMu.Lock()
 	defer db.keyMu.Unlock()
 
@@ -77,8 +81,22 @@ func (db *DB) resealAll() {
 }
 
 // pendingReseal lists the collections whose encrypted values are not all
-// of the current key. With start, it also starts their jobs.
+// of the current key, in every database (named <database>/<collection>).
+// With start, it also starts their jobs.
 func (db *DB) pendingReseal(start bool) []string {
+	out := db.pendingResealHere(start)
+
+	db.eachDatabase(func(child *DB) {
+		for _, name := range child.pendingResealHere(start) {
+			out = append(out, child.name+"/"+name)
+		}
+	})
+
+	return out
+}
+
+// pendingResealHere is pendingReseal for the collections of db only.
+func (db *DB) pendingResealHere(start bool) []string {
 	var out []string
 
 	for _, col := range db.engineList() {

@@ -191,6 +191,10 @@ func (s *Server) logRequest(rl *reqLog, r *http.Request) {
 		attrs = append(attrs, slog.String("coll", coll))
 	}
 
+	if name := headerDatabase(r); name != "" {
+		attrs = append(attrs, slog.String("database", name))
+	}
+
 	in := rl.in
 
 	if in == 0 && r.ContentLength > 0 {
@@ -380,6 +384,10 @@ func (s *Server) logWrite(w http.ResponseWriter, r *http.Request, op string, att
 		all = append(all, slog.String("coll", coll))
 	}
 
+	if name := headerDatabase(r); name != "" {
+		all = append(all, slog.String("database", name))
+	}
+
 	hide := s.hidesBody(r.PathValue("coll"))
 
 	for _, a := range attrs {
@@ -412,6 +420,10 @@ func (s *Server) logInfo(w http.ResponseWriter, r *http.Request, msg string, att
 
 	if coll := r.PathValue("coll"); coll != "" {
 		all = append(all, slog.String("coll", coll))
+	}
+
+	if name := headerDatabase(r); name != "" {
+		all = append(all, slog.String("database", name))
 	}
 
 	all = append(all, attrs...)

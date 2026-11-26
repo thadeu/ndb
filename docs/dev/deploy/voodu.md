@@ -22,7 +22,7 @@ The files are in [`deploy/examples/single-vm/voodu`](https://github.com/thadeu/n
 <<< @/deploy/examples/single-vm/voodu/app.voodu{hcl}
 
 - `user = "1000:65532"`: group 65532 is the group of the socket, so the app can open it (the socket is `0660` by default).
-- `NDB_URL` is the only setting the SDKs need.
+- `NDB_URL` is the only setting the SDKs need. It can hold a [database](../databases.md) for each app on one daemon: `unix:///run/ndb/ndb.sock?db=billion`, or over TCP `tcp://:<token>@ndb-0.<scope>.voodu:7070/billion` (put that value in `vd config`, not in the file, because it holds the token).
 - Add one block like this for each app.
 
 ## Apply

@@ -8,7 +8,7 @@ For development, `ghcr.io/thadeu/ndb-stack` has the daemon and the console in on
 
 ```bash
 docker run -d --name ndb-ui -p 127.0.0.1:4321:4321 \
-  -e NDB_URL=tcp://10.10.0.1:7070 -e NDB_TOKEN=... \
+  -e NDB_URL=tcp://:<token>@10.10.0.1:7070 \
   ghcr.io/thadeu/ndb-ui
 ```
 

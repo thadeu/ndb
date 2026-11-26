@@ -69,6 +69,38 @@ const defs = await db.collections()
 
 :::
 
+## `GET /_databases`
+
+The databases of the daemon: the default one first, then the others by name, each with its count of collections. See [Databases](../databases.md).
+
+**Answer:** `{"databases":[{"name":"default","collections":12},{"name":"billion","collections":9}]}`. Over TCP it needs the full token (`403 forbidden` for a scoped one).
+
+```bash
+curl --unix-socket /run/ndb/ndb.sock http://ndb/_databases
+```
+
+## `PUT /_databases/{name}`
+
+Makes a database. A write in a database that does not exist makes it too, unless `allow_implicit` is off; then a write there is `404 database_not_found`, and this route is the way to make it.
+
+**Answer:** `201 {"database":"billion","created":true}`, or `200` with `"created":false` when it exists (`default` always does). **Errors:** `400 invalid_database`.
+
+```bash
+curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/_databases/billion
+```
+
+## `DELETE /_databases/{name}`
+
+Drops a database: its streams and watch streams close, its collections close, and its dir is removed in the background.
+
+**Query:** `confirm` must be the name of the database.
+
+**Answer:** `{"dropped":"billion"}`. **Errors:** `400 confirm_required`, `400 invalid_database`, `400 invalid_request` for `default`, `404 database_not_found`.
+
+```bash
+curl --unix-socket /run/ndb/ndb.sock -X DELETE 'http://ndb/_databases/billion?confirm=billion'
+```
+
 ## `GET /_stats`
 
 Every collection, the totals, the version and the uptime.
@@ -124,7 +156,7 @@ const stats = await db.stats()
 
 The disk use per collection and per part: the scan of `ndb size`. It only stats files.
 
-**Answer:** `{"data_dir","total","collections":[{"name","bytes":{"wal","segments","meta","blobs","cursors"},"total","wal_files","segment_files"}],"shared":{...}}`.
+**Answer:** `{"data_dir","total","collections":[{"name","bytes":{"wal","segments","meta","blobs","cursors"},"total","wal_files","segment_files"}],"shared":{...},"databases_bytes"}`. `databases_bytes` (only when there is one) is the disk of the other [databases](../databases.md); `total` leaves it out. With the `Ndb-Database` header, the answer is the one of that database.
 
 ::: code-group
 
@@ -155,6 +187,8 @@ Streams a backup file (`.ndb`, NDJSON, `application/x-ndjson`) taken at a mark b
 | `no_blobs` | bool | `false` | leave the blob contents out (the references stay) |
 
 **Answer:** the stream. **Errors:** `403 forbidden` over TCP: the backup works on the unix socket only.
+
+With no `Ndb-Database` header, the file holds every [database](../databases.md) of the daemon (format 2 when there is one besides the default). With the header, it holds that database alone.
 
 Use `ndb backup` instead of calling it by hand; `ndb restore` reads the file. See [Backup and restore](../operations.md#backup-and-restore).
 

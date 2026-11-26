@@ -29,8 +29,11 @@ module Ndb
     RETRY_CAP = 1.0
 
     # The address is, in order: url:, socket:, env NDB_URL, the default
-    # socket. The token is token:, or env NDB_TOKEN. It goes only in the
-    # Authorization header, and the unix socket does not need it.
+    # socket. The token is, in order: token:, the token of the address
+    # (tcp://:<token>@host:port), env NDB_TOKEN. It goes only in the
+    # Authorization header, and the unix socket does not need it. The path
+    # of the address names a database (tcp://host:7070/billion; ?db=billion
+    # for a unix socket); none is the default database.
     #
     # ready_timeout is how many seconds a call retries while the daemon is
     # starting or recovering (not_ready, socket missing or refusing), with
@@ -40,13 +43,16 @@ module Ndb
     # after the User-Agent of the gem, so the daemon can tell the apps apart.
     def initialize(url: nil, socket: nil, token: nil, timeout: 30, pool_size: 16, ready_timeout: 10, user_agent: nil)
       @endpoint = Endpoint.parse(url || socket || presence(ENV["NDB_URL"]) || DEFAULT_SOCKET)
-      @token = presence(token) || presence(ENV["NDB_TOKEN"])
+      @token = presence(token) || @endpoint.token || presence(ENV["NDB_TOKEN"])
       @pool = Pool.new(@endpoint, timeout: timeout, size: pool_size)
       @ready_timeout = ready_timeout.to_f
       @user_agent = [USER_AGENT, presence(user_agent.to_s.strip)].compact.join(" ")
     end
 
     def socket = @endpoint.path
+
+    # The address only: never the token.
+    def inspect = "#<Ndb::Client #{@endpoint}>"
 
     # A collection (or a pattern such as "logs-2026-*") with the query
     # builder. definition is what the first call declares (PUT /{coll}).
@@ -487,9 +493,11 @@ module Ndb
       end
     end
 
-    # Adds the User-Agent, and the bearer token when the client has one.
+    # Adds the User-Agent, the database of the address (Ndb-Database) and
+    # the bearer token, when the client has them.
     def authorize(headers)
       headers = headers.merge("User-Agent" => @user_agent)
+      headers = headers.merge("Ndb-Database" => @endpoint.database) if @endpoint.database
 
       @token ? headers.merge("Authorization" => "Bearer #{@token}") : headers
     end

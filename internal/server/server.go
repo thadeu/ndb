@@ -44,8 +44,10 @@ type Server struct {
 	// tokens are the bearer tokens of the non-unix requests; none = open.
 	tokens []Token
 
-	// streams runs the /{s}/_streams routes.
-	streams *streams.Service
+	// streams runs the /{s}/_streams routes of the default database, and
+	// dbStreams the ones of the other databases (databases.go).
+	streams   *streams.Service
+	dbStreams dbStreams
 
 	// log is the logger of the request lines (logs.go).
 	log *logging.Logger
@@ -128,6 +130,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	err := s.http.Shutdown(ctx)
 
 	s.streams.Close()
+	s.closeStreams("", true)
 
 	return err
 }
@@ -135,18 +138,20 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) routes() http.Handler {
 	rt := &router{
 		system: map[string][]route{
-			"_health":      {{"GET", s.health}},
-			"_metrics":     {{"GET", s.metricsPage}},
-			"_collections": {{"GET", s.ready(s.list)}},
-			"_stats":       {{"GET", s.ready(s.globalStats)}},
-			"_size":        {{"GET", s.ready(s.size)}},
-			"_backup":      {{"POST", s.ready(s.backup)}},
-			"_restore":     {{"POST", s.ready(s.restoreAny)}},
-			"_pitr":        {{"GET", s.ready(s.pitrAll)}},
-			"_blobs":       {{"POST", s.ready(s.putBlob)}},
-			"_blobs/{}":    {{"GET", s.ready(s.getBlob)}},
-			"_log":         {{"GET", s.getLog}, {"PUT", s.putLog}},
-			"_cluster/{}":  {{"GET", s.ready(s.getSettings)}, {"PUT", s.ready(s.putSettings)}, {"POST", s.ready(s.rotateKey)}},
+			"_health":       {{"GET", s.health}},
+			"_metrics":      {{"GET", s.metricsPage}},
+			"_collections":  {{"GET", s.ready(s.list)}},
+			"_databases":    {{"GET", s.readyRoot(s.listDatabases)}},
+			"_databases/{}": {{"PUT", s.readyRoot(s.createDatabase)}, {"DELETE", s.readyRoot(s.dropDatabase)}},
+			"_stats":        {{"GET", s.ready(s.globalStats)}},
+			"_size":         {{"GET", s.ready(s.size)}},
+			"_backup":       {{"POST", s.ready(s.backup)}},
+			"_restore":      {{"POST", s.ready(s.restoreAny)}},
+			"_pitr":         {{"GET", s.ready(s.pitrAll)}},
+			"_blobs":        {{"POST", s.ready(s.putBlob)}},
+			"_blobs/{}":     {{"GET", s.ready(s.getBlob)}},
+			"_log":          {{"GET", s.getLog}, {"PUT", s.putLog}},
+			"_cluster/{}":   {{"GET", s.readyRoot(s.getSettings)}, {"PUT", s.readyRoot(s.putSettings)}, {"POST", s.readyRoot(s.rotateKey)}},
 		},
 		coll: map[string][]route{
 			"": {
@@ -193,7 +198,24 @@ func (s *Server) routes() http.Handler {
 
 type handler func(http.ResponseWriter, *http.Request, *engine.DB)
 
-// ready gives fn the engine, or answers 503 while recovery runs. A
+// readyRoot gives fn the engine of the default database, whatever the
+// database header says: the routes of the databases themselves.
+func (s *Server) readyRoot(fn handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		db := s.db.Load()
+
+		if db == nil {
+			writeError(w, &apiError{status: http.StatusServiceUnavailable, code: "not_ready", msg: "ndb is recovering"})
+
+			return
+		}
+
+		fn(w, r, db)
+	}
+}
+
+// ready gives fn the engine of the database of the request (the
+// Ndb-Database header, databases.go), or answers 503 while recovery runs. A
 // collection pattern (logs-*) in the path is pattern_read_only.
 func (s *Server) ready(fn handler) http.HandlerFunc {
 	return s.readyOr(fn, nil)
@@ -206,6 +228,13 @@ func (s *Server) readyOr(one, many handler) http.HandlerFunc {
 
 		if db == nil {
 			writeError(w, &apiError{status: http.StatusServiceUnavailable, code: "not_ready", msg: "ndb is recovering"})
+
+			return
+		}
+
+		db, r, err := s.database(r, db)
+		if err != nil {
+			writeError(w, err)
 
 			return
 		}

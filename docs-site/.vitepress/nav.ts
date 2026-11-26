@@ -28,6 +28,7 @@ export const tabs: Tab[] = [
         items: [
           { text: 'Architecture', link: '/architecture' },
           { text: 'Storage', link: '/storage' },
+          { text: 'Databases', link: '/databases' },
           { text: 'WAL', link: '/wal' },
           { text: 'Concurrency', link: '/concurrency' },
           { text: 'Encrypted fields', link: '/encryption' },

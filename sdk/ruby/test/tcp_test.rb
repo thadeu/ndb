@@ -24,6 +24,15 @@ class TcpTest < Minitest::Test
   def plain = self.class.plain
   def secured = self.class.secured
 
+  def test_token_in_the_url
+    url = secured.url.sub("tcp://", "tcp://:#{TcpDaemon::TOKEN}@")
+    tcp = Ndb::Client.new(url: url)
+
+    tcp.ensure_collection(@coll)
+
+    refute_includes tcp.inspect, TcpDaemon::TOKEN
+  end
+
   def test_roundtrip_over_tcp
     tcp = Ndb::Client.new(url: plain.url)
 

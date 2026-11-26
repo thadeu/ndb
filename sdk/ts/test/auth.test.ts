@@ -36,6 +36,15 @@ describe('token over tcp', () => {
     expect((err as NdbError).status).toBe(401)
   })
 
+  it('takes the token of the URL', async () => {
+    vi.stubEnv('NDB_TOKEN', '')
+
+    const url = inject('tokenTcpAddr').replace('tcp://', `tcp://:${inject('token')}@`)
+    const db = track(connect(url))
+
+    await expect(db.request('GET', '/_collections')).resolves.toBeDefined()
+  })
+
   it('falls back to NDB_TOKEN and lets the option win', async () => {
     vi.stubEnv('NDB_TOKEN', inject('token'))
 

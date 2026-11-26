@@ -473,6 +473,7 @@ export type Language = 'curl' | 'go' | 'ruby' | 'ts';
 export interface Target {
   socket?: string;
   base?: string;
+  database?: string;
 }
 
 export interface SnippetInput extends Target {
@@ -481,10 +482,16 @@ export interface SnippetInput extends Target {
   body?: string;
 }
 
+// address is the NDB_URL of the target: a database other than the default
+// one goes in the path (?db= on a unix socket).
 function address(target: Target): string {
-  if (target.socket) return `unix://${target.socket}`;
+  const database = target.database && target.database !== 'default' ? target.database : '';
 
-  return (target.base ?? 'http://127.0.0.1:7070').replace(/^https?:\/\//, 'tcp://').replace(/\/+$/, '');
+  if (target.socket) return `unix://${target.socket}${database ? `?db=${database}` : ''}`;
+
+  const base = (target.base ?? 'http://127.0.0.1:7070').replace(/^https?:\/\//, 'tcp://').replace(/\/+$/, '');
+
+  return database ? `${base}/${database}` : base;
 }
 
 function compact(body: string): string {

@@ -89,7 +89,7 @@ func lowerAll(list []string, cut string) []string {
 // corsMethods and corsHeaders are what a preflight allows.
 const (
 	corsMethods = "GET, HEAD, POST, PUT, DELETE"
-	corsHeaders = "Authorization, Content-Type, X-Request-Id, Range"
+	corsHeaders = "Authorization, Content-Type, X-Request-Id, Range, Ndb-Database"
 	corsExpose  = "X-Request-Id, Retry-After, Content-Range, Etag, Allow, X-Ndb-Total, X-Ndb-Examined, X-Ndb-Plan, X-Ndb-Next, X-Ndb-Took-Ms, X-Ndb-Explain"
 	corsMaxAge  = "600"
 )

@@ -1,0 +1,1 @@
+{"_tx":1,"_ts":"2026-11-26T13:11:13.040163Z","_op":"put","_id":"encryption.key","_v":1,"doc":{"value":{"id":"k1","key":"d2652b062631cc504f60f72fe449b011d459ea70c3983e771f2baad2fe98aeed","fingerprint":"76abd1f43800336a","source":"made","created_at":"2026-11-26T13:11:13.039686Z"}},"_crc":"3ef23c06"}

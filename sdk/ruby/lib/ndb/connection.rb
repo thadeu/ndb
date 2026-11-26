@@ -12,10 +12,14 @@ module Ndb
   # https:// URL (ndb behind a TLS proxy such as Caddy). The host name is
   # resolved each time a connection opens, so a changed DNS record is
   # followed after a reconnect.
+  #
+  # The token can be in the address, as in a Redis URL:
+  # tcp://:<token>@host:port. The user part is ignored.
   class Endpoint
     INVALID = "must be unix:///path, tcp://host:port or https://host"
+    NO_COLON = "put the token after a colon: tcp://:<token>@host:port"
 
-    attr_reader :path, :host, :port
+    attr_reader :path, :host, :port, :token, :database
 
     # "unix:///path", "tcp://host:port", "https://host[:port]",
     # "http://host[:port]", or a bare socket path.
@@ -25,18 +29,55 @@ module Ndb
       return new(path: address) if address.start_with?("/")
 
       uri = URI.parse(address)
+      token = token_of(uri, address)
+      database = database_of(uri, address)
 
       case uri.scheme
-      when "unix" then new(path: uri.path)
-      when "tcp" then new(host: uri.host, port: uri.port)
-      when "https", "http" then new(host: uri.host, port: uri.port, tls: uri.scheme == "https")
-      else raise ArgumentError, "ndb address #{address.inspect} #{INVALID}"
+      when "unix" then new(path: uri.path, database: database)
+      when "tcp" then new(host: uri.host, port: uri.port, token: token, database: database)
+      when "https", "http" then new(host: uri.host, port: uri.port, tls: uri.scheme == "https", token: token, database: database)
+      else raise ArgumentError, "ndb address #{redact(address).inspect} #{INVALID}"
       end
     rescue URI::InvalidURIError
-      raise ArgumentError, "ndb address #{address.inspect} #{INVALID}"
+      raise ArgumentError, "ndb address #{redact(address).inspect} #{INVALID}"
     end
 
-    def initialize(path: nil, host: nil, port: nil, tls: false)
+    # The password of the userinfo. A user with no password is refused: it
+    # is a token in the wrong place.
+    def self.token_of(uri, address)
+      return nil if uri.userinfo.nil?
+
+      raise ArgumentError, "ndb address #{redact(address).inspect}: #{NO_COLON}" if uri.password.nil? && !uri.user.to_s.empty?
+
+      token = URI::RFC2396_PARSER.unescape(uri.password.to_s)
+
+      token.empty? ? nil : token
+    end
+
+    # The database of the address: the path of a tcp or https address
+    # (tcp://host:7070/billion) or the query db (needed for a unix socket,
+    # whose path is the file). nil is the default database.
+    def self.database_of(uri, address)
+      query = URI.decode_www_form(uri.query.to_s).to_h["db"]
+      path = uri.scheme == "unix" ? "" : uri.path.to_s.delete_prefix("/").delete_suffix("/")
+      shown = redact(address).inspect
+
+      raise ArgumentError, "ndb address #{shown}: the path names one database: tcp://host:port/<database>" if path.include?("/")
+      raise ArgumentError, "ndb address #{shown}: the path and ?db= name two databases" if !path.empty? && query && path != query
+
+      database = path.empty? ? query : path
+
+      database.to_s.empty? ? nil : database
+    end
+
+    # address with its userinfo hidden, for error messages.
+    def self.redact(address)
+      address.sub(%r{\A([a-z][a-z0-9+.-]*://)[^/]*@}i, '\1***@')
+    end
+
+    private_class_method :token_of, :database_of
+
+    def initialize(path: nil, host: nil, port: nil, tls: false, token: nil, database: nil)
       if path.to_s.empty? && (host.to_s.empty? || port.nil?)
         raise ArgumentError, "ndb address needs a socket path or a host and port"
       end
@@ -45,7 +86,11 @@ module Ndb
       @host = host
       @port = port
       @tls = tls
+      @token = token
+      @database = database
     end
+
+    def inspect = "#<Ndb::Endpoint #{self}>"
 
     def unix? = !@path.to_s.empty?
 
