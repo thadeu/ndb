@@ -85,6 +85,77 @@ func BenchmarkFindByID(b *testing.B) {
 	p99(b, lat)
 }
 
+// BenchmarkGetByID is the GET /{coll}/_doc/{id} path of the collection: the
+// check of the own _id and the "_v" in the answer.
+func BenchmarkGetByID(b *testing.B) {
+	c := benchCollection(b)
+	n := benchRows()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		if _, ok := c.Get("c" + strconv.Itoa(i*7919%n)); !ok {
+			b.Fatal("not found")
+		}
+	}
+}
+
+// BenchmarkGetWhileBulk is BenchmarkGetByID while a second goroutine
+// inserts docs in batches of 1000 without a stop: the wait of a read on
+// the writes (p99).
+func BenchmarkGetWhileBulk(b *testing.B) {
+	c := benchCollection(b)
+	n := benchRows()
+	stop := make(chan struct{})
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		for k := 0; ; k++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+
+			docs := make([][]byte, 1000)
+
+			for i := range docs {
+				docs[i] = fmt.Appendf(nil, `{"_id":"w%d-%d","ref":"w%d","n":%d}`, k, i, k, i)
+			}
+
+			if _, err := c.Insert(ctx, docs...); err != nil {
+				b.Error(err)
+
+				return
+			}
+		}
+	}()
+
+	lat := make([]time.Duration, b.N)
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		start := time.Now()
+
+		c.Get("c" + strconv.Itoa(i*7919%n))
+
+		lat[i] = time.Since(start)
+	}
+
+	b.StopTimer()
+	close(stop)
+	<-done
+
+	slices.Sort(lat)
+	b.ReportMetric(float64(lat[len(lat)*99/100].Nanoseconds()), "p99-ns")
+	b.ReportMetric(float64(lat[len(lat)*999/1000].Nanoseconds()), "p999-ns")
+	b.ReportMetric(float64(lat[len(lat)-1].Microseconds()), "max-µs")
+}
+
 func BenchmarkQueryByIDWhere(b *testing.B) {
 	c := benchCollection(b)
 	n := benchRows()

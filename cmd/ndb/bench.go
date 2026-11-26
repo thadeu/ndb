@@ -34,6 +34,7 @@ func runBench(args []string) error {
 	fl.StringVar(&o.Data, "data", "", "keep the loaded calls in this dir and read them again on the next runs (read parts only)")
 	fl.BoolVar(&o.Concurrent, "concurrent", false, "measure reads from 1, 3 and 10 clients at the same time (loads the calls first)")
 	fl.BoolVar(&o.Compound, "compound", false, "measure compound indexes and $unwind: orders with items, read with one index and then with compound indexes")
+	fl.BoolVar(&o.Mixed, "mixed", false, "measure fast reads: GET by _id and a small _search, alone and while a second client sends _bulk")
 	fl.BoolVar(&o.Streams, "streams", false, "measure streams: appends, group workers, append-to-delivery latency, claim, kill -9")
 	fl.BoolVar(&o.Idle, "idle", false, "measure idle collections: disk, CPU, RSS and files per collection at rest")
 	fl.IntVar(&o.Collections, "collections", o.Collections, "collections of the idle part")

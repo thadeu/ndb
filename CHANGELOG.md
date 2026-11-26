@@ -15,9 +15,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **Console:** the connection menu lists the databases of the daemon (`c/<connection>@<database>`).
 - **CLI:** `https://` URLs.
 - **Compatibility test:** `TestCompat` opens a data dir made by 1.26.0 and checks its answers.
+- **Bench `-mixed`:** `GET` by `_id` and a small `_search`, alone and while a second client sends `_bulk`. New checks: `get.id_us`, `search.small_us` and the p99 of both with the writer.
 
 ### Changed
 
+- **Faster reads:** `GET /{coll}/_doc/{id}` checks the `_id` of the document with a scan of its bytes, not a full decode (0 allocations for the check; 2.3x faster on a 1 KB document). A small `_search` page makes fewer allocations (276 to 248 for 10 documents). The answers do not change.
 - **Upgrade note, the path of `NDB_URL` is the database now** (Go, Ruby, Rails, TS, the CLI and the console). Before, the SDKs and the CLI dropped the path of a `tcp://` or `https://` URL, and the console kept it as a proxy prefix. An URL with a path, such as `https://host/ndb`, now reads and writes the database `ndb`: remove the path to keep the default database. An URL with no path works as before.
 - **A token without a colon is refused:** `tcp://<token>@host` was dropped with no error; now it is an error that says to write `tcp://:<token>@host`.
 - **`GET /_size` and `/_stats`:** the other databases are not in the bytes of the default one; `databases_bytes` gives them.
