@@ -60,6 +60,7 @@ end
 
 - The address is, in order: `url`, `socket`, env `NDB_URL`, then the default socket `/run/ndb/ndb.sock`.
 - The address is `unix:///path`, `tcp://host:port`, or a bare path that starts with `/`.
+- One URL can hold the token and the database: `url: <%= ENV["NDB_URL"] %>` with `NDB_URL=tcp://:<token>@ndb.internal:7070/billion`. The models then use the collections of the database `billion` (`?db=billion` on a unix socket). See [Databases](https://ndb.clowk.in/databases).
 - The token is, in order: `token`, the token of the URL (`tcp://:<token>@host:port`), env `NDB_TOKEN`. It goes only in the `Authorization` header. A unix socket does not need it.
 - `ready_timeout` is how long a call retries while the daemon is not ready (`not_ready`, or the socket is missing or refuses). It uses backoff with jitter. A write is retried only when the daemon certainly did not process it. A read is also retried after a dropped connection. A timeout is never retried.
 - The pool drops its connections after a `fork`.

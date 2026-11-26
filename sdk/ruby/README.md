@@ -36,6 +36,8 @@ require "ndb"
 ```ruby
 ndb = Ndb.connect("unix:///run/ndb/ndb.sock")                 # unix socket
 ndb = Ndb.connect("tcp://10.0.0.5:7070", token: "secret")     # TCP with a bearer token
+ndb = Ndb.connect("tcp://:secret@10.0.0.5:7070/billion")      # token and database in the URL
+ndb = Ndb.connect("unix:///run/ndb/ndb.sock?db=billion")      # a database on the unix socket
 ndb = Ndb.connect                                             # reads NDB_URL and NDB_TOKEN
 
 ndb.health   # => true when the daemon is ready (GET /_health)
@@ -56,6 +58,7 @@ Ndb::Client.new(
 
 - The address is, in order: `url:` (the `addr` of `Ndb.connect`), `socket:`, env `NDB_URL`, then the default socket `/run/ndb/ndb.sock`.
 - The token is, in order: `token:`, the token of the URL (`tcp://:<token>@host:port`), env `NDB_TOKEN`. It goes only in the `Authorization` header. A unix socket does not need it.
+- The database is the path of the URL (`tcp://host:7070/billion`), or `?db=` (needed on a unix socket). None is the default database. See [Databases](https://ndb.clowk.in/databases).
 - A bad address raises `ArgumentError` at once.
 - `ready_timeout` is how long a call retries while the daemon is not ready (`not_ready`, or the socket is missing or refuses). It uses exponential backoff (50 ms up to 1 s) with jitter. A write is retried only when the daemon certainly did not process it. A read is also retried after a dropped connection. A timeout is never retried. When the deadline passes, the last error is raised.
 - `health` does not wait: a daemon that is recovering raises `Ndb::NotReady`.

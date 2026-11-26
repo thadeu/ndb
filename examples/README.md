@@ -30,6 +30,9 @@ Every program reads `NDB_URL` and `NDB_TOKEN`. Without them it uses the socket o
 
 ```sh
 NDB_URL=tcp://127.0.0.1:7070 NDB_TOKEN=secret make run-crud LANG=ts
+
+# the same, with the token and a database in the URL
+NDB_URL=tcp://:secret@127.0.0.1:7070/examples make run-crud LANG=ts
 ```
 
 Every program can run again and again: it removes what it created, or checks first (`reports` seeds its orders once).

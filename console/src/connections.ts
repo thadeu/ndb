@@ -46,6 +46,15 @@ export function fixedFromEnv(env: Record<string, string | undefined> = process.e
   return { name: env.NDB_NAME || 'default', url, token: token || env.NDB_TOKEN || undefined };
 }
 
+// stored is the connection as the file keeps it: a token typed in the URL
+// (tcp://:<token>@host) moves to the token field, so no page shows it.
+function stored(connection: Connection): Connection {
+  const { url, token } = splitToken(connection.url);
+  const kept = token ?? connection.token;
+
+  return { name: connection.name, url, ...(kept ? { token: kept } : {}) };
+}
+
 // splitToken takes the userinfo out of url: the password is the token, the
 // user part is ignored.
 export function splitToken(url: string): { url: string; token?: string } {
@@ -107,7 +116,7 @@ export class Connections {
 
     const rest = this.list().filter(item => item.name !== connection.name);
 
-    this.write([...rest, { name: connection.name, url: connection.url, ...(connection.token ? { token: connection.token } : {}) }]);
+    this.write([...rest, stored(connection)]);
   }
 
   // update replaces the connection `name` in place, so the list keeps its
@@ -126,7 +135,7 @@ export class Connections {
       throw new Error(`A connection named ${connection.name} already exists.`);
     }
 
-    list[index] = { name: connection.name, url: connection.url, ...(connection.token ? { token: connection.token } : {}) };
+    list[index] = stored(connection);
 
     this.write(list);
   }

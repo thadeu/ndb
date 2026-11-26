@@ -1,3 +1,5 @@
+import { splitToken } from './connections';
+
 // Client for one ndb daemon. Only the server uses it, so the token never
 // reaches a browser. The API contract is docs/dev/http-api.md in thadeu/ndb.
 
@@ -129,7 +131,7 @@ export function target(url: string): Target {
     return withDatabase({ base: 'http://ndb', unix: path }, '', db);
   }
 
-  const remote = /^(tcp|https?):\/\/([^/]+)(\/.*)?$/.exec(address);
+  const remote = /^(tcp|https?):\/\/(?:[^/@]*@)?([^/@]+)(\/.*)?$/.exec(address);
 
   if (!remote) throw new NdbError('invalid_url', 'Use unix:///path, tcp://host:port, or http(s)://host.');
 
@@ -276,8 +278,9 @@ export class Ndb {
     const { base, unix, database } = target(this.endpoint.url);
     const headers: Record<string, string> = { accept: 'application/json' };
     const picked = this.endpoint.database ?? database;
+    const token = this.endpoint.token || splitToken(this.endpoint.url).token;
 
-    if (this.endpoint.token) headers.authorization = `Bearer ${this.endpoint.token}`;
+    if (token) headers.authorization = `Bearer ${token}`;
 
     if (picked && picked !== 'default') headers['ndb-database'] = picked;
 

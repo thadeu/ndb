@@ -66,6 +66,20 @@ describe('database of a connection URL', () => {
     expect(target('unix:///run/ndb/ndb.sock')).toEqual({ base: 'http://ndb', unix: '/run/ndb/ndb.sock' });
   });
 
+  it('keeps the token of the URL out of the address and out of the saved file', () => {
+    expect(target('tcp://:s3cret@10.0.0.1:7070/billion')).toEqual({ base: 'http://10.0.0.1:7070', database: 'billion' });
+
+    const saved = new Connections(join(dir, 'cfg2', 'console.json'));
+
+    saved.add({ name: 'remote', url: 'tcp://:s3cret@10.0.0.1:7070/billion' });
+
+    expect(saved.get('remote')).toEqual({ name: 'remote', url: 'tcp://10.0.0.1:7070/billion', token: 's3cret' });
+
+    saved.update('remote', { name: 'remote', url: 'tcp://10.0.0.2:7070', token: 'kept' });
+
+    expect(saved.get('remote')).toEqual({ name: 'remote', url: 'tcp://10.0.0.2:7070', token: 'kept' });
+  });
+
   it('refuses two databases', () => {
     expect(() => target('tcp://h:7070/a/b')).toThrow('one database');
     expect(() => target('tcp://h:7070/a?db=b')).toThrow('two databases');

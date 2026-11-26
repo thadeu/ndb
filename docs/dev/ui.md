@@ -26,7 +26,7 @@ ndb-ui                         # http://127.0.0.1:4321
 
 ```bash [Docker]
 docker run -p 127.0.0.1:4321:4321 \
-  -e NDB_URL=tcp://10.10.0.1:7070 -e NDB_TOKEN=... \
+  -e NDB_URL=tcp://:<token>@10.10.0.1:7070 \
   ghcr.io/thadeu/ndb-ui
 ```
 
