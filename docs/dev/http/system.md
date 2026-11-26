@@ -79,6 +79,16 @@ The databases of the daemon: the default one first, then the others by name, eac
 curl --unix-socket /run/ndb/ndb.sock http://ndb/_databases
 ```
 
+## `PUT /_databases/{name}`
+
+Makes a database. A write in a database that does not exist makes it too, unless `allow_implicit` is off; then a write there is `404 database_not_found`, and this route is the way to make it.
+
+**Answer:** `201 {"database":"billion","created":true}`, or `200` with `"created":false` when it exists (`default` always does). **Errors:** `400 invalid_database`.
+
+```bash
+curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/_databases/billion
+```
+
 ## `DELETE /_databases/{name}`
 
 Drops a database: its streams and watch streams close, its collections close, and its dir is removed in the background.
@@ -146,7 +156,7 @@ const stats = await db.stats()
 
 The disk use per collection and per part: the scan of `ndb size`. It only stats files.
 
-**Answer:** `{"data_dir","total","collections":[{"name","bytes":{"wal","segments","meta","blobs","cursors"},"total","wal_files","segment_files"}],"shared":{...}}`.
+**Answer:** `{"data_dir","total","collections":[{"name","bytes":{"wal","segments","meta","blobs","cursors"},"total","wal_files","segment_files"}],"shared":{...},"databases_bytes"}`. `databases_bytes` (only when there is one) is the disk of the other [databases](../databases.md); `total` leaves it out. With the `Ndb-Database` header, the answer is the one of that database.
 
 ::: code-group
 

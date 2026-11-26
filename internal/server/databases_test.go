@@ -170,6 +170,77 @@ func TestDatabasesRoutes(t *testing.T) {
 	}
 }
 
+func TestDaemonRoutesIgnoreTheDatabaseHeader(t *testing.T) {
+	c := unixServer(t)
+
+	for _, req := range [][3]string{
+		{"GET", "/_cluster/settings", ""},
+		{"PUT", "/_cluster/settings", `{"log":{"level":"info"}}`},
+		{"GET", "/_log", ""},
+		{"GET", "/_health", ""},
+	} {
+		resp, body := do(t, c, req[0], req[1], req[2], in("nope"))
+
+		if resp.StatusCode != 200 {
+			t.Fatalf("%s %s with a database header: %d %s", req[0], req[1], resp.StatusCode, body)
+		}
+	}
+
+	_, body := do(t, c, "GET", "/_databases", "", nil)
+
+	if strings.Contains(body, "nope") {
+		t.Fatalf("a daemon route made a database: %s", body)
+	}
+}
+
+func TestDatabasesNeedACreateWithoutAllowImplicit(t *testing.T) {
+	h := strictHandler(t)
+
+	rec := raw(h, "POST", "/users/_doc", `{"_id":"u1"}`)
+
+	if rec.Code != 404 {
+		t.Fatalf("control: %d", rec.Code)
+	}
+
+	send := func(method, path, body, db string) (int, string) {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+
+		if db != "" {
+			req.Header.Set("Ndb-Database", db)
+		}
+
+		rec := httptest.NewRecorder()
+
+		h.ServeHTTP(rec, req)
+
+		return rec.Code, rec.Body.String()
+	}
+
+	if code, body := send("PUT", "/users", `{}`, "billion"); code != 404 || codeOf(t, body) != "database_not_found" || !strings.Contains(body, "PUT /_databases/billion") {
+		t.Fatalf("write in a new database: %d %s", code, body)
+	}
+
+	if code, body := send("PUT", "/_databases/billion", "", ""); code != 201 || !strings.Contains(body, `"created":true`) {
+		t.Fatalf("create: %d %s", code, body)
+	}
+
+	if code, body := send("PUT", "/_databases/billion", "", ""); code != 200 || !strings.Contains(body, `"created":false`) {
+		t.Fatalf("create again: %d %s", code, body)
+	}
+
+	if code, body := send("PUT", "/users", `{}`, "billion"); code >= 300 {
+		t.Fatalf("ensure in the created database: %d %s", code, body)
+	}
+
+	if code, body := send("PUT", "/_databases/Bad", "", ""); code != 400 || codeOf(t, body) != "invalid_database" {
+		t.Fatalf("create a bad name: %d %s", code, body)
+	}
+
+	if code, body := send("PUT", "/_databases/default", "", ""); code != 200 || !strings.Contains(body, `"created":false`) {
+		t.Fatalf("create default: %d %s", code, body)
+	}
+}
+
 func TestStreamsLiveInTheirDatabase(t *testing.T) {
 	c := unixServer(t)
 

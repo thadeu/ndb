@@ -104,6 +104,12 @@ func (db *DB) Database(name string, create bool) (*DB, error) {
 	return child, nil
 }
 
+// Implicit tells if a write may make a database that does not exist
+// (allow_implicit, the same rule as for collections).
+func (db *DB) Implicit() bool {
+	return db.cfg.AllowImplicit
+}
+
 // Databases lists the names of the databases other than the default one,
 // sorted.
 func (db *DB) Databases() []string {

@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **Databases:** many sets of collections in one daemon; two apps can each have `users`. The header `Ndb-Database` picks one; no header is the default database, the data dir of today with the same files. `PUT`, `GET` and `DELETE /_databases`. A write makes a database (not with `allow_implicit: false`). Each database has its own catalog, watch positions, blobs and streams; all share the key, the settings and the memory budget. A backup with no header holds every database (format 2; a daemon with no database still writes format 1). Scoped tokens stay in the default database. See `docs/dev/databases.md`.
+- **Token and database in the URL:** `NDB_URL=tcp://:<token>@host:7070/billion` (or `unix:///run/ndb/ndb.sock?db=billion`), as in Redis and Postgres URLs, in Go, Ruby, Rails, TS, the CLI and the console. The order of the token: the option, the URL, `NDB_TOKEN`. Errors and the printed client never show the token.
+- **Console:** the connection menu lists the databases of the daemon (`c/<connection>@<database>`).
+- **CLI:** `https://` URLs.
+- **Compatibility test:** `TestCompat` opens a data dir made by 1.26.0 and checks its answers.
+
+### Changed
+
+- **Console:** the path of an `https://host/path` connection URL names a database now, as in the SDKs; it was a proxy prefix before.
+- **`GET /_size` and `/_stats`:** the other databases are not in the bytes of the default one; `databases_bytes` gives them.
+
 ## [1.26.0] - 2026-11-18
 
 ### Added

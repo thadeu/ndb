@@ -142,7 +142,7 @@ func (s *Server) routes() http.Handler {
 			"_metrics":      {{"GET", s.metricsPage}},
 			"_collections":  {{"GET", s.ready(s.list)}},
 			"_databases":    {{"GET", s.readyRoot(s.listDatabases)}},
-			"_databases/{}": {{"DELETE", s.readyRoot(s.dropDatabase)}},
+			"_databases/{}": {{"PUT", s.readyRoot(s.createDatabase)}, {"DELETE", s.readyRoot(s.dropDatabase)}},
 			"_stats":        {{"GET", s.ready(s.globalStats)}},
 			"_size":         {{"GET", s.ready(s.size)}},
 			"_backup":       {{"POST", s.ready(s.backup)}},
@@ -151,7 +151,7 @@ func (s *Server) routes() http.Handler {
 			"_blobs":        {{"POST", s.ready(s.putBlob)}},
 			"_blobs/{}":     {{"GET", s.ready(s.getBlob)}},
 			"_log":          {{"GET", s.getLog}, {"PUT", s.putLog}},
-			"_cluster/{}":   {{"GET", s.ready(s.getSettings)}, {"PUT", s.ready(s.putSettings)}, {"POST", s.ready(s.rotateKey)}},
+			"_cluster/{}":   {{"GET", s.readyRoot(s.getSettings)}, {"PUT", s.readyRoot(s.putSettings)}, {"POST", s.readyRoot(s.rotateKey)}},
 		},
 		coll: map[string][]route{
 			"": {

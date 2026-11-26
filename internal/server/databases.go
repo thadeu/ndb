@@ -58,7 +58,12 @@ func (s *Server) database(r *http.Request, root *engine.DB) (*engine.DB, *http.R
 	segs, _ := segments(r.URL.EscapedPath())
 	_, need := required(r.Method, segs)
 
-	db, err := root.Database(name, need >= accessWrite)
+	db, err := root.Database(name, need >= accessWrite && root.Implicit())
+
+	if errors.Is(err, engine.ErrUnknownDatabase) && need >= accessWrite {
+		err = &apiError{status: http.StatusNotFound, code: "database_not_found", msg: "no database " + name + " (allow_implicit is off): create it with PUT /_databases/" + name}
+	}
+
 	if err != nil {
 		return nil, r, err
 	}
@@ -177,6 +182,43 @@ func (s *Server) listDatabases(w http.ResponseWriter, _ *http.Request, root *eng
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"databases": out})
+}
+
+// createDatabase is PUT /_databases/{name}: 201 when it makes the database,
+// 200 when it exists ("default" always does).
+func (s *Server) createDatabase(w http.ResponseWriter, r *http.Request, root *engine.DB) {
+	name := r.PathValue("database")
+
+	if name != engine.DefaultDatabase && !engine.ValidDatabase(name) {
+		writeError(w, engine.ErrInvalidDatabase)
+
+		return
+	}
+
+	if name == engine.DefaultDatabase {
+		writeJSON(w, http.StatusOK, map[string]any{"database": name, "created": false})
+
+		return
+	}
+
+	_, err := root.Database(name, false)
+	existed := err == nil
+
+	if _, err := root.Database(name, true); err != nil {
+		writeError(w, err)
+
+		return
+	}
+
+	status := http.StatusOK
+
+	if !existed {
+		status = http.StatusCreated
+
+		s.logInfo(w, r, "database created", slog.String("database", name))
+	}
+
+	writeJSON(w, status, map[string]any{"database": name, "created": !existed})
 }
 
 // dropDatabase is DELETE /_databases/{name}?confirm=<name>: the streams of

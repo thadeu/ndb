@@ -34,6 +34,7 @@ The query language (operators, date math, `$elemMatch`) is on [Query](query.md),
 | GET | `/_metrics` | [System](http/system.md#get-metrics) |
 | GET | `/_collections` | [System](http/system.md#get-collections) |
 | GET | `/_databases` | [System](http/system.md#get-databases) |
+| PUT | `/_databases/{name}` | [System](http/system.md#put-databases-name) |
 | DELETE | `/_databases/{name}?confirm={name}` | [System](http/system.md#delete-databases-name) |
 | GET | `/_stats` | [System](http/system.md#get-stats) |
 | GET | `/_size` | [System](http/system.md#get-size) |

@@ -24,12 +24,17 @@ curl --unix-socket /run/ndb/ndb.sock http://ndb/users/_doc/u1 -H 'Ndb-Database: 
 
 - **Names:** `^[a-z0-9][a-z0-9_-]{0,62}$`. Another name is `400 invalid_database`.
 - **A write makes the database** when it does not exist, as a write makes a collection. A read of a database that does not exist is `404 database_not_found`, and it makes nothing.
+- **`allow_implicit: false`** (in `ndb.yml`) also stops a write from making a database, so a typo in a URL (`/bilion`) is `404 database_not_found` and not a new empty database. Then make each database once with `PUT /_databases/<name>`.
 - **Routes:** every collection, document, query, watch and stream route, and `GET /_collections`, `/_stats`, `/_size`, `/_pitr`, `POST /_restore`, the blob routes and `POST /_backup` work in the database of the header.
 - **Routes of the whole daemon** do not use the header: `/_health`, `/_metrics`, `/_log`, `/_cluster/settings`, `/_cluster/key`, `/_databases`.
+- **Disk:** `GET /_size` of the default database counts its own files; the other databases are in `databases_bytes`. `GET /_size` with the header gives the bytes of that database.
 
-## List and drop
+## Make, list and drop
 
 ```bash
+curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/_databases/billion
+# {"database":"billion","created":true}
+
 curl --unix-socket /run/ndb/ndb.sock http://ndb/_databases
 # {"databases":[{"name":"default","collections":12},{"name":"billion","collections":9}]}
 

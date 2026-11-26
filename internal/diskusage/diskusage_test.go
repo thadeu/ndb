@@ -18,6 +18,28 @@ func write(t *testing.T, path string, n int) {
 	}
 }
 
+func TestScanLeavesTheOtherDatabasesApart(t *testing.T) {
+	dir := t.TempDir()
+
+	write(t, filepath.Join(dir, "collections", "a", "0001.ndjson"), 100)
+	write(t, filepath.Join(dir, "catalog.bolt"), 11)
+	write(t, filepath.Join(dir, "_databases", "billion", "collections", "b", "0001.ndjson"), 500)
+	write(t, filepath.Join(dir, "_databases", "billion", "catalog.bolt"), 20)
+
+	u, err := Scan(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if u.Databases != 520 {
+		t.Fatalf("databases = %d, want 520", u.Databases)
+	}
+
+	if u.Shared.Meta != 11 || u.Total != 111 {
+		t.Fatalf("the default database counts the others: shared %+v, total %d", u.Shared, u.Total)
+	}
+}
+
 func TestScanSplitsPartsAndCountsFiles(t *testing.T) {
 	dir := t.TempDir()
 
