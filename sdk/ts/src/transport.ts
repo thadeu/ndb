@@ -23,7 +23,8 @@ const defaultReadyTimeoutMs = 10_000
 const readOps = /\/(_search|_count|_aggregate)$/
 
 export interface ConnectOptions {
-  // Bearer token for the TCP listener. Default: env NDB_TOKEN.
+  // Bearer token for the TCP listener. Default: the token of the address
+  // (tcp://:<token>@host:port), then env NDB_TOKEN.
   token?: string
   // How long (ms) a call retries while the daemon starts or recovers
   // (503 not_ready, socket missing or refusing). Default 10000; 0 disables.
@@ -37,6 +38,31 @@ export interface ConnectOptions {
   userAgent?: string
 }
 
+// parseAddr is new URL, with an error that never holds the token (the
+// TypeError of node keeps the input).
+function parseAddr(target: string, shown: string): URL {
+  try {
+    return new URL(target)
+  } catch {
+    throw new TypeError(`ndb: address "${shown}" must be unix:///path, tcp://host:port or https://host`)
+  }
+}
+
+// urlToken is the password of the userinfo; the user part is ignored. A user
+// with no password is refused: it is a token in the wrong place.
+function urlToken(url: URL, shown: string): string | undefined {
+  if (url.username !== '' && url.password === '') {
+    throw new TypeError(`ndb: address "${shown}": put the token after a colon: tcp://:<token>@host:port`)
+  }
+
+  return url.password === '' ? undefined : decodeURIComponent(url.password)
+}
+
+// redactAddr hides the userinfo of addr, for error messages.
+function redactAddr(addr: string): string {
+  return addr.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/]*@/i, '$1***@')
+}
+
 // Bun has its own undici, whose Pool cannot dial a unix socket. On Bun the
 // transport uses its fetch, which can.
 const onBun = typeof (globalThis as { Bun?: unknown }).Bun !== 'undefined'
@@ -45,17 +71,21 @@ export class Transport {
   private readonly client: Pool | undefined
   private readonly base: string
   private readonly socketPath: string | undefined
-  private readonly token: string | undefined
+  readonly #token: string | undefined
   private readonly readyTimeout: number
   private readonly userAgent: string | undefined
 
   // addr: unix:///path, tcp://host:port, or https://host[:port] (ndb behind
   // a TLS proxy such as Caddy; http:// works too). Default: env NDB_URL.
+  // The token can be in the address, as in a Redis URL:
+  // tcp://:<token>@host:port. The token is, in order: the token option,
+  // the address, env NDB_TOKEN.
   constructor(addr?: string, opts: ConnectOptions = {}) {
     const target = addr || process.env.NDB_URL || ''
-    const url = new URL(target)
+    const shown = redactAddr(target)
+    const url = parseAddr(target, shown)
 
-    this.token = opts.token || process.env.NDB_TOKEN || undefined
+    this.#token = opts.token || urlToken(url, shown) || process.env.NDB_TOKEN || undefined
     this.readyTimeout = opts.readyTimeout ?? defaultReadyTimeoutMs
     this.userAgent = userAgent(opts.userAgent)
 
@@ -67,7 +97,7 @@ export class Transport {
     } else if ((url.protocol === 'https:' || url.protocol === 'http:') && url.host !== '') {
       this.base = `${url.protocol}//${url.host}`
     } else {
-      throw new TypeError(`ndb: address "${target}" must be unix:///path, tcp://host:port or https://host`)
+      throw new TypeError(`ndb: address "${shown}" must be unix:///path, tcp://host:port or https://host`)
     }
 
     if (!onBun) {
@@ -151,8 +181,8 @@ export class Transport {
       headers['user-agent'] = this.userAgent
     }
 
-    if (this.token) {
-      headers.authorization = `Bearer ${this.token}`
+    if (this.#token) {
+      headers.authorization = `Bearer ${this.#token}`
     }
 
     return headers

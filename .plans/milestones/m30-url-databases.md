@@ -1,6 +1,6 @@
 # M30 — One URL: token and database
 
-Status: not started · Depends on: nothing · Docs: `docs/dev/configuration.md`, `docs/dev/http.md`, `docs/dev/clients/`, `docs-site/llms-agents.md`
+Status: in progress (E30.1 done) · Depends on: nothing · Docs: `docs/dev/configuration.md`, `docs/dev/http.md`, `docs/dev/clients/`, `docs-site/llms-agents.md`
 
 ## Goal
 
@@ -68,14 +68,14 @@ query `?db=` is also accepted on tcp and https.
 
 ### E30.1 — Token in the URL (SDKs only)
 
-- [ ] Golden compatibility test, first: a data dir made by the last release
+- [x] Golden compatibility test, first: a data dir made by the last release
       (fixture in the repo) opens with the new binary and answers the same;
       it runs in CI on each commit (see the rule in `README.md`).
-- [ ] Shared cases in `spec/` for the parse: userinfo, no userinfo,
+- [x] Shared cases in `spec/url/cases.json` for the parse: userinfo, no userinfo,
       percent-encoded token, the order option > URL > env, a bad URL.
-- [ ] Go, Ruby, Rails, TS, CLI (`-url`): read the token from the URL.
-- [ ] Tests that the token is not in an error message or `inspect`.
-- [ ] Docs: the URL format on one page (`docs/dev/configuration.md`),
+- [x] Go, Ruby, Rails, TS, CLI (`-url`, also `https://`), console (`NDB_URL`): read the token from the URL.
+- [x] Tests that the token is not in an error message or `inspect`.
+- [x] Docs: the URL format on one page (`docs/dev/configuration.md`),
       linked from each client page.
 
 ### E30.2 — Databases in the daemon

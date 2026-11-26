@@ -238,7 +238,26 @@ NDB_TOKEN=$(cat /run/secrets/ndb_token) ndb serve -tcp 10.0.0.5:7070
 
 The unix socket never asks for a token: file permissions guard it (`listen.unix_mode`, default `0660`). `POST /_backup` stays unix-only.
 
-The token is defense in depth. Keep the listener on a private address (for example WireGuard) as well. SDKs take a `token` option or `NDB_TOKEN`; see [clients.md](clients.md).
+The token is defense in depth. Keep the listener on a private address (for example WireGuard) as well. SDKs take a `token` option, the token of the URL or `NDB_TOKEN`; see [Connection URL](#connection-url) and [clients.md](clients.md).
+
+## Connection URL
+
+One URL holds the address and the token, as in a Redis or Postgres URL:
+
+```bash
+NDB_URL=tcp://:<token>@10.0.0.5:7070
+NDB_URL=https://:<token>@ndb.example.com
+NDB_URL=unix:///run/ndb/ndb.sock
+```
+
+- The token is the password part of the URL, after the colon. The user part is ignored (`tcp://default:<token>@host` is the same).
+- A token with `/`, `@` or `:` must be percent-encoded (`a%2Fb`). A token made with `openssl rand -hex 32` needs no encoding.
+- A user with no colon (`tcp://<token>@host`) is an error, so a token in the wrong place is never sent as a user name.
+- The token is, in order: the `token` option in code, the token of the URL, `NDB_TOKEN`. An URL with no token keeps the behavior of `NDB_TOKEN`.
+- The SDKs, the CLI and the console never show the token: errors and the printed client show `tcp://***@host:port`.
+- The unix socket needs no token.
+
+Every client runs the same cases: `spec/url/cases.json`.
 
 Ten failed token checks from one IP in one minute lock that IP out for five minutes (`429 too_many_requests`). The browser guards (`cors_origins`, `allowed_hosts`), the lockout and the limits are on [Security](security.md).
 

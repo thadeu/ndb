@@ -51,10 +51,12 @@ type reply struct {
 	Body   []byte
 }
 
-// newAPIClient reads unix:///path/to.sock, tcp://host:port or
-// http://host:port. The token is NDB_TOKEN.
+// newAPIClient reads unix:///path/to.sock, tcp://host:port,
+// http://host:port or https://host[:port]. The token is the one of the URL
+// (tcp://:<token>@host:port, as in a Redis URL), else NDB_TOKEN.
 func newAPIClient(rawURL string) (*apiClient, error) {
 	token := os.Getenv("NDB_TOKEN")
+	shown := redactURL(rawURL)
 
 	if sock, ok := strings.CutPrefix(rawURL, "unix://"); ok {
 		if err := checkSocketPath(sock); err != nil {
@@ -66,14 +68,68 @@ func newAPIClient(rawURL string) (*apiClient, error) {
 
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return nil, fmt.Errorf("url %q: %w", rawURL, err)
+		var ue *url.Error
+
+		if errors.As(err, &ue) {
+			ue.URL = shown
+		}
+
+		return nil, fmt.Errorf("url %q: %w", shown, err)
 	}
 
-	if (u.Scheme != "tcp" && u.Scheme != "http") || u.Host == "" {
-		return nil, fmt.Errorf("url %q: want unix:///path, tcp://host:port or http://host:port", rawURL)
+	if (u.Scheme != "tcp" && u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, fmt.Errorf("url %q: want unix:///path, tcp://host:port, http://host:port or https://host", shown)
 	}
 
-	return &apiClient{base: "http://" + u.Host, token: token, hc: &http.Client{Transport: withUserAgent(http.DefaultTransport)}, timeout: defaultCallTimeout}, nil
+	if u.User != nil {
+		pass, ok := u.User.Password()
+
+		if !ok && u.User.Username() != "" {
+			return nil, fmt.Errorf("url %q: put the token after a colon: tcp://:<token>@host:port", shown)
+		}
+
+		if pass != "" {
+			token = pass
+		}
+	}
+
+	scheme := "http"
+
+	if u.Scheme == "https" {
+		scheme = "https"
+	}
+
+	return &apiClient{base: scheme + "://" + u.Host, token: token, hc: &http.Client{Transport: withUserAgent(http.DefaultTransport)}, timeout: defaultCallTimeout}, nil
+}
+
+// redactURL hides the userinfo (the token) of rawURL, for messages and the
+// source line of stats.
+func redactURL(rawURL string) string {
+	scheme, rest, ok := strings.Cut(rawURL, "://")
+
+	if !ok {
+		return rawURL
+	}
+
+	authority, path, slash := strings.Cut(rest, "/")
+	at := strings.LastIndex(authority, "@")
+
+	if at < 0 {
+		return rawURL
+	}
+
+	shown := scheme + "://***@" + authority[at+1:]
+
+	if slash {
+		shown += "/" + path
+	}
+
+	return shown
+}
+
+// String shows the address of the client, never its token.
+func (c *apiClient) String() string {
+	return "apiClient(" + c.base + ")"
 }
 
 func newUnixClient(sock, token string) *apiClient {

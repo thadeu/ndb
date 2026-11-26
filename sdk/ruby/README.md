@@ -55,7 +55,7 @@ Ndb::Client.new(
 ```
 
 - The address is, in order: `url:` (the `addr` of `Ndb.connect`), `socket:`, env `NDB_URL`, then the default socket `/run/ndb/ndb.sock`.
-- The token is `token:`, or env `NDB_TOKEN`. It goes only in the `Authorization` header. A unix socket does not need it.
+- The token is, in order: `token:`, the token of the URL (`tcp://:<token>@host:port`), env `NDB_TOKEN`. It goes only in the `Authorization` header. A unix socket does not need it.
 - A bad address raises `ArgumentError` at once.
 - `ready_timeout` is how long a call retries while the daemon is not ready (`not_ready`, or the socket is missing or refuses). It uses exponential backoff (50 ms up to 1 s) with jitter. A write is retried only when the daemon certainly did not process it. A read is also retried after a dropped connection. A timeout is never retried. When the deadline passes, the last error is raised.
 - `health` does not wait: a daemon that is recovering raises `Ndb::NotReady`.

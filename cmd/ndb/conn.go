@@ -23,7 +23,7 @@ type connFlags struct {
 func addConnFlags(fl *flag.FlagSet) connFlags {
 	return connFlags{
 		dataDirFlags: addDataDirFlags(fl),
-		rawURL:       fl.String("url", "", "running daemon: unix:///path/to.sock or tcp://host:port (default NDB_URL, then the socket of ndb.yml)"),
+		rawURL:       fl.String("url", "", "running daemon: unix:///path/to.sock, tcp://[:<token>@]host:port or https://[:<token>@]host (default NDB_URL, then the socket of ndb.yml)"),
 		asJSON:       fl.Bool("json", false, "machine output"),
 	}
 }
@@ -60,7 +60,7 @@ func (c connFlags) resolve(fl *flag.FlagSet) (target, error) {
 
 	if rawURL != "" {
 		t.client, err = newAPIClient(rawURL)
-		t.source = rawURL
+		t.source = redactURL(rawURL)
 
 		return t, err
 	}

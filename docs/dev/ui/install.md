@@ -24,8 +24,8 @@ With no config, the console offers `unix:///run/ndb/ndb.sock`. Add other daemons
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `NDB_URL` | | One fixed connection. The add form is hidden and the config file is not used. |
-| `NDB_TOKEN` | | Bearer token for `NDB_URL`. |
+| `NDB_URL` | | One fixed connection. The add form is hidden and the config file is not used. The token can be in it: `tcp://:<token>@host:7070` (it wins over `NDB_TOKEN`, and the page never shows it). |
+| `NDB_TOKEN` | | Bearer token for `NDB_URL`, when the URL has none. |
 | `NDB_NAME` | `default` | Name of the fixed connection. |
 | `PORT` | `4321` | Listen port. |
 | `HOST` | `127.0.0.1` | Listen address (`0.0.0.0` in the image). |

@@ -91,20 +91,39 @@ func WithIdleTimeout(d time.Duration) ConnectOption {
 
 // Connect returns a handle for addr: unix:///path/to/ndb.sock,
 // tcp://host:port, or https://host[:port] (ndb behind a TLS proxy such as
-// Caddy; http:// works too). An empty addr reads NDB_URL. NDB_TOKEN and
-// NDB_PREFIX are the defaults of WithToken and WithPrefix. It does not dial;
+// Caddy; http:// works too). An empty addr reads NDB_URL. The token can be
+// in the address, as in a Redis URL: tcp://:<token>@host:port. The token is,
+// in order: WithToken, the address, NDB_TOKEN. NDB_PREFIX is the default of
+// WithPrefix. It does not dial;
 // the first call does, and waits while the daemon starts (WithReadyTimeout).
 func Connect(addr string, opts ...ConnectOption) (*DB, error) {
 	if addr == "" {
 		addr = os.Getenv("NDB_URL")
 	}
 
+	shown := redactAddr(addr)
+
 	u, err := url.Parse(addr)
 	if err != nil {
-		return nil, fmt.Errorf("ndb: bad address %q: %w", addr, err)
+		var ue *url.Error
+
+		if errors.As(err, &ue) {
+			ue.URL = shown
+		}
+
+		return nil, fmt.Errorf("ndb: bad address %q: %w", shown, err)
 	}
 
-	db := &DB{ensured: map[string]bool{}, token: os.Getenv("NDB_TOKEN"), prefix: os.Getenv("NDB_PREFIX"), readyTimeout: DefaultReadyTimeout, maxConns: DefaultMaxConns}
+	token, err := urlToken(u)
+	if err != nil {
+		return nil, fmt.Errorf("ndb: address %q: %w", shown, err)
+	}
+
+	if token == "" {
+		token = os.Getenv("NDB_TOKEN")
+	}
+
+	db := &DB{ensured: map[string]bool{}, token: token, prefix: os.Getenv("NDB_PREFIX"), readyTimeout: DefaultReadyTimeout, maxConns: DefaultMaxConns}
 
 	for _, opt := range opts {
 		opt(db)
@@ -138,7 +157,7 @@ func Connect(addr string, opts ...ConnectOption) (*DB, error) {
 	case (u.Scheme == "https" || u.Scheme == "http") && u.Host != "":
 		db.base = u.Scheme + "://" + u.Host
 	default:
-		return nil, fmt.Errorf("ndb: address %q must be unix:///path, tcp://host:port or https://host", addr)
+		return nil, fmt.Errorf("ndb: address %q must be unix:///path, tcp://host:port or https://host", shown)
 	}
 
 	db.client = &http.Client{Transport: tr}
@@ -148,6 +167,57 @@ func Connect(addr string, opts ...ConnectOption) (*DB, error) {
 	db.watches = &http.Client{Transport: wt}
 
 	return db, nil
+}
+
+// urlToken is the token in the address: the password of the userinfo, as
+// in redis://:<password>@host. The user part is ignored. A user with no
+// password is refused: it is a token in the wrong place.
+func urlToken(u *url.URL) (string, error) {
+	if u.User == nil {
+		return "", nil
+	}
+
+	token, ok := u.User.Password()
+
+	if !ok && u.User.Username() != "" {
+		return "", errors.New("put the token after a colon: tcp://:<token>@host:port")
+	}
+
+	return token, nil
+}
+
+// redactAddr hides the userinfo of addr, for error messages.
+func redactAddr(addr string) string {
+	scheme, rest, ok := strings.Cut(addr, "://")
+
+	if !ok {
+		return addr
+	}
+
+	authority, path, _ := strings.Cut(rest, "/")
+	at := strings.LastIndex(authority, "@")
+
+	if at < 0 {
+		return addr
+	}
+
+	shown := scheme + "://***@" + authority[at+1:]
+
+	if strings.Contains(rest, "/") {
+		shown += "/" + path
+	}
+
+	return shown
+}
+
+// String shows the address of the handle, never its token.
+func (db *DB) String() string {
+	return "ndb.DB(" + db.base + ")"
+}
+
+// GoString is String for %#v.
+func (db *DB) GoString() string {
+	return db.String()
 }
 
 // Close closes the idle connections. The handle stays usable.

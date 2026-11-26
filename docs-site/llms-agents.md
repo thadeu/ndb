@@ -5,7 +5,7 @@ ndb is one Go daemon. It stores documents (JSON objects) in collections and answ
 ### Run and connect
 
 - `ndb serve` with no flags (not as root): data in `~/.ndb/data`, unix socket `~/.ndb/ndb.sock`, TCP `127.0.0.1:7070`. As root, or with `/var/lib/ndb`: socket `/run/ndb/ndb.sock`, no TCP.
-- The SDKs read `NDB_URL` (`unix:///path/ndb.sock`, `http://host:port`). Over TCP with a token: `Authorization: Bearer <token>`. The unix socket needs no token.
+- The SDKs read `NDB_URL` (`unix:///path/ndb.sock`, `tcp://host:port`, `https://host`). The token can be in the URL: `tcp://:<token>@host:port` (order: the `token` option, the URL, `NDB_TOKEN`). Over TCP with a token: `Authorization: Bearer <token>`. The unix socket needs no token.
 - `GET /_health` is `{"status":"ok"}` when ready; `503 not_ready` while it recovers. The SDKs retry that for 10 s.
 - Logs: `ndb serve -log-level debug|info|warn|error|quiet`, or `PUT /_log {"level":"debug"}` with an admin token.
 

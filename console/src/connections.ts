@@ -18,11 +18,29 @@ export function defaultPath(env: Record<string, string | undefined> = process.en
   return join(base, 'ndb', 'console.json');
 }
 
-// fixedFromEnv gives the one connection of NDB_URL, or undefined.
+// fixedFromEnv gives the one connection of NDB_URL, or undefined. The token
+// of the URL (tcp://:<token>@host:port) wins over NDB_TOKEN, and it is taken
+// out of the URL, so the page never shows it.
 export function fixedFromEnv(env: Record<string, string | undefined> = process.env): Connection | undefined {
   if (!env.NDB_URL) return undefined;
 
-  return { name: env.NDB_NAME || 'default', url: env.NDB_URL, token: env.NDB_TOKEN || undefined };
+  const { url, token } = splitToken(env.NDB_URL);
+
+  return { name: env.NDB_NAME || 'default', url, token: token || env.NDB_TOKEN || undefined };
+}
+
+// splitToken takes the userinfo out of url: the password is the token, the
+// user part is ignored.
+export function splitToken(url: string): { url: string; token?: string } {
+  const match = /^([a-z][a-z0-9+.-]*:\/\/)([^/@]*)@(.*)$/i.exec(url);
+
+  if (!match) return { url };
+
+  const [, scheme = '', userinfo = '', rest = ''] = match;
+  const colon = userinfo.indexOf(':');
+  const password = colon < 0 ? '' : decodeURIComponent(userinfo.slice(colon + 1));
+
+  return { url: scheme + rest, token: password || undefined };
 }
 
 // Connections is the list of ndb daemons that the console can open. It lives
