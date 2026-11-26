@@ -70,6 +70,10 @@ type Options struct {
 	// daemon of its own.
 	Compound bool
 
+	// Mixed: GET by _id and a small _search, alone and while a second
+	// client sends _bulk, on a daemon of its own.
+	Mixed bool
+
 	// Concurrent: clients that read at the same time (1, 3 and 10).
 	Concurrent bool
 
@@ -105,7 +109,7 @@ type Options struct {
 }
 
 func (o Options) all() bool {
-	return !o.Stress && !o.Query && !o.Aggs && !o.Lookup && !o.Idle && !o.Concurrent && !o.Direct && !o.Streams && !o.Compound
+	return !o.Stress && !o.Query && !o.Aggs && !o.Lookup && !o.Idle && !o.Concurrent && !o.Direct && !o.Streams && !o.Compound && !o.Mixed
 }
 
 // reads tells whether a part needs the loaded calls.
@@ -163,6 +167,10 @@ func (o Options) plan(reuse bool) []planned {
 	if o.Compound || o.all() {
 		steps = append(steps, compoundPlan()...)
 		steps = append(steps, encryptedPlan()...)
+	}
+
+	if o.Mixed || o.all() {
+		steps = append(steps, mixedPlan()...)
 	}
 
 	if o.Streams || o.all() {
@@ -325,6 +333,11 @@ func Run(o Options, w io.Writer) (err error) {
 		report = append(report, compoundPart(dir)...)
 		report = append(report, "| **encrypted fields** (median of 2000) | |")
 		report = append(report, encryptedPart(dir)...)
+	}
+
+	if o.Mixed || o.all() {
+		report = append(report, "| **fast reads** (one client, µs, over the unix socket) | |")
+		report = append(report, mixedPart(dir)...)
 	}
 
 	if o.Streams || o.all() {

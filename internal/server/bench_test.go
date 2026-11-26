@@ -90,6 +90,97 @@ func BenchmarkFindByIDUnixSocket(b *testing.B) {
 	}
 }
 
+// BenchmarkGetDocUnixSocket is GET /{coll}/_doc/{id} over a unix socket.
+func BenchmarkGetDocUnixSocket(b *testing.B) {
+	client := unixServer(b)
+
+	req, _ := http.NewRequest("PUT", "http://ndb/bench", bytes.NewReader([]byte(`{}`)))
+
+	if _, err := client.Do(req); err != nil {
+		b.Fatal(err)
+	}
+
+	for i := range benchDocs {
+		body := fmt.Appendf(nil, `{"docs":[{"_id":"d%d","k":"d%d","n":%d}]}`, i, i, i)
+
+		resp, err := client.Post("http://ndb/bench/_bulk", "application/json", bytes.NewReader(body))
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		resp.Body.Close()
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := range b.N {
+		resp, err := client.Get(fmt.Sprintf("http://ndb/bench/_doc/d%d", i%benchDocs))
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			b.Fatalf("status %d", resp.StatusCode)
+		}
+	}
+}
+
+// BenchmarkSearchSmallUnixSocket is a _search on an index with a small
+// answer (10 docs) over a unix socket.
+func BenchmarkSearchSmallUnixSocket(b *testing.B) {
+	client := unixServer(b)
+
+	req, _ := http.NewRequest("PUT", "http://ndb/bench", bytes.NewReader([]byte(`{"indexes":["g"]}`)))
+
+	if _, err := client.Do(req); err != nil {
+		b.Fatal(err)
+	}
+
+	var docs bytes.Buffer
+
+	docs.WriteString(`{"docs":[`)
+
+	for i := range benchDocs {
+		if i > 0 {
+			docs.WriteByte(',')
+		}
+
+		fmt.Fprintf(&docs, `{"_id":"d%d","g":"g%d","n":%d}`, i, i%100, i)
+	}
+
+	docs.WriteString(`]}`)
+
+	resp, err := client.Post("http://ndb/bench/_bulk", "application/json", &docs)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	resp.Body.Close()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := range b.N {
+		body := fmt.Appendf(nil, `{"query":{"g":"g%d"},"limit":10}`, i%100)
+
+		resp, err := client.Post("http://ndb/bench/_search", "application/json", bytes.NewReader(body))
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			b.Fatalf("status %d", resp.StatusCode)
+		}
+	}
+}
+
 func seedViaHTTP(b *testing.B, client *http.Client) {
 	b.Helper()
 

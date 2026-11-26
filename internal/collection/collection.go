@@ -442,11 +442,7 @@ func (c *Collection) Get(id string) (Doc, bool) {
 		return Doc{}, false
 	}
 
-	var own struct {
-		ID string `json:"_id"`
-	}
-
-	if json.Unmarshal(d.Doc, &own) != nil || own.ID != id {
+	if !ownID(d.Doc, id) {
 		return Doc{}, false
 	}
 

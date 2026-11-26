@@ -1051,8 +1051,12 @@ func newTopK(q *query.Query) *topK {
 		k = q.Skip + q.Limit + 1
 	}
 
-	return &topK{q: q, k: k}
+	return &topK{q: q, k: k, rows: make([]row, 0, min(k, topKCap))}
 }
+
+// topKCap is the most rows newTopK makes room for at the start: a small
+// page gets all its room in one allocation.
+const topKCap = 64
 
 func (t *topK) Len() int           { return len(t.rows) }
 func (t *topK) Swap(i, j int)      { t.rows[i], t.rows[j] = t.rows[j], t.rows[i] }
@@ -1114,7 +1118,9 @@ func (t *topK) add(r row) {
 	case t.k == 0:
 		t.rows = append(t.rows, r)
 	case len(t.rows) < t.k:
-		heap.Push(t, r)
+		// heap.Push without its boxing of r in an any: append, then move it up.
+		t.rows = append(t.rows, r)
+		heap.Fix(t, len(t.rows)-1)
 	case t.q.Cmp(r.Pos, t.rows[0].Pos) < 0:
 		t.rows[0] = r
 		heap.Fix(t, 0)
