@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.27.0] - 2026-11-26
+
 ### Added
 
 - **Databases:** many sets of collections in one daemon; two apps can each have `users`. The header `Ndb-Database` picks one; no header is the default database, the data dir of today with the same files. `PUT`, `GET` and `DELETE /_databases`. A write makes a database (not with `allow_implicit: false`). Each database has its own catalog, watch positions, blobs and streams; all share the key, the settings and the memory budget. A backup with no header holds every database (format 2; a daemon with no database still writes format 1). Scoped tokens stay in the default database. See `docs/dev/databases.md`.
@@ -794,7 +796,8 @@ First release.
 - Release tooling: static binaries for Linux and macOS, multi-arch image at `ghcr.io/thadeu/ndb`.
 - Docs in `docs/dev/`, a docs site, and deploy examples (single VM, cross-VM with WireGuard).
 
-[Unreleased]: https://github.com/thadeu/ndb/compare/v1.26.0...HEAD
+[Unreleased]: https://github.com/thadeu/ndb/compare/v1.27.0...HEAD
+[1.27.0]: https://github.com/thadeu/ndb/compare/v1.26.0...v1.27.0
 [1.26.0]: https://github.com/thadeu/ndb/compare/v1.25.1...v1.26.0
 [1.25.1]: https://github.com/thadeu/ndb/compare/v1.25.0...v1.25.1
 [1.25.0]: https://github.com/thadeu/ndb/compare/v1.24.0...v1.25.0
