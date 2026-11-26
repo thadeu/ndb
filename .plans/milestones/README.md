@@ -54,8 +54,9 @@ docs in `docs/dev/` describe what they built.
 | [M26](m26-compound-indexes-unwind.md) | Compound indexes and `$unwind` | an index and a unique key on 2 to 4 fields (`"account_id,created_at"`): equality on the first fields, a range and a sort on the next; `$unwind` before `$group` in `_aggregate` | in progress |
 | M27 | Server settings and the encryption key | `GET` and `PUT /_cluster/settings`; one master key per daemon (`NDB_ENCRYPTION_KEY`, or made at the first start and kept in a system WAL, so backups hold it); shown masked; key rotation (`ndb key rotate`, 1.23.1) | done (the console view of the settings: later) |
 | M28 | Encrypted fields and blind indexes | `encrypted` and `blind` in a collection: a `.pem` or a CPF encrypted before the WAL; equality, unique and group on a CPF by its hash; the old documents of a field added later are encrypted in the background (1.22.1) | done |
-| [M29](m29-fast-reads.md) | Fast reads | `GET` by `_id` in µs, reads from a snapshot (no wait for writes), small gains in `_search`, read and write limits | not started |
-| [M30](m30-url-databases.md) | One URL: token and database | `tcp://:<token>@host:7070/<db>` in every SDK; many databases in one daemon (the `default` is the data dir of today); base of the replication design (`../backlog/replication.md`) | done |
+| M29 | Fast reads | `ndb bench -mixed`; `GET` by `_id` checks the own `_id` on the bytes (about 26 µs on the unix socket, HTTP is 98% of it); fewer allocations in a small `_search` (1.27.1). Skipped: reads from a snapshot (a read waits for a write less than 1 µs at p99) and read/write limits (no request slots to split). Missed: the p99 of reads with a writer is 2–3x, not 2x (CPU and GC of the writer, not the lock) | done |
+| M30 | One URL: token and database | `tcp://:<token>@host:7070/<db>` in every SDK; many databases in one daemon (the `default` is the data dir of today); docs: `docs/dev/databases.md` (1.27.0) | done |
+| [M31](m31-replication.md) | Replication: one owner, local reads | `NDB_REPLICA_OF`: a copy on each VM reads local and forwards writes to the one owner (read your writes); `watch` and streams on the owner; manual promote; `GET /_replication` | not started |
 | M17 | PITR and rename | restore a collection to an instant of the last day; rename to put it in place (1.2.3; at/to 1.2.4) | done |
 
 ## Next (after 0.1.2)
