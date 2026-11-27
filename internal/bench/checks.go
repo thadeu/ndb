@@ -56,6 +56,8 @@ var gates = []gate{
 	{metric: "encrypted.read_pct", what: "extra time of a read with an encrypted 2 KB .pem (median)", max: 25, unit: "%"},
 	{metric: "compound.worst", what: "slowest read with compound indexes or $unwind (median)", max: 66, unit: "ms"},
 	{metric: "get.id_us", what: "GET by _id, one client (median)", max: 60, unit: "µs"},
+	{metric: "replica.get_id_us", what: "GET by _id on a copy, one client (median)", max: 60, unit: "µs"},
+	{metric: "replica.lag_p99_ms", what: "lag of a copy on this host under _bulk (p99)", max: 100, unit: "ms"},
 	{metric: "search.small_us", what: "small _search, one client (median)", max: 100, unit: "µs"},
 	{metric: "mixed.get_p99_us", what: "GET by _id p99 while a client sends _bulk", max: 700, unit: "µs"},
 	{metric: "mixed.search_p99_us", what: "small _search p99 while a client sends _bulk", max: 700, unit: "µs"},

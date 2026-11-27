@@ -74,6 +74,10 @@ type Options struct {
 	// client sends _bulk, on a daemon of its own.
 	Mixed bool
 
+	// Replica: an owner and a copy on this host: the lag of the copy under
+	// a _bulk load, and GET by _id on the copy.
+	Replica bool
+
 	// Concurrent: clients that read at the same time (1, 3 and 10).
 	Concurrent bool
 
@@ -109,7 +113,7 @@ type Options struct {
 }
 
 func (o Options) all() bool {
-	return !o.Stress && !o.Query && !o.Aggs && !o.Lookup && !o.Idle && !o.Concurrent && !o.Direct && !o.Streams && !o.Compound && !o.Mixed
+	return !o.Stress && !o.Query && !o.Aggs && !o.Lookup && !o.Idle && !o.Concurrent && !o.Direct && !o.Streams && !o.Compound && !o.Mixed && !o.Replica
 }
 
 // reads tells whether a part needs the loaded calls.
@@ -171,6 +175,10 @@ func (o Options) plan(reuse bool) []planned {
 
 	if o.Mixed || o.all() {
 		steps = append(steps, mixedPlan()...)
+	}
+
+	if o.Replica || o.all() {
+		steps = append(steps, replicaPlan()...)
 	}
 
 	if o.Streams || o.all() {
@@ -340,6 +348,11 @@ func Run(o Options, w io.Writer) (err error) {
 		report = append(report, mixedPart(dir)...)
 	}
 
+	if o.Replica || o.all() {
+		report = append(report, "| **replication** (an owner and a copy on this host) | |")
+		report = append(report, replicaPart(dir)...)
+	}
+
 	if o.Streams || o.all() {
 		report = append(report, "| **streams** (Redis Streams parity) | |")
 		report = append(report, streamsPart(dir)...)
@@ -371,6 +384,11 @@ func Run(o Options, w io.Writer) (err error) {
 // daemon is the ndb process under test, with its RSS peak per phase.
 type daemon struct {
 	dir string
+
+	// tcp is the TCP address of the daemon ("" = none); env are more env
+	// vars (the replication part).
+	tcp string
+	env []string
 
 	// ready is how long start waits for /_health (default 5 s): a daemon
 	// that reads big direct files answers only when it has read them.
@@ -407,7 +425,8 @@ func (d *daemon) start() {
 	// -tcp "": no TCP listener. A daemon of a user install listens on
 	// 127.0.0.1:7070 by default, so two daemons (two phases, or one of the
 	// user) would fight for the port, and the second one would not start.
-	d.cmd = exec.Command(*bin, "-config", filepath.Join(d.dir, "ndb.yml"), "-data-dir", filepath.Join(d.dir, "data"), "-unix", d.sock(), "-tcp", "")
+	d.cmd = exec.Command(*bin, "-config", filepath.Join(d.dir, "ndb.yml"), "-data-dir", filepath.Join(d.dir, "data"), "-unix", d.sock(), "-tcp", d.tcp)
+	d.cmd.Env = append(os.Environ(), d.env...)
 
 	// The last lines of stderr say why a daemon did not start.
 	d.stderr = &tail{max: 4096}
