@@ -15,3 +15,14 @@ func SetLookupBudget(n int) func() {
 
 	return func() { lookupBudget = old }
 }
+
+// Sweep runs the TTL sweep of an engine collection now.
+func (c *Collection) Sweep() (int, error) {
+	if err := c.enter(); err != nil {
+		return 0, err
+	}
+
+	defer c.leave()
+
+	return c.eng.Sweep()
+}

@@ -204,6 +204,11 @@ func (db *DB) familyOf(name string) []string {
 	return out
 }
 
+// Family is the collection name and its partitions.
+func (db *DB) Family(name string) []string {
+	return db.familyOf(name)
+}
+
 // openOf is the open collections among names.
 func (db *DB) openOf(names []string) []*Collection {
 	db.mu.RLock()

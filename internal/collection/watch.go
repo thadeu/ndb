@@ -203,6 +203,12 @@ func (s *engineStream) release() {
 	}
 }
 
+// Buffered is how many events of the last record are not read yet: 0
+// after the last event of a record.
+func (s *engineStream) Buffered() int {
+	return len(s.queue)
+}
+
 func (s *engineStream) Close() {
 	s.sub.Close()
 

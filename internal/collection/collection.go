@@ -541,6 +541,8 @@ func (c *Collection) prepare(req any) (writer.Prepared, error) {
 		err = c.prepareLock(v, r)
 	case txReq:
 		ops, err = c.prepareTx(v, r)
+	case applyReq:
+		ops, err = c.prepareApply(v, r)
 	default:
 		err = errf("internal", "unknown request %T", req)
 	}
