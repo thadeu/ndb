@@ -146,7 +146,7 @@ the door. E32.0 is the gate of the door (E32.1 to E32.3) and of the pilot
       link: `remote_addr`, `connected_at`, `last_heartbeat_at`, `rtt_ms`
       (from the heartbeat), `bytes_per_s` and `records_per_s`, and
       `term`. On the owner, the same for each copy connected.
-- [ ] Backups to a remote place: `ndb backup -` already writes to stdout
+- [x] Backups to a remote place: `ndb backup -` already writes to stdout
       (`ndb backup - | aws s3 cp - s3://...`). Add a test that a backup of
       a server under writes, streamed this way, restores the same.
 
