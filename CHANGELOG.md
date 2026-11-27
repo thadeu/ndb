@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **`tcp+tls://` URLs:** a second name of `https://` (`tcp+tls://:<token>@host:7070/billion`), in Go, Ruby, Rails, TS, the CLI and the console. Ndb Cloud shows this form.
+
+### Changed
+
+- **Console:** its code moved to a private repository. The image `ghcr.io/thadeu/ndb-ui`, the `ndb-ui-*` binaries of each release and `ndb-stack` keep their names and the version of ndb.
+
 ## [1.27.1] - 2026-11-26
 
 ## [1.27.0] - 2026-11-26

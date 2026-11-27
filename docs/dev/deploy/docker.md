@@ -223,12 +223,4 @@ volumes:
 docker build -t ndb:dev --build-arg VERSION=dev .
 ```
 
-The stack is built FROM the two images. `NDB_TAG` (default `latest`) selects their version. To build it from local images:
-
-```bash
-docker build -t ndb-local .
-docker build -t ndb-ui-local console
-docker build -t ndb-stack-local \
-  --build-arg NDB_IMAGE=ndb-local --build-arg NDB_UI_IMAGE=ndb-ui-local \
-  deploy/docker/stack
-```
+The stack is built FROM the images `ndb` and `ndb-ui` of the same version, in the repository of `ndb-ui` (not this one). `NDB_TAG` (default `latest`) selects their version.

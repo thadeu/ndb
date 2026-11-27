@@ -5,15 +5,16 @@ One tag `vX.Y.Z` releases everything. Version 0.1.0 is used in all packages.
 | Artifact | Name | Workflow |
 |---|---|---|
 | Daemon binaries + checksums | GitHub Release | `release.yml` |
-| Console binaries | GitHub Release (`ndb-ui-*`) | `release.yml` (after the daemon) |
+| Console binaries | GitHub Release (`ndb-ui-*`), uploaded by `thadeu/ndb-cloud` | `cloud.yml` sends `ndb-release`; `release.yml` of `ndb-cloud` |
 | Go SDK | tag `sdk/go/vX.Y.Z`, module `github.com/thadeu/ndb/sdk/go` | `release.yml` |
 | Go Redis adapter | tag `sdk/go/ndbredis/vX.Y.Z`, module `github.com/thadeu/ndb/sdk/go/ndbredis` (needs the Go SDK of the same release) | `release.yml` |
-| Images | `ghcr.io/thadeu/ndb`, `ghcr.io/thadeu/ndb-ui` (two jobs at the same time), then `ghcr.io/thadeu/ndb-stack` (built FROM the two images of the same version) | `ghcr.yml` |
+| Images | `ghcr.io/thadeu/ndb` | `ghcr.yml` |
+| Console images | `ghcr.io/thadeu/ndb-ui`, then `ghcr.io/thadeu/ndb-stack` (built FROM `ndb` and `ndb-ui` of the same version) | `release.yml` of `thadeu/ndb-cloud`, after `ghcr.yml` |
 | Gems | `ndb` (pushed first), then `ndb-rails` (depends on it) | `publish.yml` (job `gems`) |
 | npm | `@thadeu/ndb` | `publish.yml` (job `npm`, at the same time as `gems`) |
 | Docs site | Cloudflare Pages (project `ndb-docs`, via wrangler) | `docs.yml` (when the site changes, and on each `v*` tag from `ci.yml` to show the new version) |
 
-**One run does it all.** `make tag` pushes `main` and the tag, and ends at once. CI (`ci.yml`) tests the release commit; when the tests pass and the commit has a tag `v*`, its last jobs call `release.yml`, `ghcr.yml` and `publish.yml` for that tag, at the same time, in the same run. A failed test publishes nothing. So the tests run once, a push to `main` with no tag runs only the tests, and only the console is tested in `release.yml` (CI does not test it). The run of a release commit is never cancelled by a newer push.
+**One run does it all.** `make tag` pushes `main` and the tag, and ends at once. CI (`ci.yml`) tests the release commit; when the tests pass and the commit has a tag `v*`, its last jobs call `release.yml`, `ghcr.yml` and `publish.yml` for that tag, at the same time, in the same run. A failed test publishes nothing. So the tests run once, and a push to `main` with no tag runs only the tests. When `release.yml` and `ghcr.yml` are done, `cloud.yml` sends `ndb-release` to `thadeu/ndb-cloud`, which tests the console against the new ndb binary and publishes it. The run of a release commit is never cancelled by a newer push.
 
 Each of the three can also run by hand (Actions, Run workflow, with the tag), for example to finish a publish that stopped halfway.
 
@@ -24,6 +25,7 @@ Each of the three can also run by hand (Actions, Run workflow, with the tag), fo
 3. Cloudflare Pages: create the project `ndb-docs` (or let the first `wrangler pages deploy` create it), attach the custom domain, and add the repo secrets `CLOUDFLARE_API_TOKEN` (Pages: Edit) and `CLOUDFLARE_ACCOUNT_ID`.
 4. ghcr: after the first image push, open the package `ndb` under the profile Packages and set visibility to Public. Link it to the repository.
 5. Settings, Actions, General: allow workflows to have read and write permission (the Go tag step pushes a tag).
+6. The secret `NDB_CLOUD_DISPATCH_TOKEN`: a fine-grained token with Contents: write on `thadeu/ndb-cloud`, for `cloud.yml`. The setup of `ndb-cloud` is in its README.
 
 ## Versions
 

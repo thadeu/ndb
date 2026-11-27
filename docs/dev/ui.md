@@ -36,7 +36,7 @@ Then open http://127.0.0.1:4321, click **New connection**, and press **Discover*
 
 ## Self-hosted
 
-The console is **self-hosted only**. You run it on your machine or next to your daemons, and it talks to them directly. There is no account, no login, and nothing leaves your network. It is free, in the same repository and under the same license as ndb.
+The console is **self-hosted only**. You run it on your machine or next to your daemons, and it talks to them directly. There is no account, no login, and nothing leaves your network. It is free to use. Its code is not in this repository: you get it as the image `ghcr.io/thadeu/ndb-ui` and the `ndb-ui` binaries of each ndb release, with the same version as ndb.
 
 A **hosted console** (one place for all your daemons, with sign-in and teams) is planned for later. It does not exist yet, and the self-hosted console stays: the hosted version will be built on top of it, not instead of it.
 

@@ -1,10 +1,10 @@
 name: release
 
-# The GitHub release of a tag: the daemon binaries, the console binaries
-# and the tags of the Go modules. The images are in ghcr.yml and the SDK
-# packages in publish.yml. There are no Go tests here: CI calls this
-# workflow only after its tests passed on the release commit. The console
-# is tested here, as CI does not test it.
+# The GitHub release of a tag: the daemon binaries and the tags of the Go
+# modules. The images are in ghcr.yml and the SDK packages in publish.yml.
+# There are no Go tests here: CI calls this workflow only after its tests
+# passed on the release commit. The ndb-ui binaries are added to the same
+# release by thadeu/ndb-cloud (see cloud.yml).
 
 on:
   # Called by CI (ci.yml) when the tests passed on a commit with a tag v*.
@@ -86,60 +86,3 @@ jobs:
             git tag "${module}/${TAG}" "$sha"
             git push origin "${module}/${TAG}"
           done
-
-  console:
-    name: ndb-ui test and binaries
-    needs: release
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.tag }}
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.4
-
-      - name: Test
-        working-directory: console
-        run: |
-          mkdir -p /tmp/ndb-console-test
-          (cd .. && go build -o /tmp/ndb-console-test/ndb ./cmd/ndb)
-
-          bun install --frozen-lockfile
-          bun run typecheck
-          nice bun test
-
-      - name: Build
-        working-directory: console
-        run: |
-          bun run client
-
-          mkdir -p release
-
-          for target in linux-x64:linux-amd64 linux-arm64:linux-arm64 darwin-x64:darwin-amd64 darwin-arm64:darwin-arm64; do
-            bun_target="${target%%:*}"
-            suffix="${target#*:}"
-            name="ndb-ui-${TAG}-${suffix}"
-
-            mkdir "release/$name"
-
-            bun build --compile --minify --target="bun-${bun_target}" src/main.ts --outfile "release/$name/ndb-ui"
-
-            cp ../LICENSE README.md "release/$name/"
-            tar -C release -czf "release/$name.tar.gz" "$name"
-            rm -rf "release/$name"
-          done
-
-          (cd release && sha256sum *.tar.gz > ndb-ui-checksums.txt)
-
-      - name: Publish
-        working-directory: console
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$TAG" release/* --clobber

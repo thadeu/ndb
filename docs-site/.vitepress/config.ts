@@ -242,7 +242,6 @@ export default defineConfig({
     'brand/**',
     'sdk/**',
     'examples/**',
-    'console/**',
     'deploy/**',
     'spec/**',
     'test/**',

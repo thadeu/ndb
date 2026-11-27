@@ -2,7 +2,8 @@
 # release.sh bumps the version of ndb and its SDKs, closes the Unreleased
 # section of CHANGELOG.md, makes the commit "release: X.Y.Z" and the tag
 # vX.Y.Z, then asks before it pushes. A tag push starts the full release
-# (binaries, console, gem, npm, images), so everything has one version.
+# (binaries, gem, npm, images; ndb-ui in thadeu/ndb-cloud), so everything
+# has one version.
 #
 #   scripts/release.sh patch|minor|major [--dry-run] [--yes]
 #

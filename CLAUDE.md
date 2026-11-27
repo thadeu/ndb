@@ -54,11 +54,10 @@ token lockout. See `docs/dev/security.md`.
 | `sdk/ruby` | gem `ndb` (plain client) |
 | `sdk/rails` | gem `ndb-rails` (models, `Ndb::Streams` consumers, `bundle exec ndb streams`) |
 | `sdk/ts` | npm `@thadeu/ndb` (also `@thadeu/ndb/ioredis` and `@thadeu/ndb/node-redis`) |
-| `console/` | `ndb-ui`, the web console (Bun + Hono JSX). It has its own `console/CLAUDE.md` |
 | `docs/dev/` | all docs; `docs/dev/http.md` + `docs/dev/http/` is the API contract |
 | `docs-site/` | VitePress site built from `docs/dev/` (no copies) |
 | `examples/` | runnable examples (not in CI; `cd examples && make check`) |
-| `deploy/` | Docker (`ndb`, `ndb-ui`, `stack`), systemd, compose examples |
+| `deploy/` | Docker (`ndb`), systemd, compose examples |
 | `test/` | `smoke.sh` (every endpoint with curl), golden files, PITR e2e |
 | `.plans/` | milestone index, backlog, playbooks (done plans are removed; see git history) |
 
@@ -132,8 +131,10 @@ test/smoke.sh
     publish, docs) for the new tag;
   - the maintainer runs `make tag patch|minor` on a machine.
 - CI (`.github/workflows/ci.yml`) is the only place with tests. On a `v*` tag, its `tag` job
-  calls `release.yml` (binaries, GitHub Release, Go tags), `ghcr.yml` (images `ndb`, `ndb-ui`,
-  `ndb-stack`) and `publish.yml` (gems, npm). `docs.yml` deploys the site when docs change.
+  calls `release.yml` (binaries, GitHub Release, Go tags), `ghcr.yml` (image `ndb`) and
+  `publish.yml` (gems, npm); then `cloud.yml` sends `ndb-release` to the private
+  `thadeu/ndb-cloud`, which publishes `ndb-ui` (binaries in this release, images `ndb-ui`,
+  `ndb-stack`). `docs.yml` deploys the site when docs change.
 - Keep CI cheap: one `go test -short` pass, no `-race`, no macOS runners.
 
 ### No Claude attribution

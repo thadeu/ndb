@@ -138,10 +138,14 @@ the door. E32.0 is the gate of the door (E32.1 to E32.3) and of the pilot
 
 - [x] `tcp+tls://` = `https://` in Go, Ruby, Rails, TS, the CLI and the
       console; cases in `spec/url/cases.json`.
-- [ ] Move `console/` to `ndb-cloud/apps/ui` (git subtree). Remove it from
+- [x] Move `console/` to `ndb-cloud/apps/ui` (git subtree). Remove it from
       the ndb repo: the `ndb-ui` and `ndb-stack` jobs of `ghcr.yml` move
       to `ndb-cloud` (`ndb-stack` takes the ndb binary of the release), and
       the docs (`docs/dev/ui.md`, the deploy pages) point to the image.
+      Done: `cloud.yml` sends `ndb-release` to `ndb-cloud` after `release.yml`
+      and `ghcr.yml`; `ndb-cloud` tests ndb-ui against the release binary,
+      uploads the `ndb-ui-*` binaries to the public ndb release (for
+      `install.sh --ui`) and pushes `ndb-ui` and `ndb-stack`, same version.
 - [ ] `GET /_replication` gets the numbers of the Replication screen, per
       link: `remote_addr`, `connected_at`, `last_heartbeat_at`, `rtt_ms`
       (from the heartbeat), `bytes_per_s` and `records_per_s`, and

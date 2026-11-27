@@ -100,7 +100,7 @@ The socket is `/run/ndb/ndb.sock`. Share the `/run/ndb` volume with your app con
 There are three images:
 
 - `ghcr.io/thadeu/ndb`: the server.
-- `ghcr.io/thadeu/ndb-ui`: the console alone.
+- `ghcr.io/thadeu/ndb-ui`: the console alone. It is free to use; its code is not public.
 - `ghcr.io/thadeu/ndb-stack`: the server and the console in one image, for development. It has no token by default, so do not use it for a public server.
 
 ```bash

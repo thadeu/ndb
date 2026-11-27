@@ -3,8 +3,9 @@ name: ci
 # The one place with tests: every push to main and every pull request.
 # When the tests pass on a commit of main that has a tag v* (the commit
 # "release: X.Y.Z" of make tag), the last jobs run the release: release.yml
-# (binaries, console, Go tags), ghcr.yml (images) and publish.yml (gems,
-# npm), at the same time. So a release is tested once, and make tag does
+# (binaries, Go tags), ghcr.yml (image) and publish.yml (gems, npm), at the
+# same time; then cloud.yml starts the ndb-ui release in
+# thadeu/ndb-cloud. So a release is tested once, and make tag does
 # not wait.
 
 on:
@@ -190,6 +191,14 @@ jobs:
     permissions:
       contents: read
       packages: write
+    secrets: inherit
+
+  cloud:
+    needs: [tag, release, ghcr]
+    if: needs.tag.outputs.tag != ''
+    uses: ./.github/workflows/cloud.yml
+    with:
+      tag: ${{ needs.tag.outputs.tag }}
     secrets: inherit
 
   publish:

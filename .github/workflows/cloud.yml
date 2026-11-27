@@ -1,0 +1,38 @@
+name: cloud
+
+# ndb-ui (the private thadeu/ndb-cloud) has the version of ndb. Once the
+# release binaries and the ndb image of a tag are out, this sends
+# ndb-release there: its release workflow tests ndb-ui against them, adds
+# the ndb-ui binaries to this release and pushes the images ndb-ui and
+# ndb-stack. The secret NDB_CLOUD_DISPATCH_TOKEN is a fine-grained token with
+# Contents: write on thadeu/ndb-cloud.
+
+on:
+  # Called by ci.yml and tag.yml after release.yml and ghcr.yml.
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+
+  # Run by hand: the tag must be released.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release tag (vX.Y.Z)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send ndb-release to thadeu/ndb-cloud
+        env:
+          GH_TOKEN: ${{ secrets.NDB_CLOUD_DISPATCH_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: gh api "repos/${{ github.repository_owner }}/ndb-cloud/dispatches" -f event_type=ndb-release -F "client_payload[tag]=$TAG"
