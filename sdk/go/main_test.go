@@ -86,6 +86,11 @@ func startDaemon(dir string) (func(), error) {
 // a tokenFile the TCP listener asks for the token. It sets daemon.unix and
 // daemon.tcp only when primary is true; otherwise see lastLaunch.
 func launchDaemon(dir, tokenFile string, primary bool) (func(), error) {
+	return launchDaemonEnv(dir, tokenFile, primary, nil)
+}
+
+// launchDaemonEnv is launchDaemon with more env vars (NDB_REPLICA_OF...).
+func launchDaemonEnv(dir, tokenFile string, primary bool, env []string) (func(), error) {
 	bin := daemon.bin
 
 	tcpAddr, err := freeAddr()
@@ -120,6 +125,7 @@ func launchDaemon(dir, tokenFile string, primary bool) (func(), error) {
 
 	cmd := exec.Command(bin, args...)
 
+	cmd.Env = append(os.Environ(), env...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 

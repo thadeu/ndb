@@ -11,6 +11,8 @@ declare module 'vitest' {
     tcpAddr: string
     tokenTcpAddr: string
     token: string
+    ownerTcpAddr: string
+    copyUnixAddr: string
   }
 }
 
@@ -20,6 +22,8 @@ const token = 'ts-sdk-secret'
 
 let daemon: ChildProcess | undefined
 let tokenDaemon: ChildProcess | undefined
+let ownerDaemon: ChildProcess | undefined
+let copyDaemon: ChildProcess | undefined
 let dir = ''
 
 function freePort(): Promise<number> {
@@ -104,13 +108,37 @@ export default async function setup(project: TestProject): Promise<() => Promise
     throw err
   }
 
+  const key = { ...process.env, NDB_ENCRYPTION_KEY: 'ef'.repeat(32) }
+  const ownerSock = join(dir, 'own.sock')
+  const ownerPort = await freePort()
+
+  ownerDaemon = spawn(
+    bin,
+    ['-config', join(dir, 'absent.yml'), '-data-dir', join(dir, 'owndata'), '-unix', ownerSock, '-tcp', `127.0.0.1:${ownerPort}`],
+    { stdio: 'inherit', env: key },
+  )
+
+  await waitReady(ownerSock)
+
+  const copySock = join(dir, 'copy.sock')
+
+  copyDaemon = spawn(
+    bin,
+    ['-config', join(dir, 'absent.yml'), '-data-dir', join(dir, 'copydata'), '-unix', copySock, '-tcp', ''],
+    { stdio: 'inherit', env: { ...key, NDB_REPLICA_OF: `tcp://127.0.0.1:${ownerPort}` } },
+  )
+
+  await waitReady(copySock)
+
+  project.provide('ownerTcpAddr', `tcp://127.0.0.1:${ownerPort}`)
+  project.provide('copyUnixAddr', `unix://${copySock}`)
   project.provide('unixAddr', `unix://${sock}`)
   project.provide('tcpAddr', `tcp://127.0.0.1:${port}`)
   project.provide('tokenTcpAddr', `tcp://127.0.0.1:${tokenPort}`)
   project.provide('token', token)
 
   return async () => {
-    await Promise.all([daemon, tokenDaemon].map(stopDaemon))
+    await Promise.all([daemon, tokenDaemon, copyDaemon, ownerDaemon].map(stopDaemon))
 
     rmSync(dir, { recursive: true, force: true })
   }
