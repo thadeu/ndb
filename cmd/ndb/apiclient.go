@@ -56,7 +56,8 @@ type reply struct {
 }
 
 // newAPIClient reads unix:///path/to.sock, tcp://host:port,
-// http://host:port or https://host[:port]. The token is the one of the URL
+// tcp+tls://host:port (the same as https), http://host:port or
+// https://host[:port]. The token is the one of the URL
 // (tcp://:<token>@host:port, as in a Redis URL), else NDB_TOKEN. The path
 // names a database (tcp://host:port/billion; ?db=billion on a unix socket).
 func newAPIClient(rawURL string) (*apiClient, error) {
@@ -92,8 +93,8 @@ func newAPIClient(rawURL string) (*apiClient, error) {
 		return nil, fmt.Errorf("url %q: %w", shown, err)
 	}
 
-	if (u.Scheme != "tcp" && u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return nil, fmt.Errorf("url %q: want unix:///path, tcp://host:port, http://host:port or https://host", shown)
+	if (u.Scheme != "tcp" && u.Scheme != "tcp+tls" && u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, fmt.Errorf("url %q: want unix:///path, tcp://host:port, tcp+tls://host:port, http://host:port or https://host", shown)
 	}
 
 	if u.User != nil {
@@ -115,7 +116,7 @@ func newAPIClient(rawURL string) (*apiClient, error) {
 
 	scheme := "http"
 
-	if u.Scheme == "https" {
+	if u.Scheme == "https" || u.Scheme == "tcp+tls" {
 		scheme = "https"
 	}
 

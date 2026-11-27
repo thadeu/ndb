@@ -63,6 +63,7 @@ describe('database of a connection URL', () => {
     expect(target('tcp://10.0.0.1:7070?db=billion')).toEqual({ base: 'http://10.0.0.1:7070', database: 'billion' });
     expect(target('unix:///run/ndb/ndb.sock?db=billion')).toEqual({ base: 'http://ndb', unix: '/run/ndb/ndb.sock', database: 'billion' });
     expect(target('tcp://10.0.0.1:7070/')).toEqual({ base: 'http://10.0.0.1:7070' });
+    expect(target('tcp+tls://:tok@ndb.example.com:7070/billion')).toEqual({ base: 'https://ndb.example.com:7070', database: 'billion' });
     expect(target('unix:///run/ndb/ndb.sock')).toEqual({ base: 'http://ndb', unix: '/run/ndb/ndb.sock' });
   });
 

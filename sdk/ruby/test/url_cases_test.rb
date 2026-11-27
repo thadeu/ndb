@@ -48,10 +48,16 @@ class UrlCasesTest < Minitest::Test
 
     database.nil? ? assert_nil(client.endpoint.database) : assert_equal(database, client.endpoint.database)
 
+    assert_equal c.dig("want", "base"), base_of(client.endpoint) if c.dig("want", "base")
+
     return unless secret
 
     refute_includes client.inspect, secret
     refute_includes client.endpoint.inspect, secret
     refute_includes client.endpoint.to_s, secret
+  end
+
+  def base_of(endpoint)
+    "#{endpoint.tls? ? "https" : "http"}://#{endpoint.host}:#{endpoint.port}"
   end
 end

@@ -19,6 +19,7 @@ type urlCase struct {
 	Want   struct {
 		Token    *string `json:"token"`
 		Database *string `json:"database"`
+		Base     string  `json:"base"`
 		Error    bool    `json:"error"`
 	} `json:"want"`
 }
@@ -89,6 +90,10 @@ func TestURLCases(t *testing.T) {
 
 			if db.database != wantDB {
 				t.Fatalf("database %q, want %q", db.database, wantDB)
+			}
+
+			if c.Want.Base != "" && db.base != c.Want.Base {
+				t.Fatalf("base %q, want %q", db.base, c.Want.Base)
 			}
 
 			shown := fmt.Sprintf("%v %+v %#v", db, db, db)

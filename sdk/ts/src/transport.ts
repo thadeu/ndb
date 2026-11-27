@@ -44,7 +44,7 @@ function parseAddr(target: string, shown: string): URL {
   try {
     return new URL(target)
   } catch {
-    throw new TypeError(`ndb: address "${shown}" must be unix:///path, tcp://host:port or https://host`)
+    throw new TypeError(`ndb: address "${shown}" must be unix:///path, tcp://host:port, tcp+tls://host:port or https://host`)
   }
 }
 
@@ -94,7 +94,8 @@ export class Transport {
   private readonly readyTimeout: number
   private readonly userAgent: string | undefined
 
-  // addr: unix:///path, tcp://host:port, or https://host[:port] (ndb behind
+  // addr: unix:///path, tcp://host:port, tcp+tls://host:port (the same as
+  // https), or https://host[:port] (ndb behind
   // a TLS proxy such as Caddy; http:// works too). Default: env NDB_URL.
   // The token can be in the address, as in a Redis URL:
   // tcp://:<token>@host:port. The token is, in order: the token option,
@@ -115,10 +116,12 @@ export class Transport {
       this.socketPath = decodeURIComponent(url.pathname)
     } else if (url.protocol === 'tcp:' && url.host !== '') {
       this.base = `http://${url.host}`
+    } else if (url.protocol === 'tcp+tls:' && url.host !== '') {
+      this.base = `https://${url.host}`
     } else if ((url.protocol === 'https:' || url.protocol === 'http:') && url.host !== '') {
       this.base = `${url.protocol}//${url.host}`
     } else {
-      throw new TypeError(`ndb: address "${shown}" must be unix:///path, tcp://host:port or https://host`)
+      throw new TypeError(`ndb: address "${shown}" must be unix:///path, tcp://host:port, tcp+tls://host:port or https://host`)
     }
 
     if (!onBun) {

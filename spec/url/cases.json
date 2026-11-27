@@ -1,5 +1,5 @@
 {
-  "about": "NDB_URL parse cases that every client runs. url is the address; env is NDB_TOKEN (null: unset); option is the token option of the client (null: not given). want.token is the token sent (null: none); want.database is the Ndb-Database header sent (absent or null: none); want.error: the address is refused. secret must never be in an error message or in the inspect text of the client.",
+  "about": "NDB_URL parse cases that every client runs. url is the address; env is NDB_TOKEN (null: unset); option is the token option of the client (null: not given). want.token is the token sent (null: none); want.database is the Ndb-Database header sent (absent or null: none); want.base (absent: not checked) is the base of the HTTP requests (tcp+tls:// is https://); want.error: the address is refused. secret must never be in an error message or in the inspect text of the client.",
   "cases": [
     {
       "name": "no token anywhere",
@@ -177,6 +177,48 @@
         "error": true
       },
       "secret": "urltok"
+    },
+    {
+      "name": "tcp+tls is https",
+      "url": "tcp+tls://:tlstok@qzu-mkfs-gan.us-east-1.ndb.clowk.in:7070/billion",
+      "env": null,
+      "option": null,
+      "want": {
+        "token": "tlstok",
+        "database": "billion",
+        "base": "https://qzu-mkfs-gan.us-east-1.ndb.clowk.in:7070"
+      },
+      "secret": "tlstok"
+    },
+    {
+      "name": "tcp+tls takes env",
+      "url": "tcp+tls://ndb.example.com:7070",
+      "env": "envtok",
+      "option": null,
+      "want": {
+        "token": "envtok",
+        "base": "https://ndb.example.com:7070"
+      }
+    },
+    {
+      "name": "tcp is plain http",
+      "url": "tcp://127.0.0.1:7070",
+      "env": null,
+      "option": null,
+      "want": {
+        "token": null,
+        "base": "http://127.0.0.1:7070"
+      }
+    },
+    {
+      "name": "tcp+tls token without a colon is refused",
+      "url": "tcp+tls://tlstok@ndb.example.com:7070",
+      "env": null,
+      "option": null,
+      "want": {
+        "error": true
+      },
+      "secret": "tlstok"
     }
   ]
 }

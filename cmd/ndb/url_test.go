@@ -26,6 +26,7 @@ func TestURLCases(t *testing.T) {
 			Want   struct {
 				Token    *string `json:"token"`
 				Database *string `json:"database"`
+				Base     string  `json:"base"`
 				Error    bool    `json:"error"`
 			} `json:"want"`
 		} `json:"cases"`
@@ -85,6 +86,10 @@ func TestURLCases(t *testing.T) {
 
 			if client.database != wantDB {
 				t.Fatalf("database %q, want %q", client.database, wantDB)
+			}
+
+			if c.Want.Base != "" && client.base != c.Want.Base {
+				t.Fatalf("base %q, want %q", client.base, c.Want.Base)
 			}
 
 			if c.Secret != "" && strings.Contains(redactURL(c.URL), c.Secret) {

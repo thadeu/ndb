@@ -94,8 +94,9 @@ func WithIdleTimeout(d time.Duration) ConnectOption {
 }
 
 // Connect returns a handle for addr: unix:///path/to/ndb.sock,
-// tcp://host:port, or https://host[:port] (ndb behind a TLS proxy such as
-// Caddy; http:// works too). An empty addr reads NDB_URL. The token can be
+// tcp://host:port, tcp+tls://host:port (the same as https), or
+// https://host[:port] (ndb behind a TLS proxy such as Caddy; http:// works
+// too). An empty addr reads NDB_URL. The token can be
 // in the address, as in a Redis URL: tcp://:<token>@host:port. The path
 // names a database (tcp://host:port/billion; ?db=billion for a unix
 // socket); none is the default database. The token is,
@@ -165,10 +166,12 @@ func Connect(addr string, opts ...ConnectOption) (*DB, error) {
 		db.base = "http://ndb"
 	case u.Scheme == "tcp" && u.Host != "":
 		db.base = "http://" + u.Host
+	case u.Scheme == "tcp+tls" && u.Host != "":
+		db.base = "https://" + u.Host
 	case (u.Scheme == "https" || u.Scheme == "http") && u.Host != "":
 		db.base = u.Scheme + "://" + u.Host
 	default:
-		return nil, fmt.Errorf("ndb: address %q must be unix:///path, tcp://host:port or https://host", shown)
+		return nil, fmt.Errorf("ndb: address %q must be unix:///path, tcp://host:port, tcp+tls://host:port or https://host", shown)
 	}
 
 	db.client = &http.Client{Transport: tr}

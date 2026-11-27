@@ -9,19 +9,21 @@ module Ndb
   Response = Data.define(:status, :headers, :body)
 
   # Where the daemon listens: a unix socket path, a TCP host and port, or an
-  # https:// URL (ndb behind a TLS proxy such as Caddy). The host name is
+  # https:// URL (ndb behind a TLS proxy such as Caddy; tcp+tls:// is the
+  # same). The host name is
   # resolved each time a connection opens, so a changed DNS record is
   # followed after a reconnect.
   #
   # The token can be in the address, as in a Redis URL:
   # tcp://:<token>@host:port. The user part is ignored.
   class Endpoint
-    INVALID = "must be unix:///path, tcp://host:port or https://host"
+    INVALID = "must be unix:///path, tcp://host:port, tcp+tls://host:port or https://host"
     NO_COLON = "put the token after a colon: tcp://:<token>@host:port"
 
     attr_reader :path, :host, :port, :token, :database
 
-    # "unix:///path", "tcp://host:port", "https://host[:port]",
+    # "unix:///path", "tcp://host:port", "tcp+tls://host:port" (the same
+    # as https), "https://host[:port]",
     # "http://host[:port]", or a bare socket path.
     def self.parse(address)
       address = address.to_s
@@ -35,6 +37,7 @@ module Ndb
       case uri.scheme
       when "unix" then new(path: uri.path, database: database)
       when "tcp" then new(host: uri.host, port: uri.port, token: token, database: database)
+      when "tcp+tls" then new(host: uri.host, port: uri.port || 443, tls: true, token: token, database: database)
       when "https", "http" then new(host: uri.host, port: uri.port, tls: uri.scheme == "https", token: token, database: database)
       else raise ArgumentError, "ndb address #{redact(address).inspect} #{INVALID}"
       end

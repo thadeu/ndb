@@ -115,10 +115,11 @@ export interface Target {
   database?: string;
 }
 
-// target turns a connection URL into the base URL for fetch. A unix socket
-// uses a fixed host name and the unix option of Bun fetch. The database is
-// the path of a tcp or http(s) URL (tcp://host:7070/billion), or ?db= (the
-// only way on a unix socket, whose path is the file).
+// target turns a connection URL into the base URL for fetch. tcp+tls:// is
+// https://. A unix socket uses a fixed host name and the unix option of Bun
+// fetch. The database is the path of a tcp or http(s) URL
+// (tcp://host:7070/billion), or ?db= (the only way on a unix socket, whose
+// path is the file).
 export function target(url: string): Target {
   const [address = '', query = ''] = url.split('?', 2);
   const db = new URLSearchParams(query).get('db') ?? '';
@@ -131,12 +132,13 @@ export function target(url: string): Target {
     return withDatabase({ base: 'http://ndb', unix: path }, '', db);
   }
 
-  const remote = /^(tcp|https?):\/\/(?:[^/@]*@)?([^/@]+)(\/.*)?$/.exec(address);
+  const remote = /^(tcp\+tls|tcp|https?):\/\/(?:[^/@]*@)?([^/@]+)(\/.*)?$/.exec(address);
 
-  if (!remote) throw new NdbError('invalid_url', 'Use unix:///path, tcp://host:port, or http(s)://host.');
+  if (!remote) throw new NdbError('invalid_url', 'Use unix:///path, tcp://host:port, tcp+tls://host:port, or http(s)://host.');
 
-  const [, scheme, host, path = ''] = remote;
-  const base = scheme === 'tcp' ? `http://${host}` : `${scheme}://${host}`;
+  const [, scheme = '', host, path = ''] = remote;
+  const http = { tcp: 'http', 'tcp+tls': 'https' }[scheme] ?? scheme;
+  const base = `${http}://${host}`;
 
   return withDatabase({ base }, path.replace(/^\/+|\/+$/g, ''), db);
 }

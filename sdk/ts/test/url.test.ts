@@ -10,7 +10,7 @@ interface UrlCase {
   env: string | null
   option: string | null
   secret?: string
-  want: { token?: string | null; database?: string | null; error?: boolean }
+  want: { token?: string | null; database?: string | null; base?: string; error?: boolean }
 }
 
 const file = resolve(import.meta.dirname, '../../../spec/url/cases.json')
@@ -59,6 +59,10 @@ describe('spec/url/cases.json', () => {
 
     expect(sentToken(t)).toBe(c.want.token ?? null)
     expect(sent(t)['ndb-database'] ?? null).toBe(c.want.database ?? null)
+
+    if (c.want.base) {
+      expect((t as unknown as { base: string }).base).toBe(c.want.base)
+    }
 
     if (c.secret) {
       expect(inspect(t)).not.toContain(c.secret)

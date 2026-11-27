@@ -248,6 +248,7 @@ One URL holds the address, the token and the [database](databases.md), as in a R
 NDB_URL=tcp://:<token>@10.0.0.5:7070
 NDB_URL=tcp://:<token>@10.0.0.5:7070/billion
 NDB_URL=https://:<token>@ndb.example.com/billion
+NDB_URL=tcp+tls://:<token>@ndb.example.com:7070/billion
 NDB_URL=unix:///run/ndb/ndb.sock
 NDB_URL=unix:///run/ndb/ndb.sock?db=billion
 ```
@@ -259,6 +260,7 @@ NDB_URL=unix:///run/ndb/ndb.sock?db=billion
 - The SDKs, the CLI and the console never show the token: errors and the printed client show `tcp://***@host:port`.
 - The unix socket needs no token.
 - **Database:** the path of a `tcp` or `https` URL names a [database](databases.md) (`/billion`); on a unix socket the path is the file, so use `?db=billion` (it works on every scheme). No path is the default database, as before. The client sends it as the `Ndb-Database` header on every request. A path with two parts, or a path and a `?db=` that differ, is an error.
+- `tcp+tls://` is a second name of `https://`: the client sends HTTPS to the same host and port. Use the one you like; Ndb Cloud shows `tcp+tls://`.
 - An `https://` URL has no path prefix: `https://host/ndb` names the database `ndb`, not a proxy path.
 
 Every client runs the same cases: `spec/url/cases.json`.
@@ -315,7 +317,7 @@ ndb.example.com {
 }
 ```
 
-Keep `listen.tcp` on `127.0.0.1` (or a private address), and give the apps `NDB_URL=https://ndb.example.com` with their token. The SDKs take `https://host[:port]`; see [clients.md](clients.md).
+Keep `listen.tcp` on `127.0.0.1` (or a private address), and give the apps `NDB_URL=https://ndb.example.com` with their token. The SDKs take `https://host[:port]` (or `tcp+tls://host:port`, the same); see [clients.md](clients.md).
 
 ## Code and file together
 

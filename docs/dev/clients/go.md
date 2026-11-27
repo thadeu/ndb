@@ -41,7 +41,7 @@ defer db.Close()
 ```
 
 - `Connect` does not dial. The first call does.
-- The address must be `unix:///path`, `tcp://host:port`, or `https://host[:port]` (ndb behind a TLS proxy; `http://` works too). Anything else returns an error.
+- The address must be `unix:///path`, `tcp://host:port`, `tcp+tls://host:port`, or `https://host[:port]` (ndb behind a TLS proxy; `http://` works too; `tcp+tls://` is the same as `https://`). Anything else returns an error.
 - The token goes only in the `Authorization` header. A unix socket does not need it.
 - Every request sends `User-Agent: ndb-go/<version> (go1.26.10; linux/amd64)`. The version comes from the build info of the app (`dev` when the build has none). `ndb.WithUserAgent("myapp/1.2")` adds the token of your app at the end, so the daemon can tell the apps apart.
 - `WithReadyTimeout` sets how long a call retries when the daemon is not ready (HTTP 503 `not_ready`, or the socket is missing or refuses). The default is `ndb.DefaultReadyTimeout` (10 s). Zero turns the retry off. Writes are retried only when the daemon certainly did not process them. Reads are also retried after a dropped connection.

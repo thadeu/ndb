@@ -55,7 +55,7 @@ db = Ndb.connect                                             # reads NDB_URL and
 
 ```ruby
 Ndb.connect(
-  "unix:///run/ndb/ndb.sock", # or "tcp://host:port", "https://host", or a bare path that starts with /
+  "unix:///run/ndb/ndb.sock", # or "tcp://host:port", "https://host", "tcp+tls://host:port" (the same as https), or a bare path that starts with /
   token: nil,                 # bearer token
   timeout: 30,                # seconds, per request
   pool_size: 16,              # idle connections kept
