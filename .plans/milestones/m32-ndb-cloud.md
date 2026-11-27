@@ -1,6 +1,6 @@
 # M32 — Ndb Cloud and the Elasticsearch door
 
-Status: not started, planned after M31 (E32.0 decides if it goes on) · Depends on: nothing (M31 is not needed, but it comes first) · Plan refs: anway-cloud `.plans/001-anway-cloud.md` (the model), the talk of 2026-11-26 and 27
+Status: in progress (E32.4) · E32.0 decides if the Elasticsearch door goes on · Depends on: nothing (M31 is not needed, but it comes first) · Plan refs: anway-cloud `.plans/001-anway-cloud.md` (the model), the talk of 2026-11-26 and 27
 
 ## Goal
 
@@ -83,7 +83,7 @@ From `atendesimples/serveless/services/cdr-service/src/cdrs-charts`
 - **Backups are part of the product from the first paid server:** daily,
   online (`ndb backup -`), streamed to **Cloudflare R2** (S3 API, no
   egress cost, off the node), 7 days kept, restore from the page.
-- **One private monorepo, `thadeu/ndb-web`** (pnpm workspaces), with one
+- **One private monorepo, `thadeu/ndb-cloud`** (pnpm workspaces), with one
   design system for both UIs:
   - `packages/ui`: the design system. CSS (tokens, light and dark, the
     classes of each component), plain JS (menus, mega menu, split panel,
@@ -94,12 +94,12 @@ From `atendesimples/serveless/services/cdr-service/src/cdrs-charts`
     `ghcr.io/thadeu/ndb-ui` (the same name as today, so no user breaks).
     Free to use; the code is not public, only the image (a usage license
     in the image and in the ndb README).
-  The reference is the prototype in `ndb-web` (`design/`, the rules in
+  The reference is the prototype in `ndb-cloud` (`design/`, the rules in
   `design/README.md`). The data screens (Collections, Dev Tools) are
   written once in `apps/ui`; the Cloud shows them for a server in proxy
   mode with signed headers, inside its own layout.
 - **The console leaves the public ndb repo.** `console/` moves to
-  `ndb-web/apps/ui` (git subtree, the history kept). The ndb repo keeps
+  `ndb-cloud/apps/ui` (git subtree, the history kept). The ndb repo keeps
   the daemon, the SDKs and the docs.
 - **The self-hosted UI has the screens of the Cloud, without the pods:**
   Dashboard; Servers (your daemons: "Add connection" with a URL and a
@@ -125,10 +125,117 @@ From `atendesimples/serveless/services/cdr-service/src/cdrs-charts`
 ## Epics
 
 Tests first in each epic. The ndb epics follow the repo rules (docs, spec
-cases, every SDK). The Cloud and UI epics live in the private monorepo `ndb-web`,
-with its own `.plans/001-ndb-web.md`.
+cases, every SDK). The Cloud and UI epics live in the private monorepo `ndb-cloud`,
+with its own `.plans/001-ndb-cloud.md`.
 
-### E32.0 — Viability (a gate: no other epic starts before it passes)
+**Order (decided 2026-11-27):** the Cloud first, the Elasticsearch door last.
+The ndb parts (E32.4), the design system (E32.7), the self-hosted UI (E32.9),
+the Cloud app (E32.5), backups (E32.6) and replication (E32.10) do not need
+the door. E32.0 is the gate of the door (E32.1 to E32.3) and of the pilot
+(E32.8) only: it measures if atendesimples fits, not if the Cloud works.
+
+### E32.4 — ndb parts for the Cloud (ndb repo)
+
+- [x] `tcp+tls://` = `https://` in Go, Ruby, Rails, TS, the CLI and the
+      console; cases in `spec/url/cases.json`.
+- [ ] Move `console/` to `ndb-cloud/apps/ui` (git subtree). Remove it from
+      the ndb repo: the `ndb-ui` and `ndb-stack` jobs of `ghcr.yml` move
+      to `ndb-cloud` (`ndb-stack` takes the ndb binary of the release), and
+      the docs (`docs/dev/ui.md`, the deploy pages) point to the image.
+- [ ] `GET /_replication` gets the numbers of the Replication screen, per
+      link: `remote_addr`, `connected_at`, `last_heartbeat_at`, `rtt_ms`
+      (from the heartbeat), `bytes_per_s` and `records_per_s`, and
+      `term`. On the owner, the same for each copy connected.
+- [ ] Backups to a remote place: `ndb backup -` already writes to stdout
+      (`ndb backup - | aws s3 cp - s3://...`). Add a test that a backup of
+      a server under writes, streamed this way, restores the same.
+
+### E32.7 — Design system (ndb-cloud, packages/ui)
+
+From the prototype (`ndb-cloud/design/`), with the rules of
+`design/README.md`:
+
+- [ ] Tokens in CSS variables, light and dark (`data-theme`), the theme
+      switch kept per browser.
+- [ ] Shell: top bar (logo, mega menu with the pages and a tip from the
+      docs, search with Option+S, region, account), the 28 px breadcrumb
+      bar, the side nav (account or connection switcher on top), footer.
+- [ ] List page: title with count, refresh, actions, the primary split
+      button, saved filter sets, filter, pages; the table (13 px, sort,
+      checkboxes, the blue selected row).
+- [ ] Split panel under a list: grip to resize, close, tabs.
+- [ ] Details (key and value in 3 columns, copy buttons), boxes, tiles,
+      alerts, modal, flash, switch, segmented control, charts (line,
+      stacked bars).
+- [ ] The Dev Tools editor (request and response, line numbers, the
+      current request, Ctrl+Enter, the divider).
+- [ ] The gallery page with every component. Responsive at 360 px.
+
+### E32.9 — The self-hosted UI (ndb-cloud, apps/ui)
+
+- [ ] The screens of "Decided", on `packages/ui`, with the data of the
+      daemon (`/_health`, `/_metrics`, `/_stats`, `/_size`,
+      `/_collections`, `/_databases`, `/_backup`, `/_restore`, `/_pitr`,
+      `/_cluster/settings`, `/_log`, `/_replication`).
+- [ ] Servers: add, edit and remove a connection (URL with the token and
+      the database); saved in the config file as today.
+- [ ] An optional password (`NDB_UI_PASSWORD`) with a session cookie, for
+      a UI on a VM. Without it, the guards of today (Origin, Host).
+- [ ] The image `ghcr.io/thadeu/ndb-ui` from `ndb-cloud`, on tags only (CI
+      minutes of a private repo).
+
+### E32.5 — The Cloud app (ndb-cloud, apps/cloud)
+
+Copy anway-cloud (Rails 8.1, Phlex, Clowk, ContaGorda Pay, Anway jobs,
+Voodu PAT plane), then change what is ndb:
+
+- [ ] Servers: create (name, region, size), list, delete with the typed
+      name. Manifests: statefulset (`NDB_TOKEN`, `NDB_ENCRYPTION_KEY`,
+      `memory_limit` from the size, volume `data`) and TCP ingress on 7070
+      with TLS.
+- [ ] Health: running only when `GET /_health` answers over verified TLS;
+      the reconcile every 2 minutes.
+- [ ] Connection tab: the URL (Show/Copy, the token never in the page
+      source), snippets for ndb-rails, Go, TS, curl, and an OpenSearch
+      client on `/_es`.
+- [ ] Usage tab: CPU and memory of the pod, disk (`/_size`), documents
+      and collections (`/_stats`), requests per second (metrics).
+- [ ] Settings tab: size and resize, rotate token, the token names and
+      their scopes, the log level, restart, pause and resume, upgrade to a
+      new ndb release (GitHub + ghcr check, as Anway Cloud), delete.
+- [ ] Billing: a monthly subscription per paid server; sizes by disk too
+      (ndb data grows, a queue does not). `config/cloud.yml`: region
+      of the Oracle node (its id follows the Oracle region) with its capacity.
+
+### E32.6 — Backups (ndb-cloud, apps/cloud)
+
+- [ ] A daily job per server: `ndb backup -` streamed to Cloudflare R2
+      (one bucket, a prefix per server, the R2 keys only on the Cloud).
+      7 days kept (an R2 lifecycle rule).
+- [ ] Backups tab: the list (time, size), "Back up now", download (a signed
+      link), restore into the same server (stop, restore, start) or into a
+      new server.
+- [ ] A restore test in CI: a backup of a fixture data dir restores and
+      answers the same.
+
+### E32.10 — Replication screen (both UIs) and managed replication (Cloud)
+
+- [ ] A canvas of the links: one node per server (name, region, role
+      owner or copy, version, term) and one edge per link (owner to copy).
+      The edge shows the state (streaming, resync, down) by color and
+      motion, the lag (records and seconds), the round trip (`rtt_ms`),
+      the rate (records/s, bytes/s), the remote address, connected since,
+      the last heartbeat. A click on an edge or a node opens its details
+      in the split panel, with the lag and rtt charts over time.
+- [ ] Self-hosted: it reads `/_replication` of each connection and joins
+      the links by address.
+- [ ] Cloud: "Add a copy" on a server: pick the target server (another
+      region of the same account) and the database; the Cloud does the
+      token, `NDB_REPLICA_OF`, the key and the restart. "Promote" with a
+      typed confirmation; "Remove copy".
+- [ ] Alarms (Cloud): a link down for 2 minutes, a lag over 30 s.
+
+### E32.0 — Viability (a gate for the Elasticsearch door and the pilot)
 
 The maintainer gives the node and the access to OpenSearch.
 
@@ -201,107 +308,6 @@ in this file, and the plan stops or changes.
       a count check at the end. It is also the tool of every customer who
       leaves Elasticsearch.
 
-### E32.4 — ndb parts for the Cloud (ndb repo)
-
-- [ ] `tcp+tls://` = `https://` in Go, Ruby, Rails, TS, the CLI and the
-      console; cases in `spec/url/cases.json`.
-- [ ] Move `console/` to `ndb-web/apps/ui` (git subtree). Remove it from
-      the ndb repo: the `ndb-ui` and `ndb-stack` jobs of `ghcr.yml` move
-      to `ndb-web` (`ndb-stack` takes the ndb binary of the release), and
-      the docs (`docs/dev/ui.md`, the deploy pages) point to the image.
-- [ ] `GET /_replication` gets the numbers of the Replication screen, per
-      link: `remote_addr`, `connected_at`, `last_heartbeat_at`, `rtt_ms`
-      (from the heartbeat), `bytes_per_s` and `records_per_s`, and
-      `term`. On the owner, the same for each copy connected.
-- [ ] Backups to a remote place: `ndb backup -` already writes to stdout
-      (`ndb backup - | aws s3 cp - s3://...`). Add a test that a backup of
-      a server under writes, streamed this way, restores the same.
-
-### E32.5 — The Cloud app (ndb-web, apps/cloud)
-
-Copy anway-cloud (Rails 8.1, Phlex, Clowk, ContaGorda Pay, Anway jobs,
-Voodu PAT plane), then change what is ndb:
-
-- [ ] Servers: create (name, region, size), list, delete with the typed
-      name. Manifests: statefulset (`NDB_TOKEN`, `NDB_ENCRYPTION_KEY`,
-      `memory_limit` from the size, volume `data`) and TCP ingress on 7070
-      with TLS.
-- [ ] Health: running only when `GET /_health` answers over verified TLS;
-      the reconcile every 2 minutes.
-- [ ] Connection tab: the URL (Show/Copy, the token never in the page
-      source), snippets for ndb-rails, Go, TS, curl, and an OpenSearch
-      client on `/_es`.
-- [ ] Usage tab: CPU and memory of the pod, disk (`/_size`), documents
-      and collections (`/_stats`), requests per second (metrics).
-- [ ] Settings tab: size and resize, rotate token, the token names and
-      their scopes, the log level, restart, pause and resume, upgrade to a
-      new ndb release (GitHub + ghcr check, as Anway Cloud), delete.
-- [ ] Billing: a monthly subscription per paid server; sizes by disk too
-      (ndb data grows, a queue does not). `config/cloud.yml`: region
-      of the Oracle node (its id follows the Oracle region) with its capacity.
-
-### E32.6 — Backups (ndb-web, apps/cloud)
-
-- [ ] A daily job per server: `ndb backup -` streamed to Cloudflare R2
-      (one bucket, a prefix per server, the R2 keys only on the Cloud).
-      7 days kept (an R2 lifecycle rule).
-- [ ] Backups tab: the list (time, size), "Back up now", download (a signed
-      link), restore into the same server (stop, restore, start) or into a
-      new server.
-- [ ] A restore test in CI: a backup of a fixture data dir restores and
-      answers the same.
-
-### E32.7 — Design system (ndb-web, packages/ui)
-
-From the prototype (`ndb-web/design/`), with the rules of
-`design/README.md`:
-
-- [ ] Tokens in CSS variables, light and dark (`data-theme`), the theme
-      switch kept per browser.
-- [ ] Shell: top bar (logo, mega menu with the pages and a tip from the
-      docs, search with Option+S, region, account), the 28 px breadcrumb
-      bar, the side nav (account or connection switcher on top), footer.
-- [ ] List page: title with count, refresh, actions, the primary split
-      button, saved filter sets, filter, pages; the table (13 px, sort,
-      checkboxes, the blue selected row).
-- [ ] Split panel under a list: grip to resize, close, tabs.
-- [ ] Details (key and value in 3 columns, copy buttons), boxes, tiles,
-      alerts, modal, flash, switch, segmented control, charts (line,
-      stacked bars).
-- [ ] The Dev Tools editor (request and response, line numbers, the
-      current request, Ctrl+Enter, the divider).
-- [ ] The gallery page with every component. Responsive at 360 px.
-
-### E32.9 — The self-hosted UI (ndb-web, apps/ui)
-
-- [ ] The screens of "Decided", on `packages/ui`, with the data of the
-      daemon (`/_health`, `/_metrics`, `/_stats`, `/_size`,
-      `/_collections`, `/_databases`, `/_backup`, `/_restore`, `/_pitr`,
-      `/_cluster/settings`, `/_log`, `/_replication`).
-- [ ] Servers: add, edit and remove a connection (URL with the token and
-      the database); saved in the config file as today.
-- [ ] An optional password (`NDB_UI_PASSWORD`) with a session cookie, for
-      a UI on a VM. Without it, the guards of today (Origin, Host).
-- [ ] The image `ghcr.io/thadeu/ndb-ui` from `ndb-web`, on tags only (CI
-      minutes of a private repo).
-
-### E32.10 — Replication screen (both UIs) and managed replication (Cloud)
-
-- [ ] A canvas of the links: one node per server (name, region, role
-      owner or copy, version, term) and one edge per link (owner to copy).
-      The edge shows the state (streaming, resync, down) by color and
-      motion, the lag (records and seconds), the round trip (`rtt_ms`),
-      the rate (records/s, bytes/s), the remote address, connected since,
-      the last heartbeat. A click on an edge or a node opens its details
-      in the split panel, with the lag and rtt charts over time.
-- [ ] Self-hosted: it reads `/_replication` of each connection and joins
-      the links by address.
-- [ ] Cloud: "Add a copy" on a server: pick the target server (another
-      region of the same account) and the database; the Cloud does the
-      token, `NDB_REPLICA_OF`, the key and the restart. "Promote" with a
-      typed confirmation; "Remove copy".
-- [ ] Alarms (Cloud): a link down for 2 minutes, a lag over 30 s.
-
 ### E32.8 — Pilot: atendesimples
 
 - [ ] Staging first (`datalake-staging`): `ndb import es` of the index,
@@ -320,7 +326,7 @@ From the prototype (`ndb-web/design/`), with the rules of
 - [ ] A customer goes from sign-in to a running server and a first write in
       under 5 minutes, with TLS on 7070.
 - [ ] A backup restores into a new server and answers the same.
-- [ ] The self-hosted image `ndb-ui` from `ndb-web` replaces the console
+- [ ] The self-hosted image `ndb-ui` from `ndb-cloud` replaces the console
       of the ndb repo; the ndb repo has no `console/`.
 - [ ] A copy set from the Cloud (owner in one region, copy in another)
       streams, and the Replication screen shows its lag and rtt.
