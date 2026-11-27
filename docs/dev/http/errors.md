@@ -62,11 +62,13 @@ The SDKs turn each code into a typed error: Go `ndb.ErrUnknownCollection` (`erro
 | `catalog_conflict` | 409 | Two declarations disagree (`write`, `path`, `time`). |
 | `direct_collection` | 409 | A write on a direct-mode collection. |
 | `history_truncated` | 410 | A `_watch` needs WAL files that `wal_retention` deleted. |
+| `position_gone` | 410 | A copy asks the [change stream](../replication.md) from a position whose WAL is deleted. The `Ndb-Gone` header lists the collections. The copy takes a snapshot of each one, with no step by hand. |
 | `request_too_large`, `line_too_large` | 413 | The body or a line is over `max_line_size` (or the blob limit). |
 | `lookup_too_large` | 422 | A lookup attaches more than 10 000 documents to one answer. |
 | `group_limit_exceeded` | 422 | The group table of an aggregate is over its memory limit. |
 | `canceled` | 499 | The client left before the answer (logs and metrics only). |
 | `internal` | 500 | A bug or a disk error. The message stays in the daemon log. |
 | `not_ready` | 503 | The daemon is recovering. Retry. |
+| `owner_unavailable` | 503 | A write on a [copy](../replication.md) goes to the owner, and the owner does not answer. Reads still work on the copy. Retry. |
 | `closed`, `stopping` | 503 | The daemon is shutting down. Retry on another daemon or later. |
 | `watch_lagged` | (stream) | The consumer was too slow. Reconnect: it resumes after the last ack. |

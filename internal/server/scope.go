@@ -34,6 +34,10 @@ type Token struct {
 	// Decrypt is the collections whose encrypted fields the token reads as
 	// plain values. It is not implied by admin.
 	Decrypt []string
+
+	// Replicate is a token of a copy: it reads the change stream, the
+	// snapshots and the blobs of any database, and nothing else.
+	Replicate bool
 }
 
 // allows tells if the token may do need on coll. An empty coll is a system
@@ -102,7 +106,7 @@ func required(method string, segs []string) (string, access) {
 
 	if strings.HasPrefix(segs[0], "_") {
 		switch segs[0] {
-		case "_backup", "_log", "_cluster", "_databases":
+		case "_backup", "_log", "_cluster", "_databases", "_replication":
 			return "*", accessAdmin
 		case "_restore":
 			return "", accessAdmin

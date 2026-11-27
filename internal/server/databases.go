@@ -58,6 +58,11 @@ func (s *Server) database(r *http.Request, root *engine.DB) (*engine.DB, *http.R
 	segs, _ := segments(r.URL.EscapedPath())
 	_, need := required(r.Method, segs)
 
+	// A copy reads the stream of a database; it never makes one.
+	if len(segs) > 0 && segs[0] == "_replication" {
+		need = accessRead
+	}
+
 	db, err := root.Database(name, need >= accessWrite && root.Implicit())
 
 	if errors.Is(err, engine.ErrUnknownDatabase) && need >= accessWrite {

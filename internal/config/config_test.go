@@ -281,10 +281,30 @@ tokens:
 		"tokens:\n  - name: a\n    file: a\n",
 		"tokens:\n  - name: a\n    file: a\n    read: [x]\n  - name: a\n    file: b\n    read: [y]\n",
 		"tokens:\n  - name: a\n    file: a\n    read: [\"[\"]\n",
+		"tokens:\n  - name: a\n    file: a\n    replicate: true\n    read: [x]\n",
 	} {
 		if _, err := config.Load(write(t, bad)); !errors.Is(err, config.ErrInvalid) {
 			t.Fatalf("%q: err = %v, want ErrInvalid", bad, err)
 		}
+	}
+}
+
+func TestLoadReplicateTokenAndReplicaOf(t *testing.T) {
+	path := write(t, `
+replica_of: "tcp://:t@owner:7070/app"
+tokens:
+  - name: copies
+    file: copies.token
+    replicate: true
+`)
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(cfg.Tokens) != 1 || !cfg.Tokens[0].Replicate || cfg.ReplicaOf != "tcp://:t@owner:7070/app" {
+		t.Fatalf("cfg = %+v %q", cfg.Tokens, cfg.ReplicaOf)
 	}
 }
 
