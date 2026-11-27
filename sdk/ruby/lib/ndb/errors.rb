@@ -145,6 +145,13 @@ module Ndb
   class InvalidDatabase < Error; end
   class DatabaseNotFound < Error; end
 
+  # A write on a copy goes to the owner, and the owner does not answer.
+  # Reads still work on the copy.
+  class OwnerUnavailable < Error; end
+
+  # The change stream of a copy needs WAL that the owner deleted.
+  class PositionGone < Error; end
+
   # The daemon error code -> the Ruby class.
   CODE_TO_ERROR = {
     "unauthorized" => Unauthorized,
@@ -214,7 +221,9 @@ module Ndb
     "unknown_group" => UnknownGroup,
     "group_exists" => GroupExists,
     "invalid_database" => InvalidDatabase,
-    "database_not_found" => DatabaseNotFound
+    "database_not_found" => DatabaseNotFound,
+    "owner_unavailable" => OwnerUnavailable,
+    "position_gone" => PositionGone
   }.freeze
 
   def self.error_for(code, message, status)

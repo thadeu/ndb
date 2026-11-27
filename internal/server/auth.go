@@ -49,6 +49,19 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 		noteToken(w, t.Name)
 
 		segs, _ := segments(r.URL.EscapedPath())
+
+		if t.Replicate {
+			if !replicateAllows(r.Method, segs) {
+				writeError(w, &apiError{status: http.StatusForbidden, code: "forbidden", msg: fmt.Sprintf("token %s is a replicate token: it may only read the change stream (GET /_replication/stream)", t.Name)})
+
+				return
+			}
+
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), tokenKey{}, t)))
+
+			return
+		}
+
 		coll, need := required(r.Method, segs)
 
 		// The lists of a scoped token name collections of the default

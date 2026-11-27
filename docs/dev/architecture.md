@@ -18,4 +18,4 @@ One Go process, `ndb`. It listens on a unix socket (and optional TCP), answers H
 - Writes use [optimistic locking by default](concurrency.md): every document has a version (`_v`), so a write can refuse to overwrite a change it did not see. No setup, and nobody waits. Pessimistic locking (`_lock`) and transactions of one collection (`_tx`) are there when you ask for them.
 - The SDKs and `curl` give the same answer, because the daemon owns the meaning of every operator.
 - `/_health` answers `503 recovering` until the data directory is open, so a load balancer waits for you.
-- Version 1 is one node: no replication, no clustering, no joins, no SQL.
+- One owner per database: [replication](replication.md) keeps copies on other nodes (they read local and send writes to the owner). No multi-master, no automatic failover, no clustering, no joins, no SQL.

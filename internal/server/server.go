@@ -61,6 +61,9 @@ type Server struct {
 	sec     Security
 	fails   *failLimiter
 	watches atomic.Int64
+
+	// repl is the replication state (replication.go).
+	repl replicationState
 }
 
 func New() *Server {
@@ -70,7 +73,7 @@ func New() *Server {
 	s.streams = streams.New(func() *engine.DB { return s.db.Load() })
 	s.SetSecurity(DefaultSecurity())
 
-	s.handler = s.observe(s.guard(s.authenticate(s.routes())))
+	s.handler = s.observe(s.guard(s.authenticate(s.replicate(s.routes()))))
 	s.http = &http.Server{
 		Handler:           s.handler,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -138,20 +141,22 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) routes() http.Handler {
 	rt := &router{
 		system: map[string][]route{
-			"_health":       {{"GET", s.health}},
-			"_metrics":      {{"GET", s.metricsPage}},
-			"_collections":  {{"GET", s.ready(s.list)}},
-			"_databases":    {{"GET", s.readyRoot(s.listDatabases)}},
-			"_databases/{}": {{"PUT", s.readyRoot(s.createDatabase)}, {"DELETE", s.readyRoot(s.dropDatabase)}},
-			"_stats":        {{"GET", s.ready(s.globalStats)}},
-			"_size":         {{"GET", s.ready(s.size)}},
-			"_backup":       {{"POST", s.ready(s.backup)}},
-			"_restore":      {{"POST", s.ready(s.restoreAny)}},
-			"_pitr":         {{"GET", s.ready(s.pitrAll)}},
-			"_blobs":        {{"POST", s.ready(s.putBlob)}},
-			"_blobs/{}":     {{"GET", s.ready(s.getBlob)}},
-			"_log":          {{"GET", s.getLog}, {"PUT", s.putLog}},
-			"_cluster/{}":   {{"GET", s.readyRoot(s.getSettings)}, {"PUT", s.readyRoot(s.putSettings)}, {"POST", s.readyRoot(s.rotateKey)}},
+			"_health":         {{"GET", s.health}},
+			"_metrics":        {{"GET", s.metricsPage}},
+			"_collections":    {{"GET", s.ready(s.list)}},
+			"_databases":      {{"GET", s.readyRoot(s.listDatabases)}},
+			"_databases/{}":   {{"PUT", s.readyRoot(s.createDatabase)}, {"DELETE", s.readyRoot(s.dropDatabase)}},
+			"_stats":          {{"GET", s.ready(s.globalStats)}},
+			"_size":           {{"GET", s.ready(s.size)}},
+			"_backup":         {{"POST", s.ready(s.backup)}},
+			"_restore":        {{"POST", s.ready(s.restoreAny)}},
+			"_pitr":           {{"GET", s.ready(s.pitrAll)}},
+			"_blobs":          {{"POST", s.ready(s.putBlob)}},
+			"_blobs/{}":       {{"GET", s.ready(s.getBlob)}},
+			"_log":            {{"GET", s.getLog}, {"PUT", s.putLog}},
+			"_cluster/{}":     {{"GET", s.readyRoot(s.getSettings)}, {"PUT", s.readyRoot(s.putSettings)}, {"POST", s.readyRoot(s.rotateKey)}},
+			"_replication":    {{"GET", s.readyRoot(s.replicationStatus)}},
+			"_replication/{}": {{"GET", s.ready(s.replicationGet)}, {"POST", s.readyRoot(s.replicationPost)}},
 		},
 		coll: map[string][]route{
 			"": {

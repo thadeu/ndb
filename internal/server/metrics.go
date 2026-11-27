@@ -2,13 +2,15 @@ package server
 
 import (
 	"fmt"
-	"github.com/thadeu/ndb/internal/streams"
 	"io"
 	"net/http"
+	"sort"
 	"sync/atomic"
 
 	"github.com/thadeu/ndb/internal/engine"
 	ndbmetrics "github.com/thadeu/ndb/internal/metrics"
+	"github.com/thadeu/ndb/internal/replication"
+	"github.com/thadeu/ndb/internal/streams"
 )
 
 // metrics are plain counters, exported in the Prometheus text format.
@@ -101,6 +103,65 @@ func (s *Server) metricsPage(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	writeStreamMetrics(w, s.streams.Metrics())
+	s.writeReplicationMetrics(w)
+}
+
+// replicationStates are the values of ndb_replication_state.
+var replicationStates = []string{replication.StateStarting, replication.StateStreaming, replication.StateResync, replication.StateDown}
+
+// writeReplicationMetrics prints the lag and the state of each copy.
+func (s *Server) writeReplicationMetrics(w io.Writer) {
+	s.repl.mu.RLock()
+
+	names := make([]string, 0, len(s.repl.copies))
+
+	for name := range s.repl.copies {
+		names = append(names, name)
+	}
+
+	s.repl.mu.RUnlock()
+
+	sort.Strings(names)
+
+	var copies []*replication.Copy
+
+	for _, name := range names {
+		if c := s.copyOf(name); c != nil {
+			copies = append(copies, c)
+		}
+	}
+
+	if len(copies) == 0 {
+		return
+	}
+
+	fmt.Fprint(w, "# TYPE ndb_replication_lag_seconds gauge\n")
+
+	for _, c := range copies {
+		fmt.Fprintf(w, "ndb_replication_lag_seconds{database=%q} %g\n", c.Source().Local, c.Status().LagSeconds)
+	}
+
+	fmt.Fprint(w, "# TYPE ndb_replication_lag_records gauge\n")
+
+	for _, c := range copies {
+		fmt.Fprintf(w, "ndb_replication_lag_records{database=%q} %d\n", c.Source().Local, c.Status().LagRecords)
+	}
+
+	fmt.Fprint(w, "# TYPE ndb_replication_state gauge\n")
+
+	for _, c := range copies {
+		state := c.Status().State
+
+		for _, st := range replicationStates {
+			v := 0
+
+			if st == state {
+				v = 1
+			}
+
+			fmt.Fprintf(w, "ndb_replication_state{database=%q,state=%q} %d\n", c.Source().Local, st, v)
+		}
+	}
 }
 
 // writeStreamMetrics prints the series of the streams used since the start.

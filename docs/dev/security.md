@@ -23,6 +23,7 @@ ndb listens on a unix socket and, optionally, on TCP.
 - ndb compares tokens in constant time. Logs show the token name, never the secret.
 - Make each token from 32 random bytes. Give each app its own token with the smallest scope.
 - `POST /_backup` works only on the unix socket.
+- A `replicate` token (`replicate: true` in `tokens:`) is the token of a [copy](replication.md): it reads the change stream, the snapshots and the blobs of any database (`GET /_replication/stream`, `/_replication/snapshot`, `/_blobs/{ref}`), and every other route is `403 forbidden`. It has no collections. Promote and resync work only on the unix socket.
 
 ## Browser attacks (CSRF and DNS rebinding)
 
@@ -118,6 +119,8 @@ What protects what:
 | the memory of the daemon | not protected | not protected |
 
 To change the key, use a [key rotation](encryption.md#key-rotation) (`ndb key rotate`, on the host only). `NDB_ENCRYPTION_KEY_OLD` gives the old env key during one.
+
+**Replication.** A copy that serves reads needs the same `NDB_ENCRYPTION_KEY` as its owner; another fingerprint is a start error. The key never goes over the network. An owner with the key kept in its data dir logs a `warn` when a copy connects: if its disk is lost, the copies have the data and no key. See [Replication](replication.md#encryption).
 
 So the default makes a restore need nothing. To keep the key out of the files, give it in `NDB_ENCRYPTION_KEY` from a secret store, and keep a copy of it: a backup of a data dir with an env key can only be restored with the same key.
 

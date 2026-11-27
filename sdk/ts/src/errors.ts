@@ -63,6 +63,8 @@ export type ErrorCode =
   | 'group_exists'
   | 'invalid_database'
   | 'database_not_found'
+  | 'owner_unavailable'
+  | 'position_gone'
   | 'invalid_update'
   | 'locked'
   | 'lock_expired'
@@ -137,6 +139,14 @@ export class InvalidDatabaseError extends NdbError {}
 // A read of a database that does not exist (database_not_found).
 export class DatabaseNotFoundError extends NdbError {}
 
+// A write on a copy goes to the owner, and the owner does not answer
+// (owner_unavailable). Reads still work on the copy.
+export class OwnerUnavailableError extends NdbError {}
+
+// The change stream of a copy needs WAL that the owner deleted
+// (position_gone).
+export class PositionGoneError extends NdbError {}
+
 // withRetry lost the race on every try: the document changed between the
 // read and the write each time.
 export class StaleObjectError extends NdbError {}
@@ -194,6 +204,8 @@ const subclasses: Record<string, typeof NdbError> = {
   group_exists: GroupExistsError,
   invalid_database: InvalidDatabaseError,
   database_not_found: DatabaseNotFoundError,
+  owner_unavailable: OwnerUnavailableError,
+  position_gone: PositionGoneError,
 }
 
 export function makeError(code: ErrorCode, message: string, status = 0): NdbError {

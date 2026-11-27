@@ -37,7 +37,7 @@ await db.health() // throws NotReadyError while recovering
 
 ## `GET /_metrics`
 
-Prometheus text: requests, errors, latency of `_search` and `_aggregate`, rows, writes, WAL and segment counters, blob store size. It is open to scrapers like any route (token on TCP).
+Prometheus text: requests, errors, latency of `_search` and `_aggregate`, rows, writes, WAL and segment counters, blob store size, and on a copy the lag and state of [replication](../replication.md) (`ndb_replication_lag_seconds`, `ndb_replication_lag_records`, `ndb_replication_state`). It is open to scrapers like any route (token on TCP).
 
 ```bash
 curl --unix-socket /run/ndb/ndb.sock http://ndb/_metrics
@@ -351,3 +351,52 @@ The format (`text` or `json`) stays the one of the start.
 curl --unix-socket /run/ndb/ndb.sock -X PUT http://ndb/_log -d '{"level":"debug","body_max":512}'
 # {"body_max":512,"format":"text","level":"debug","slow_ms":1000}
 ```
+
+## Replication
+
+The routes of [replication](../replication.md). A copy calls the first two; a person calls the others.
+
+### `GET /_replication`
+
+The role of each database: `owner` (with `term` and the `copies` connected now) or `copy` (with `source`, the token hidden, `state`, `synced`, `lag_records`, `lag_seconds`, `last_error`, and `resync` while a resync runs). Admin of `*` over TCP. CLI: `ndb replication status`.
+
+```bash
+curl --unix-socket /run/ndb/ndb.sock http://ndb/_replication
+# {"databases":[{"database":"default","role":"copy","term":0,"source":"tcp://:***@ndb-0.app.voodu:7070/default","state":"streaming","synced":true,"lag_records":0,"lag_seconds":0}]}
+```
+
+### `GET /_replication/stream`
+
+The change stream of the database of `Ndb-Database`, as NDJSON, in one long answer. A `replicate` token or a full token. The query `from` is the position of each collection: `a=12,b=3` (the owner tx of the last record the copy applied). A collection that is not in `from` starts at its first record.
+
+Lines, in order per collection:
+
+| Line | Meaning |
+|---|---|
+| `{"hello":{"database","term","key","promoted"}}` | first line: the term, the fingerprint of the key, and, on an owner that was a copy, the positions of its promote |
+| `{"catalog":{"gen","defs"}}` | the definitions of the engine collections; again after each change |
+| `{"record":{"c","tx","ts","ops":[{"op","_id","_v","doc"}]}}` | one WAL record. No `ops`: a record of the TTL sweep, which is not replicated |
+| `{"heartbeat":{"ts","last"}}` | every second: the last tx of each collection, for the lag |
+| `{"gone":["a"]}` | the history of these collections can not be sent: the copy takes a snapshot, then connects again |
+
+**Errors:** `410 position_gone` when the WAL of a position was deleted; the header `Ndb-Gone` lists the collections. `403 forbidden` for another token.
+
+### `GET /_replication/snapshot?collection={name}`
+
+The live documents of one collection at one tx: a `catalog` line with its definition, `record` lines of 500 puts, then `{"end":{"tx","docs"}}`. The copy reads the stream after `tx`. It has no settings, so no key. **Errors:** `404 unknown_collection`.
+
+### `POST /_replication/promote`
+
+Makes the copy of the database of `Ndb-Database` the owner. Unix socket only. **Answer:** `{"database","role":"owner","term"}`. **Errors:** `400 invalid_request` (the database is not a copy), `403 forbidden` over TCP. CLI: `ndb replication promote`.
+
+### `POST /_replication/resync`
+
+Drops the data of the copy and copies the owner again. Unix socket only. **Answer:** `{"database","state"}`. CLI: `ndb replication resync`.
+
+### Headers of a forwarded write
+
+| Header | Where | Meaning |
+|---|---|---|
+| `Ndb-Forwarded: 1` | request, copy to owner | the copy asks for the position |
+| `Ndb-Position` | answer of the owner | `users=42,_catalog=7`: the last tx of the collection, and the catalog version after a change of a definition |
+| `Ndb-Stale: true` | answer of the copy | the copy did not apply the position in 5 s |

@@ -12,7 +12,7 @@ The files are in [`deploy/examples/single-vm/voodu`](https://github.com/thadeu/n
 
 <<< @/deploy/examples/single-vm/voodu/ndb.voodu{hcl}
 
-- `replicas = 1`: one daemon owns the data dir (`flock`). Never scale it to 2.
+- `replicas = 1`: one daemon owns the data dir (`flock`). Never scale it to 2. To have the same data on another VM, run one more `ndb` there as a [copy](../replication.md) (`NDB_REPLICA_OF` in `vd config`), not a second replica of this one.
 - The `data` volume is a local persistent disk, never NFS or EFS.
 - The `socket` volume is a host path that every app mounts.
 - `stop_timeout` above 30 s, so that running requests finish.

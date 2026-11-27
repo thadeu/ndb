@@ -90,9 +90,10 @@ class TcpDaemon
 
   attr_reader :port, :socket
 
-  def initialize(token: nil)
+  def initialize(token: nil, env: {})
     TestDaemon.start
 
+    @env = env
     @tmp = Dir.mktmpdir("ndbt", "/tmp")
     @socket = File.join(@tmp, "s.sock")
     @port = free_port
@@ -114,7 +115,7 @@ class TcpDaemon
     args += ["-token-file", @token_file] if @token_file
 
     log = File.join(@tmp, "ndb.log")
-    @pid = Process.spawn(TestDaemon.binary, *args, out: log, err: log)
+    @pid = Process.spawn(@env, TestDaemon.binary, *args, out: log, err: log)
 
     wait_ready
   end

@@ -123,7 +123,7 @@ func statusOf(code string) int {
 		return http.StatusUnauthorized
 	case "forbidden":
 		return http.StatusForbidden
-	case "history_truncated":
+	case "history_truncated", "position_gone":
 		return http.StatusGone
 	case "too_many_requests":
 		return http.StatusTooManyRequests
@@ -131,7 +131,7 @@ func statusOf(code string) int {
 		return http.StatusUnprocessableEntity
 	case "canceled":
 		return StatusClientClosed
-	case "not_ready", "closed", "stopping":
+	case "not_ready", "closed", "stopping", "owner_unavailable":
 		return http.StatusServiceUnavailable
 	case "internal":
 		return http.StatusInternalServerError

@@ -23,6 +23,7 @@ import (
 	"github.com/thadeu/ndb/internal/config"
 	"github.com/thadeu/ndb/internal/engine"
 	"github.com/thadeu/ndb/internal/logging"
+	"github.com/thadeu/ndb/internal/replication"
 	"github.com/thadeu/ndb/internal/segment"
 	"github.com/thadeu/ndb/internal/server"
 )
@@ -151,6 +152,10 @@ func run(args []string) error {
 
 	cfg.EncryptionKey = os.Getenv("NDB_ENCRYPTION_KEY")
 	cfg.EncryptionKeyOld = os.Getenv("NDB_ENCRYPTION_KEY_OLD")
+
+	if v, ok := os.LookupEnv("NDB_REPLICA_OF"); ok {
+		cfg.ReplicaOf = v
+	}
 
 	logSrc := logSources(cfg, os.Getenv, set["log-level"])
 
@@ -294,7 +299,7 @@ func scopedTokens(tokens []config.Token) ([]server.Token, error) {
 			return nil, fmt.Errorf("token %s: %w", t.Name, err)
 		}
 
-		out = append(out, server.Token{Name: t.Name, Secret: secret, Read: t.Read, Write: t.Write, Admin: t.Admin, Decrypt: t.Decrypt})
+		out = append(out, server.Token{Name: t.Name, Secret: secret, Read: t.Read, Write: t.Write, Admin: t.Admin, Decrypt: t.Decrypt, Replicate: t.Replicate})
 	}
 
 	return out, nil
@@ -316,6 +321,11 @@ func serve(ctx context.Context, cfg config.Config, token string, lg *logging.Log
 	)
 
 	scoped, err := scopedTokens(cfg.Tokens)
+	if err != nil {
+		return err
+	}
+
+	sources, err := replication.ParseSources(cfg.ReplicaOf, engine.ValidDatabase)
 	if err != nil {
 		return err
 	}
@@ -357,6 +367,17 @@ func serve(ctx context.Context, cfg config.Config, token string, lg *logging.Log
 		return err
 	}
 
+	copies, err := startCopies(ctx, db, sources, log)
+
+	if err != nil {
+		log.Error("replication failed to start", "err", err)
+
+		_ = srv.Shutdown(context.Background())
+
+		return errors.Join(err, db.Close())
+	}
+
+	srv.SetReplicas(copies)
 	srv.Attach(db)
 	srv.ApplyStoredLog(db)
 
@@ -392,6 +413,10 @@ func serve(ctx context.Context, cfg config.Config, token string, lg *logging.Log
 
 	if err := srv.Shutdown(sctx); err != nil {
 		log.Warn("shutdown timed out, requests still running", "err", err)
+	}
+
+	for _, c := range copies {
+		c.Stop()
 	}
 
 	err = errors.Join(stopErr, db.Close())

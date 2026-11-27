@@ -99,6 +99,12 @@ type Config struct {
 	// may do. The secret of each is in a file.
 	Tokens []Token `yaml:"tokens"`
 
+	// ReplicaOf makes databases of this daemon copies of the databases of
+	// owners: a comma list of tcp://:<token>@host:port[/<db>][?as=<db>]
+	// (docs/dev/replication.md). NDB_REPLICA_OF overrides it. Empty: no
+	// copy, the daemon owns every database.
+	ReplicaOf string `yaml:"replica_of"`
+
 	// LogLevel is debug, info, warn, error or quiet (default info).
 	// LogFormat is text or json (default text). NDB_LOG_LEVEL,
 	// NDB_LOG_FORMAT and the flags of ndb serve override them.
@@ -171,6 +177,10 @@ type Token struct {
 
 	// Decrypt is the collections whose encrypted fields the token reads.
 	Decrypt []string `yaml:"decrypt"`
+
+	// Replicate makes the token of a copy: it reads the change stream of
+	// any database and nothing else (docs/dev/replication.md).
+	Replicate bool `yaml:"replicate"`
 }
 
 // file is the YAML shape; sizes are strings like "1GiB".
@@ -354,7 +364,9 @@ func checkTokens(tokens []Token) error {
 			return fmt.Errorf("%w: tokens: the name %q is used twice", ErrInvalid, t.Name)
 		case t.File == "":
 			return fmt.Errorf("%w: token %s: file is required", ErrInvalid, t.Name)
-		case len(t.Read)+len(t.Write)+len(t.Admin) == 0:
+		case t.Replicate && len(t.Read)+len(t.Write)+len(t.Admin)+len(t.Decrypt) > 0:
+			return fmt.Errorf("%w: token %s: a replicate token has no collections (it reads the change stream only)", ErrInvalid, t.Name)
+		case !t.Replicate && len(t.Read)+len(t.Write)+len(t.Admin) == 0:
 			return fmt.Errorf("%w: token %s: give it read, write or admin collections", ErrInvalid, t.Name)
 		}
 

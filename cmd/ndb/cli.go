@@ -21,6 +21,7 @@ var subcommands = map[string]func(args []string) error{
 	"collections": runCollections,
 	"compact":     runCompact,
 	"key":         runKey,
+	"replication": runReplication,
 	"truncate":    runTruncate,
 	"drop":        runDrop,
 	"rename":      runRename,
@@ -126,6 +127,9 @@ Usage:
   ndb key rotate [-env]         a new encryption key; every encrypted value is sealed again
                                 in the background. -env: the new key for NDB_ENCRYPTION_KEY,
                                 shown once. Unix socket only
+  ndb replication status        the role of each database (owner, copy), the lag of a copy
+  ndb replication promote       make this copy the owner (-database NAME). Unix socket only
+  ndb replication resync        drop the data of this copy and copy the owner again. Unix socket only
   ndb truncate <collection>     remove every document; keep the definition and indexes
   ndb drop <collection>         remove the collection, its definition and watch consumers
   ndb rename <collection> <to>  give the collection a new name (-replace: in place of <to>)

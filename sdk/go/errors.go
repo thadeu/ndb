@@ -96,4 +96,11 @@ var (
 	ErrGroupExists       = &Error{Code: "group_exists"}
 	ErrInvalidDatabase   = &Error{Code: "invalid_database"}
 	ErrDatabaseNotFound  = &Error{Code: "database_not_found"}
+
+	// ErrOwnerUnavailable: a write on a copy goes to the owner, and the owner
+	// does not answer. Reads still work on the copy. ErrPositionGone: the
+	// change stream of a copy needs WAL that the owner deleted (the copy
+	// takes a snapshot by itself).
+	ErrOwnerUnavailable = &Error{Code: "owner_unavailable"}
+	ErrPositionGone     = &Error{Code: "position_gone"}
 )

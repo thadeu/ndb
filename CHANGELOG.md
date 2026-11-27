@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- **Replication (one owner, local reads):** `NDB_REPLICA_OF=tcp://:<token>@owner:7070[/<db>][?as=<db>]` (or `replica_of` in `ndb.yml`) makes a database of the daemon a copy of a database of an owner. The copy pulls the change stream (`GET /_replication/stream`), writes each record with its own write path, and keeps its position in `replication.json`. Reads on a copy are local once it caught up; writes, `_watch`, `_ack` and `_streams` go to the owner, and the copy answers a write after it applied it (read your writes, `Ndb-Position`, `Ndb-Stale`). A lost position takes a snapshot of the collection (`GET /_replication/snapshot`). The TTL sweep is local to each node. See `docs/dev/replication.md`.
+- **Token scope `replicate`:** `replicate: true` in `tokens:`; it reads the change stream, the snapshots and the blobs, and nothing else.
+- **Promote and resync:** `ndb replication promote` and `ndb replication resync` (`POST /_replication/promote`, `/_replication/resync`, unix socket only). A promote adds one to the term; a copy refuses an owner with a lower term, and an old owner with its own writes must resync.
+- **Monitoring:** `GET /_replication` and `ndb replication status` (role, state, lag, last error, copies connected); metrics `ndb_replication_lag_seconds`, `ndb_replication_lag_records`, `ndb_replication_state`.
+- **Error codes:** `503 owner_unavailable` (a write on a copy, the owner does not answer) and `410 position_gone`, in the Go, Ruby and TS SDKs.
+
+### Compatibility
+
+- A daemon with no `NDB_REPLICA_OF` works as before: no new file in the data dir, the same routes and answers (TestCompat passes).
+
 ## [1.27.1] - 2026-11-26
 
 ## [1.27.0] - 2026-11-26
