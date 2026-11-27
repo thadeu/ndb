@@ -62,3 +62,25 @@ One URL can also hold both, and a [database](../databases.md) for each app: `NDB
 - **Direct mode stays local to the db VM.** Apps on other VMs write through the API (engine mode). Never put NDJSON files on a network file system for ndb to read.
 - **`data_dir` is on a local disk** of the db VM.
 - **Online backup is a unix-socket call**, so run `ndb backup` on the db VM.
+
+## A copy on each VM
+
+To read on the apps VM with no network round trip, run an ndb there too as a [copy](../replication.md) of the ndb of the db VM. The apps point `NDB_URL` to the ndb of their own VM: reads are local, and writes go to the owner over the tunnel.
+
+On the db VM (the owner), add a `replicate` token to `ndb.yml`:
+
+```yaml
+tokens:
+  - name: copies
+    file: /etc/ndb/copies.token
+    replicate: true
+```
+
+On the apps VM (the copy), in the env of the ndb unit:
+
+```bash
+NDB_REPLICA_OF=tcp://:<the copies token>@10.10.0.1:7070
+NDB_ENCRYPTION_KEY=<the key of the owner>
+```
+
+Check with `ndb replication status` on each VM.

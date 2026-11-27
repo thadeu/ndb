@@ -14,7 +14,7 @@ One Go daemon (`ndb`) that stores NDJSON and answers HTTP/JSON:
   aggregate `$match $group $sort $project $dateTrunc`.
 - **Outbox and queues:** `watch` + `ack` (change feed with consumer positions) and Redis-style
   **streams** (`/_streams`: groups, PEL, nack with delayed retry, claim, dead letter `<stream>_dead`).
-- One node, one data directory. No cluster, no replication, no SQL, no joins.
+- One data directory per node. Replication: one owner per database, copies pull it (`NDB_REPLICA_OF`, `docs/dev/replication.md`). No multi-master, no SQL, no joins.
 
 Two write modes:
 

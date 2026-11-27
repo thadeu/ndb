@@ -101,6 +101,7 @@ An unknown key is an error at start (the file is read in strict mode). Sizes are
 | `auth_lockout` | how long a locked-out IP gets `429 too_many_requests`. Default `5m`. |
 | `max_conns` | the most open TCP connections. Over it, a new connection waits. `0` = no limit (default). |
 | `max_watches` | the most open `_watch` streams. Over it: `429 too_many_requests`. `0` = no limit (default). |
+| `replica_of` | makes databases of this daemon [copies](replication.md) of the databases of owners: a comma list of `tcp://:<token>@host:port[/<db>][?as=<db>]`. `NDB_REPLICA_OF` overrides it. Default: none, the daemon owns every database. |
 
 ### Document id
 
@@ -302,6 +303,7 @@ tokens:
 - Each list holds collection names or globs: `calls*` covers `calls` and its partitions (`calls-2026-11`), `*` covers every collection. A pattern read (`/logs-2026-*/_search`) needs a glob that covers the whole pattern (`logs*` or `*`).
 - The system reads do not filter by scope: a token with any read right sees every collection name in `/_collections`, `/_stats`, `/_size` and `/_pitr`.
 - An unknown token is `401 unauthorized`; a token without the right is `403 forbidden`, with the token name in the message.
+- `replicate: true` makes the token of a [copy](replication.md): it reads the change stream of every database and nothing else. It has no `read`, `write` or `admin` list.
 - `name` and `file` are required, names are unique, and a token needs at least one list. A missing or empty file stops the start.
 - An insert (`_doc`, `_bulk`) to a collection that does not exist creates it (with `allow_implicit`): the write right is enough. The other writes (`_update/{id}` with `upsert` too, `_expire`, `_persist`) do not create it: they answer `404 unknown_collection`.
 
