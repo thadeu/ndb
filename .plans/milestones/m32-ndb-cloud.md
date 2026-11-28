@@ -155,6 +155,9 @@ the door. E32.0 is the gate of the door (E32.1 to E32.3) and of the pilot
 - [x] Backups to a remote place: `ndb backup -` already writes to stdout
       (`ndb backup - | aws s3 cp - s3://...`). Add a test that a backup of
       a server under writes, streamed this way, restores the same.
+- [x] `backup_tcp` (`NDB_BACKUP_TCP=1`): `POST /_backup` over TCP for the
+      full token, when the daemon has a token. The Cloud has no exec in the
+      pod and the image no shell, so it takes the backup over the mesh.
 
 ### E32.7 — Design system (ndb-cloud, packages/ui)
 
@@ -215,8 +218,9 @@ Voodu PAT plane), then change what is ndb:
 
 ### E32.6 — Backups (ndb-cloud, apps/cloud)
 
-- [ ] A daily job per server: `ndb backup -` streamed to Cloudflare R2
-      (one bucket, a prefix per server, the R2 keys only on the Cloud).
+- [ ] A daily job per server: `POST /_backup` over the mesh (`backup_tcp`)
+      streamed to Cloudflare R2 or Oracle Object Storage (S3 API; one
+      bucket, a prefix per server, the keys only on the Cloud).
       7 days kept (an R2 lifecycle rule).
 - [ ] Backups tab: the list (time, size), "Back up now", download (a signed
       link), restore into the same server (stop, restore, start) or into a

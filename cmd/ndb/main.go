@@ -147,6 +147,10 @@ func run(args []string) error {
 		return errors.New("-max-conns and -max-watches must be zero or more")
 	}
 
+	if os.Getenv("NDB_BACKUP_TCP") == "1" {
+		cfg.BackupTCP = true
+	}
+
 	cfg.EncryptionKey = os.Getenv("NDB_ENCRYPTION_KEY")
 	cfg.EncryptionKeyOld = os.Getenv("NDB_ENCRYPTION_KEY_OLD")
 
@@ -231,6 +235,7 @@ func security(cfg config.Config) server.Security {
 		AuthWindow:   cfg.AuthWindow,
 		AuthLockout:  cfg.AuthLockout,
 		MaxWatches:   cfg.MaxWatches,
+		BackupTCP:    cfg.BackupTCP,
 	}
 }
 

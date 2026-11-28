@@ -22,7 +22,7 @@ ndb listens on a unix socket and, optionally, on TCP.
 - A scoped token can read, write or administer only some collections of the default database. A token without the right is `403 forbidden`. Another [database](databases.md) (the `Ndb-Database` header) and `/_databases` need the full token. See [Scoped tokens](configuration.md#scoped-tokens).
 - ndb compares tokens in constant time. Logs show the token name, never the secret.
 - Make each token from 32 random bytes. Give each app its own token with the smallest scope.
-- `POST /_backup` works only on the unix socket.
+- `POST /_backup` works only on the unix socket, unless `backup_tcp` (or `NDB_BACKUP_TCP=1`) is on and the daemon has a token: then the full token can also ask over TCP. A backup holds every document, and the key unless it comes from `NDB_ENCRYPTION_KEY`.
 
 ## Browser attacks (CSRF and DNS rebinding)
 

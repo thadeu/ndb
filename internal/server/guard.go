@@ -45,6 +45,11 @@ type Security struct {
 	// MaxWatches is the most _watch streams open at the same time (0 = no
 	// limit).
 	MaxWatches int
+
+	// BackupTCP lets POST /_backup answer over TCP too, when the daemon has
+	// a token (backup_tcp, NDB_BACKUP_TCP=1). For a host that reaches the
+	// daemon only by the network, such as Ndb Cloud.
+	BackupTCP bool
 }
 
 // The lockout defaults.

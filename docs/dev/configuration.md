@@ -101,6 +101,7 @@ An unknown key is an error at start (the file is read in strict mode). Sizes are
 | `auth_lockout` | how long a locked-out IP gets `429 too_many_requests`. Default `5m`. |
 | `max_conns` | the most open TCP connections. Over it, a new connection waits. `0` = no limit (default). |
 | `max_watches` | the most open `_watch` streams. Over it: `429 too_many_requests`. `0` = no limit (default). |
+| `backup_tcp` | `true` lets `POST /_backup` answer over TCP too, when the daemon has a token. For a host that reaches the daemon only by the network (Ndb Cloud). `NDB_BACKUP_TCP=1` sets it. Default `false`: the unix socket only. Give the key in `NDB_ENCRYPTION_KEY`, so the file does not hold it. |
 
 ### Document id
 

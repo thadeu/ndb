@@ -186,7 +186,7 @@ Streams a backup file (`.ndb`, NDJSON, `application/x-ndjson`) taken at a mark b
 |---|---|---|---|
 | `no_blobs` | bool | `false` | leave the blob contents out (the references stay) |
 
-**Answer:** the stream. **Errors:** `403 forbidden` over TCP: the backup works on the unix socket only.
+**Answer:** the stream. **Errors:** `403 forbidden` over TCP: the backup works on the unix socket only, unless [`backup_tcp`](../configuration.md) (`NDB_BACKUP_TCP=1`) is on and the daemon has a token. Then the full token can also ask over TCP, as Ndb Cloud does.
 
 With no `Ndb-Database` header, the file holds every [database](../databases.md) of the daemon (format 2 when there is one besides the default). With the header, it holds that database alone.
 

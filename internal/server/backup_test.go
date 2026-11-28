@@ -70,3 +70,61 @@ func TestBackupEndpointRefusesTCP(t *testing.T) {
 		t.Fatalf("status = %d, want 403: %s", resp.StatusCode, b)
 	}
 }
+
+// With backup_tcp and a token, a backup also answers over TCP, for a host
+// that reaches the daemon only by the network (Ndb Cloud). Without a token,
+// or without a good one, it is refused.
+func TestBackupEndpointOverTCPWithBackupTCP(t *testing.T) {
+	db, err := engine.Open(config.Config{DataDir: t.TempDir(), AllowImplicit: true}, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer db.Close()
+
+	post := func(srv *server.Server, token string) (int, string) {
+		ts := httptest.NewServer(srv.Handler())
+
+		defer ts.Close()
+
+		req, _ := http.NewRequest("POST", ts.URL+"/_backup", strings.NewReader(`{}`))
+
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		defer resp.Body.Close()
+
+		b, _ := io.ReadAll(resp.Body)
+
+		return resp.StatusCode, string(b)
+	}
+
+	open := server.New()
+	open.SetSecurity(server.Security{BackupTCP: true})
+	open.Attach(db)
+
+	if code, body := post(open, ""); code != http.StatusForbidden {
+		t.Fatalf("backup_tcp without a token: %d, want 403: %s", code, body)
+	}
+
+	srv := server.New()
+	srv.SetSecurity(server.Security{BackupTCP: true})
+	srv.SetToken("s3cret")
+	srv.Attach(db)
+
+	if code, _ := post(srv, "bad"); code != http.StatusUnauthorized {
+		t.Fatalf("bad token: %d, want 401", code)
+	}
+
+	code, body := post(srv, "s3cret")
+
+	if code != 200 || !strings.HasPrefix(body, `{"ndb_backup":1`) || !strings.Contains(body, `{"_section":"end"`) {
+		t.Fatalf("backup over TCP: %d %s", code, body)
+	}
+}

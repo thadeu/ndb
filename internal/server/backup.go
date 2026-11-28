@@ -12,12 +12,13 @@ import (
 
 // backup streams a consistent backup file (see engine.DB.Backup) as the
 // response body. It copies everything the daemon holds, so it answers only on
-// the unix socket. The client compresses and stores the stream. If the copy
+// the unix socket, or over TCP with backup_tcp on a daemon with a token (the
+// token check ran before). The client compresses and stores the stream. If the copy
 // fails after the first byte, the connection is aborted: the file then has no
 // end line and a restore refuses it.
 func (s *Server) backup(w http.ResponseWriter, r *http.Request, db *engine.DB) {
-	if addr, _ := r.Context().Value(http.LocalAddrContextKey).(net.Addr); addr == nil || addr.Network() != "unix" {
-		writeError(w, &apiError{status: http.StatusForbidden, code: "forbidden", msg: "backup is allowed on the unix socket only"})
+	if !s.backupAllowed(r) {
+		writeError(w, &apiError{status: http.StatusForbidden, code: "forbidden", msg: "backup is allowed on the unix socket only (or over TCP with backup_tcp and a token)"})
 
 		return
 	}
@@ -84,4 +85,14 @@ func (f *firstWrite) Write(p []byte) (int, error) {
 	}
 
 	return f.w.Write(p)
+}
+
+// backupAllowed is true on the unix socket, and over TCP when backup_tcp is
+// on and the daemon has a token.
+func (s *Server) backupAllowed(r *http.Request) bool {
+	if addr, _ := r.Context().Value(http.LocalAddrContextKey).(net.Addr); addr != nil && addr.Network() == "unix" {
+		return true
+	}
+
+	return s.sec.BackupTCP && len(s.tokens) > 0
 }

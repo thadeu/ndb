@@ -150,6 +150,10 @@ type Config struct {
 	// MaxWatches the most open _watch streams (0 = no limit, the default).
 	MaxConns   int `yaml:"max_conns"`
 	MaxWatches int `yaml:"max_watches"`
+
+	// BackupTCP lets POST /_backup answer over TCP when the daemon has a
+	// token (default false: the unix socket only). NDB_BACKUP_TCP=1 sets it.
+	BackupTCP bool `yaml:"backup_tcp"`
 }
 
 // The defaults of the token lockout.

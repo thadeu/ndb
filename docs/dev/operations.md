@@ -106,7 +106,7 @@ The file is readable with `head`, `grep` and `jq`:
 
 A daemon with other [databases](databases.md) writes format 2 (`"ndb_backup":2`), and `ndb restore` puts every database back. Older daemons refuse format 2 with a clear error, so they never restore half of it. A daemon with no other database writes format 1, as before.
 
-- **Daemon running:** the CLI asks the daemon on the unix socket (`-url unix://...`, `NDB_URL`, or `listen.unix` of `ndb.yml`). The daemon takes a mark between two commits, so the file never holds half a transaction. Online backup is refused over TCP.
+- **Daemon running:** the CLI asks the daemon on the unix socket (`-url unix://...`, `NDB_URL`, or `listen.unix` of `ndb.yml`). The daemon takes a mark between two commits, so the file never holds half a transaction. Online backup is refused over TCP, unless `backup_tcp` (`NDB_BACKUP_TCP=1`) is on and the daemon has a token.
 - **Daemon stopped:** the CLI opens the data dir itself, under the lock, like a short daemon start.
 - Segments and indexes are not saved: they are derived, and restore rebuilds them.
 - Direct-mode collections: only their definition is saved. The data is in the apps' own files; back those up yourself.
