@@ -43,7 +43,7 @@ bench-go:
 
 # Static, CGO-free release build. VERSION defaults to the git description.
 # Binaries are staged in bin/ (git-ignored); tarballs and checksums go to dist/.
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')
+VERSION ?= $(shell git describe --tags --match 'v*' --always --dirty 2>/dev/null | sed 's/^v//')
 TARGETS ?= linux/amd64 linux/arm64 darwin/arm64
 LDFLAGS = -s -w -X main.version=$(VERSION)
 
