@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/thadeu/ndb/internal/backup"
 	"github.com/thadeu/ndb/internal/blob"
@@ -205,5 +206,54 @@ func TestOfflineRestoreGivesSameResults(t *testing.T) {
 		if string(got.Rows[i]) != string(want.Rows[i]) {
 			t.Fatalf("row %d: %s != %s", i, got.Rows[i], want.Rows[i])
 		}
+	}
+}
+
+// A partitioned collection is a definition with no data of its own: its
+// documents live in its partitions. An online backup saves the definition
+// and the partitions, and a restore gives both back.
+func TestOnlineBackupOfAPartitionedCollection(t *testing.T) {
+	db := open(t, cfg(t.TempDir(), nil))
+
+	def, err := db.EnsurePartitioned(catalog.Def{Name: "cdrs", Time: "ts", PartitionBy: "month"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	at := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
+
+	part, err := db.PartitionAt(def, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := part.Insert(ctx, []byte(`{"k":"c1","ts":"`+at.Format(time.RFC3339)+`"}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+
+	if err := db.Backup(ctx, &buf, backup.Options{}); err != nil {
+		t.Fatalf("backup: %v", err)
+	}
+
+	if strings.Contains(buf.String(), `{"_section":"wal","collection":"cdrs"}`) {
+		t.Fatalf("the logical collection has a wal section:\n%s", buf.String())
+	}
+
+	dest := filepath.Join(t.TempDir(), "bk")
+
+	if err := backup.Extract(&buf, dest); err != nil {
+		t.Fatal(err)
+	}
+
+	restored := open(t, cfg(dest, nil))
+
+	if _, ok := restored.Partitioned("cdrs"); !ok {
+		t.Fatal("the logical definition is not restored")
+	}
+
+	if got := ids(t, mustGet(t, restored, "cdrs-2026-11")); !got["c1"] {
+		t.Fatalf("the partition is not restored: %v", got)
 	}
 }

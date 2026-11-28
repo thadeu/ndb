@@ -303,6 +303,12 @@ func (c *Catalog) partitionOwner(name string) (Def, bool) {
 }
 
 // Place is the name the encrypted values of the collection are bound to: the
+// HoldsData is true for a collection with its own WAL: not a direct one (the
+// apps' files hold its data) and not a partitioned one (its partitions do).
+func (d Def) HoldsData() bool {
+	return d.Write != Direct && d.PartitionBy == ""
+}
+
 // logical collection of a partition, so a value reads in every partition.
 func (d Def) Place() string {
 	if d.PartitionOf != "" {

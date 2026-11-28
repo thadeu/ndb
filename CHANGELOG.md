@@ -12,6 +12,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **`NDB_TCP`:** the TCP listen address from the env, when `-tcp` is not given (an image with no shell, as on Voodu or Kubernetes).
 - **`backup_tcp`:** `POST /_backup` can also answer over TCP, for the full token, when the daemon has a token (`backup_tcp: true` or `NDB_BACKUP_TCP=1`; default off). Ndb Cloud takes its backups this way.
 
+### Fixed
+
+- **Backup of a partitioned collection:** an online backup failed with `collection <name> is not open` on a daemon with a partitioned collection. The file now holds its definition and its partitions, and a restore gives both back.
+
 ### Changed
 
 - **Console:** its code moved to a private repository. The image `ghcr.io/thadeu/ndb-ui`, the `ndb-ui-*` binaries of each release and `ndb-stack` keep their names and the version of ndb.

@@ -321,7 +321,7 @@ func writeBody(lw *lineWriter, src Source, opts Options) error {
 	refs := map[string]blob.Ref{}
 
 	for _, d := range src.Defs {
-		if d.Write == catalog.Direct {
+		if !d.HoldsData() {
 			continue
 		}
 

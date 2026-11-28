@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/thadeu/ndb/internal/backup"
-	"github.com/thadeu/ndb/internal/catalog"
 	"github.com/thadeu/ndb/internal/collection"
 	"github.com/thadeu/ndb/internal/config"
 	"github.com/thadeu/ndb/internal/wal"
@@ -91,7 +90,7 @@ func (db *DB) backupSource(ctx context.Context, streams func(string) ([]byte, er
 	snaps := map[string]backup.Snapshot{}
 
 	for _, d := range defs {
-		if d.Write == catalog.Direct {
+		if !d.HoldsData() {
 			continue
 		}
 
