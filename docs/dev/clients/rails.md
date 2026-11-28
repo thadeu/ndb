@@ -978,6 +978,7 @@ plugin :ndb
 - When the consumers stop by themselves, Puma stops too. So a broken consumer is not hidden.
 - Without `NDB_STREAMS_IN_PUMA`, the plugin runs only in development (`RAILS_ENV`, `RACK_ENV` or `APP_ENV`; none of them is development). `NDB_STREAMS_IN_PUMA=true` (or `1`, `yes`, `on`) turns it on, and `false` (or `0`, `no`, `off`) turns it off. Any other value is an error at the start of Puma.
 - In production, a process of its own (`bundle exec ndb streams`) is the usual choice: it scales and restarts apart from the web process.
+- An app that only appends (no class with `perform`) needs no plugin and no `ndb streams` process. Another program, such as a Go worker, can read the stream.
 
 ### Groups at boot
 
