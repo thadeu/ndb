@@ -65,7 +65,7 @@ func run(args []string) error {
 	cfgPath := fl.String("config", "", "config file (default: NDB_CONFIG, then ./ndb.yml, then /etc/ndb/ndb.yml; absent = defaults)")
 	dataDir := fl.String("data-dir", "", "data dir (overrides ndb.yml)")
 	unix := fl.String("unix", "", "unix socket path (overrides ndb.yml)")
-	tcp := fl.String("tcp", "", "TCP listen address, e.g. 127.0.0.1:7070 (overrides ndb.yml)")
+	tcp := fl.String("tcp", "", "TCP listen address, e.g. 127.0.0.1:7070 (default NDB_TCP, then ndb.yml)")
 	unixMode := fl.String("unix-mode", "", "permission of the unix socket, octal (default 0660, or listen.unix_mode)")
 	showVersion := fl.Bool("version", false, "print the version and exit")
 
@@ -115,9 +115,7 @@ func run(args []string) error {
 		cfg.Listen.Unix = *unix
 	}
 
-	if set["tcp"] {
-		cfg.Listen.TCP = *tcp
-	}
+	cfg.Listen.TCP = serveTCP(cfg.Listen.TCP, set["tcp"], *tcp, os.LookupEnv)
 
 	if set["unix-mode"] {
 		if cfg.Listen.UnixMode, err = parseUnixMode(*unixMode); err != nil {
@@ -266,6 +264,21 @@ func serveToken(flagFile string, lookup func(string) (string, bool)) (string, er
 	}
 
 	return token, nil
+}
+
+// serveTCP is the TCP listen address: -tcp when set, else NDB_TCP when set
+// (an image with no shell, where the env is the only setting), else the one
+// of ndb.yml. An empty value turns the listener off.
+func serveTCP(fromConfig string, flagSet bool, flagValue string, lookup func(string) (string, bool)) string {
+	if flagSet {
+		return flagValue
+	}
+
+	if addr, ok := lookup("NDB_TCP"); ok {
+		return addr
+	}
+
+	return fromConfig
 }
 
 // readTokenFile returns the trimmed token. An empty file is an error: it

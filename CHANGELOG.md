@@ -9,6 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Added
 
 - **`tcp+tls://` URLs:** a second name of `https://` (`tcp+tls://:<token>@host:7070/billion`), in Go, Ruby, Rails, TS, the CLI and the console. Ndb Cloud shows this form.
+- **`NDB_TCP`:** the TCP listen address from the env, when `-tcp` is not given (an image with no shell, as on Voodu or Kubernetes).
 
 ### Changed
 

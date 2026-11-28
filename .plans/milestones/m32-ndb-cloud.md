@@ -146,6 +146,8 @@ the door. E32.0 is the gate of the door (E32.1 to E32.3) and of the pilot
       and `ghcr.yml`; `ndb-cloud` tests ndb-ui against the release binary,
       uploads the `ndb-ui-*` binaries to the public ndb release (for
       `install.sh --ui`) and pushes `ndb-ui` and `ndb-stack`, same version.
+- [x] `NDB_TCP`: the TCP address from the env (the Voodu manifest has env
+      only, and the image has no shell).
 - [ ] `GET /_replication` gets the numbers of the Replication screen, per
       link: `remote_addr`, `connected_at`, `last_heartbeat_at`, `rtt_ms`
       (from the heartbeat), `bytes_per_s` and `records_per_s`, and

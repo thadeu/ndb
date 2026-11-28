@@ -21,7 +21,7 @@ ndb backup [-config f] [-data-dir d] [-url unix://sock] <dest> [-gzip]
 | `-config` | config file. Default: `NDB_CONFIG`, then `./ndb.yml`, then `/etc/ndb/ndb.yml`. A missing file is fine. |
 | `-data-dir` | overrides `data_dir`. |
 | `-unix` | overrides `listen.unix`. |
-| `-tcp` | overrides `listen.tcp`, for example `10.10.0.1:7070`. |
+| `-tcp` | overrides `listen.tcp`, for example `10.10.0.1:7070`. Without it, `NDB_TCP` (set and empty turns TCP off), for an image with no shell where the env is the only setting. |
 | `-unix-mode` | overrides `listen.unix_mode`: permission of the socket file, octal. Default `0660` (owner and group). |
 | `-token-file` | file with the bearer token that the TCP listener requires. Without it, `NDB_TOKEN_FILE` or `NDB_TOKEN`. See [Authentication](#authentication). |
 | `-cors-origin` | overrides `cors_origins`. Give it once for each origin. |

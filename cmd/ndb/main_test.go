@@ -471,3 +471,32 @@ func TestDaemonTokenFileOnTCP(t *testing.T) {
 		t.Fatal("unix socket asked for a token")
 	}
 }
+
+// The TCP address is, in order: -tcp, NDB_TCP, ndb.yml. NDB_TCP is for an
+// image with no shell, where the env is the only setting (Voodu, Kubernetes).
+func TestServeTCP(t *testing.T) {
+	cases := []struct {
+		name    string
+		flagSet bool
+		flag    string
+		env     map[string]string
+		want    string
+	}{
+		{name: "config", want: "127.0.0.1:7070"},
+		{name: "env", env: map[string]string{"NDB_TCP": "0.0.0.0:7070"}, want: "0.0.0.0:7070"},
+		{name: "empty env turns it off", env: map[string]string{"NDB_TCP": ""}, want: ""},
+		{name: "flag wins", flagSet: true, flag: "10.0.0.5:7070", env: map[string]string{"NDB_TCP": "0.0.0.0:7070"}, want: "10.0.0.5:7070"},
+	}
+
+	for _, c := range cases {
+		lookup := func(key string) (string, bool) {
+			v, ok := c.env[key]
+
+			return v, ok
+		}
+
+		if got := serveTCP("127.0.0.1:7070", c.flagSet, c.flag, lookup); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+}
