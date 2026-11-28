@@ -161,6 +161,8 @@ the door. E32.0 is the gate of the door (E32.1 to E32.3) and of the pilot
 - [x] Restore at start: `NDB_RESTORE_URL` + `NDB_RESTORE_ID` restore a
       backup before the data dir opens, once per id. The Cloud restores into
       the same server or starts a new one from a backup this way.
+- [x] `NDB_TOKENS`: scoped tokens in the env (JSON), for the Tokens page of
+      the Cloud.
 
 ### E32.7 — Design system (ndb-cloud, packages/ui)
 

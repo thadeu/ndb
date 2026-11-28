@@ -338,6 +338,13 @@ func serve(ctx context.Context, cfg config.Config, token string, lg *logging.Log
 		return err
 	}
 
+	fromEnv, err := envTokens(os.LookupEnv)
+	if err != nil {
+		return err
+	}
+
+	scoped = append(scoped, fromEnv...)
+
 	listeners, err := listen(cfg.Listen, cfg.MaxConns)
 
 	if err != nil {

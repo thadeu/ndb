@@ -309,6 +309,7 @@ tokens:
 - Each list holds collection names or globs: `calls*` covers `calls` and its partitions (`calls-2026-11`), `*` covers every collection. A pattern read (`/logs-2026-*/_search`) needs a glob that covers the whole pattern (`logs*` or `*`).
 - The system reads do not filter by scope: a token with any read right sees every collection name in `/_collections`, `/_stats`, `/_size` and `/_pitr`.
 - An unknown token is `401 unauthorized`; a token without the right is `403 forbidden`, with the token name in the message.
+- `NDB_TOKENS` gives scoped tokens in the env, for an image with no config file (Ndb Cloud): a JSON list with the same keys and the secret in `secret`, such as `[{"name":"dash","secret":"<32 random bytes>","read":["calls*"]}]`. Each needs a name, a secret and a right. They add to `tokens:`.
 - `name` and `file` are required, names are unique, and a token needs at least one list. A missing or empty file stops the start.
 - An insert (`_doc`, `_bulk`) to a collection that does not exist creates it (with `allow_implicit`): the write right is enough. The other writes (`_update/{id}` with `upsert` too, `_expire`, `_persist`) do not create it: they answer `404 unknown_collection`.
 
