@@ -158,6 +158,9 @@ the door. E32.0 is the gate of the door (E32.1 to E32.3) and of the pilot
 - [x] `backup_tcp` (`NDB_BACKUP_TCP=1`): `POST /_backup` over TCP for the
       full token, when the daemon has a token. The Cloud has no exec in the
       pod and the image no shell, so it takes the backup over the mesh.
+- [x] Restore at start: `NDB_RESTORE_URL` + `NDB_RESTORE_ID` restore a
+      backup before the data dir opens, once per id. The Cloud restores into
+      the same server or starts a new one from a backup this way.
 
 ### E32.7 — Design system (ndb-cloud, packages/ui)
 

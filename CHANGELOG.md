@@ -10,6 +10,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - **`tcp+tls://` URLs:** a second name of `https://` (`tcp+tls://:<token>@host:7070/billion`), in Go, Ruby, Rails, TS, the CLI and the console. Ndb Cloud shows this form.
 - **`NDB_TCP`:** the TCP listen address from the env, when `-tcp` is not given (an image with no shell, as on Voodu or Kubernetes).
+- **Restore at start:** `NDB_RESTORE_URL` and `NDB_RESTORE_ID` restore a backup file into the data dir before the daemon opens it, over what it holds; the same id again does nothing (`<data-dir>/.restore-id`). For a host with the env as its only setting, such as Ndb Cloud.
 - **`backup_tcp`:** `POST /_backup` can also answer over TCP, for the full token, when the daemon has a token (`backup_tcp: true` or `NDB_BACKUP_TCP=1`; default off). Ndb Cloud takes its backups this way.
 
 ### Fixed

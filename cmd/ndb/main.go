@@ -365,6 +365,16 @@ func serve(ctx context.Context, cfg config.Config, token string, lg *logging.Log
 
 	began := time.Now()
 
+	// A restore at start (NDB_RESTORE_URL) runs while /_health answers
+	// "recovering", before the data dir opens.
+	if err := startRestore(cfg.DataDir, os.LookupEnv, log); err != nil {
+		log.Error("restore failed", "data_dir", cfg.DataDir, "err", err)
+
+		_ = srv.Shutdown(context.Background())
+
+		return err
+	}
+
 	db, err := engine.Open(cfg, log)
 
 	if err != nil {

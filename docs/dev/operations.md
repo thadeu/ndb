@@ -127,6 +127,17 @@ systemctl start ndb
 
 After a restore, documents keep their `_v`, and `watch` consumers resume after their last ack. A consumer whose position is older than a `snapshot` gets `history_truncated`.
 
+**Restore at start.** A host that starts the daemon from its env only (an image with no shell, as Ndb Cloud) gives the backup by URL:
+
+```bash
+NDB_RESTORE_URL=https://bucket.example/daily.ndb.gz NDB_RESTORE_ID=daily-2026-11-28 ndb serve
+```
+
+- Before it opens the data dir, the daemon downloads the file and restores it as `ndb restore -force` does: it replaces what the data dir holds. `/_health` answers `503 {"status":"recovering"}` until it ends.
+- It keeps the id in `<data-dir>/.restore-id`. The same id again does nothing, so a restart never restores twice. A new id restores again.
+- A failed download (any answer but 200) or a bad file leaves the data dir as it was, and the daemon does not start.
+- The encryption key must be the one of the backup: the same `NDB_ENCRYPTION_KEY`, or none when the backup holds the key.
+
 ### Point in time recovery
 
 A copy of a collection as it was at an instant of the last day: `ndb restore calls -at 15m -to calls_restored`, then `ndb rename calls_restored calls -replace`. See [PITR](pitr.md).
